@@ -33,16 +33,16 @@ targets:
           - fetch
           - remote-notification
     dependencies:
-      - package: Firebase
+      - package: firebase-ios-sdk
         product: FirebaseCore
-      - package: Firebase
+      - package: firebase-ios-sdk
         product: FirebaseAuth
-      - package: Firebase
+      - package: firebase-ios-sdk
         product: FirebaseFirestore
-      - package: Firebase
+      - package: firebase-ios-sdk
         product: FirebaseMessaging
 
 packages:
-  Firebase:
+  firebase-ios-sdk:
     url: https://github.com/firebase/firebase-ios-sdk
     from: 10.0.0
