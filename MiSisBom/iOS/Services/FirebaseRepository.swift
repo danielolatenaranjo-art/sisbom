@@ -64,19 +64,19 @@ class FirebaseRepository {
         }
     }
     
-    func getAlerts(onChange: @escaping ([Alert]) -> Void) -> ListenerRegistration {
+    func getAlerts(onChange: @escaping ([AlertaItem]) -> Void) -> ListenerRegistration {
         return db.collection("alertas").addSnapshotListener { snapshot, error in
             guard let documents = snapshot?.documents else {
                 print("Error fetching alerts: \(error?.localizedDescription ?? "Unknown error")")
                 return
             }
-            let list = documents.compactMap { doc -> Alert? in
+            let list = documents.compactMap { doc -> AlertaItem? in
                 var data = doc.data()
                 if data["idAlerta"] == nil {
                     data["idAlerta"] = doc.documentID
                 }
                 guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
-                return try? JSONDecoder().decode(Alert.self, from: jsonData)
+                return try? JSONDecoder().decode(AlertaItem.self, from: jsonData)
             }
             onChange(list)
         }

@@ -2,7 +2,7 @@ import SwiftUI
 import Combine
 
 struct ChatView: View {
-    let alert: Alert
+    let alert: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
     @Environment(\.presentationMode) var presentationMode
     
@@ -158,7 +158,7 @@ struct ChatView: View {
     }
     
     // MARK: - Message Parsing Logic
-    private func parseMessages(alert: Alert, personnel: [UserPersonal], myId: String) -> [ChatMsgItem] {
+    private func parseMessages(alert: AlertaItem, personnel: [UserPersonal], myId: String) -> [ChatMsgItem] {
         if alert.mensajeAlerta.isEmpty { return [] }
         
         return alert.mensajeAlerta.split(separator: "|").compactMap { rawSub in

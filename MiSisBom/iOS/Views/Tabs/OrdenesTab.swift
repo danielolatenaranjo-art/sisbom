@@ -43,7 +43,7 @@ struct OrdenesTab: View {
 
 // MARK: - OrdenItemCard Component
 struct OrdenItemCard: View {
-    let orden: Alert
+    let orden: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
     @State private var showDetailSheet: Bool = false
 
@@ -95,7 +95,7 @@ struct OrdenItemCard: View {
 
 // MARK: - OrdenDetailView (Full Screen Modal Sheet)
 struct OrdenDetailView: View {
-    let orden: Alert
+    let orden: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
     @Binding var isPresented: Bool
 

@@ -59,7 +59,7 @@ struct AlertasTab: View {
 
 // MARK: - AlertItemCard Component
 struct AlertItemCard: View {
-    let alert: Alert
+    let alert: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
     let onChatClick: () -> Void
 
@@ -235,7 +235,7 @@ struct AlertItemCard: View {
         )
     }
     
-    private func parseAlertPreview(alert: Alert) -> String {
+    private func parseAlertPreview(alert: AlertaItem) -> String {
         if alert.duracion.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "C" {
             let msgs = alert.mensajeAlerta.split(separator: "|").map { String($0) }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
             if let lastMsg = msgs.last {

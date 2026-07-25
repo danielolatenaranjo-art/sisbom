@@ -124,7 +124,7 @@ struct MainView: View {
                 ChangelogDialog(viewModel: viewModel)
             }
         }
-        .fullScreenCover(item: Binding<Alert?>(
+        .fullScreenCover(item: Binding<AlertaItem?>(
             get: { viewModel.activeChatAlert },
             set: { viewModel.activeChatAlert = $0 }
         )) { alert in

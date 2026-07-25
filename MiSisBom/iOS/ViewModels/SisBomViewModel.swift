@@ -41,7 +41,7 @@ class SisBomViewModel: ObservableObject {
     // Data lists
     @Published var personnelList: [UserPersonal] = []
     @Published var dispatchesList: [Dispatch] = []
-    @Published var alertsList: [Alert] = []
+    @Published var alertsList: [AlertaItem] = []
     @Published var vehiclesList: [Vehicle] = []
     @Published var attendanceList: [AttendanceSheet] = []
     @Published var isCentralActive: Bool = false
@@ -50,7 +50,7 @@ class SisBomViewModel: ObservableObject {
     // Navigation details
     @Published var selectedDispatchId: String? = nil
     @Published var activeChatId: String? = nil
-    @Published var activeChatAlert: Alert? = nil
+    @Published var activeChatAlert: AlertaItem? = nil
     @Published var selectedOrdenId: String? = nil
     @Published var showChangelogDialog: Bool = false
     private var pendingChatId: String? = nil
@@ -176,7 +176,7 @@ class SisBomViewModel: ObservableObject {
             dispatchesList = list
             list.forEach { knownDispatchIds.insert($0.idServicio) }
         }
-        if let list: [Alert] = loadCache(key: "cache_alerts") {
+        if let list: [AlertaItem] = loadCache(key: "cache_alerts") {
             alertsList = list
             list.forEach { knownAlertIds.insert($0.idAlerta) }
         }
@@ -502,7 +502,7 @@ class SisBomViewModel: ObservableObject {
     }
     
     // ANCLAR / DESANCLAR ALERTA
-    func toggleAlertPin(alert: Alert) {
+    func toggleAlertPin(alert: AlertaItem) {
         guard let myRadial = currentUser?.idRadial, !myRadial.isEmpty else { return }
         var list = alert.fijar.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         
@@ -516,7 +516,7 @@ class SisBomViewModel: ObservableObject {
     }
     
     // REGISTRAR VISTO / CONFORME
-    func registerConforme(alert: Alert) {
+    func registerConforme(alert: AlertaItem) {
         guard let myRadial = currentUser?.idRadial, !myRadial.isEmpty else { return }
         var list = alert.conforme.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         

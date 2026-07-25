@@ -161,7 +161,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
 }
 
 // MARK: - Alert Model
-struct Alert: Identifiable, Codable, Equatable {
+struct AlertaItem: Identifiable, Codable, Equatable {
     var id: String { idAlerta }
     let idAlerta: String
     let tipo: String // "orden" or "alerta"
