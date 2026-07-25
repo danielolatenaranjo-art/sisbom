@@ -1,6 +1,7 @@
 name: SisBom
 options:
   bundleIdPrefix: com.misisbom
+  xcodeVersion: "15.0"
   deploymentTarget:
     iOS: "15.0"
 targets:
