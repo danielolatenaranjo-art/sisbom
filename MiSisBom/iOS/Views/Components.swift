@@ -141,7 +141,7 @@ struct SyncIndicatorDot: View {
                     }
                 }
             }
-            .onChange(of: isSyncing) { newValue in
+            .onChange(of: isSyncing, perform: { newValue in
                 if newValue {
                     withAnimation(Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                         scale = 1.3
