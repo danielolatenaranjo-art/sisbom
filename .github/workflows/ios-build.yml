@@ -41,7 +41,7 @@ jobs:
           xcodebuild build \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
-            -sdk iphonesimulator \
+            -sdk iphoneos \
             -configuration Release \
             -skipMacroValidation \
             -skipPackagePluginValidation \
