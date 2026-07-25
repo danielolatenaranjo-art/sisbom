@@ -12,6 +12,7 @@ targets:
         excludes:
           - project.yml
           - iOS_Setup_Guide.md
+          - generate_icons.py
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom
