@@ -29,21 +29,20 @@ jobs:
           cd MiSisBom/iOS
           xcodegen generate
 
-      - name: Resolve Package Dependencies
+      - name: Install Pods
         run: |
           cd MiSisBom/iOS
-          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom -clonedSourcePackagesDirPath "$PWD/.spm-cache"
+          pod install --repo-update
 
       - name: Build iOS Application
         run: |
           set -o pipefail
           cd MiSisBom/iOS
           xcodebuild build \
-            -project SisBom.xcodeproj \
+            -workspace SisBom.xcworkspace \
             -scheme SisBom \
             -sdk iphonesimulator \
             -configuration Release \
-            -clonedSourcePackagesDirPath "$PWD/.spm-cache" \
             -skipMacroValidation \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="" \
