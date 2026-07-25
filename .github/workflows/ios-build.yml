@@ -24,12 +24,7 @@ jobs:
           cd MiSisBom/iOS
           xcodegen generate
 
-      - name: Resolve Swift Package Dependencies
-        run: |
-          cd MiSisBom/iOS
-          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom
-
-      - name: Build iOS App (Simulator)
+      - name: Build iOS Application
         run: |
           cd MiSisBom/iOS
           xcodebuild build \
