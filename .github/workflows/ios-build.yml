@@ -29,6 +29,11 @@ jobs:
           cd MiSisBom/iOS
           xcodegen generate
 
+      - name: Resolve Package Dependencies
+        run: |
+          cd MiSisBom/iOS
+          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom
+
       - name: Build iOS Application
         run: |
           set -o pipefail
