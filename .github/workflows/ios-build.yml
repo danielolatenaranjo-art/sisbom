@@ -27,7 +27,7 @@ jobs:
       - name: Resolve Swift Package Dependencies
         run: |
           cd MiSisBom/iOS
-          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj
+          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom
 
       - name: Build iOS App (Simulator)
         run: |
@@ -36,7 +36,6 @@ jobs:
             -project SisBom.xcodeproj \
             -scheme SisBom \
             -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
             -configuration Release \
             -derivedDataPath build \
             -skipMacroValidation \
