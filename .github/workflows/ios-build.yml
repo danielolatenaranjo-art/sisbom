@@ -32,7 +32,7 @@ jobs:
       - name: Resolve Package Dependencies
         run: |
           cd MiSisBom/iOS
-          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom
+          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom -derivedDataPath build
 
       - name: Build iOS Application
         run: |
