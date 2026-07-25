@@ -8,13 +8,13 @@ targets:
     type: application
     platform: iOS
     sources:
-      - SisBomApp.swift
-      - Models
-      - Services
-      - ViewModels
-      - Views
-      - Assets.xcassets
-      - GoogleService-Info.plist
+      - path: SisBomApp.swift
+      - path: Models
+      - path: Services
+      - path: ViewModels
+      - path: Views
+      - path: Assets.xcassets
+      - path: GoogleService-Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom
