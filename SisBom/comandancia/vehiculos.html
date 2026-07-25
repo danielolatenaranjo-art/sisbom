@@ -1,0 +1,1193 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flota de Vehículos - SisBom</title>
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <style>
+        html { font-size: 14px; }
+        body { font-family: 'Segoe UI', sans-serif; min-font-size: 12px; background-color: #F8FAFC; color: #334155; -webkit-font-smoothing: antialiased; }
+        
+        /* Spinner Global Minimalista (Pequeño y sin fondo gris) */
+        .spinner {
+            border: 3px solid transparent;
+            border-radius: 50%;
+            border-top: 3px solid #B91C1C;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Componentes Comunes */
+        .f-label { display: block; font-size: 0.70rem; font-weight: 700; color: #94a3b8; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .f-input { 
+            width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; 
+            line-height: 1.25rem; background-color: #fff; color: #0f172a; outline: none; transition: all 0.2s; font-size: 13px;
+        }
+        .f-input:focus { border-color: #B91C1C; box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.1); }
+        .f-input:read-only { background-color: #f1f5f9; color: #64748b; cursor: not-allowed; }
+        
+        .box-info { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1rem; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+
+        /* Pestañas del Modal */
+        .tab-button {
+            padding: 12px 24px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #64748b;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            flex: 1;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .tab-button:hover { color: #B91C1C; background-color: #FEF2F2; }
+        .tab-button.active { color: #B91C1C; border-bottom-color: #B91C1C; background-color: #fff; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder { text-transform: uppercase !important; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <!-- FORZAR MAYÚSCULAS EN LOS INPUTS (EXCEPTO CHAT) -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('input', e => {
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (e.target.type !== 'password' && !e.target.classList.contains('chat-input') && e.target.id !== 'chat-message') {
+                        const start = e.target.selectionStart, end = e.target.selectionEnd;
+                        e.target.value = e.target.value.toUpperCase();
+                        e.target.setSelectionRange(start, end);
+                    }
+                }
+            });
+        });
+    </script>
+
+    <!-- MAIN APP CONTENEDOR -->
+    <main class="flex-1 overflow-auto max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
+        <div class="flex flex-col gap-6">
+
+            <!-- HEADER CON TITULO Y BUSCADOR -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+                <div>
+                    <h1 class="text-3xl font-black text-slate-800 tracking-tight uppercase">Flota de Vehículos</h1>
+                    <p class="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Estado físico, mecánico y operativo del material mayor</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="relative flex-1 md:flex-none">
+                        <input type="text" id="searchInput" class="f-input pl-10 pr-4 py-2 font-medium text-slate-700" placeholder="Buscar unidad...">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><i class="fas fa-search text-sm"></i></div>
+                    </div>
+                    <button onclick="App.openVehicleModal()" class="bg-bomberos-red hover:bg-bomberos-dark text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-sm transition-all">
+                        <i class="fas fa-plus"></i> Nueva Unidad
+                    </button>
+                </div>
+            </div>
+
+            <!-- TARJETAS KPI (Métricas de la Flota) -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-slate-400 uppercase tracking-widest mb-0.5" style="font-size: 10px;">Total Flota</p>
+                        <p class="text-2xl font-black text-slate-800 leading-none" id="kpi-total">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-lg"><i class="fas fa-truck"></i></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-green-200 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-green-600 uppercase tracking-widest mb-0.5" style="font-size: 10px;">Disponibles</p>
+                        <p class="text-2xl font-black text-green-700 leading-none" id="kpi-disponibles">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-green-50 flex items-center justify-center text-green-600 text-lg"><i class="fas fa-check-circle"></i></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-red-200 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-red-600 uppercase tracking-widest mb-0.5" style="font-size: 10px;">En Servicio</p>
+                        <p class="text-2xl font-black text-red-700 leading-none" id="kpi-servicio">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-600 text-lg"><i class="fas fa-truck-fast"></i></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-300 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-slate-500 uppercase tracking-widest mb-0.5" style="font-size: 10px;">F. de Servicio</p>
+                        <p class="text-2xl font-black text-slate-600 leading-none" id="kpi-fueraservicio">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 text-lg"><i class="fas fa-wrench"></i></div>
+                </div>
+            </div>
+
+            <!-- GRID PRINCIPAL DE VEHÍCULOS -->
+            <div id="vehiculos-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- JS Inject -->
+            </div>
+
+            <!-- Estado Vacío -->
+            <div id="empty-state" class="hidden text-center py-12 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 text-3xl mb-4 mx-auto"><i class="fas fa-folder-open"></i></div>
+                <p class="text-slate-600 font-bold">No se encontraron vehículos</p>
+                <p class="text-xs text-slate-400 mt-1">Intente cambiar el término de búsqueda.</p>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- MODAL AGREGAR / EDITAR VEHÍCULO CON TABS -->
+    <!-- Se fija la altura del modal para que no salte al cambiar de pestaña -->
+    <div id="vehicle-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200" style="z-index: 8000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col overflow-hidden transform transition-all scale-100" style="height: 90vh; max-height: 800px;">
+            
+            <!-- Cabecera -->
+            <div class="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center flex-shrink-0">
+                <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2" id="vehicleModalTitle">
+                    <i class="fas fa-truck text-bomberos-red"></i> Nueva Unidad
+                </h3>
+                <button type="button" onclick="App.closeVehicleModal()" class="text-slate-400 hover:text-red-600 transition-colors p-1"><i class="fas fa-times text-xl"></i></button>
+            </div>
+
+            <!-- Pestañas -->
+            <div class="flex justify-start border-b border-slate-200 px-6 bg-white shadow-sm flex-shrink-0 overflow-x-auto custom-scrollbar" id="v-tabs-container">
+                <div class="tab-button active shrink-0" onclick="App.switchVehicleTab('detalle')" id="v-btn-tab-detalle">Detalles de Unidad</div>
+                <div class="tab-button shrink-0" onclick="App.switchVehicleTab('historial')" id="v-btn-tab-historial">Hoja de Vida / Historial</div>
+            </div>
+            
+            <!-- Contenedor dinámico principal -->
+            <div class="flex-1 overflow-hidden bg-slate-50 relative flex flex-col">
+                
+                <!-- TAB 1: DETALLES -->
+                <form id="v-tab-detalle" onsubmit="App.saveVehicle(event)" class="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
+                    <input type="hidden" id="v-editMode" value="false">
+                    <input type="hidden" id="v-originalId" value="">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div>
+                            <label class="f-label required">ID Carro / Unidad</label>
+                            <input type="text" id="v-idCarro" required class="f-input font-black text-slate-900 text-lg uppercase" placeholder="Ej: B-1">
+                            <p class="text-slate-400 mt-1" style="font-size: 10px;">Identificador principal del carro.</p>
+                        </div>
+                        <div>
+                            <label class="f-label">Patente</label>
+                            <input type="text" id="v-patente" class="f-input uppercase font-bold text-slate-700" placeholder="Ej: AB-CD-12">
+                        </div>
+                        <div>
+                            <label class="f-label required">Estado Operativo</label>
+                            <select id="v-estado" required class="f-input font-bold text-slate-800 bg-white">
+                                <option value="0-9">En Servicio / Disponible (0-9)</option>
+                                <option value="0-8">Fuera de Servicio (0-8)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="f-label">Clave en Servicio</label>
+                            <input type="text" id="v-enServicio" readonly class="f-input uppercase font-bold text-slate-500 bg-slate-100 cursor-not-allowed border-slate-200" placeholder="Sin Servicio">
+                            <p class="text-slate-400 mt-1 leading-tight" style="font-size: 10px;">Gestionado automáticamente por la Central.</p>
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="f-label required">Odómetro Global (KM Actual)</label>
+                            <input type="number" id="v-kmActual" required class="f-input font-black text-slate-900 text-xl text-center shadow-inner" placeholder="Ej: 15000">
+                        </div>
+                    </div>
+
+                    <div class="border-t border-slate-200 pt-4 mt-4 space-y-4">
+                        <div>
+                            <label class="f-label">Notas Técnicas / Mecánicas</label>
+                            <textarea id="v-notas" rows="2" class="f-input resize-y text-slate-700 uppercase" placeholder="Anotaciones sobre fallas, revisiones o material faltante..."></textarea>
+                        </div>
+                        <div>
+                            <label class="f-label">Observación General</label>
+                            <textarea id="v-observacion" rows="2" class="f-input resize-y text-slate-700 uppercase" placeholder="Observaciones varias sobre la unidad..."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="pt-4 mt-4 flex justify-between items-center border-t border-slate-200 pb-2">
+                        <button type="button" onclick="App.confirmDeleteVehicle()" id="v-btnDelete" class="text-slate-400 hover:text-red-600 font-bold text-sm hidden flex items-center transition-colors px-3 py-2 rounded-lg hover:bg-red-50">
+                            <i class="fas fa-trash-alt mr-2"></i> Eliminar
+                        </button>
+                        <div class="flex gap-3 ml-auto w-full justify-end">
+                            <button type="submit" id="v-btnSave" class="bg-bomberos-red hover:bg-bomberos-dark text-white px-6 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition-all">
+                                <i class="fas fa-save"></i>
+                                <span id="v-btnText">Guardar Detalles</span> 
+                            </button>
+                        </div>
+                    </div>
+                </form>
+
+                <!-- TAB 2: HISTORIAL DE VIDA -->
+                <div id="v-tab-historial" class="hidden p-6 flex-col flex-1 overflow-hidden">
+                    <div class="flex justify-between items-center mb-4 shrink-0">
+                        <div>
+                            <h4 class="text-sm font-black text-slate-800 uppercase tracking-tight">Registro de Novedades</h4>
+                            <p class="text-xs text-slate-500 font-medium">Mantenciones, fallas mecánicas y revisiones de la unidad.</p>
+                        </div>
+                        <button type="button" onclick="App.openLogModal()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg font-bold text-xs transition-all shadow-sm flex items-center gap-2">
+                            <i class="fas fa-plus"></i> <span class="hidden sm:inline">Agregar Registro</span>
+                        </button>
+                    </div>
+
+                    <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex flex-col flex-1 min-h-0">
+                        <div class="overflow-x-auto overflow-y-auto flex-1 custom-scrollbar">
+                            <table class="w-full text-left border-collapse">
+                                <thead class="bg-slate-50 border-b border-slate-200 sticky top-0">
+                                    <tr>
+                                        <th class="py-3 px-4 font-bold text-slate-500 uppercase tracking-widest" style="font-size: 10px; width: 10%;">ID</th>
+                                        <th class="py-3 px-4 font-bold text-slate-500 uppercase tracking-widest" style="font-size: 10px; width: 20%;">Fecha/Hora</th>
+                                        <th class="py-3 px-4 font-bold text-slate-500 uppercase tracking-widest" style="font-size: 10px; width: 40%;">A qué corresponde (Motivo)</th>
+                                        <th class="py-3 px-4 font-bold text-slate-500 uppercase tracking-widest" style="font-size: 10px; width: 15%;">Odómetro</th>
+                                        <th class="py-3 px-4 font-bold text-slate-500 uppercase tracking-widest text-center" style="font-size: 10px; width: 15%;">Estado</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="v-historial-tbody" class="divide-y divide-slate-100 bg-white">
+                                    <!-- Inyectado por JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                        <div id="v-historial-empty" class="hidden text-center py-8 shrink-0 border-t border-slate-100">
+                            <i class="fas fa-clipboard-list text-3xl text-slate-300 mb-2"></i>
+                            <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">Sin registros previos</p>
+                        </div>
+                        <div id="v-historial-loader" class="text-center py-8 hidden shrink-0 border-t border-slate-100">
+                            <i class="fas fa-circle-notch fa-spin text-2xl text-slate-400 mb-2"></i>
+                            <p class="text-xs font-bold text-slate-500 uppercase tracking-widest">Cargando bitácora...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL AGREGAR REGISTRO DE HISTORIAL (LOG) -->
+    <div id="log-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-70 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200" style="z-index: 9000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden transform transition-all scale-100">
+            <form id="logForm" onsubmit="App.saveLog(event)" class="flex flex-col h-full bg-slate-50">
+                <div class="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center">
+                    <h3 class="text-base font-black text-slate-800 flex items-center gap-2 uppercase tracking-tight">
+                        <i class="fas fa-clipboard-list text-blue-600"></i> Nuevo Registro
+                    </h3>
+                    <button type="button" onclick="App.closeLogModal()" class="text-slate-400 hover:text-red-600 transition-colors p-1"><i class="fas fa-times text-lg"></i></button>
+                </div>
+                
+                <div class="p-6 space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="f-label required">Fecha</label>
+                            <input type="date" id="l-fecha" required class="f-input font-bold text-slate-700">
+                        </div>
+                        <div>
+                            <label class="f-label required">Hora</label>
+                            <input type="time" id="l-hora" required class="f-input font-bold text-slate-700">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="f-label required">A qué corresponde (Motivo)</label>
+                        <textarea id="l-motivo" required rows="2" class="f-input resize-y text-slate-800 uppercase" placeholder="Ej: Cambio de aceite, falla eléctrica, revisión técnica..."></textarea>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="f-label required">Estado de la Unidad</label>
+                            <select id="l-estado" required class="f-input font-bold text-slate-800">
+                                <option value="0-9">Disponible (0-9)</option>
+                                <option value="0-8">Fuera de Servicio (0-8)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="f-label required">Odómetro (KM)</label>
+                            <input type="number" id="l-odometro" readonly required class="f-input font-black text-slate-500 bg-slate-100 border-slate-200 cursor-not-allowed text-center shadow-inner" placeholder="Automático">
+                            <p class="text-[10px] text-slate-400 mt-1 leading-tight">Capturado automáticamente de la unidad.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-blue-50 p-3 rounded-lg border border-blue-100 flex items-start gap-2 mt-2">
+                        <i class="fas fa-info-circle text-blue-500 mt-0.5"></i>
+                        <p class="text-xs text-blue-800 font-medium leading-tight">Al guardar, el estado de la unidad se actualizará automáticamente. El odómetro queda registrado como una captura exacta de este momento.</p>
+                    </div>
+                </div>
+
+                <div class="px-6 py-4 border-t border-slate-200 bg-white flex justify-end gap-3">
+                    <button type="button" onclick="App.closeLogModal()" class="px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 border border-slate-300 rounded-xl transition-colors">Cancelar</button>
+                    <button type="submit" id="l-btnSave" class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition-all">
+                        <i class="fas fa-save"></i> Registrar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMACIÓN PARA ELIMINAR -->
+    <div id="confirm-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-200" style="z-index: 9999;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100">
+            <div class="p-6 text-center">
+                <div class="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center text-2xl mx-auto mb-4 border border-red-100">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 class="font-bold text-lg text-slate-800 mb-2 uppercase tracking-tight">Confirmación</h3>
+                <p class="text-sm text-slate-600 font-medium" id="confirm-msg">¿Estás seguro de realizar esta acción?</p>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-2 gap-2">
+                <button onclick="document.getElementById('confirm-modal').classList.add('hidden')" class="flex-1 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                <button id="btn-confirm-action" class="flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 shadow-sm rounded-xl transition-colors">Sí, Continuar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- OVERLAY DE CARGA -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm hidden flex-col items-center justify-center transition-opacity duration-300" style="z-index: 9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
+
+    <script>
+        // Formateo mayúsculas
+        document.addEventListener('input', function(e) {
+            if (e.target.tagName === 'TEXTAREA' || (e.target.tagName === 'INPUT' && e.target.type === 'text')) {
+                const start = e.target.selectionStart;
+                const end = e.target.selectionEnd;
+                e.target.value = e.target.value.toUpperCase();
+                try { e.target.setSelectionRange(start, end); } catch (err) {}
+            }
+        });
+
+        // CONFIGURACIÓN CENTRAL DE FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+            authDomain: "sisbom-de5f8.firebaseapp.com",
+            projectId: "sisbom-de5f8",
+            storageBucket: "sisbom-de5f8.firebasestorage.app",
+            messagingSenderId: "39449538456",
+            appId: "1:39449538456:web:64f767264356ae587485ed"
+        };
+
+        const CACHE_KEY = "sisbom_vehiculos_cache_v3";
+        let fbDb = null;
+
+        const App = {
+            data: [],
+            despachosData: [],
+            bitacoraData: [],
+            personalData: [],
+            filteredData: [],
+            searchTerm: '',
+            unsubVehiculos: null,
+            unsubVehicleHistory: null,
+            currentVehicleLogs: [],
+            currentVehicleId: null,
+
+            async init() {
+                if (window.stopLoadingData) return;
+
+                this.setupSearch();
+
+                try {
+                    const cachedData = localStorage.getItem(CACHE_KEY);
+                    if (cachedData) {
+                        const parsed = JSON.parse(cachedData);
+                        this.data = parsed.vehiculos || [];
+                        this.despachosData = parsed.despachos || [];
+                        this.bitacoraData = parsed.bitacora || [];
+                        this.personalData = parsed.personal || [];
+                        this.applyFilters();
+                    }
+                } catch(e) {}
+
+                await this.initFirebase();
+                this.loadData(false);
+            },
+
+            async initFirebase() {
+                if (parent) {
+                try {
+                    if (parent.fbDb) {
+                        fbDb = parent.fbDb;
+                    window.fbDoc = parent.fbDoc;
+                    window.fbSetDoc = parent.fbSetDoc;
+                    window.fbUpdateDoc = parent.fbUpdateDoc;
+                    window.fbDeleteDoc = parent.fbDeleteDoc;
+                    window.fbCollection = parent.fbCollection;
+                    window.fbGetDocs = parent.fbGetDocs;
+                    window.fbOnSnapshot = parent.fbOnSnapshot;
+                    window.fbWriteBatch = parent.fbWriteBatch;
+                    console.log("Firebase inherited from parent in Vehiculos");
+                    return;
+                    }
+                } catch (e) {
+                    console.warn("Error inheriting parent Firebase:", e);
+                }
+            }
+                try {
+                    const { initializeApp } = await import("./libs/firebase-app.js");
+                    const { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot, writeBatch } = await import("./libs/firebase-firestore.js");
+
+                    window.fbDoc = doc;
+                    window.fbSetDoc = setDoc;
+                    window.fbUpdateDoc = updateDoc;
+                    window.fbDeleteDoc = deleteDoc;
+                    window.fbCollection = collection;
+                    window.fbGetDocs = getDocs;
+                    window.fbOnSnapshot = onSnapshot;
+                    window.fbWriteBatch = writeBatch;
+
+                    const app = initializeApp(firebaseConfig);
+                    fbDb = getFirestore(app);
+                    try {
+                        const { getAuth, signInAnonymously, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                        const auth = getAuth(app);
+                        const storedUser = localStorage.getItem('authUserId');
+                        const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                        if (storedUser && storedPassSecure) {
+                            const email = storedUser + "@sisbom.com";
+                            await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                            console.log("Firebase conectado con credenciales en fallback (Type B).");
+                        } else {
+                            await signInAnonymously(auth);
+                            console.log("Firebase conectado de forma anónima en fallback (Type B).");
+                        }
+                    } catch(authErr) {
+                        console.warn("Error authenticating fallback Firebase (Type B):", authErr);
+                    }
+                } catch(e) {
+                    console.error("Error inicializando Firebase", e);
+                }
+            },
+
+            setupSearch() {
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    this.searchTerm = e.target.value.toLowerCase().trim();
+                    this.applyFilters();
+                });
+            },
+
+            async loadData(force = false) {
+                if (force && parent && typeof parent.refreshAllDatabaseData === 'function') {
+                    parent.refreshAllDatabaseData(true);
+                    return;
+                }
+                const syncIcon = document.getElementById('sync-icon');
+                if (syncIcon) syncIcon.classList.add('fa-spin');
+                
+                if (this.unsubVehiculos && force) {
+                    try {
+                        if (!fbDb) await this.initFirebase();
+                        const [snapDespachos, snapBitacora, snapPersonal] = await Promise.all([
+                            window.fbGetDocs(window.fbCollection(fbDb, 'despachos')),
+                            window.fbGetDocs(window.fbCollection(fbDb, 'bitacora')),
+                            window.fbGetDocs(window.fbCollection(fbDb, 'personal'))
+                        ]);
+
+                        this.despachosData = [];
+                        snapDespachos.forEach(d => this.despachosData.push({idServicio: d.id, ...d.data()}));
+
+                        this.bitacoraData = [];
+                        snapBitacora.forEach(d => this.bitacoraData.push(d.data()));
+
+                        this.personalData = [];
+                        snapPersonal.forEach(d => this.personalData.push(d.data()));
+
+                        this.applyFilters();
+
+                        setTimeout(() => {
+                            if (syncIcon) syncIcon.classList.remove('fa-spin');
+                            this.showToast("Datos sincronizados en tiempo real.", "success");
+                        }, 500);
+                    } catch(e) {
+                        this.showToast("Error al sincronizar datos anexos.", "error");
+                        if (syncIcon) syncIcon.classList.remove('fa-spin');
+                    }
+                    return;
+                }
+
+                const loadedOnce = sessionStorage.getItem('sisbom_vehiculos_loaded');
+                if (!loadedOnce || (!this.unsubVehiculos && force)) this.showLoader();
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    if (!this.unsubVehiculos) {
+                        const [snapDespachos, snapBitacora, snapPersonal] = await Promise.all([
+                            window.fbGetDocs(window.fbCollection(fbDb, 'despachos')),
+                            window.fbGetDocs(window.fbCollection(fbDb, 'bitacora')),
+                            window.fbGetDocs(window.fbCollection(fbDb, 'personal'))
+                        ]);
+
+                        this.despachosData = [];
+                        snapDespachos.forEach(d => this.despachosData.push({idServicio: d.id, ...d.data()}));
+
+                        this.bitacoraData = [];
+                        snapBitacora.forEach(d => this.bitacoraData.push(d.data()));
+
+                        this.personalData = [];
+                        snapPersonal.forEach(d => this.personalData.push(d.data()));
+
+                        this.unsubVehiculos = window.fbOnSnapshot(window.fbCollection(fbDb, 'vehiculos'), (snap) => {
+                            let fbVehiculos = [];
+                            snap.forEach(doc => {
+                                let data = doc.data();
+                                fbVehiculos.push({
+                                    idCarro: data.idCarro || doc.id,
+                                    estado: data.estado || '0',
+                                    enServicio: data.enServicio || '',
+                                    kmActual: data.kmActual || '',
+                                    Observacion: data.Observacion || data.observacion || '',
+                                    notas: data.notas || '',
+                                    patente: data.patente || ''
+                                });
+                            });
+                            this.data = fbVehiculos;
+                            
+                            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                                vehiculos: this.data,
+                                despachos: this.despachosData,
+                                bitacora: this.bitacoraData,
+                                personal: this.personalData
+                            }));
+                            sessionStorage.setItem('sisbom_vehiculos_loaded', 'true');
+                            
+                            this.applyFilters();
+                            this.hideLoader();
+                            
+                            // Actualizar detalles si el modal de ese auto está abierto
+                            if(this.currentVehicleId && document.getElementById('v-editMode').value === "true") {
+                                const vehicle = this.data.find(v => String(v.idCarro).toUpperCase() === String(this.currentVehicleId).toUpperCase());
+                                if(vehicle) {
+                                    const estSelect = document.getElementById('v-estado');
+                                    if (String(vehicle.estado) === '1') estSelect.value = '0-9';
+                                    else if (String(vehicle.estado) === '0') estSelect.value = '0-8';
+                                    else estSelect.value = String(vehicle.estado).trim();
+
+                                    document.getElementById('v-enServicio').value = vehicle.enServicio || '0';
+                                    document.getElementById('v-kmActual').value = vehicle.kmActual || '';
+                                }
+                            }
+                            
+                        }, (error) => {
+                            console.error(error);
+                            this.showToast("Error de conexión en vivo.", "error");
+                            this.hideLoader();
+                        });
+                    }
+
+                } catch (e) {
+                    console.error(e);
+                    this.showToast("Fallo de conexión a Firebase.", "error");
+                    this.hideLoader();
+                } finally {
+                    if (syncIcon) syncIcon.classList.remove('fa-spin');
+                }
+            },
+
+            formatName(input) {
+                if(!input || String(input).trim() === '') return 'No Registrado';
+                const searchVal = String(input).trim().toLowerCase();
+                let person = this.personalData.find(p => String(p.idRadial).trim().toLowerCase() === searchVal || String(p.idRegistro).trim() === searchVal);
+                if(!person) person = this.personalData.find(p => String(p.nombreBombero).toLowerCase().includes(searchVal));
+                
+                if(person) return `${person.idRadial || person.idRegistro} - ${person.nombreBombero}`;
+                return input;
+            },
+
+            applyFilters() {
+                let filtered = this.data;
+
+                // Excluir filas vacías sin ID
+                filtered = filtered.filter(row => row.idCarro && String(row.idCarro).trim() !== '');
+
+                // Filtro por Texto Libre
+                if (this.searchTerm !== '') {
+                    filtered = filtered.filter(row => {
+                        const s = `${row.idCarro} ${row.patente} ${row.Observacion} ${row.notas}`.toLowerCase();
+                        return s.includes(this.searchTerm);
+                    });
+                }
+
+                // Cálculo de KPIs
+                let kpiTotal = filtered.length;
+                let kpiDisp = 0;
+                let kpiServ = 0;
+                let kpiFuera = 0;
+
+                filtered.forEach(row => {
+                    const estado = String(row.estado).trim();
+                    const enServicio = String(row.enServicio || '').trim();
+
+                    if (estado === '0-8' || estado === '0') {
+                        kpiFuera++;
+                    } else {
+                        if (enServicio !== '' && enServicio !== '0' && enServicio !== '6-13' && enServicio !== '6-14') {
+                            kpiServ++;
+                        } else {
+                            kpiDisp++;
+                        }
+                    }
+                });
+
+                document.getElementById('kpi-total').innerText = kpiTotal;
+                document.getElementById('kpi-disponibles').innerText = kpiDisp;
+                document.getElementById('kpi-servicio').innerText = kpiServ;
+                document.getElementById('kpi-fueraservicio').innerText = kpiFuera;
+
+                this.filteredData = filtered.sort((a, b) => String(a.idCarro).localeCompare(String(b.idCarro), undefined, {numeric: true, sensitivity: 'base'}));
+                this.renderGrid();
+            },
+
+            renderGrid() {
+                const grid = document.getElementById('vehiculos-grid');
+                const empty = document.getElementById('empty-state');
+
+                if (this.filteredData.length === 0) {
+                    grid.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                empty.classList.add('hidden');
+
+                grid.innerHTML = this.filteredData.map(row => {
+                    const carro = String(row.idCarro).trim();
+                    const patente = row.patente || 'S/P';
+                    const estadoRaw = String(row.estado).trim(); 
+                    const enServicio = String(row.enServicio || '').trim();
+                    const kmActual = row.kmActual || '0';
+                    const observacion = row.Observacion || row.observacion || '';
+                    const notas = row.notas || '';
+                    const isFuera = (estadoRaw === '0-8' || estadoRaw === '0');
+
+                    let activeBitacora = null;
+                    if (!isFuera && enServicio !== '' && enServicio !== '0' && enServicio !== '6-13' && enServicio !== '6-14') {
+                        activeBitacora = this.bitacoraData.find(b => String(b.carro).trim().toUpperCase() === carro.toUpperCase() && String(b.idServicio).trim() === enServicio);
+                        if (!activeBitacora) {
+                            // Backup: buscar la última salida de este carro si no coincide exactamente el ID
+                            activeBitacora = [...this.bitacoraData].reverse().find(b => String(b.carro).trim().toUpperCase() === carro.toUpperCase());
+                        }
+                    }
+
+                    let statusBadge = '';
+                    let statusColor = 'bg-slate-400';
+                    let iconBg = 'bg-slate-100';
+                    let iconColor = 'text-slate-500';
+                    let statusText = '';
+                    let headerIcon = 'fa-truck';
+
+                    if (!isFuera) {
+                        if (enServicio === '6-13') {
+                            statusBadge = `<span class="bg-blue-50 text-blue-700 px-3 py-1 rounded-md font-black tracking-widest uppercase border border-blue-200 shadow-sm" style="font-size: 10px;"><i class="fas fa-route mr-1"></i> Trámites (6-13)</span>`;
+                            statusColor = 'bg-blue-500';
+                            iconBg = 'bg-blue-50';
+                            iconColor = 'text-blue-600';
+                            statusText = 'Fuera de Jurisdicción';
+                            headerIcon = 'fa-truck-moving';
+                        } else if (enServicio === '6-14') {
+                            statusBadge = `<span class="bg-yellow-50 text-yellow-700 px-3 py-1 rounded-md font-black tracking-widest uppercase border border-yellow-200 shadow-sm" style="font-size: 10px;"><i class="fas fa-gas-pump mr-1"></i> Combustible (6-14)</span>`;
+                            statusColor = 'bg-yellow-500';
+                            iconBg = 'bg-yellow-50';
+                            iconColor = 'text-yellow-600';
+                            statusText = 'En Carga de Combustible';
+                        } else if (enServicio !== '' && enServicio !== '0') {
+                            statusBadge = `<span class="bg-red-50 text-bomberos-red px-3 py-1 rounded-md font-black tracking-widest uppercase border border-red-200 shadow-sm animate-pulse" style="font-size: 10px;"><i class="fas fa-fire mr-1"></i> En Servicio</span>`;
+                            statusColor = 'bg-bomberos-red';
+                            iconBg = 'bg-red-50';
+                            iconColor = 'text-bomberos-red';
+                            statusText = `<span class="font-bold text-bomberos-red">Clave ${enServicio}</span>`;
+                            headerIcon = 'fa-truck-fast';
+                        } else {
+                            statusBadge = `<span class="bg-green-50 text-green-700 px-3 py-1 rounded-md font-black tracking-widest uppercase border border-green-200 shadow-sm" style="font-size: 10px;"><i class="fas fa-check-double mr-1"></i> Disponible (0-9)</span>`;
+                            statusColor = 'bg-green-500';
+                            iconBg = 'bg-green-50';
+                            iconColor = 'text-green-600';
+                            statusText = 'En Cuartel y Operativo';
+                        }
+                    } else {
+                        statusBadge = `<span class="bg-slate-100 text-slate-600 px-3 py-1 rounded-md font-black tracking-widest uppercase border border-slate-300 shadow-sm" style="font-size: 10px;"><i class="fas fa-wrench mr-1"></i> Fuera de Servicio (0-8)</span>`;
+                        statusText = 'Inoperativo';
+                    }
+
+                    return `
+                    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-full hover:shadow-lg transition-shadow relative overflow-hidden group">
+                        <div class="absolute top-0 left-0 right-0 h-1.5 ${statusColor} transition-colors"></div>
+                        <div class="p-5 border-b border-slate-100 flex justify-between items-start gap-2 bg-gradient-to-b from-slate-50/50 to-transparent">
+                            <div class="flex items-center gap-4">
+                                <div class="w-14 h-14 rounded-2xl ${iconBg} ${iconColor} flex items-center justify-center border border-current border-opacity-10 shrink-0 group-hover:scale-105 transition-transform shadow-sm">
+                                    <i class="fas ${headerIcon} text-2xl"></i>
+                                </div>
+                                <div class="flex flex-col">
+                                    <h5 class="font-black text-slate-800 text-2xl leading-none tracking-tight">${carro}</h5>
+                                    <div class="bg-slate-100 border border-slate-200 rounded px-2 py-0.5 w-fit mt-1.5 flex items-center gap-1.5">
+                                        <div class="w-1.5 h-1.5 rounded-full bg-slate-400"></div>
+                                        <span class="font-bold text-slate-600 tracking-widest leading-none" style="font-size: 10px;">${patente}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="text-right flex-shrink-0 flex flex-col items-end gap-2">
+                                ${statusBadge}
+                                <button onclick="App.openVehicleModal('${carro}')" class="text-slate-400 hover:text-bomberos-red transition-colors text-xs font-bold uppercase tracking-widest mt-2" title="Editar Unidad">
+                                    <i class="fas fa-edit"></i> Editar
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="p-5 flex flex-col gap-4 flex-1">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <span class="f-label" style="font-size: 9px;">Estado Actual</span>
+                                    <span class="f-value text-xs">${statusText}</span>
+                                </div>
+                                <div>
+                                    <span class="f-label" style="font-size: 9px;">Odómetro Global</span>
+                                    <span class="f-value text-base font-black text-slate-800">${kmActual} <span class="font-bold text-slate-400" style="font-size: 10px;">KM</span></span>
+                                </div>
+                            </div>
+
+                            ${activeBitacora ? `
+                            <div class="bg-red-50/50 p-3 rounded-lg border border-red-100 flex flex-col gap-2 mt-2">
+                                <span class="font-bold text-bomberos-red uppercase tracking-widest border-b border-red-100 pb-1" style="font-size: 9px;">Dotación Despachada</span>
+                                <div class="grid grid-cols-1 gap-1.5 mt-1" style="font-size: 11px;">
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-slate-500"><i class="fas fa-user-shield w-4 text-center mr-1 text-slate-400"></i> OBAC:</span>
+                                        <span class="font-bold text-slate-700 truncate" style="max-width: 130px;" title="${this.formatName(activeBitacora.obac)}">${this.formatName(activeBitacora.obac)}</span>
+                                    </div>
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-slate-500"><i class="fas fa-user-cog w-4 text-center mr-1 text-slate-400"></i> Cond:</span>
+                                        <span class="font-bold text-slate-700 truncate" style="max-width: 130px;" title="${this.formatName(activeBitacora.conductor)}">${this.formatName(activeBitacora.conductor)}</span>
+                                    </div>
+                                    <div class="flex justify-between items-center border-t border-red-100/50 pt-1.5 mt-0.5">
+                                        <span class="text-slate-500"><i class="fas fa-users w-4 text-center mr-1 text-slate-400"></i> Bomberos:</span>
+                                        <span class="font-black text-bomberos-red">${activeBitacora.cuantosBomberos || '0'}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            ` : ''}
+
+                            <div class="mt-auto space-y-3 pt-2">
+                                ${notas ? `
+                                <div class="bg-blue-50/50 p-3 rounded-lg border border-blue-100 flex items-start gap-2">
+                                    <i class="fas fa-clipboard-list text-blue-400 mt-0.5"></i>
+                                    <div>
+                                        <span class="f-label text-blue-600 mb-0.5" style="font-size: 9px;">Notas Técnicas</span>
+                                        <p class="text-xs text-blue-900 font-medium leading-relaxed">${notas}</p>
+                                    </div>
+                                </div>` : ''}
+                                
+                                ${observacion ? `
+                                <div class="bg-slate-50 p-3 rounded-lg border border-slate-100 flex items-start gap-2">
+                                    <i class="fas fa-comment-dots text-slate-400 mt-0.5"></i>
+                                    <div>
+                                        <span class="f-label mb-0.5" style="font-size: 9px;">Observación General</span>
+                                        <p class="text-xs text-slate-600 font-medium leading-relaxed italic">${observacion}</p>
+                                    </div>
+                                </div>` : ''}
+                                
+                                ${(!notas && !observacion) ? `<div class="text-center p-3 text-xs text-slate-400 italic">No hay observaciones adicionales registradas para esta unidad.</div>` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+
+            // --- LÓGICA DE AGREGAR Y EDITAR VEHÍCULOS (MODAL) ---
+            switchVehicleTab(tabName) {
+                const tabDetalle = document.getElementById('v-tab-detalle');
+                const tabHistorial = document.getElementById('v-tab-historial');
+                
+                tabDetalle.classList.add('hidden');
+                tabHistorial.classList.add('hidden');
+                tabHistorial.classList.remove('flex');
+                
+                document.getElementById('v-btn-tab-detalle').classList.remove('active');
+                document.getElementById('v-btn-tab-historial').classList.remove('active');
+                
+                if (tabName === 'detalle') {
+                    tabDetalle.classList.remove('hidden');
+                } else if (tabName === 'historial') {
+                    tabHistorial.classList.remove('hidden');
+                    tabHistorial.classList.add('flex');
+                }
+                
+                document.getElementById(`v-btn-tab-${tabName}`).classList.add('active');
+            },
+
+            openVehicleModal(id = null) {
+                const modal = document.getElementById('vehicle-modal');
+                document.getElementById('v-tab-detalle').reset();
+                this.switchVehicleTab('detalle');
+
+                document.getElementById('v-editMode').value = id ? "true" : "false";
+                document.getElementById('v-originalId').value = id || "";
+
+                const title = document.getElementById('vehicleModalTitle');
+                const btnDelete = document.getElementById('v-btnDelete');
+                const idInput = document.getElementById('v-idCarro');
+                const tabContainer = document.getElementById('v-tabs-container');
+                
+                this.currentVehicleId = id;
+                this.currentVehicleLogs = [];
+
+                // Cleanup subscription
+                if (this.unsubVehicleHistory) {
+                    this.unsubVehicleHistory();
+                    this.unsubVehicleHistory = null;
+                }
+
+                if (id) {
+                    title.innerHTML = `<i class="fas fa-truck text-bomberos-red"></i> Editar Unidad ${id}`;
+                    btnDelete.classList.remove('hidden');
+                    idInput.readOnly = true;
+                    idInput.classList.add('bg-slate-100', 'text-slate-500');
+                    tabContainer.classList.remove('hidden');
+
+                    const vehicle = this.data.find(v => String(v.idCarro) === String(id));
+                    if (vehicle) {
+                        document.getElementById('v-idCarro').value = vehicle.idCarro;
+                        document.getElementById('v-patente').value = vehicle.patente || '';
+                        
+                        const estSelect = document.getElementById('v-estado');
+                        if (String(vehicle.estado) === '1') estSelect.value = '0-9';
+                        else if (String(vehicle.estado) === '0') estSelect.value = '0-8';
+                        else estSelect.value = String(vehicle.estado).trim();
+
+                        document.getElementById('v-enServicio').value = vehicle.enServicio || '0';
+                        document.getElementById('v-kmActual').value = vehicle.kmActual || '';
+                        document.getElementById('v-notas').value = vehicle.notas || '';
+                        document.getElementById('v-observacion').value = vehicle.Observacion || vehicle.observacion || '';
+                    }
+
+                    // Suscribirse a la subcolección de Historial/Notas
+                    this.loadVehicleHistory(id);
+
+                } else {
+                    title.innerHTML = `<i class="fas fa-truck text-bomberos-red"></i> Nueva Unidad`;
+                    btnDelete.classList.add('hidden');
+                    idInput.readOnly = false;
+                    idInput.classList.remove('bg-slate-100', 'text-slate-500');
+                    document.getElementById('v-estado').value = "0-9";
+                    document.getElementById('v-enServicio').value = "0";
+                    tabContainer.classList.add('hidden'); // Ocultar tabs si es nuevo
+                }
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                document.body.classList.add('overflow-hidden');
+            },
+
+            closeVehicleModal() {
+                const modal = document.getElementById('vehicle-modal');
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                document.body.classList.remove('overflow-hidden');
+                if (this.unsubVehicleHistory) {
+                    this.unsubVehicleHistory();
+                    this.unsubVehicleHistory = null;
+                }
+                this.currentVehicleId = null;
+            },
+
+            async saveVehicle(e) {
+                e.preventDefault();
+                const isEdit = document.getElementById('v-editMode').value === "true";
+                const originalId = document.getElementById('v-originalId').value;
+                const idCarro = document.getElementById('v-idCarro').value.trim().toUpperCase();
+
+                if (!idCarro) {
+                    this.showToast("El ID de la unidad es obligatorio.", "error");
+                    return;
+                }
+
+                if (!isEdit) {
+                    const exists = this.data.find(v => String(v.idCarro).toUpperCase() === idCarro);
+                    if (exists) {
+                        this.showToast(`La unidad ${idCarro} ya existe.`, "error");
+                        return;
+                    }
+                }
+
+                this.showLoader();
+                const btnSave = document.getElementById('v-btnSave');
+                btnSave.disabled = true;
+
+                const rawEstado = document.getElementById('v-estado').value;
+                const dbEstado = (rawEstado === '0-9') ? '1' : '0';
+
+                const payload = {
+                    idCarro: idCarro,
+                    patente: document.getElementById('v-patente').value.trim().toUpperCase(),
+                    estado: dbEstado,
+                    enServicio: document.getElementById('v-enServicio').value.trim().toUpperCase(),
+                    kmActual: document.getElementById('v-kmActual').value.trim(),
+                    notas: document.getElementById('v-notas').value.trim().toUpperCase(),
+                    Observacion: document.getElementById('v-observacion').value.trim().toUpperCase()
+                };
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, 'vehiculos', idCarro);
+                    
+                    if (isEdit && String(originalId).toUpperCase() !== idCarro) {
+                         await window.fbDeleteDoc(window.fbDoc(fbDb, 'vehiculos', originalId));
+                    }
+                    
+                    await window.fbSetDoc(docRef, payload, { merge: true });
+
+                    this.showToast("Vehículo guardado correctamente.");
+                    this.closeVehicleModal();
+                } catch (err) {
+                    console.error(err);
+                    this.showToast("Error al guardar el vehículo.", "error");
+                } finally {
+                    btnSave.disabled = false;
+                    this.hideLoader();
+                }
+            },
+
+            confirmDeleteVehicle() {
+                const originalId = document.getElementById('v-originalId').value;
+                if(!originalId) return;
+
+                document.getElementById('confirm-msg').innerHTML = `Vas a eliminar permanentemente la unidad <b>${originalId}</b> y todo su historial. ¿Deseas continuar?`;
+                document.getElementById('confirm-modal').classList.remove('hidden');
+                
+                const btnConfirm = document.getElementById('btn-confirm-action');
+                btnConfirm.onclick = async () => {
+                    document.getElementById('confirm-modal').classList.add('hidden');
+                    this.showLoader();
+                    try {
+                        if (!fbDb) await this.initFirebase();
+                        await window.fbDeleteDoc(window.fbDoc(fbDb, 'vehiculos', originalId));
+                        this.showToast("Unidad eliminada correctamente.");
+                        this.closeVehicleModal();
+                    } catch (err) {
+                        console.error(err);
+                        this.showToast("Error al eliminar.", "error");
+                    } finally {
+                        this.hideLoader();
+                    }
+                };
+            },
+
+            // --- LÓGICA DE HISTORIAL/HOJA DE VIDA ---
+            async loadVehicleHistory(idCarro) {
+                document.getElementById('v-historial-loader').classList.remove('hidden');
+                document.getElementById('v-historial-tbody').innerHTML = '';
+                document.getElementById('v-historial-empty').classList.add('hidden');
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    
+                    this.unsubVehicleHistory = window.fbOnSnapshot(window.fbCollection(fbDb, `vehiculos/${idCarro}/historial`), (snap) => {
+                        let logs = [];
+                        snap.forEach(doc => logs.push(doc.data()));
+                        
+                        this.currentVehicleLogs = logs.sort((a, b) => parseInt(b.idLog) - parseInt(a.idLog));
+                        this.renderLogs();
+                    }, (error) => {
+                        console.warn("Vehicle history snapshot listener error in Comandancia vehiculos:", error);
+                    });
+                } catch (err) {
+                    console.error(err);
+                    document.getElementById('v-historial-loader').classList.add('hidden');
+                    this.showToast("Error cargando la hoja de vida.", "error");
+                }
+            },
+
+            renderLogs() {
+                document.getElementById('v-historial-loader').classList.add('hidden');
+                const tbody = document.getElementById('v-historial-tbody');
+                const empty = document.getElementById('v-historial-empty');
+
+                if (this.currentVehicleLogs.length === 0) {
+                    tbody.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                empty.classList.add('hidden');
+                tbody.innerHTML = this.currentVehicleLogs.map(log => {
+                    let color = 'bg-slate-100 text-slate-600';
+                    if(log.estado === '0-9') color = 'bg-green-100 text-green-700 border-green-200';
+                    else if(log.estado === '0-8') color = 'bg-red-100 text-red-700 border-red-200';
+                    
+                    let dateParsed = log.fecha;
+                    if(dateParsed.includes('-')) {
+                        const p = dateParsed.split('-');
+                        if(p.at(0).length === 4) dateParsed = `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                    }
+
+                    return `
+                    <tr class="hover:bg-slate-50 transition-colors">
+                        <td class="py-2.5 px-4 text-slate-400 font-black text-[10px]">#${log.idLog}</td>
+                        <td class="py-2.5 px-4 font-semibold text-slate-600 text-[10px]">
+                            ${dateParsed}<br><span class="text-slate-400 tracking-widest text-[8px]">${log.hora || ''}</span>
+                        </td>
+                        <td class="py-2.5 px-4 font-bold text-slate-800 text-xs">
+                            ${log.motivo}
+                            ${log.registradoPor ? `<div class="text-[8px] text-slate-400 mt-1 uppercase tracking-widest"><i class="fas fa-user mr-1"></i> ${log.registradoPor}</div>` : ''}
+                        </td>
+                        <td class="py-2.5 px-4 font-black text-slate-700 text-[10px]">${log.odometro} <span class="text-slate-400">KM</span></td>
+                        <td class="py-2.5 px-4 text-center">
+                            <span class="px-2 py-1 rounded text-[9px] font-black uppercase tracking-widest border ${color}">${log.estado}</span>
+                        </td>
+                    </tr>`;
+                }).join('');
+            },
+
+            openLogModal() {
+                if(!this.currentVehicleId) return;
+
+                const modal = document.getElementById('log-modal');
+                document.getElementById('logForm').reset();
+
+                // Auto-fill: Fecha, Hora, Estado actual, Odómetro actual
+                const now = new Date();
+                const d = String(now.getDate()).padStart(2, '0');
+                const m = String(now.getMonth() + 1).padStart(2, '0');
+                const y = now.getFullYear();
+                const hh = String(now.getHours()).padStart(2, '0');
+                const mm = String(now.getMinutes()).padStart(2, '0');
+                
+                document.getElementById('l-fecha').value = `${y}-${m}-${d}`;
+                document.getElementById('l-hora').value = `${hh}:${mm}`;
+                
+                const vehicle = this.data.find(v => String(v.idCarro) === String(this.currentVehicleId));
+                if(vehicle) {
+                    const est = String(vehicle.estado).trim();
+                    document.getElementById('l-estado').value = (est === '1' || est === '0-9') ? '0-9' : '0-8';
+                    
+                    const currentKmOnScreen = document.getElementById('v-kmActual').value;
+                    document.getElementById('l-odometro').value = currentKmOnScreen || vehicle.kmActual || '';
+                }
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            },
+
+            closeLogModal() {
+                document.getElementById('log-modal').classList.add('hidden');
+                document.getElementById('log-modal').classList.remove('flex');
+            },
+
+            async saveLog(e) {
+                e.preventDefault();
+                if(!this.currentVehicleId) return;
+
+                this.showLoader();
+                const btnSave = document.getElementById('l-btnSave');
+                btnSave.disabled = true;
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    const newId = this.currentVehicleLogs.length > 0 ? Math.max(...this.currentVehicleLogs.map(l => parseInt(l.idLog) || 0)) + 1 : 1;
+                    
+                    let responsable = "Usuario Desconocido";
+                    try {
+                        const sessionStr = localStorage.getItem('adminUser');
+                        if(sessionStr) responsable = JSON.parse(sessionStr).nombreBombero;
+                    } catch(err){}
+
+                    const payloadLog = {
+                        idLog: newId,
+                        fecha: document.getElementById('l-fecha').value,
+                        hora: document.getElementById('l-hora').value,
+                        motivo: document.getElementById('l-motivo').value.trim().toUpperCase(),
+                        estado: document.getElementById('l-estado').value,
+                        odometro: document.getElementById('l-odometro').value.trim(),
+                        registradoPor: responsable
+                    };
+
+                    const batch = window.fbWriteBatch(fbDb);
+                    
+                    // Insertar Log en subcolección
+                    const logRef = window.fbDoc(fbDb, `vehiculos/${this.currentVehicleId}/historial`, String(newId));
+                    batch.set(logRef, payloadLog);
+
+                    // Actualizar el vehículo en la colección principal
+                    const mainRef = window.fbDoc(fbDb, 'vehiculos', this.currentVehicleId);
+                    const dbEstadoLog = (payloadLog.estado === '0-9') ? '1' : '0';
+                    batch.update(mainRef, {
+                        estado: dbEstadoLog,
+                        kmActual: payloadLog.odometro
+                    });
+
+                    await batch.commit();
+
+                    this.showToast("Registro añadido a la hoja de vida.");
+                    this.closeLogModal();
+
+                } catch(err) {
+                    console.error(err);
+                    this.showToast("Error al guardar el registro.", "error");
+                } finally {
+                    btnSave.disabled = false;
+                    this.hideLoader();
+                }
+            },
+
+            // --- UTILIDADES GLOBALES ---
+            showLoader() {
+                const el = document.getElementById('loading-overlay');
+                if(el) { el.classList.remove('hidden'); el.classList.add('flex'); }
+            },
+            
+            hideLoader() {
+                const el = document.getElementById('loading-overlay');
+                if(el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+            },
+            
+            showToast(message, type = 'success') {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+                toast.className = `transform transition-all duration-300 translate-y-full opacity-0 max-w-sm w-full shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 ${bg} text-white`;
+                toast.innerHTML = `<div class="p-4 w-full flex items-center gap-3">
+                    ${type === 'success' ? '<i class="fas fa-check-circle text-lg"></i>' : '<i class="fas fa-times-circle text-lg"></i>'}
+                    <p class="text-sm font-medium">${message}</p>
+                </div>`;
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 10);
+                setTimeout(() => {
+                    toast.classList.add('translate-y-full', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3500);
+            }
+        };
+
+        window.onFirebaseParentLogout = function() {
+            if (App.unsubVehiculos) { try { App.unsubVehiculos(); } catch(e){} App.unsubVehiculos = null; }
+            if (App.unsubVehicleHistory) { try { App.unsubVehicleHistory(); } catch(e){} App.unsubVehicleHistory = null; }
+            console.log("Unsubscribed all vehiculos.html realtime listeners on parent logout hook call.");
+        };
+
+        window.addEventListener('DOMContentLoaded', () => App.init());
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

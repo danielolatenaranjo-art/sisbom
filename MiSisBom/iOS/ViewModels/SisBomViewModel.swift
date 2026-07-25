@@ -1,0 +1,739 @@
+import Foundation
+import Combine
+import FirebaseFirestore
+import FirebaseMessaging
+import FirebaseAuth
+import AVFoundation
+import UIKit
+
+// Screen definitions matching Android enum classes
+enum AppScreen: String, Codable {
+    case login
+    case main
+    case chat
+}
+
+enum MainTab: String, Codable, CaseIterable {
+    case actividad
+    case despacho
+    case ordenes
+    case alertas
+    case asistencia
+}
+
+class SisBomViewModel: ObservableObject {
+    private let repository = FirebaseRepository()
+    private var listeners: [ListenerRegistration] = []
+    
+    // MARK: - Reactive UI States
+    @Published var currentScreen: AppScreen = .login
+    @Published var currentTab: MainTab = .actividad
+    @Published var currentUser: UserPersonal? = nil
+    @Published var isSyncing: Bool = false
+    @Published var isLoggingIn: Bool = false
+    @Published var isDarkMode: Bool = false {
+        didSet {
+            UserDefaults.standard.set(isDarkMode, forKey: "app_dark_mode")
+            updateInterfaceStyle()
+        }
+    }
+    
+    // Data lists
+    @Published var personnelList: [UserPersonal] = []
+    @Published var dispatchesList: [Dispatch] = []
+    @Published var alertsList: [Alert] = []
+    @Published var vehiclesList: [Vehicle] = []
+    @Published var attendanceList: [AttendanceSheet] = []
+    @Published var isCentralActive: Bool = false
+    @Published var centralOperatorName: String = ""
+    
+    // Navigation details
+    @Published var selectedDispatchId: String? = nil
+    @Published var activeChatId: String? = nil
+    @Published var activeChatAlert: Alert? = nil
+    @Published var selectedOrdenId: String? = nil
+    @Published var showChangelogDialog: Bool = false
+    private var pendingChatId: String? = nil
+    
+    // Feedback strings
+    @Published var changePasswordError: String = ""
+    @Published var changePasswordSuccess: String = ""
+    
+    // Known items to avoid duplicate sound triggers
+    private var knownDispatchIds = Set<String>()
+    private var knownAlertIds = Set<String>()
+    private var isFirstCheck = true
+    
+    // Bloqueo temporal para evitar efecto rebote (race conditions de Firestore)
+    private var lastStatusChangeTime: Date = Date.distantPast
+    private var pendingStatus: String? = nil
+    private var lastServiceChangeTime: Date = Date.distantPast
+    private var pendingService: String? = nil
+    
+    // Audio Player
+    private var audioPlayer: AVAudioPlayer?
+    
+    init() {
+        // Load Dark Mode Preference
+        if UserDefaults.standard.object(forKey: "app_dark_mode") != nil {
+            self.isDarkMode = UserDefaults.standard.bool(forKey: "app_dark_mode")
+        } else {
+            // Fallback to system setting
+            self.isDarkMode = UITraitCollection.current.userInterfaceStyle == .dark
+        }
+        
+        updateInterfaceStyle()
+        
+        // Load local cache for instant offline view
+        loadLocalCache()
+        
+        // Load saved session
+        if let savedUser: UserPersonal = loadCache(key: "fire_user") {
+            self.currentUser = savedUser
+            self.currentScreen = .main
+            self.startFirebaseSync(userId: savedUser.idRegistro)
+        }
+        
+        // Timer to skip initial sound triggers for historical items
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) {
+            self.isFirstCheck = false
+        }
+        
+        // Listen for open chat room notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenChatRoomNotification(_:)),
+            name: NSNotification.Name("OpenChatRoom"),
+            object: nil
+        )
+        
+        // Check if there is a cached launchChatId
+        if let launchChatId = AppDelegate.launchChatId {
+            self.openChatRoom(chatId: launchChatId)
+            AppDelegate.launchChatId = nil
+        }
+        
+        let lastSeenVersion = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
+        if lastSeenVersion != "1.0.7" {
+            self.showChangelogDialog = true
+        }
+    }
+    
+    @objc private func handleOpenChatRoomNotification(_ notification: Foundation.Notification) {
+        if let chatId = notification.userInfo?["chatId"] as? String {
+            DispatchQueue.main.async {
+                self.openChatRoom(chatId: chatId)
+            }
+        }
+    }
+    
+    func dismissChangelog() {
+        showChangelogDialog = false
+        UserDefaults.standard.set("1.0.7", forKey: "last_seen_version")
+    }
+    
+    func openChatRoom(chatId: String) {
+        self.currentScreen = .main
+        self.currentTab = .alertas
+        
+        if let alert = alertsList.first(where: { $0.idAlerta == chatId }) {
+            self.activeChatId = chatId
+            self.activeChatAlert = alert
+            self.pendingChatId = nil
+        } else {
+            self.pendingChatId = chatId
+        }
+    }
+    
+    private func updateInterfaceStyle() {
+        DispatchQueue.main.async {
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                windowScene.windows.forEach { window in
+                    window.overrideUserInterfaceStyle = self.isDarkMode ? .dark : .light
+                }
+            }
+        }
+    }
+    
+    // MARK: - Local Cache Persistence
+    
+    private func saveCache<T: Codable>(_ value: T, key: String) {
+        if let encoded = try? JSONEncoder().encode(value) {
+            UserDefaults.standard.set(encoded, forKey: key)
+        }
+    }
+    
+    private func loadCache<T: Codable>(key: String) -> T? {
+        if let data = UserDefaults.standard.data(forKey: key) {
+            return try? JSONDecoder().decode(T.self, from: data)
+        }
+        return nil
+    }
+    
+    private func loadLocalCache() {
+        if let list: [UserPersonal] = loadCache(key: "cache_personnel") { personnelList = list }
+        if let list: [Dispatch] = loadCache(key: "cache_dispatches") {
+            dispatchesList = list
+            list.forEach { knownDispatchIds.insert($0.idServicio) }
+        }
+        if let list: [Alert] = loadCache(key: "cache_alerts") {
+            alertsList = list
+            list.forEach { knownAlertIds.insert($0.idAlerta) }
+        }
+        if let list: [Vehicle] = loadCache(key: "cache_vehicles") { vehiclesList = list }
+        if let list: [AttendanceSheet] = loadCache(key: "cache_attendance") { attendanceList = list }
+    }
+    
+    // MARK: - Firebase Syncing
+    
+    func startFirebaseSync(userId: String) {
+        isSyncing = true
+        
+        // Unsubscribe from previous listeners if any
+        stopFirebaseSync()
+        
+        // FCM Subscriptions
+        Messaging.messaging().subscribe(toTopic: "alertas_generales")
+        Messaging.messaging().subscribe(toTopic: "despachos")
+        Messaging.messaging().subscribe(toTopic: "usuario_\(userId)")
+        
+        self.setupListeners(userId: userId)
+    }
+    
+    private func setupListeners(userId: String) {
+        let user = self.currentUser
+        let cargo = user?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let radial = user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let isComandante = cargo == "COMANDANTE" && ["1", "01", "2", "02", "3", "03"].contains(radial)
+
+        // Listener 1: Central State
+        let l1 = repository.getCentralState { [weak self] data in
+            guard let self = self else { return }
+            let estado = data["estado"] as? String ?? ""
+            let idReg = data["idRegistro"] as? String ?? ""
+            let opName = (data["nombreBombero"] as? String) ?? (data["operador"] as? String) ?? ""
+            
+            let myId = self.currentUser?.idRegistro ?? ""
+            let myName = self.currentUser?.nombreBombero ?? ""
+            
+            let isMeActive = estado.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "activo" &&
+                ((!myId.isEmpty && idReg.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myId.lowercased()) ||
+                 (!myName.isEmpty && opName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myName.lowercased()))
+            
+            self.isCentralActive = isMeActive
+            self.centralOperatorName = opName
+            
+            if isMeActive {
+                if self.currentUser?.estado != "0-9" {
+                    self.changeStatus(newStatus: "0-9")
+                }
+                self.currentTab = .despacho
+            }
+        }
+        listeners.append(l1)
+        
+        // Listener 2: Personnel list or Personnel self
+        let l2: ListenerRegistration
+        if isComandante {
+            l2 = repository.getPersonnel { [weak self] list in
+                guard let self = self else { return }
+                self.personnelList = list
+                self.saveCache(list, key: "cache_personnel")
+                if let my = self.currentUser, let fresh = list.first(where: { $0.idRegistro == my.idRegistro }) {
+                    self.updateCurrentUserData(fresh: fresh)
+                }
+            }
+        } else {
+            l2 = repository.getPersonnelSelf(userId: userId) { [weak self] selfUser in
+                guard let self = self else { return }
+                if let fresh = selfUser {
+                    self.personnelList = [fresh]
+                    self.saveCache(self.personnelList, key: "cache_personnel")
+                    self.updateCurrentUserData(fresh: fresh)
+                }
+            }
+        }
+        listeners.append(l2)
+        
+        // Listener 3: Dispatches list
+        let l3 = repository.getDispatches { [weak self] list in
+            guard let self = self else { return }
+            self.dispatchesList = list
+            self.saveCache(list, key: "cache_dispatches")
+            
+            for d in list {
+                if !self.knownDispatchIds.contains(d.idServicio) {
+                    self.knownDispatchIds.insert(d.idServicio)
+                    if !self.isFirstCheck && d.operadorFinal.isEmpty && self.currentUser?.estado != "0-8" {
+                        self.playSound(soundName: "despacho")
+                        self.triggerVibration()
+                    }
+                }
+            }
+            
+            // Clean local service if dispatch is closed or assigned to someone else
+            if let my = self.currentUser {
+                let mySvcId = my.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !mySvcId.isEmpty && mySvcId != "0" {
+                    let svc = list.first(where: { $0.idServicio == mySvcId })
+                    if svc == nil || !(svc?.operadorFinal.isEmpty ?? true) {
+                        self.changePersonalService(newServiceId: "0")
+                    }
+                }
+            }
+        }
+        listeners.append(l3)
+        
+        // Listener 4: Alerts list
+        let l4 = repository.getAlerts { [weak self] list in
+            guard let self = self else { return }
+            self.alertsList = list
+            self.saveCache(list, key: "cache_alerts")
+            
+            for a in list {
+                if !self.knownAlertIds.contains(a.idAlerta) {
+                    self.knownAlertIds.insert(a.idAlerta)
+                    if !self.isFirstCheck {
+                        self.playSound(soundName: "alerta")
+                        self.triggerVibration()
+                    }
+                }
+            }
+            
+            // Update active chat alert if it updates
+            if let activeChatId = self.activeChatId,
+               let updated = list.first(where: { $0.idAlerta == activeChatId }) {
+                self.activeChatAlert = updated
+            }
+            
+            // Resolve pending chat ID if present
+            if let pendingId = self.pendingChatId,
+               let alert = list.first(where: { $0.idAlerta == pendingId }) {
+                self.activeChatId = pendingId
+                self.activeChatAlert = alert
+                self.pendingChatId = nil
+            }
+        }
+        listeners.append(l4)
+        
+        // Listener 5: Vehicles list
+        let l5 = repository.getVehicles { [weak self] list in
+            guard let self = self else { return }
+            self.vehiclesList = list
+            self.saveCache(list, key: "cache_vehicles")
+        }
+        listeners.append(l5)
+        
+        // Listener 6: Attendance list
+        let l6 = repository.getAttendance(userId: userId) { [weak self] list in
+            guard let self = self else { return }
+            self.attendanceList = list
+            self.saveCache(list, key: "cache_attendance")
+        }
+        listeners.append(l6)
+        
+        self.isSyncing = false
+    }
+    
+    func stopFirebaseSync() {
+        listeners.forEach { $0.remove() }
+        listeners.removeAll()
+    }
+    
+    // MARK: - Actions
+    
+    func performLogin(idReg: String, pass: String, completion: @escaping (Bool) -> Void) {
+        let trimmedId = idReg.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        
+        if trimmedId.isEmpty || pass.isEmpty {
+            completion(false)
+            return
+        }
+        
+        isLoggingIn = true
+        
+        let email = trimmedId + "@sisbom.com"
+        let securePass = pass + "_secure_sisbom"
+        
+        Auth.auth().signIn(withEmail: email, password: securePass) { [weak self] authResult, authError in
+            guard let self = self else { return }
+            
+            if authResult != nil {
+                Firestore.firestore().collection("personal").document(trimmedId).getDocument { doc, docError in
+                    if let doc = doc, doc.exists, let data = doc.data() {
+                        guard let jsonData = try? JSONSerialization.data(withJSONObject: data),
+                              let user = try? JSONDecoder().decode(UserPersonal.self, from: jsonData) else {
+                            self.isLoggingIn = false
+                            completion(false)
+                            return
+                        }
+                        
+                        if !user.activo {
+                            self.isLoggingIn = false
+                            completion(false)
+                            return
+                        }
+                        
+                        self.currentUser = user
+                        self.saveCache(user, key: "fire_user")
+                        self.currentScreen = .main
+                        self.isLoggingIn = false
+                        self.startFirebaseSync(userId: user.idRegistro)
+                        completion(true)
+                    } else {
+                        self.isLoggingIn = false
+                        completion(false)
+                    }
+                }
+            } else {
+                print("Firebase Auth sign-in failed: \(authError?.localizedDescription ?? "unknown error")")
+                if let matchLocal = self.personnelList.first(where: { $0.idRegistro.lowercased() == trimmedId && $0.contrasena == pass }) {
+                    if !matchLocal.activo {
+                        self.isLoggingIn = false
+                        completion(false)
+                        return
+                    }
+                    self.currentUser = matchLocal
+                    self.saveCache(matchLocal, key: "fire_user")
+                    self.currentScreen = .main
+                    self.isLoggingIn = false
+                    self.startFirebaseSync(userId: matchLocal.idRegistro)
+                    completion(true)
+                } else {
+                    self.isLoggingIn = false
+                    completion(false)
+                }
+            }
+        }
+    }
+    
+    func logout() {
+        let oldUserId = currentUser?.idRegistro ?? ""
+        
+        // Unsubscribe from FCM topics
+        Messaging.messaging().unsubscribe(fromTopic: "alertas_generales")
+        Messaging.messaging().unsubscribe(fromTopic: "despachos")
+        if !oldUserId.isEmpty {
+            Messaging.messaging().unsubscribe(fromTopic: "usuario_\(oldUserId)")
+        }
+        
+        stopFirebaseSync()
+        
+        try? Auth.auth().signOut()
+        
+        // Clear UserDefaults Cache
+        let domain = Bundle.main.bundleIdentifier!
+        UserDefaults.standard.removePersistentDomain(forName: domain)
+        UserDefaults.standard.synchronize()
+        
+        // Reset state variables
+        currentUser = nil
+        currentScreen = .login
+        currentTab = .actividad
+        isCentralActive = false
+        personnelList = []
+        dispatchesList = []
+        alertsList = []
+        vehiclesList = []
+        attendanceList = []
+        knownDispatchIds.removeAll()
+        knownAlertIds.removeAll()
+        isFirstCheck = true
+    }
+    
+    func changeStatus(newStatus: String) {
+        guard let user = currentUser else { return }
+        
+        // Optimistic update
+        let updated = UserPersonal(
+            idRegistro: user.idRegistro,
+            nombreBombero: user.nombreBombero,
+            idRadial: user.idRadial,
+            contrasena: user.contrasena,
+            activo: user.activo,
+            conductor: user.conductor,
+            enServicio: user.enServicio,
+            cargo: user.cargo,
+            foto: user.foto,
+            estado: newStatus
+        )
+        self.currentUser = updated
+        self.saveCache(updated, key: "fire_user")
+        
+        self.pendingStatus = newStatus
+        self.lastStatusChangeTime = Date()
+
+        repository.updatePersonalStatus(userId: user.idRegistro, status: newStatus) { [weak self] result in
+            guard let self = self else { return }
+            if case .success = result {
+                self.repository.addStatusHistoryEntry(userId: user.idRegistro, status: newStatus) { _ in }
+            }
+        }
+    }
+    
+    func changePersonalService(newServiceId: String) {
+        guard let user = currentUser else { return }
+        
+        // Optimistic update
+        let updated = UserPersonal(
+            idRegistro: user.idRegistro,
+            nombreBombero: user.nombreBombero,
+            idRadial: user.idRadial,
+            contrasena: user.contrasena,
+            activo: user.activo,
+            conductor: user.conductor,
+            enServicio: newServiceId,
+            cargo: user.cargo,
+            foto: user.foto,
+            estado: user.estado
+        )
+        self.currentUser = updated
+        self.saveCache(updated, key: "fire_user")
+        
+        self.pendingService = newServiceId
+        self.lastServiceChangeTime = Date()
+
+        repository.updatePersonalService(userId: user.idRegistro, serviceId: newServiceId) { _ in }
+    }
+    
+    func attendService(dispatchId: String, attend: Bool) {
+        let serviceId = attend ? dispatchId : "0"
+        changePersonalService(newServiceId: serviceId)
+    }
+    
+    // ANCLAR / DESANCLAR ALERTA
+    func toggleAlertPin(alert: Alert) {
+        guard let myRadial = currentUser?.idRadial, !myRadial.isEmpty else { return }
+        var list = alert.fijar.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        
+        if list.contains(myRadial) {
+            list.removeAll { $0 == myRadial }
+        } else {
+            list.append(myRadial)
+        }
+        let finalString = list.joined(separator: ",")
+        repository.updateAlertPin(alertId: alert.idAlerta, newFijar: finalString) { _ in }
+    }
+    
+    // REGISTRAR VISTO / CONFORME
+    func registerConforme(alert: Alert) {
+        guard let myRadial = currentUser?.idRadial, !myRadial.isEmpty else { return }
+        var list = alert.conforme.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        
+        if !list.contains(myRadial) {
+            list.append(myRadial)
+            let finalString = list.joined(separator: ",")
+            repository.updateAlertConforme(alertId: alert.idAlerta, newConforme: finalString) { _ in }
+        }
+    }
+    
+    func changePassword(newPass: String) {
+        guard let user = currentUser else { return }
+        if newPass.isEmpty {
+            self.changePasswordError = "Ingrese una nueva contraseña"
+            return
+        }
+        
+        repository.updatePersonalPassword(userId: user.idRegistro, newPass: newPass) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success:
+                self.changePasswordSuccess = "Contraseña cambiada con éxito"
+                self.changePasswordError = ""
+                let updated = UserPersonal(
+                    idRegistro: user.idRegistro,
+                    nombreBombero: user.nombreBombero,
+                    idRadial: user.idRadial,
+                    contrasena: newPass,
+                    activo: user.activo,
+                    conductor: user.conductor,
+                    enServicio: user.enServicio,
+                    cargo: user.cargo,
+                    foto: user.foto,
+                    estado: user.estado
+                )
+                self.currentUser = updated
+                self.saveCache(updated, key: "fire_user")
+            case .failure(let error):
+                self.changePasswordError = "Error: \(error.localizedDescription)"
+                self.changePasswordSuccess = ""
+            }
+        }
+    }
+    
+    func sendChatMessage(alert: Alert, messageText: String) {
+        guard let user = currentUser else { return }
+        
+        let date = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd-MM-yyyy"
+        let dateString = dateFormatter.string(from: date)
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let timeString = timeFormatter.string(from: date)
+        
+        let sanitizedText = messageText.replacingOccurrences(of: "|", with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        let prefix = "\(dateString)/\(timeString)/\(user.idRegistro)"
+        let newEntry = "\(prefix): \(sanitizedText)"
+        
+        let finalChatString = alert.mensajeAlerta.isEmpty ? newEntry : "\(alert.mensajeAlerta)|\(newEntry)"
+        
+        repository.sendChatMessage(alertId: alert.idAlerta, finalChatString: finalChatString) { _ in }
+    }
+    
+    // MARK: - Central Dispatch Console
+    
+    func dispatchFromCentral(clave: String, lugar: String, preinforme: String, selectedVehicles: [Vehicle]) {
+        guard isCentralActive, let op = currentUser else { return }
+        
+        // Find next sequential integer ID
+        var maxId = 0
+        for d in dispatchesList {
+            if let num = Int(d.idServicio) {
+                if num > maxId { maxId = num }
+            }
+        }
+        let nextId = String(maxId + 1)
+        
+        let date = Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd-MM-yyyy"
+        let dateStr = dateFormatter.string(from: date)
+        
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateFormat = "HH:mm"
+        let timeStr = timeFormatter.string(from: date)
+        
+        let opName = op.nombreBombero
+        let vehicleClaves = selectedVehicles.map { $0.clave }
+        let vehicleIds = selectedVehicles.map { $0.idCarro }
+        
+        let carrosTexto = vehicleClaves.joined(separator: " / ")
+        
+        // Create units map with initial state matching despacho.html
+        var unidadesMap: [String: String] = [:]
+        for vId in vehicleIds {
+            unidadesMap[vId] = "pending_departure"
+        }
+        
+        let dispatchData: [String: Any] = [
+            "idServicio": nextId,
+            "clave": clave,
+            "lugar": lugar,
+            "preinforme": preinforme,
+            "carros": vehicleClaves,
+            "carrosTexto": carrosTexto,
+            "horaDespacho": timeStr,
+            "fechaDespacho": dateStr,
+            "quienDespacha": opName,
+            "operadorInicial": opName,
+            "operadorFinal": "",
+            "hora67": "",
+            "source": "despacho.html",
+            "unidades": unidadesMap,
+            "obacServicio": "",
+            "informeObac": "",
+            "fechaTermino": ""
+        ]
+        
+        repository.createDispatchNew(dispatchId: nextId, data: dispatchData) { [weak self] result in
+            guard let self = self else { return }
+            if case .success = result {
+                // Update vehicle service status
+                for vId in vehicleIds {
+                    self.repository.updateVehicleService(vehicleId: vId, enServicio: nextId) { _ in }
+                }
+                
+                // Set dispatching operator as active in service
+                self.changePersonalService(newServiceId: nextId)
+            }
+        }
+    }
+    
+    // MARK: - Audio and Vibration System
+    
+    func playSound(soundName: String) {
+        // Look up resources in main bundle
+        guard let url = Bundle.main.url(forResource: soundName, withExtension: "mp3") ??
+                        Bundle.main.url(forResource: soundName, withExtension: "wav") ??
+                        Bundle.main.url(forResource: "alerta", withExtension: "wav") else {
+            return
+        }
+        
+        do {
+            // Configure Audio Session for playing sounds even if phone is on silent switch (ambient/playback)
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+            try AVAudioSession.sharedInstance().setActive(true)
+            
+            audioPlayer = try AVAudioPlayer(contentsOf: url)
+            audioPlayer?.play()
+        } catch {
+            print("Sound playing error: \(error.localizedDescription)")
+        }
+    }
+    
+    func triggerVibration() {
+        let generator = UIImpactFeedbackGenerator(style: .heavy)
+        generator.prepare()
+        generator.impactOccurred()
+        
+        // Fallback standard vibration
+        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+    }
+    
+    private func updateCurrentUserData(fresh: UserPersonal) {
+        guard let my = self.currentUser else { return }
+        var needsUpdate = false
+        var targetEstado = my.estado
+        var targetEnServicio = my.enServicio
+        
+        let timeStatusElapsed = Date().timeIntervalSince(self.lastStatusChangeTime)
+        if let pending = self.pendingStatus, timeStatusElapsed < 4.0 {
+            if fresh.estado == pending {
+                self.pendingStatus = nil
+            }
+        } else {
+            if fresh.estado != my.estado {
+                targetEstado = fresh.estado
+                needsUpdate = true
+            }
+        }
+        
+        let timeServiceElapsed = Date().timeIntervalSince(self.lastServiceChangeTime)
+        if let pendingSvc = self.pendingService, timeServiceElapsed < 4.0 {
+            if fresh.enServicio == pendingSvc {
+                self.pendingService = nil
+            }
+        } else {
+            if fresh.enServicio != my.enServicio {
+                targetEnServicio = fresh.enServicio
+                needsUpdate = true
+            }
+        }
+        
+        var targetActivo = my.activo
+        if fresh.activo != my.activo {
+            targetActivo = fresh.activo
+            needsUpdate = true
+        }
+        
+        if needsUpdate {
+            let updated = UserPersonal(
+                idRegistro: my.idRegistro,
+                nombreBombero: my.nombreBombero,
+                idRadial: my.idRadial,
+                contrasena: my.contrasena,
+                activo: targetActivo,
+                conductor: my.conductor,
+                enServicio: targetEnServicio,
+                cargo: my.cargo,
+                foto: my.foto,
+                estado: targetEstado
+            )
+            self.currentUser = updated
+            self.saveCache(updated, key: "fire_user")
+        }
+    }
+}

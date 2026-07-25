@@ -1,0 +1,1990 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal - SisBom</title>
+    <!-- Icono de la pestaña -->
+    <link rel="icon" href="Logo.png" type="image/png">
+    
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    
+    <style>
+        :root {
+            /* Paleta Oscura Principal basada en la imagen */
+            --bg-app: #0f172a;      /* Fondo general muy oscuro (slate-900) */
+            --bg-card: #1e293b;     /* Fondo de tarjetas ligeramente más claro (slate-800) */
+            --bg-input: #0b0f19;    /* Fondo de inputs y secciones de lectura (aún más oscuro) */
+            
+            --text-main: #f8fafc;   /* Texto principal blanco/gris muy claro */
+            --text-muted: #94a3b8;  /* Texto secundario gris */
+            
+            /* Colores de estado (Mantenemos los vivos para contraste) */
+            --primary-red: #ef4444; 
+            --primary-green: #10b981;
+            --primary-blue: #3b82f6;
+            --primary-purple: #8b5cf6;
+            --primary-orange: #f97316;
+            --primary-yellow: #eab308;
+            --primary-cyan: #06b6d4;
+            --primary-slate: #475569; /* Ajustado para modo oscuro */
+            
+            --glass-border: #334155; /* Bordes sutiles oscuros (slate-700) */
+            --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 20px 40px -5px rgba(0, 0, 0, 0.4);
+            
+            --card-radius: 8px; /* Reducido para parecerse más a los paneles de la imagen */
+            --btn-radius: 6px;
+            
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        body { 
+            font-family: 'Segoe UI', 'Inter', sans-serif; 
+            background-color: var(--bg-app); 
+            color: var(--text-main);
+            overflow-y: auto; 
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        @keyframes fade-slide-up {
+            from { opacity: 0; transform: translateY(20px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+
+        @keyframes slide-in-right {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .animate-enter { animation: fade-slide-up 0.6s var(--ease-out-expo) forwards; opacity: 0; }
+
+        .app-container {
+            max-width: 100%; 
+            width: 100%;
+            margin: 0;
+            padding: 24px; 
+        }
+
+        /* --- TOAST NOTIFICATIONS --- */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            pointer-events: none;
+        }
+
+        .toast-card {
+            pointer-events: auto;
+            background: var(--bg-card);
+            border-left: 6px solid;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            padding: 16px 20px;
+            min-width: 300px;
+            max-width: 400px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            animation: slide-in-right 0.4s var(--ease-out-expo);
+            transition: all 0.3s ease;
+        }
+        
+        .toast-card.status-0-9 { border-left-color: var(--primary-green); }
+        .toast-card.status-0-8 { border-left-color: var(--primary-red); }
+        .toast-card.status-other { border-left-color: var(--primary-blue); }
+        .toast-card h4 { color: var(--text-main) !important; }
+
+        /* --- GRID NORMAL --- */
+        .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 16px; padding-bottom: 40px; transition: all 0.3s ease; }
+
+        /* --- GRID COMPACTO (MOSAICO) --- */
+        .card-grid.compact {
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            grid-auto-flow: dense; 
+            gap: 8px;
+        }
+
+        /* --- GRID VISUAL (AHORA INTERACTIVO) --- */
+        .card-grid.visual {
+            grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+            grid-auto-flow: dense; 
+            gap: 8px;
+        }
+
+        /* Tarjetas Principales */
+        .card {
+            background: var(--bg-card); 
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            box-shadow: var(--shadow-soft) !important;
+            display: flex; 
+            align-items: stretch;
+            transition: transform 0.3s var(--ease-out-expo), box-shadow 0.3s, background-color 0.3s, width 0.3s, height 0.3s, border-color 0.3s;
+            overflow: hidden;
+            min-height: 130px; 
+            position: relative;
+        }
+        
+        .card:hover { transform: translateY(-4px); box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important; }
+        
+        /* --- ESTILOS DE TARJETA COMPACTA --- */
+        .card-grid.compact .card {
+            min-height: 70px;
+            height: 70px;
+            border: none;
+            border-radius: 14px;
+            box-shadow: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            grid-column: span 1; 
+            grid-row: span 1;
+            position: relative;
+            user-select: none;
+        }
+        
+        .card-grid.compact .card:hover { transform: scale(1.05); z-index: 10; }
+ 
+        /* --- ESTILOS DE TARJETA VISUAL (INTERACTIVO) --- */
+        .card-grid.visual .card {
+            min-height: 80px;
+            height: auto;
+            border: none;
+            border-radius: 14px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 10px 6px;
+            cursor: pointer; 
+            user-select: none;
+            grid-column: span 1; 
+            grid-row: span 1;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .card-grid.visual .card:hover {
+            transform: scale(1.05);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.1);
+            z-index: 10;
+        }
+ 
+        /* OVERLAY DE CONFIRMACIÓN (SOLO PARA MODO COMPACTO) */
+        .confirmation-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease-out;
+            z-index: 20;
+            border-radius: 14px;
+            flex-direction: column;
+            color: white;
+            font-weight: 800;
+            font-size: 1.2rem;
+            text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            text-align: center;
+            line-height: 1.1;
+        }
+ 
+        .card.confirming-0-9 .confirmation-overlay,
+        .card.confirming-0-8 .confirmation-overlay,
+        .card.confirming-en-servicio .confirmation-overlay {
+            opacity: 1;
+            pointer-events: auto;
+        }
+ 
+        .card.confirming-0-9 { background-color: var(--primary-green) !important; }
+        .card.confirming-0-8 { background-color: var(--primary-red) !important; }
+        .card.confirming-en-servicio { background-color: var(--primary-blue) !important; cursor: default; }
+ 
+        .card.confirming-0-9 .compact-id,
+        .card.confirming-0-8 .compact-id,
+        .card.confirming-en-servicio .compact-id { display: none !important; }
+ 
+        /* Colores Sólidos para Compacto y Visual */
+        .card-grid.compact .card-status-0-9, .card-grid.visual .card-status-0-9 { background: var(--primary-green) !important; color: white !important; }
+        .card-grid.compact .card-status-0-8, .card-grid.visual .card-status-0-8 { background: var(--primary-red) !important; color: white !important; }
+        .card-grid.compact .card-status-no-asistir, .card-grid.visual .card-status-no-asistir { background: #ef4444 !important; color: white !important; }
+        .card-grid.compact .card-status-suspendido, .card-grid.visual .card-status-suspendido { background: var(--primary-purple) !important; color: white !important; }
+        .card-grid.compact .card-status-cds, .card-grid.visual .card-status-cds { background: var(--primary-yellow) !important; color: #713f12 !important; }
+        .card-grid.compact .card-status-permiso, .card-grid.visual .card-status-permiso { background: var(--primary-orange) !important; color: white !important; }
+        .card-grid.compact .card-status-en-servicio, .card-grid.visual .card-status-en-servicio { background: var(--primary-blue) !important; color: white !important; }
+        .card-grid.compact .card-status-licencia, .card-grid.visual .card-status-licencia { background: var(--primary-cyan) !important; color: #083344 !important; }
+        .card-grid.compact .card-status-operador, .card-grid.visual .card-status-operador { background: var(--primary-slate) !important; color: white !important; }
+ 
+        .card-grid.compact .card .card-img, .card-grid.visual .card .card-img,
+        .card-grid.compact .card .card-right, .card-grid.visual .card .card-right,
+        .card-grid.visual .card .compact-id, .card-grid.visual .card .card-left, .card-grid.visual .card .confirmation-overlay { display: none !important; }
+ 
+        .card-grid.compact .card .card-left {
+            width: 100%; height: 100%; border: none; background: transparent !important; padding: 0;
+            display: flex; align-items: center; justify-content: center;
+        }
+ 
+        .compact-id { display: none; }
+        .card-grid.compact .card .compact-id {
+            display: block; font-size: 1.8rem; font-weight: 800; color: white; margin: 0; line-height: 1; text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        .card-grid.compact .card-status-cds .compact-id, .card-grid.compact .card-status-licencia .compact-id { color: inherit; text-shadow: none; }
+ 
+        .visual-content { display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; width: 100%; }
+        .card-grid.visual .card .visual-content { display: flex; }
+ 
+        .visual-id { font-size: 1.6rem; font-weight: 900; line-height: 1; margin-bottom: 4px; text-shadow: 0 1px 2px rgba(0,0,0,0.1); }
+        .card-grid.visual .card-status-cds .visual-id, .card-grid.visual .card-status-licencia .visual-id { text-shadow: none; }
+        .visual-name { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%; margin-bottom: 6px; }
+        .visual-status { font-size: 0.6rem; font-weight: 800; background: rgba(0,0,0,0.15); padding: 3px 6px; border-radius: 6px; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1; text-align: center; }
+ 
+        /* Estados de Borde y Fondo de Tarjeta (Modo Normal - Oscuro) */
+        /* Estados de Borde de Tarjeta (Modo Normal - Detalle) */
+        .card-grid:not(.compact):not(.visual) .card-status-0-9 { border-color: var(--primary-green) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-0-8 { border-color: var(--primary-red) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-no-asistir { border-color: #ef4444 !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-suspendido { border-color: var(--primary-purple) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-cds { border-color: var(--primary-yellow) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-permiso { border-color: var(--primary-orange) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-en-servicio { border-color: var(--primary-blue) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-licencia { border-color: var(--primary-cyan) !important; }
+        .card-grid:not(.compact):not(.visual) .card-status-operador { border-color: var(--primary-slate) !important; }
+ 
+        /* Sección izquierda de la tarjeta (Foto y ID) */
+        .card-left {
+            width: 80px; 
+            background: var(--bg-input) !important; 
+            padding: 12px;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            border-right: 1px solid var(--glass-border) !important; flex-shrink: 0;
+        }
+
+        .card-img {
+            width: 56px; height: 56px; border-radius: 50%; object-fit: cover;
+            background: var(--bg-card); 
+            border: 2px solid var(--glass-border); 
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+ 
+        .card-right {
+            flex: 1; padding: 12px 16px;
+            display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-width: 0;
+        }
+ 
+        /* Nombres y textos dentro de la tarjeta */
+        .card-name { 
+            font-size: 0.95rem; font-weight: 600; color: var(--text-main); 
+            text-transform: uppercase; line-height: 1.2;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            display: flex; align-items: center;
+        }
+ 
+        .status-text {
+            font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            display: flex; align-items: center; gap: 6px;
+        }
+ 
+        .text-status-09 { color: var(--primary-green) !important; }
+        .text-status-08 { color: var(--primary-red) !important; }
+        .text-status-no-asistir { color: #f87171 !important; }
+        .text-status-susp { color: var(--primary-purple) !important; }
+        .text-status-cds { color: var(--primary-yellow) !important; } 
+        .text-status-perm { color: var(--primary-orange) !important; }
+        .text-status-serv { color: var(--primary-blue) !important; }
+        .text-status-licencia { color: var(--primary-cyan) !important; }
+        .text-status-operador { color: var(--text-muted) !important; }
+ 
+        /* Botones de acción (Chips) */
+        .btn-chip {
+            background: var(--bg-input) !important; 
+            color: var(--text-muted) !important; 
+            border: 1px solid var(--glass-border) !important;
+            padding: 6px 2px; border-radius: 8px; font-size: 0.65rem; font-weight: 700;
+            cursor: pointer; transition: all 0.2s ease-out;
+            flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; letter-spacing: 0.3px;
+        }
+        .btn-chip:hover:not(:disabled) { background: var(--bg-card) !important; border-color: var(--text-muted) !important; color: var(--text-main) !important; transform: translateY(-1px); }
+        .btn-chip:disabled { opacity: 0.3; cursor: not-allowed; background: var(--bg-input) !important; }
+ 
+        .btn-chip.active-ok { background-color: var(--primary-green) !important; color: white !important; border-color: var(--primary-green) !important; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3) !important; }
+        .btn-chip.active-bad { background-color: var(--primary-red) !important; color: white !important; border-color: var(--primary-red) !important; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3) !important; }
+        .btn-chip.active-susp { background-color: rgba(192, 132, 252, 0.2) !important; color: #e9d5ff !important; border-color: rgba(192, 132, 252, 0.4) !important; }
+        .btn-chip.active-cds { background-color: rgba(234, 179, 8, 0.2) !important; color: #fde047 !important; border-color: rgba(234, 179, 8, 0.4) !important; }
+        .btn-chip.active-perm { background-color: rgba(249, 115, 22, 0.2) !important; color: #ffedd5 !important; border-color: rgba(249, 115, 22, 0.4) !important; }
+        .btn-chip.active-licencia { background-color: rgba(6, 182, 212, 0.2) !important; color: #cffafe !important; border-color: rgba(6, 182, 212, 0.4) !important; }
+
+        /* Input de Búsqueda (Como en la tarjeta central de la imagen) */
+        .search-input {
+            width: 100%; height: 56px; padding-right: 16px; 
+            background-color: var(--bg-input) !important; 
+            border: 1px solid var(--glass-border) !important; border-radius: 14px;
+            outline: none; font-size: 1rem; font-weight: 600; color: var(--text-main) !important; 
+            box-shadow: var(--shadow-soft) !important; transition: all 0.3s;
+        }
+        .search-input:focus { box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important; border-color: rgba(255, 255, 255, 0.2) !important; }
+
+        /* Tarjeta de Totales Superior */
+        .totals-card {
+            display: flex; align-items: center; justify-content: center;
+            background: transparent !important; 
+            height: 56px; border-radius: var(--card-radius);
+            overflow-x: auto; padding: 0 6px; flex: 1; gap: 8px;
+            border: none !important; box-shadow: none !important;
+        }
+        .total-item {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 6px 14px; border-right: none !important; min-width: 80px;
+            border-radius: 10px; height: 48px;
+        }
+        .total-item:last-child { border-right: none !important; }
+        .total-item-active { background: rgba(248, 250, 252, 0.06); border: 1px solid rgba(248, 250, 252, 0.12); }
+        .total-item-drivers { background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.25); }
+        .total-item-09 { background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.25); }
+        .total-item-08 { background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.25); }
+        .total-label { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; letter-spacing: 0.5px; }
+        .total-item-active .total-label { color: #94a3b8; }
+        .total-item-drivers .total-label { color: #60a5fa; }
+        .total-item-09 .total-label { color: #34d399; }
+        .total-item-08 .total-label { color: #f87171; }
+        .total-value { font-size: 1.15rem; font-weight: 800; line-height: 1; }
+        .total-item-active .total-value { color: #f1f5f9; }
+        .total-item-drivers .total-value { color: #93c5fd; }
+        .total-item-09 .total-value { color: #6ee7b7; }
+        .total-item-08 .total-value { color: #fca5a5; }
+
+        .loader-spinner { 
+            width: 40px; height: 40px; 
+            border: 3px solid rgba(255,255,255,0.05); 
+            border-top: 3px solid var(--primary-red); 
+            border-radius: 50%; 
+            animation: spin 1s linear infinite; 
+        }
+        
+        .badge-driver {
+            font-size: 0.65rem; font-weight: 700; padding: 2px 6px; border-radius: 6px;
+            background: rgba(59, 130, 246, 0.1) !important; color: var(--primary-blue) !important; border: 1px solid rgba(59, 130, 246, 0.2) !important;
+            display: inline-flex; align-items: center; gap: 4px; letter-spacing: 0.5px;
+        }
+
+        .section-icon { transition: transform 0.3s ease; }
+        .section-icon.rotated { transform: rotate(-90deg); }
+        .section-header { cursor: pointer; transition: background-color 0.2s; border-radius: 8px; padding: 8px; margin: 0 -8px 16px -8px; }
+        .section-header:hover { background-color: rgba(255, 255, 255, 0.03) !important; }
+        .card-grid.collapsed { display: none; }
+
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+        
+        @media (max-width: 640px) {
+            .app-container { padding: 16px; }
+            .card-grid { grid-template-columns: 1fr; }
+            .card-grid.compact { grid-template-columns: repeat(auto-fill, minmax(70px, 1fr)); }
+            .card-grid.visual { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+            .totals-card { justify-content: center; }
+        }
+
+        /* --- OVERRIDES GENERALES PARA MODO OSCURO --- */
+        .section-header h3 { color: var(--text-main) !important; }
+        #search-results-container h3 { color: var(--text-main) !important; }
+
+        /* Modal Selección de Estado Premium */
+        #status-select-content {
+            background-color: var(--bg-app) !important;
+            border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            color: var(--text-main) !important;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+        }
+        #status-select-content .border-b,
+        #status-select-content .border-t {
+            border-color: rgba(255, 255, 255, 0.08) !important;
+            background-color: var(--bg-card) !important;
+        }
+        #status-select-content h3 {
+            color: #ffffff !important;
+        }
+        
+        /* Eliminar fondo por defecto del modal */
+        #status-select-content > .bg-white {
+            background-color: transparent !important;
+        }
+
+        /* --- BOTONES DEL MODAL --- */
+        .btn-modal-status {
+            border: 1px solid transparent;
+            color: #ffffff;
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            background-color: var(--bg-input) !important;
+            transition: all 0.2s ease-out;
+        }
+
+        /* 0-9 (Verde) */
+        .btn-modal-09 { border-color: rgba(16, 185, 129, 0.4) !important; color: #34d399 !important; }
+        .btn-modal-09:hover { background-color: rgba(16, 185, 129, 0.1) !important; border-color: var(--primary-green) !important; }
+
+        /* 0-8 (Rojo) */
+        .btn-modal-08 { border-color: rgba(239, 68, 68, 0.4) !important; color: #f87171 !important; }
+        .btn-modal-08:hover { background-color: rgba(239, 68, 68, 0.1) !important; border-color: var(--primary-red) !important; }
+
+        /* CDS (Amarillo Oscuro/Ámbar) */
+        .btn-modal-cds { border-color: rgba(234, 179, 8, 0.4) !important; color: #fde047 !important; }
+        .btn-modal-cds:hover { background-color: rgba(234, 179, 8, 0.1) !important; border-color: var(--primary-yellow) !important; }
+
+        /* PERMISO (Naranja) */
+        .btn-modal-permiso { border-color: rgba(249, 115, 22, 0.4) !important; color: #fdba74 !important; }
+        .btn-modal-permiso:hover { background-color: rgba(249, 115, 22, 0.1) !important; border-color: var(--primary-orange) !important; }
+
+        /* LICENCIA MÉDICA (Celeste) */
+        .btn-modal-licencia { border-color: rgba(6, 182, 212, 0.4) !important; color: #67e8f9 !important; }
+        .btn-modal-licencia:hover { background-color: rgba(6, 182, 212, 0.1) !important; border-color: var(--primary-cyan) !important; }
+
+        /* Botón Cancelar */
+        #status-select-content button[onclick*="closeVisualStatusModal"] {
+            background-color: var(--bg-input) !important;
+            color: var(--text-muted) !important;
+            border: 1px solid var(--glass-border) !important;
+        }
+        #status-select-content button[onclick*="closeVisualStatusModal"]:hover {
+            background-color: var(--bg-card) !important;
+            color: var(--text-main) !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="toast-container"></div>
+
+    <div class="app-container pt-8">
+        
+        <!-- Banner de Modo Lectura -->
+        <div id="read-only-banner" class="hidden mb-6 bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm animate-enter">
+            <i class="fas fa-lock text-lg text-amber-600 animate-pulse"></i>
+            <div class="flex-1 text-sm font-semibold">
+                Modo Lectura Activo. Inicie sesión en la pantalla principal para cambiar estados.
+            </div>
+        </div>
+
+        <!-- HEADER DE CONTROLES Y TOTALES -->
+        <header class="flex flex-col xl:flex-row justify-between items-center gap-4 mb-8 animate-enter w-full">
+            
+            <!-- Buscador Integrado -->
+            <div class="w-full xl:w-1/4 flex justify-center xl:justify-start shrink-0 relative">
+                <input type="text" id="search-box" placeholder="Buscar personal..." class="search-input pl-10 bg-slate-800" oninput="window.renderGrid()">
+                <i class="fas fa-search absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+            </div>
+
+            <!-- Totales (Columna Central) -->
+            <div class="w-full xl:w-2/4 flex justify-center">
+                <div class="totals-card mx-auto w-full max-w-2xl justify-center">
+                    <div class="total-item total-item-active flex-1">
+                        <span class="total-label">Bomberos Activos</span>
+                        <span class="total-value" id="count-total">0</span>
+                    </div>
+                    <div class="total-item total-item-drivers flex-1">
+                        <span class="total-label">Conductores 0-9</span>
+                        <span class="total-value" id="count-drivers-09">0</span>
+                    </div>
+                    <div class="total-item total-item-09 flex-1">
+                        <span class="total-label">Total 0-9</span>
+                        <span class="total-value" id="count-09">0</span>
+                    </div>
+                    <div class="total-item total-item-08 flex-1">
+                        <span class="total-label">Total 0-8</span>
+                        <span class="total-value" id="count-08">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Botones (Columna Derecha) -->
+            <div class="w-full xl:w-1/4 flex justify-center xl:justify-end shrink-0 gap-3">
+                <button id="btn-detach-window" onclick="window.detachWindow()" class="bg-[#1e293b] hover:bg-[#334155] border border-[rgba(255,255,255,0.1)] text-slate-300 px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition-colors focus:outline-none hidden" title="Abrir en otra pantalla">
+                    <i class="fas fa-external-link-alt mr-1"></i> OTRA PANTALLA
+                </button>
+                <button onclick="window.toggleViewMode()" id="btn-view-mode" class="bg-[#1e293b] hover:bg-[#334155] border border-[rgba(255,255,255,0.1)] text-slate-300 px-4 py-3 rounded-xl font-bold text-sm shadow-sm transition-colors focus:outline-none" style="min-width: 120px;">
+                    <i class="fas fa-th-large"></i> Mosaico
+                </button>
+            </div>
+        </header>
+
+        <div id="search-results-container" class="mb-10 hidden">
+            <div class="flex items-center justify-between border-b border-slate-700 pb-2 mb-4">
+                <h3 class="flex items-center gap-2 text-lg font-light text-slate-100 tracking-tight">
+                    <i class="fas fa-search text-slate-400"></i> Resultados
+                </h3>
+            </div>
+            <div id="search-grid" class="card-grid"></div>
+        </div>
+
+        <div id="lists-container" class="flex flex-col gap-10">
+            <div id="initial-loader" class="py-20 flex flex-col items-center gap-4 text-center">
+                <div class="loader-spinner"></div>
+                <span id="loading-text" class="text-sm font-semibold text-slate-400 animate-pulse">Cargando información...</span>
+            </div>
+
+            <!-- SECCIÓN 1: CONDUCTORES -->
+            <div id="sec-drivers" class="section-container" style="display:none">
+                <div class="flex items-center justify-between border-b border-slate-700 pb-2 mb-4 section-header" onclick="window.toggleSection('grid-drivers', 'icon-drivers')">
+                    <h3 class="flex items-center gap-2 text-lg font-light text-slate-100 tracking-tight">
+                        <i class="fas fa-truck-fast text-blue-500 w-6"></i> Conductores
+                        <i id="icon-drivers" class="fas fa-chevron-down text-sm text-slate-400 section-icon ml-1"></i>
+                    </h3>
+                    <div class="flex gap-2 items-center">
+                        <span id="count-header-drivers-09" class="text-base font-black bg-[rgba(16,185,129,0.2)] text-[#34d399] py-1 px-4 rounded-full shadow-sm border border-[rgba(16,185,129,0.4)]">0</span>
+                    </div>
+                </div>
+                <div id="grid-drivers" class="card-grid"></div>
+            </div>
+
+            <!-- SECCIÓN 2: BOMBEROS -->
+            <div id="sec-firefighters" class="section-container" style="display:none">
+                <div class="flex items-center justify-between border-b border-slate-700 pb-2 mb-4 section-header" onclick="window.toggleSection('grid-firefighters', 'icon-firefighters')">
+                    <h3 class="flex items-center gap-2 text-lg font-light text-slate-100 tracking-tight">
+                        <i class="fas fa-helmet-safety text-orange-500 w-6"></i> Bomberos
+                        <i id="icon-firefighters" class="fas fa-chevron-down text-sm text-slate-400 section-icon ml-1"></i>
+                    </h3>
+                    <div class="flex gap-2 items-center">
+                        <span id="count-header-firefighters-09" class="text-base font-black bg-[rgba(16,185,129,0.2)] text-[#34d399] py-1 px-4 rounded-full shadow-sm border border-[rgba(16,185,129,0.4)]">0</span>
+                    </div>
+                </div>
+                <div id="grid-firefighters" class="card-grid"></div>
+            </div>
+            
+            <!-- SECCIÓN 3: BOMBEROS HONORARIOS -->
+            <div id="sec-honorary" class="section-container" style="display:none">
+                <div class="flex items-center justify-between border-b border-slate-700 pb-2 mb-4 section-header" onclick="window.toggleSection('grid-honorary', 'icon-honorary')">
+                    <h3 class="flex items-center gap-2 text-lg font-light text-slate-100 tracking-tight">
+                        <i class="fas fa-award text-yellow-500 w-6"></i> Bomberos Honorarios
+                        <i id="icon-honorary" class="fas fa-chevron-down text-sm text-slate-400 section-icon ml-1"></i>
+                    </h3>
+                    <div class="flex gap-2 items-center">
+                        <!-- El contador aquí siempre será gris/rojo ya que estarán 0-8 -->
+                        <span id="count-header-honorary" class="text-base font-black bg-[rgba(239,68,68,0.2)] text-[#f87171] py-1 px-4 rounded-full shadow-sm border border-[rgba(239,68,68,0.4)]">0</span>
+                    </div>
+                </div>
+                <div id="grid-honorary" class="card-grid"></div>
+            </div>
+
+            <div id="empty-state" class="py-20 text-center text-slate-400 font-bold uppercase text-xs" style="display: none;">No se encontraron datos.</div>
+        </div>
+
+    </div>
+
+    <!-- MODAL SELECCIÓN DE ESTADO (MODO VISUAL) -->
+    <div id="status-select-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8500;">
+        <div class="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col" id="status-select-content">
+            <div class="p-5 border-b border-slate-700 bg-slate-900 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-[rgba(59,130,246,0.2)] text-blue-400 flex items-center justify-center text-lg shadow-sm border border-[rgba(59,130,246,0.4)]"><i class="fas fa-exchange-alt"></i></div>
+                <div>
+                    <h3 class="font-black text-slate-100 tracking-tight leading-tight uppercase">Cambiar Estado</h3>
+                    <p class="text-xs font-bold text-slate-400 tracking-widest mt-0.5">BOMBERO: <span id="visual-select-name" class="text-red-400"></span></p>
+                </div>
+            </div>
+            
+            <div class="p-5 space-y-3 bg-transparent">
+                <button onclick="window.confirmVisualStatusChange('0-9')" class="btn-modal-status btn-modal-09 w-full py-3.5 rounded-xl font-bold text-sm shadow-sm"><i class="fas fa-check mr-2"></i> 0-9 (DISPONIBLE)</button>
+                <button onclick="window.confirmVisualStatusChange('0-8')" class="btn-modal-status btn-modal-08 w-full py-3.5 rounded-xl font-bold text-sm shadow-sm"><i class="fas fa-ban mr-2"></i> 0-8 (NO DISPONIBLE)</button>
+                <button onclick="window.confirmVisualStatusChange('CDS')" class="btn-modal-status btn-modal-cds w-full py-3.5 rounded-xl font-bold text-sm shadow-sm"><i class="fas fa-briefcase mr-2"></i> CDS (COMISIÓN SERVICIO)</button>
+                <button onclick="window.confirmVisualStatusChange('PERMISO')" class="btn-modal-status btn-modal-permiso w-full py-3.5 rounded-xl font-bold text-sm shadow-sm"><i class="fas fa-file-signature mr-2"></i> PERMISO</button>
+                <button onclick="window.confirmVisualStatusChange('LICENCIA')" class="btn-modal-status btn-modal-licencia w-full py-3.5 rounded-xl font-bold text-sm shadow-sm"><i class="fas fa-notes-medical mr-2"></i> LICENCIA MÉDICA</button>
+            </div>
+            
+            <div class="flex border-t border-slate-700 bg-slate-900 p-3 gap-2">
+                <button onclick="window.closeVisualStatusModal()" class="flex-1 py-3 focus:outline-none rounded-xl font-bold uppercase text-xs">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCRIPT ÚNICO UNIFICADO (TIPO MODULE) -->
+    <script>
+        try {
+            Object.defineProperty(navigator, 'onLine', { get: () => true });
+        } catch(e) {
+            console.error("Error overriding navigator.onLine:", e);
+        }
+    </script>
+    <script type="module">
+        import { initializeApp } from "./libs/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithEmailAndPassword, onAuthStateChanged, setPersistence, browserLocalPersistence } from "./libs/firebase-auth.js";
+        import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, updateDoc, collection, getDocs, onSnapshot } from "./libs/firebase-firestore.js";
+
+        function checkIsNative() {
+            return !!(window.pywebview && window.pywebview.api) || !!(window.parent && window.parent.isNativeApp);
+        }
+
+        (function() {
+            const originalSetItem = Storage.prototype.setItem;
+            Storage.prototype.setItem = function(key, value) {
+                originalSetItem.call(this, key, value);
+                if (key === 'db_personal') {
+                    originalSetItem.call(this, key + '_updated', String(Date.now()));
+                }
+            };
+        })();
+
+        const firebaseConfig = null;
+
+        window.fbDb = null;
+        window.fbDoc = doc;
+        window.fbSetDoc = setDoc;
+        window.fbUpdateDoc = updateDoc;
+        window.fbCollection = collection;
+        window.fbGetDocs = getDocs;
+        window.fbOnSnapshot = onSnapshot;
+
+        const DEFAULT_LOGO = 'Logo.png';
+        const PROTECTION_TIME_MS = 15000; 
+
+        let personnel = new Array();
+        let dispatchesMap = new Map(); 
+        
+        let viewMode = 'normal'; 
+        let audioCtx; 
+
+        if(localStorage.getItem('personalViewMode')) {
+            viewMode = localStorage.getItem('personalViewMode');
+        } else if(localStorage.getItem('isCompactView') === 'true') {
+            viewMode = 'compact'; 
+        }
+
+        // ====== FUNCIÓN PARA NORMALIZAR DATOS DE FIREBASE ======
+        window.normalizeEmpty = function(val) {
+            if (val === null || val === undefined) return '0';
+            const s = String(val).trim().toUpperCase();
+            if (s === '0' || s === 'NO' || s === 'N' || s === '' || s === 'N/A' || s === 'FALSE' || s === 'FALSO') return '0';
+            return String(val).trim();
+        };
+
+        window.isTrueValue = function(val) {
+            const s = window.normalizeEmpty(val);
+            return s === '1' || s === 'SI' || s === 'SÍ' || s === 'TRUE' || s === 'S';
+        };
+
+        window.isInServiceValue = function(val) {
+            const s = window.normalizeEmpty(val);
+            return s !== '0';
+        };
+
+        // ====== COLA DE SINCRONIZACIÓN OFFLINE-FIRST (MEJORADA) ======
+        window.queueFirebaseWrite = function(type, coll, docId, data, options) {
+            if (localStorage.getItem('saas_read_only') === '1') {
+                console.warn("Modo Lectura (SaaS): Escritura bloqueada en queueFirebaseWrite (iframe).");
+                if (window.showStatusToast) {
+                    window.showStatusToast("SaaS", "Suscripción", "Modo Lectura - Escrituras deshabilitadas", false);
+                }
+                return;
+            }
+            if (!localStorage.getItem('authUserId')) {
+                console.warn("ESCRITURA BLOQUEADA PORQUE NO HAY USUARIO INGRESADO.");
+                if (window.showToast) {
+                    window.showToast("INICIE SESION EN LA VENTANA PRINCIPAL PARA EDITAR");
+                } else if (window.showStatusToast) {
+                    window.showStatusToast("SISBOM", "SIN SESION", "INICIE SESION EN LA VENTANA PRINCIPAL PARA EDITAR", false);
+                }
+                return;
+            }
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.queueFirebaseWrite) {
+                        parent.queueFirebaseWrite(type, coll, docId, data, options);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("Error accessing parent.queueFirebaseWrite in Personal, falling back to local queue:", e);
+                }
+            }
+            let q = new Array();
+            try { 
+                const savedQ = localStorage.getItem('sisbom_sync_queue');
+                if (savedQ) q = JSON.parse(savedQ); 
+            } catch(e){}
+            const newItem = new Object({ type: type, coll: coll, docId: docId, data: data, options: options || new Object(), time: Date.now() });
+            q.push(newItem);
+            localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+            window.processSyncQueue();
+        };
+
+        window.sanitizeForFirebase = function(val) {
+            if (val === null || val === undefined) return val;
+            if (typeof val === 'function' || (val && val.constructor && val.constructor.name === 'FieldValueImpl')) return val;
+            if (Array.isArray(val) || (typeof val === 'object' && typeof val.length === 'number' && Object.prototype.toString.call(val) === '[object Array]')) {
+                return Array.from(val).map(window.sanitizeForFirebase);
+            }
+            if (typeof val === 'object') {
+                const ParentObj = (window.parent && window.parent.Object) ? window.parent.Object : Object;
+                const clean = new ParentObj();
+                for (const k of Object.keys(val)) { Reflect.set(clean, k, window.sanitizeForFirebase(val[k])); }
+                return clean;
+            }
+            return val;
+        };
+
+        window.processSyncQueue = async function() {
+            if (window.self !== window.top) {
+                if (window.parent && window.parent.processSyncQueue) {
+                    window.parent.processSyncQueue();
+                }
+                return;
+            }
+            if (!navigator.onLine || !window.fbDb || window.isSyncing) return;
+            window.isSyncing = true;
+            
+            while (true) {
+                let q = new Array();
+                try { 
+                    const savedQ = localStorage.getItem('sisbom_sync_queue');
+                    if (savedQ) q = JSON.parse(savedQ); 
+                } catch(e){}
+                
+                if (!q || q.length === 0) break;
+                
+                let item = q.shift();
+                localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+                
+                try {
+                    const sanitizedData = window.sanitizeForFirebase(item.data);
+                    
+                    if (item.type === 'set' && window.fbSetDoc) {
+                        await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), sanitizedData, item.options);
+                    } else if (item.type === 'update' && window.fbSetDoc) {
+                        let finalData = new Object();
+                        let hasDeleteField = false;
+                        for (let k of Object.keys(sanitizedData)) {
+                            if (sanitizedData[k] === '__DELETE_FIELD__' && window.fbDeleteField) {
+                                Reflect.set(finalData, k, window.fbDeleteField());
+                                hasDeleteField = true;
+                            } else {
+                                Reflect.set(finalData, k, sanitizedData[k]);
+                            }
+                        }
+                        if (hasDeleteField && window.fbUpdateDoc) {
+                            await window.fbUpdateDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData);
+                        } else {
+                            await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData, new Object({ merge: true }));
+                        }
+                    } else if (item.type === 'delete' && window.fbDeleteDoc) {
+                        await window.fbDeleteDoc(window.fbDoc(window.fbDb, item.coll, item.docId));
+                    }
+                } catch(e) {
+                    console.warn("Fallo sync item, docId:", item.docId, e);
+                    
+                    let currentQ = new Array();
+                    try { 
+                        const savedQ = localStorage.getItem('sisbom_sync_queue');
+                        if (savedQ) currentQ = JSON.parse(savedQ); 
+                    } catch(ex){}
+                    
+                    if (!currentQ.some(x => x.time === item.time)) {
+                        item.errCount = (item.errCount || 0) + 1;
+                        currentQ.unshift(item);
+                        localStorage.setItem('sisbom_sync_queue', JSON.stringify(currentQ));
+                    }
+                    
+                    if (e && e.code === 'permission-denied') {
+                        if (window.parent && window.parent.authenticateFirebase) {
+                            window.parent.authenticateFirebase();
+                        }
+                    }
+                    
+                    break;
+                }
+            }
+            window.isSyncing = false;
+        };
+
+        window.addEventListener('online', window.processSyncQueue);
+        setInterval(window.processSyncQueue, 15000);
+
+        // ====== FUNCIÓN PARA FORMATEAR NOMBRE CORTO ======
+        window.formatShortName = function(fullName) {
+            if (!fullName) return "Desconocido";
+            const cleanName = String(fullName).replace(new RegExp(',', 'g'), ' ').trim();
+            const words = cleanName.split(new RegExp('\\s+'));
+            if (words.length >= 3) {
+                return words.at(0) + ' ' + words.at(words.length - 2);
+            } else if (words.length === 2) {
+                return words.at(0) + ' ' + words.at(1);
+            }
+            return words.at(0) || cleanName;
+        };
+
+        // ====== FUNCIÓN PARA DETERMINAR SI ES BOMBERO HONORARIO ======
+        window.isHonorary = function(p) {
+            if (!p || !p.cargo) return false;
+            const cargo = String(p.cargo).trim().toLowerCase();
+            return cargo.includes('honorario') || cargo.includes('insigne');
+        };
+
+        // --- TOAST Y ANUNCIOS ---
+        window.showStatusToast = function(id, name, status, isDriver = false) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const shortName = window.formatShortName(name);
+
+            let statusClass = "status-other";
+            let statusText = status;
+            let iconClass = "fa-info-circle";
+            let soundType = 'info';
+            
+            if(String(status).trim() === "0-9") { 
+                statusClass = "status-0-9"; 
+                statusText = "DISPONIBLE (0-9)";
+                iconClass = "fa-check-circle";
+                soundType = 'success';
+            } else if(String(status).trim() === "0-8") { 
+                statusClass = "status-0-8"; 
+                statusText = "NO DISPONIBLE (0-8)";
+                iconClass = "fa-times-circle";
+                soundType = 'error';
+            } else if(String(status).trim() === "CDS") {
+                statusClass = "status-other";
+                statusText = "COMISIÓN DE SERVICIO";
+                iconClass = "fa-briefcase";
+                soundType = 'info';
+            } else if(String(status).trim() === "PERMISO") {
+                statusClass = "status-other";
+                statusText = "PERMISO";
+                iconClass = "fa-file-signature";
+                soundType = 'info';
+            } else if(String(status).trim() === "LICENCIA") {
+                statusClass = "status-other";
+                statusText = "LICENCIA MÉDICA";
+                iconClass = "fa-notes-medical";
+                soundType = 'info';
+            } else if(String(status).trim() === "OPERADOR") {
+                statusClass = "status-other";
+                statusText = "OPERADOR DE CENTRAL";
+                iconClass = "fa-headset";
+                soundType = 'info';
+            } else if(String(status).toLowerCase().includes("acto")) {
+                statusClass = "status-other";
+                soundType = 'info';
+            }
+
+            toast.className = `toast-card ${statusClass} relative`;
+            toast.innerHTML = `
+                <button onclick="this.closest('.toast-card').style.opacity='0'; this.closest('.toast-card').style.transform='translateX(100%)'; setTimeout(() => this.closest('.toast-card').remove(), 300);" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 transition-colors w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-50 focus:outline-none">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="flex-shrink-0"><span class="font-black text-2xl text-sky-400">${id}</span></div>
+                <div class="flex-1 min-w-0 pr-4">
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">Cambio de Estado</p>
+                    <h4 class="text-sm font-semibold text-slate-800 truncate" title="${name}">${shortName}</h4>
+                    <div class="text-xs font-bold mt-0.5 ${statusClass === 'status-0-9' ? 'text-green-600' : (statusClass === 'status-0-8' ? 'text-red-500' : 'text-blue-500')} flex items-center gap-1">
+                        <i class="fas ${iconClass}"></i> ${statusText}
+                    </div>
+                </div>`;
+
+            container.appendChild(toast);
+            
+            // Emitimos sonido de notificación siempre que cambie un estado
+            window.playSound(soundType);
+
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        };
+
+        window.initFirebase = async function() {
+            // Case 1: Inside iframe, inherit from parent if ready
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.fbDb) {
+                        window.fbDb = parent.fbDb;
+                        window.fbDoc = parent.fbDoc;
+                        window.fbSetDoc = parent.fbSetDoc;
+                        window.fbUpdateDoc = parent.fbUpdateDoc;
+                        window.fbCollection = parent.fbCollection;
+                        window.fbGetDocs = parent.fbGetDocs;
+                        window.fbOnSnapshot = parent.fbOnSnapshot;
+                        console.log("Firebase inherited from parent in Personal Central");
+                        window.processSyncQueue();
+                        return true;
+                    }
+                } catch (e) {
+                    console.warn("Error accessing parent Firebase:", e);
+                }
+            }
+            
+            return await window.initFirebaseSelf();
+        };
+
+        window.initFirebaseSelf = async function() {
+            if (window.fbDb) return true;
+            try {
+                window.fbDoc = doc;
+                window.fbSetDoc = setDoc;
+                window.fbUpdateDoc = updateDoc;
+                window.fbCollection = collection;
+                window.fbGetDocs = getDocs;
+                window.fbOnSnapshot = onSnapshot;
+
+                let configToUse = null;
+                try {
+                    const dynamicConfigStr = localStorage.getItem('saas_firebase_config') || localStorage.getItem('firebaseConfig');
+                    if (dynamicConfigStr) {
+                        configToUse = JSON.parse(dynamicConfigStr);
+                    }
+                } catch (e) {
+                    console.error("Error parsing saas_firebase_config in Personal Central:", e);
+                }
+                if (!configToUse) {
+                    console.error("No se encontró configuración de Firebase en Personal Central.");
+                    return false;
+                }
+                const app = initializeApp(configToUse);
+                const auth = getAuth(app);
+                window.fbAuth = auth;
+                // Inicializar Firestore con la caché activada (IndexedDB persistente multi-pestaña)
+                try {
+                    window.fbDb = initializeFirestore(app, {
+                        localCache: persistentLocalCache({
+                            tabManager: persistentMultipleTabManager()
+                        })
+                    });
+                    console.log("Caché local Multi-Pestaña configurada en Personal Central.");
+                } catch(err) {
+                    console.warn("Error al inicializar Firestore con caché:", err);
+                    window.fbDb = getFirestore(app);
+                }
+
+                // CONFIGURAR PERSISTENCIA DE SESIÓN
+                try {
+                    await setPersistence(auth, browserLocalPersistence);
+                } catch(e) {}
+
+                // INICIAR SESIÓN DE FORMA SEGURA (Evita el robo de token)
+                await new Promise((resolve) => {
+                    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+                        unsubscribe();
+                        if (user) {
+                            console.log("Sesión heredada nativamente de Firebase.");
+                            resolve();
+                        } else {
+                            const storedUser = localStorage.getItem('authUserId');
+                            const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                            if (storedUser && storedPassSecure) {
+                                try {
+                                    const email = storedUser + "@sisbom.com";
+                                    await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                                    console.log("Firebase conectado con credenciales.");
+                                } catch(e) { console.error("Error auth:", e); }
+                            } else {
+                                try { await signInAnonymously(auth); } catch(e){}
+                            }
+                            resolve();
+                        }
+                    });
+                });
+
+                window.processSyncQueue();
+                return true;
+            } catch(e) {
+                console.warn("Firebase self-init error in Personal Central:", e);
+                return false;
+            }
+        };
+
+        window.onload = async function() {
+            await window.loadFromLocalStorage();
+            
+            let success = await window.initFirebase();
+            
+            // LÓGICA HÍBRIDA (Single Source of Truth)
+            if (window.self !== window.top) {
+                // IFRAME MODO CENTRAL
+                console.log("SisBom Central: Módulo Personal operando desde el caché del Padre (Iframe).");
+            } else {
+                // MODO OTRA PANTALLA / STANDALONE
+                if (success) {
+                    window.setupRealtimeListeners(true);
+                } else {
+                    let attempts = 0;
+                    const interval = setInterval(async () => {
+                        attempts++;
+                        success = await window.initFirebase();
+                        if (success) {
+                            clearInterval(interval);
+                            window.setupRealtimeListeners(true);
+                        } else if (attempts >= 10) { // Retry for 5 seconds
+                            clearInterval(interval);
+                            console.log("Parent Firebase not ready after 5s. Falling back to self-initialization in Personal Central.");
+                            const fallbackSuccess = await window.initFirebaseSelf();
+                            if (fallbackSuccess) window.setupRealtimeListeners(true);
+                        }
+                    }, 500);
+                }
+            }
+
+            document.addEventListener('click', window.initAudioContext, new Object({ once: true }));
+            
+            window.addEventListener("storage", async function(e) {
+                // Accept events with db_personal key, OR events with no key (plain Event dispatched by parent)
+                if (e.key === 'db_personal' || e.key === null || e.key === undefined) {
+                    await window.loadFromLocalStorage();
+                }
+                if (e.key === 'authUserId' || e.key === 'authPasswordSecure') {
+                    if (window.self === window.top) {
+                        window.handleStandaloneAuthChangeDebounced();
+                    }
+                }
+            });
+
+            let lastDbPersonalUpdated = localStorage.getItem('db_personal_updated') || '';
+            setInterval(async () => {
+                const current = localStorage.getItem('db_personal_updated') || '';
+                if (current !== lastDbPersonalUpdated) {
+                    lastDbPersonalUpdated = current;
+                    await window.loadFromLocalStorage();
+                }
+            }, 1000);
+
+            // Detect if running inside iframe (main window navigation)
+            if (window.self !== window.top) {
+                const detachBtn = document.getElementById('btn-detach-window');
+                if (detachBtn) detachBtn.classList.remove('hidden');
+            }
+        };
+
+        window.detachWindow = function() {
+            const api = (window.pywebview && window.pywebview.api) || 
+                        (window.top && window.top.pywebview && window.top.pywebview.api);
+            if (api) {
+                api.open_window('personal');
+            } else {
+                window.open('personal.html', '_blank');
+            }
+        };
+
+        // --- SISTEMA DE AUDIO (Web Audio API) ---
+        window.initAudioContext = function() {
+            if (!audioCtx) {
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                audioCtx = new AudioContext();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        };
+
+        window.playSound = function(type) {
+            if (!audioCtx) return; 
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            const now = audioCtx.currentTime;
+
+            if (type === 'success') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(500, now);
+                oscillator.frequency.exponentialRampToValueAtTime(1000, now + 0.1);
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
+                oscillator.start(now);
+                oscillator.stop(now + 0.5);
+            } 
+            else if (type === 'error') {
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(150, now);
+                oscillator.frequency.linearRampToValueAtTime(80, now + 0.2);
+                gainNode.gain.setValueAtTime(0.2, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                oscillator.start(now);
+                oscillator.stop(now + 0.3);
+            } 
+            else {
+                oscillator.type = 'triangle';
+                oscillator.frequency.setValueAtTime(400, now);
+                gainNode.gain.setValueAtTime(0.2, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                oscillator.start(now);
+                oscillator.stop(now + 0.3);
+            }
+        };
+
+        // --- UI ---
+        window.toggleViewMode = function() {
+            if (viewMode === 'normal') viewMode = 'compact';
+            else if (viewMode === 'compact') viewMode = 'visual';
+            else viewMode = 'normal';
+            
+            localStorage.setItem('personalViewMode', viewMode);
+            
+            const activeCards = document.querySelectorAll('.card');
+            activeCards.forEach(c => {
+                const classes = c.className.split(' ');
+                const newClasses = new Array();
+                classes.forEach(cls => {
+                    if (!cls.startsWith('confirming-')) newClasses.push(cls);
+                });
+                c.className = newClasses.join(' ');
+                delete c.dataset.pending;
+            });
+            window.renderGrid();
+        };
+
+        window.toggleSection = function(gridId, iconId) {
+            const grid = document.getElementById(gridId);
+            const icon = document.getElementById(iconId);
+            if (grid.classList.contains('collapsed')) {
+                grid.classList.remove('collapsed');
+                icon.classList.remove('rotated');
+            } else {
+                grid.classList.add('collapsed');
+                icon.classList.add('rotated');
+            }
+        };
+
+        window.handleCompactClick = function(element, id) {
+            if (viewMode !== 'compact') return; 
+
+            if (!localStorage.getItem('authUserId')) return;
+            const p = personnel.find(per => String(per.idRegistro) === String(id));
+            if(!p) return;
+
+            const serviceIdVal = String(p.enServicio).trim();
+            const inService = window.isInServiceValue(serviceIdVal) && !serviceIdVal.startsWith('-');
+            const currentStatus = String(p.estado).trim();
+
+            const isSpecialLocked = window.isSpecialState(p) || window.isHonorary(p); 
+            if(isSpecialLocked) return;
+
+            const isConfirming = element.className.includes('confirming-');
+            if (isConfirming) {
+                const target = element.dataset.pending;
+                
+                if (!target || target === 'en-servicio-lock') {
+                    window.resetCompactCard(element);
+                    return;
+                }
+                
+                if (target) {
+                    window.resetCompactCard(element); 
+                    window.changeStatus(id, target);
+                }
+                return;
+            }
+
+            if (inService) {
+                element.classList.add('confirming-en-servicio');
+                element.dataset.pending = 'en-servicio-lock';
+
+                const serviceKey = element.getAttribute('data-service-key') || 'ACTO';
+                const overlay = element.querySelector('.confirmation-overlay');
+                if(overlay) {
+                    overlay.innerHTML = `<div class="text-xl font-bold mb-1 break-words px-2 text-center leading-tight">${serviceKey}</div><div class="text-xs font-normal opacity-90"><i class="fas fa-lock"></i> En Acto</div>`;
+                }
+
+                const timer = setTimeout(() => { window.resetCompactCard(element); }, 3000);
+                element.dataset.timerId = timer;
+                return;
+            }
+            
+            const is09 = (currentStatus === '0-9');
+            const targetStatus = is09 ? '0-8' : '0-9'; // En compacto si es CDS, PERM o LIC irá a 0-9 directamente.
+            const targetLabel = is09 ? '¿0-8?' : '¿0-9?';
+            const iconClass = is09 ? 'fa-ban' : 'fa-check';
+
+            element.classList.add('confirming-' + targetStatus);
+            element.dataset.pending = targetStatus;
+            
+            const overlay = element.querySelector('.confirmation-overlay');
+            if(overlay) {
+                overlay.innerHTML = `<i class="fas ${iconClass} text-2xl mb-1"></i><span>${targetLabel}</span>`;
+            }
+
+            const timer = setTimeout(() => {
+                window.resetCompactCard(element);
+            }, 3000);
+            element.dataset.timerId = timer;
+        };
+
+        window.resetCompactCard = function(element) {
+            if (element.dataset.timerId) clearTimeout(parseInt(element.dataset.timerId));
+            const classes = element.className.split(' ');
+            const newClasses = new Array();
+            classes.forEach(cls => {
+                if (!cls.startsWith('confirming-')) newClasses.push(cls);
+            });
+            element.className = newClasses.join(' ');
+            delete element.dataset.pending;
+            delete element.dataset.timerId;
+        };
+
+        window.loadFromLocalStorage = async function() {
+            let cached = localStorage.getItem('db_personal');
+            const cachedDisp = localStorage.getItem('activeServices');
+            
+            if (!cached && !checkIsNative()) {
+                try {
+                    const res = await fetch('./db_personal.json');
+                    if (res.ok) {
+                        const data = await res.json();
+                        localStorage.setItem('db_personal', JSON.stringify(data));
+                        cached = localStorage.getItem('db_personal');
+                    }
+                } catch(e) {}
+            }
+
+            if (cachedDisp) {
+                try {
+                    const parsedDisp = JSON.parse(cachedDisp);
+                    dispatchesMap.clear();
+                    parsedDisp.forEach(d => {
+                        dispatchesMap.set(String(d.id), String(d.key));
+                    });
+                } catch(e) {}
+            }
+
+            if (cached) {
+                try {
+                    const parsed = JSON.parse(cached);
+                    personnel = parsed.map(p => Object.assign(p, new Object({ lastUpdateLocal: p.lastUpdateLocal || 0 })));
+                    if(personnel.length > 0) {
+                        requestAnimationFrame(() => {
+                            window.sortPersonnel(); 
+                            window.renderGrid(); 
+                        });
+                    }
+                } catch(e) {}
+            }
+        };
+
+        window.updateLocalStorage = function() {
+            localStorage.setItem('db_personal', JSON.stringify(personnel));
+        };
+
+        let unsubPersonal = null;
+        let unsubDespachos = null;
+
+        window.onFirebaseParentLogout = function() {
+            console.log("Firebase Parent Logout event received in Personal.");
+            if (unsubPersonal) {
+                try { unsubPersonal(); } catch(e) {}
+                unsubPersonal = null;
+            }
+            if (unsubDespachos) {
+                try { unsubDespachos(); } catch(e) {}
+                unsubDespachos = null;
+            }
+        };
+
+        window.showToast = function(message) {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            toast.className = "toast-card status-other relative";
+            toast.innerHTML = `
+                <button onclick="this.closest('.toast-card').style.opacity='0'; this.closest('.toast-card').style.transform='translateX(100%)'; setTimeout(() => this.closest('.toast-card').remove(), 300);" class="absolute top-2 right-2 text-slate-400 hover:text-red-500 transition-colors w-7 h-7 flex items-center justify-center rounded-full hover:bg-red-50 focus:outline-none">
+                    <i class="fas fa-times"></i>
+                </button>
+                <div class="flex-shrink-0"><span class="font-black text-2xl text-slate-700">SISBOM</span></div>
+                <div class="flex-1 min-w-0 pr-4">
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-0.5">AVISO</p>
+                    <h4 class="text-sm font-semibold text-slate-800 truncate" title="${message}">${message}</h4>
+                </div>`;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+        };
+
+        let authChangeTimeout = null;
+        window.handleStandaloneAuthChange = async function() {
+            if (!window.fbAuth) return;
+
+            if (unsubPersonal) { try { unsubPersonal(); } catch(e) {} unsubPersonal = null; }
+            if (unsubDespachos) { try { unsubDespachos(); } catch(e) {} unsubDespachos = null; }
+
+            const storedUser = localStorage.getItem('authUserId');
+            const storedPassSecure = localStorage.getItem('authPasswordSecure');
+
+            try {
+                const { signInAnonymously, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                if (storedUser && storedPassSecure) {
+                    const email = storedUser + "@sisbom.com";
+                    if (!window.fbAuth.currentUser || window.fbAuth.currentUser.email !== email) {
+                        await signInWithEmailAndPassword(window.fbAuth, email, storedPassSecure);
+                    }
+                } else {
+                    if (!window.fbAuth.currentUser || !window.fbAuth.currentUser.isAnonymous) {
+                        await signInAnonymously(window.fbAuth);
+                    }
+                }
+            } catch (err) {
+                console.error("ERROR RE-AUTHENTICATING IN STANDALONE WINDOW:", err);
+            }
+
+            window.setupRealtimeListeners(true);
+        };
+
+        window.handleStandaloneAuthChangeDebounced = function() {
+            if (authChangeTimeout) clearTimeout(authChangeTimeout);
+            authChangeTimeout = setTimeout(async () => {
+                await window.handleStandaloneAuthChange();
+            }, 300);
+        };
+
+        window.setupRealtimeListeners = function(silent = false) {
+            if (window.self !== window.top) {
+                console.log("Bloqueando setupRealtimeListeners: Estamos en un Iframe (Central de Alarmas).");
+                return;
+            }
+
+            const btn = document.getElementById('btn-refresh');
+
+            if (!unsubDespachos) {
+                unsubDespachos = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'despachos'), (snap) => {
+                    if (snap.empty) return;
+                    dispatchesMap.clear();
+                    snap.forEach(doc => {
+                        const d = doc.data();
+                        const id = String(d.idServicio || doc.id).trim();
+                        const clave = String(d.clave || "").trim();
+                        if(id) dispatchesMap.set(id, clave);
+                    });
+                }, (error) => {
+                    console.warn("Despachos listener error in Personal:", error);
+                    unsubDespachos = null;
+                    if (error.code === 'permission-denied' && localStorage.getItem('adminUser')) {
+                        setTimeout(() => {
+                            if (window.parent && window.parent.authenticateFirebase) {
+                                window.parent.authenticateFirebase();
+                            }
+                            window.setupRealtimeListeners(true);
+                        }, 5000);
+                    }
+                });
+            }
+
+            if (!unsubPersonal) {
+                unsubPersonal = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'personal'), (snap) => {
+                    const dataArray = new Array();
+                    snap.forEach(doc => {
+                        const pData = doc.data();
+                        pData.idRegistro = doc.id;
+                        
+                        // Si es honorario, forzar el estado a 0-8 localmente siempre
+                        if(window.isHonorary(pData)) {
+                            pData.estado = '0-8';
+                        }
+                        
+                        dataArray.push(pData);
+                    });
+                    
+                    if (dataArray.length === 0) {
+                        console.warn("Snapshot personal vacío, ignorando.");
+                        return;
+                    }
+
+                    const now = Date.now();
+
+                    const newPersonnel = dataArray.map(apiPerson => {
+                        const localPerson = personnel.find(lp => String(lp.idRegistro) === String(apiPerson.idRegistro));
+                        if (localPerson) {
+                            const newStatus = String(apiPerson.estado).trim();
+                            const currentStatus = String(localPerson.estado).trim();
+                            
+                            const newInServiceVal = window.normalizeEmpty(apiPerson.enServicio);
+                            const currentInServiceVal = window.normalizeEmpty(localPerson.enServicio);
+                            
+                            const newIsNoAsistir = newInServiceVal.startsWith('-');
+                            const newInService = window.isInServiceValue(newInServiceVal) && !newIsNoAsistir;
+                            const currentIsNoAsistir = currentInServiceVal.startsWith('-');
+                            const currentInService = window.isInServiceValue(currentInServiceVal) && !currentIsNoAsistir;
+                            
+                            const isDriver = window.isTrueValue(apiPerson.conductor);
+
+                            if (newStatus !== currentStatus || newInServiceVal !== currentInServiceVal) {
+                                if (localPerson.offlineModified) {
+                                    return Object.assign(apiPerson, new Object({ lastUpdateLocal: 0 }));
+                                }
+                                
+                                const PROTECTION_TIME_MS = 4000;
+                                const timeDiff = now - (localPerson.lastUpdateLocal || 0);
+                                const isLocalChange = timeDiff < PROTECTION_TIME_MS;
+
+                                if (!isLocalChange) {
+                                    if (newInService && newInServiceVal !== currentInServiceVal) {
+                                         const clave = dispatchesMap.get(newInServiceVal) || "ACTO";
+                                         window.showStatusToast(apiPerson.idRadial, apiPerson.nombreBombero, "EN ACTO: " + clave, isDriver);
+                                    } else if (!window.isSpecialState(apiPerson) && !window.isHonorary(apiPerson)) {
+                                         if (newStatus === "0-9" || newStatus === "0-8" || newStatus === "CDS" || newStatus === "PERMISO" || newStatus === "LICENCIA") {
+                                             window.showStatusToast(apiPerson.idRadial, apiPerson.nombreBombero, newStatus, isDriver);
+                                         }
+                                    }
+                                    return Object.assign(apiPerson, new Object({ lastUpdateLocal: 0 }));
+                                } else {
+                                    return Object.assign(apiPerson, new Object({ estado: localPerson.estado, lastUpdateLocal: localPerson.lastUpdateLocal }));
+                                }
+                            }
+                        }
+                        return Object.assign(apiPerson, new Object({ lastUpdateLocal: 0 }));
+                    });
+                    
+                    personnel = newPersonnel;
+                    window.updateLocalStorage(); 
+                    window.sortPersonnel(); 
+                    window.renderGrid();
+                    
+                    const loader = document.getElementById('initial-loader');
+                    if(loader) loader.style.display = 'none';
+                }, (error) => {
+                    console.error("Error en snapshot personal", error);
+                    const loader = document.getElementById('initial-loader');
+                    if (personnel.length === 0 && loader) {
+                         loader.innerHTML = '<span class="text-red-500 font-bold text-sm">Sin datos. <button onclick="window.refreshPersonnel()" class="underline">Reintentar</button></span>';
+                    }
+                    unsubPersonal = null;
+                    if (error.code === 'permission-denied' && localStorage.getItem('adminUser')) {
+                        setTimeout(() => {
+                            if (window.parent && window.parent.authenticateFirebase) {
+                                window.parent.authenticateFirebase();
+                            }
+                            window.setupRealtimeListeners(true);
+                        }, 5000);
+                    }
+                });
+            }
+        };
+
+        window.refreshPersonnel = function() { window.setupRealtimeListeners(false); };
+
+        window.checkDateStatus = function(dateString) {
+            if (!dateString) return false;
+            const parts = String(dateString).trim().split('-');
+            let end;
+            if (parts.length === 3) end = new Date(parseInt(parts.at(2)), parseInt(parts.at(1)) - 1, parseInt(parts.at(0)));
+            else end = new Date(dateString);
+            if (isNaN(end.getTime())) return false;
+            end.setHours(23, 59, 59, 999);
+            return end >= new Date();
+        };
+
+        // LECTURA DE ASIGNACIONES OFICIALES DESDE ADMINISTRACIÓN
+        window.isOfficialCds = function(p) { return window.isTrueValue(p.cds) || window.checkDateStatus(p.cds); };
+        window.isOfficialPermiso = function(p) { return window.isTrueValue(p.permiso) || window.checkDateStatus(p.permiso); };
+        window.isOfficialLicencia = function(p) { return window.isTrueValue(p.licenciaMedica) || window.checkDateStatus(p.licenciaMedica); };
+        window.isPersonSuspended = function(p) { return window.checkDateStatus(p.fechaSuspensionFin); };
+
+        // EVALUADOR DEL OPERADOR ACTUAL
+        window.isPersonOperador = function(p) {
+            const sessionStr = localStorage.getItem('adminUser');
+            let currentUserId = null;
+            if(sessionStr) {
+                try { currentUserId = String(JSON.parse(sessionStr).idRegistro); } catch(e){}
+            }
+            return (currentUserId && String(p.idRegistro) === currentUserId) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'OPERADOR';
+        };
+
+        // EVALUADORES COMBINADOS (Admite asignación oficial del admin O pulsación manual de la Central)
+        window.isPersonCds = function(p) { return window.isOfficialCds(p) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'CDS'; };
+        window.isPersonPermiso = function(p) { return window.isOfficialPermiso(p) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'PERMISO'; };
+        window.isPersonLicencia = function(p) { return window.isOfficialLicencia(p) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'LICENCIA'; };
+
+        // BLOQUEO ABSOLUTO: Solo bloquea la tarjeta si el castigo o permiso es "Oficial" (Asignado por un Admin en BD)
+        // Permite que si el operador de la central lo asignó manualmente, pueda volver a quitarlo con un clic.
+        window.isSpecialState = function(p) { 
+            return window.isPersonSuspended(p) || window.isOfficialLicencia(p) || window.isOfficialPermiso(p) || window.isOfficialCds(p) || window.isPersonOperador(p); 
+        };
+
+        // ORDEN ESTRICTAMENTE ALFANUMÉRICO (El personal ya no se moverá de su lugar al cambiar de estado)
+        window.sortPersonnel = function() {
+            personnel.sort((a, b) => {
+                const idA = String(a.idRadial || "").trim(); 
+                const idB = String(b.idRadial || "").trim();
+                if (!idA) return 1; 
+                if (!idB) return -1;
+                return idA.localeCompare(idB, undefined, new Object({numeric: true, sensitivity: 'base'}));
+            });
+        };
+
+        window.renderGrid = function() {
+            const banner = document.getElementById('read-only-banner');
+            if (banner) {
+                if (!localStorage.getItem('authUserId')) {
+                    banner.classList.remove('hidden');
+                } else {
+                    banner.classList.add('hidden');
+                }
+            }
+
+            const searchBox = document.getElementById('search-box');
+            const searchTerm = searchBox ? searchBox.value.toLowerCase() : '';
+            const loader = document.getElementById('initial-loader');
+            if (loader) loader.style.display = 'none';
+
+            window.updateTotals(personnel);
+
+            const grids = document.querySelectorAll('.card-grid');
+            grids.forEach(g => {
+                if(g.id === 'search-grid') {
+                    g.classList.remove('compact', 'visual');
+                } else {
+                    if(viewMode === 'compact') {
+                        g.classList.add('compact');
+                        g.classList.remove('visual');
+                    } else if (viewMode === 'visual') {
+                        g.classList.add('visual');
+                        g.classList.remove('compact');
+                    } else {
+                        g.classList.remove('compact', 'visual');
+                    }
+                }
+            });
+            
+            const btnView = document.getElementById('btn-view-mode');
+            if(btnView) {
+                if (viewMode === 'normal') btnView.innerHTML = '<i class="fas fa-th-large"></i> Mosaico';
+                else if (viewMode === 'compact') btnView.innerHTML = '<i class="fas fa-tv"></i> Visual';
+                else btnView.innerHTML = '<i class="fas fa-list"></i> Detalle';
+            }
+
+            if (searchTerm.length > 0) {
+                document.getElementById('lists-container').style.display = 'none';
+                document.getElementById('search-results-container').classList.remove('hidden');
+                
+                const searchMatches = personnel.filter(p => {
+                    const isActive = window.isTrueValue(p.activo !== undefined ? p.activo : '1');
+                    const match = String(p.nombreBombero || "").toLowerCase().includes(searchTerm) || 
+                                  String(p.idRadial || "").toLowerCase().includes(searchTerm) ||
+                                  String(p.cargo || "").toLowerCase().includes(searchTerm);
+                    return isActive && match;
+                });
+
+                window.syncSearchGrid(searchMatches);
+                
+                if (searchMatches.length === 0) {
+                    document.getElementById('search-grid').innerHTML = '<div class="col-span-full text-center text-slate-400 text-sm py-4">No se encontraron bomberos.</div>';
+                }
+
+            } else {
+                const srContainer = document.getElementById('search-results-container');
+                if(srContainer) srContainer.classList.add('hidden');
+                document.getElementById('lists-container').style.display = 'flex';
+
+                const activePersonnel = personnel.filter(p => window.isTrueValue(p.activo !== undefined ? p.activo : '1'));
+
+                if (activePersonnel.length === 0 && personnel.length > 0) {
+                    document.getElementById('empty-state').style.display = 'block';
+                    return;
+                }
+                document.getElementById('empty-state').style.display = 'none';
+
+                // Clasificación: Conductores, Honorarios y Bomberos normales
+                const listDrivers = activePersonnel.filter(p => window.isTrueValue(p.conductor) && !window.isHonorary(p));
+                const listHonorary = activePersonnel.filter(p => window.isHonorary(p));
+                const listFirefighters = activePersonnel.filter(p => !window.isTrueValue(p.conductor) && !window.isHonorary(p));
+
+                const drivers09Count = listDrivers.filter(p => (String(p.estado).trim() === '0-9' || window.isInServiceValue(p.enServicio)) && !window.isPersonCds(p) && !window.isPersonPermiso(p) && !window.isPersonLicencia(p) && !window.isPersonOperador(p)).length;
+                const firefighters09Count = listFirefighters.filter(p => (String(p.estado).trim() === '0-9' || window.isInServiceValue(p.enServicio)) && !window.isPersonCds(p) && !window.isPersonPermiso(p) && !window.isPersonLicencia(p) && !window.isPersonOperador(p)).length;
+                const honoraryCount = listHonorary.length;
+
+                document.getElementById('count-header-drivers-09').innerText = drivers09Count;
+                document.getElementById('count-header-firefighters-09').innerText = firefighters09Count;
+                document.getElementById('count-header-honorary').innerText = honoraryCount;
+
+                window.syncSection('sec-drivers', 'grid-drivers', 'count-header-drivers', listDrivers);
+                window.syncSection('sec-honorary', 'grid-honorary', 'count-header-honorary', listHonorary);
+                window.syncSection('sec-firefighters', 'grid-firefighters', 'count-header-firefighters', listFirefighters);
+            }
+        };
+
+        window.updateTotals = function(allPersonnel) {
+            const active = allPersonnel.filter(p => window.isTrueValue(p.activo !== undefined ? p.activo : '1'));
+            
+            // Para la central, un bombero está "Disponible" si no tiene ninguno de los estados bloqueantes o asignaciones manuales.
+            const isAvailable = (p) => !window.isPersonSuspended(p) && !window.isPersonCds(p) && !window.isPersonPermiso(p) && !window.isPersonLicencia(p) && !window.isPersonOperador(p) && !window.isHonorary(p);
+
+            const count09 = active.filter(p => (String(p.estado).trim() === '0-9' || window.isInServiceValue(p.enServicio)) && isAvailable(p)).length;
+            const driversAvailable = active.filter(p => window.isTrueValue(p.conductor) && (String(p.estado).trim() === '0-9' || window.isInServiceValue(p.enServicio)) && isAvailable(p)).length;
+            
+            // Los 0-8 suman a quienes tengan estado 0-8 manualmente, o quienes tengan algún estado limitante (CDS, PERMISO, LICENCIA, OPERADOR) o sean Honorarios.
+            const count08 = active.filter(p => (String(p.estado).trim() === '0-8' && !window.isInServiceValue(p.enServicio)) || !isAvailable(p) || window.isHonorary(p)).length;
+
+            document.getElementById('count-total').innerText = active.length;
+            document.getElementById('count-drivers-09').innerText = driversAvailable; 
+            document.getElementById('count-09').innerText = count09;
+            document.getElementById('count-08').innerText = count08;
+        };
+
+        window.syncSearchGrid = function(list) {
+            const grid = document.getElementById('search-grid');
+            if(!grid) return;
+            const existingIds = new Set();
+            
+            list.forEach(p => {
+                const cardId = `search-card-${p.idRegistro}`;
+                existingIds.add(cardId);
+                window.updateOrCreateCard(grid, p, cardId, false); 
+            });
+            
+            Array.from(grid.children).forEach(child => {
+                if (!existingIds.has(child.id)) child.remove();
+            });
+        };
+
+        window.syncSection = function(secId, gridId, countId, list) {
+            const sec = document.getElementById(secId);
+            const grid = document.getElementById(gridId);
+            
+            if (list.length === 0) {
+                sec.style.display = 'none';
+                return;
+            }
+            sec.style.display = 'block';
+            if(document.getElementById(countId) && countId !== 'count-header-honorary') {
+                // Solo actualizamos el contador normal si no es el de honorarios (ese lo actualizamos en renderGrid)
+            }
+
+            const existingIds = new Set();
+            list.forEach((p, idx) => {
+                const cardId = `card-${p.idRegistro}`;
+                existingIds.add(cardId);
+                window.updateOrCreateCard(grid, p, cardId, true); 
+            });
+
+            Array.from(grid.children).forEach(child => {
+                if (!existingIds.has(child.id)) child.remove();
+            });
+        };
+
+        window.updateOrCreateCard = function(grid, p, cardId, allowCompactEvents) {
+            let card = document.getElementById(cardId);
+            
+            const suspended = window.isPersonSuspended(p);
+            const licenciaActive = window.isPersonLicencia(p);
+            const cdsActive = window.isPersonCds(p);
+            const permisoActive = window.isPersonPermiso(p);
+            const operadorActive = window.isPersonOperador(p);
+            const isHonorary = window.isHonorary(p);
+            const serviceIdVal = String(p.enServicio).trim();
+            const isNoAsistir = serviceIdVal.startsWith('-');
+            const isInService = window.isInServiceValue(serviceIdVal) && !isNoAsistir;
+
+            // Bloqueo total visual para acciones obligatorias de sistema o si es Honorario
+            const isForced08 = window.isSpecialState(p) || isHonorary; 
+            const is09 = isForced08 ? false : (isInService ? true : String(p.estado).trim() === '0-9');
+            
+            let statusClass, statusText, cardAttr;
+            if (isHonorary) { statusClass="text-status-08"; statusText="HONORARIO (0-8)"; cardAttr="0-8"; }
+            else if (suspended) { statusClass="text-status-susp"; statusText="SUSPENDIDO"; cardAttr="suspendido"; }
+            else if (licenciaActive) { statusClass="text-status-licencia"; statusText="LICENCIA MÉDICA"; cardAttr="licencia"; }
+            else if (permisoActive) { 
+                statusClass="text-status-perm"; 
+                const razon = p.tipoPermiso ? ` - ${p.tipoPermiso.toUpperCase()}` : "";
+                statusText=`PERMISO${razon}`; 
+                cardAttr="permiso"; 
+            }
+            else if (cdsActive) { statusClass="text-status-cds"; statusText="COMISIÓN DE SERVICIO"; cardAttr="cds"; }
+            else if (operadorActive) { statusClass="text-status-operador"; statusText="OPERADOR DE CENTRAL"; cardAttr="operador"; }
+            else if (isInService) { 
+                statusClass="text-status-serv"; 
+                const serviceKey = dispatchesMap.get(serviceIdVal) || "GENERAL";
+                statusText=`EN ACTO: ${serviceKey}`;
+                cardAttr="en-servicio"; 
+            }
+            else if (isNoAsistir) {
+                statusClass="text-status-no-asistir";
+                const rejectedSvcId = serviceIdVal.substring(1);
+                const serviceKey = dispatchesMap.get(rejectedSvcId) || "GENERAL";
+                statusText=`NO ASISTIRÁ: ${serviceKey}`;
+                cardAttr="no-asistir";
+            }
+            else if (String(p.estado).trim().toUpperCase() === 'NO ASISTIR') {
+                statusClass="text-status-no-asistir";
+                statusText="NO ASISTIR";
+                cardAttr="no-asistir";
+            }
+            else if (is09) { statusClass="text-status-09"; statusText="DISPONIBLE"; cardAttr="0-9"; }
+            else { statusClass="text-status-08"; statusText="NO DISPONIBLE"; cardAttr="0-8"; }
+
+            // Lógica de activación de los botones de la UI (0-9, CDS, PERM, LIC, 0-8)
+            const cls09 = is09 && !cdsActive && !permisoActive && !licenciaActive && !operadorActive && !isHonorary ? 'active-ok' : '';
+            let clsCds = '';
+            let clsPerm = '';
+            let clsLicencia = '';
+            let cls08 = '';
+
+            if (suspended) cls08 = 'active-susp';
+            else if (isHonorary) cls08 = 'active-bad'; // Honorario siempre se muestra como 0-8 activado
+            else if (licenciaActive) clsLicencia = 'active-licencia';
+            else if (permisoActive) clsPerm = 'active-perm';
+            else if (cdsActive) clsCds = 'active-cds';
+            else if (!is09 && !isInService && !isNoAsistir && !operadorActive) cls08 = 'active-bad';
+            
+            // Los botones quedan inhabilitados SOLO si hay un castigo/licencia que lo fuerce desde BD,
+            // si está metido en una emergencia (asistiendo o no asistiendo), o si es el Operador activo, si es Honorario, o si no hay sesión activa.
+            const isDisabled = isForced08 || isInService || !localStorage.getItem('authUserId');
+            
+            const shortName = window.formatShortName(p.nombreBombero);
+
+            if (!card) {
+                card = document.createElement('div');
+                card.id = cardId;
+                card.className = "card animate-enter card-status-" + cardAttr;
+                
+                if (allowCompactEvents) {
+                    card.onclick = function(e) { 
+                        if (viewMode === 'compact') {
+                            window.handleCompactClick(this, p.idRegistro);
+                        } else if (viewMode === 'visual') {
+                            window.openVisualStatusModal(p.idRegistro);
+                        }
+                    };
+                    card.onmouseleave = function(e) { 
+                        if (viewMode === 'compact') {
+                            window.resetCompactCard(this); 
+                        }
+                    };
+                }
+                
+                const drvDisplay = window.isTrueValue(p.conductor) ? 'inline-flex' : 'none';
+                
+                let serviceKeyVal = "";
+                if(isInService) {
+                    serviceKeyVal = dispatchesMap.get(serviceIdVal) || "GENERAL";
+                } else if(isNoAsistir) {
+                    serviceKeyVal = dispatchesMap.get(serviceIdVal.substring(1)) || "GENERAL";
+                }
+                card.setAttribute('data-service-key', serviceKeyVal);
+                
+                card.innerHTML = `
+                    <div class="card-left">
+                        <img src="${p.foto || DEFAULT_LOGO}" class="card-img" onerror="this.src='${DEFAULT_LOGO}'">
+                        <span class="compact-id">${p.idRadial || '--'}</span>
+                    </div>
+                    
+                    <div class="confirmation-overlay"></div>
+
+                    <div class="visual-content">
+                        <span class="visual-id">${p.idRadial || '--'}</span>
+                        <span class="visual-name" title="${p.nombreBombero}">${shortName}</span>
+                        <span class="visual-status">${statusText.replace('EN ACTO: ', '').replace('NO ASISTIRÁ: ', '')}</span>
+                    </div>
+
+                    <div class="card-right">
+                        <div>
+                            <h4 class="card-name" title="${p.nombreBombero}">
+                                <span class="font-black text-sky-400 text-xl">${p.idRadial || '--'}</span>
+                                <span class="mx-1.5 text-slate-300 text-lg">&bull;</span>
+                                <span>${shortName}</span>
+                            </h4>
+                            <div class="mt-1 flex flex-wrap gap-2 items-center">
+                                <span class="badge-driver" style="display: ${drvDisplay}"><i class="fas fa-steering-wheel"></i> CONDUCTOR</span>
+                                <span class="status-text ${statusClass}">${statusText}</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-1 w-full mt-auto pt-2">
+                            <div class="flex gap-1 w-full">
+                                <button class="btn-chip btn-09 ${cls09}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', '0-9')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-check"></i> 0-9</button>
+                                <button class="btn-chip btn-08 ${cls08}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', '0-8')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-ban"></i> 0-8</button>
+                            </div>
+                            <div class="flex gap-1 w-full">
+                                <button class="btn-chip btn-cds ${clsCds}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'CDS')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-briefcase"></i> C.D.S.</button>
+                                <button class="btn-chip btn-perm ${clsPerm}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'PERMISO')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-file-signature"></i> PERM.</button>
+                                <button class="btn-chip btn-licencia ${clsLicencia}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'LICENCIA')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-notes-medical"></i> L.M.</button>
+                            </div>
+                        </div>
+                    </div>`;
+                grid.appendChild(card);
+            } else {
+                if (card.parentNode !== grid) grid.appendChild(card);
+                
+                if(!card.className.includes('confirming-')) {
+                    if(card.dataset.status !== cardAttr) {
+                        card.dataset.status = cardAttr;
+                        card.className = "card animate-enter card-status-" + cardAttr;
+                    }
+                    
+                    let serviceKeyVal = "";
+                    if(isInService) {
+                        serviceKeyVal = dispatchesMap.get(serviceIdVal) || "GENERAL";
+                    }
+                    if(card.getAttribute('data-service-key') !== serviceKeyVal) {
+                        card.setAttribute('data-service-key', serviceKeyVal);
+                    }
+
+                    const stText = card.querySelector('.status-text');
+                    if(stText && stText.innerText !== statusText) stText.innerText = statusText;
+                    if(stText) stText.className = `status-text ${statusClass}`;
+
+                    const visStatus = card.querySelector('.visual-status');
+                    if (visStatus && visStatus.innerText !== statusText.replace('EN ACTO: ', '')) {
+                        visStatus.innerText = statusText.replace('EN ACTO: ', '');
+                    }
+                    const visName = card.querySelector('.visual-name');
+                    if (visName && visName.innerText !== shortName) {
+                        visName.innerText = shortName;
+                    }
+
+                    const btn09 = card.querySelector('.btn-09');
+                    if (btn09) {
+                        const newClass09 = `btn-chip btn-09 ${cls09}`;
+                        if(btn09.className !== newClass09) btn09.className = newClass09;
+                        btn09.disabled = isDisabled;
+                    }
+
+                    const btnCds = card.querySelector('.btn-cds');
+                    if (btnCds) {
+                        const newClassCds = `btn-chip btn-cds ${clsCds}`;
+                        if(btnCds.className !== newClassCds) btnCds.className = newClassCds;
+                        btnCds.disabled = isDisabled;
+                    }
+
+                    const btnPerm = card.querySelector('.btn-perm');
+                    if (btnPerm) {
+                        const newClassPerm = `btn-chip btn-perm ${clsPerm}`;
+                        if(btnPerm.className !== newClassPerm) btnPerm.className = newClassPerm;
+                        btnPerm.disabled = isDisabled;
+                    }
+
+                    const btnLicencia = card.querySelector('.btn-licencia');
+                    if (btnLicencia) {
+                        const newClassLicencia = `btn-chip btn-licencia ${clsLicencia}`;
+                        if(btnLicencia.className !== newClassLicencia) btnLicencia.className = newClassLicencia;
+                        btnLicencia.disabled = isDisabled;
+                    }
+
+                    const btn08 = card.querySelector('.btn-08');
+                    if (btn08) {
+                        const newClass08 = `btn-chip btn-08 ${cls08}`;
+                        if(btn08.className !== newClass08) btn08.className = newClass08;
+                        btn08.disabled = isDisabled;
+                    }
+                }
+            }
+        };
+
+        // --- FUNCIONES MODO VISUAL (MODAL ESTADOS) ---
+        window.visualSelectedId = null;
+
+        window.openVisualStatusModal = function(idRegistro) {
+            if (!localStorage.getItem('authUserId')) return;
+            const p = personnel.find(per => String(per.idRegistro) === String(idRegistro));
+            if (!p) return;
+
+            const enServicioVal = String(p.enServicio || '').trim();
+            const isReallyInService = window.isInServiceValue(enServicioVal) && !enServicioVal.startsWith('-');
+            if (window.isSpecialState(p) || isReallyInService || window.isHonorary(p)) {
+                return;
+            }
+
+            window.visualSelectedId = idRegistro;
+            document.getElementById('visual-select-name').innerText = window.formatShortName(p.nombreBombero);
+
+            const modal = document.getElementById('status-select-modal');
+            const content = document.getElementById('status-select-content');
+            document.body.classList.add('overflow-hidden');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+            }, 10);
+        };
+
+        window.closeVisualStatusModal = function() {
+            const modal = document.getElementById('status-select-modal');
+            const content = document.getElementById('status-select-content');
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                document.body.classList.remove('overflow-hidden');
+                window.visualSelectedId = null;
+            }, 200);
+        };
+
+        window.confirmVisualStatusChange = function(newStatus) {
+            if (window.visualSelectedId) {
+                window.changeStatus(window.visualSelectedId, newStatus);
+            }
+            window.closeVisualStatusModal();
+        };
+
+        window.changeStatus = async function(idRegistro, newStatus) {
+            if (!localStorage.getItem('authUserId')) return;
+            const p = personnel.find(per => String(per.idRegistro) === String(idRegistro));
+            if (!p || window.isSpecialState(p) || window.isHonorary(p)) return;
+            
+            const serviceIdVal = String(p.enServicio).trim();
+            const inService = window.isInServiceValue(serviceIdVal) && !serviceIdVal.startsWith('-');
+            if (inService) return;
+
+            if (String(p.estado).trim() === newStatus) return;
+
+            p.estado = newStatus;
+            
+            const isOffline = !navigator.onLine;
+            if (isOffline) {
+                p.offlineModified = true;
+                p.lastUpdateLocal = 0;
+            } else {
+                p.offlineModified = false;
+                p.lastUpdateLocal = Date.now(); 
+            }
+            
+            window.updateLocalStorage(); 
+            window.renderGrid(); 
+
+            if (!isOffline) {
+                window.queueFirebaseWrite('update', 'personal', String(idRegistro), new Object({ 
+                    estado: newStatus
+                }));
+
+                try {
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                    const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                    
+                    const nextIdStr = String(Date.now());
+
+                    window.queueFirebaseWrite('set', `personal/${idRegistro}/estados`, nextIdStr, new Object({
+                        estado: newStatus,
+                        fecha: dStr,
+                        hora: tStr,
+                        idEstado: nextIdStr,
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    console.error("Error guardando historial de estado:", e);
+                }
+            }
+        };
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

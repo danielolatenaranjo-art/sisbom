@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/personal/$(request.auth.uid)).data;
+    }
+
+    function isActiveUser() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/personal/$(request.auth.uid)) &&
+        (
+          getUserData().activo in ['SI', '1', 1, true]
+        );
+    }
+
+    function isAdminUser() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/personal/$(request.auth.uid)) &&
+        (
+          getUserData().autorizadoAdmin in ['1', 'SI', 'si', 'Si', true, 1]
+        );
+    }
+
+    function isComandante() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/personal/$(request.auth.uid)) &&
+        (
+          getUserData().idRadial in ['1', '01', '2', '02', '3', '03', 1, 2, 3] ||
+          getUserData().cargo in ['Comandante', 'COMANDANTE']
+        );
+    }
+
+    function isComandanteOrAdmin() {
+      return isComandante() || isAdminUser();
+    }
+
+    function isCentralOperator() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/accesos/central) && 
+        get(/databases/$(database)/documents/accesos/central).data.idRegistro == request.auth.uid && 
+        get(/databases/$(database)/documents/accesos/central).data.estado == 'activo';
+    }
+
+    function isInspector() {
+      return isAuthenticated() && 
+        exists(/databases/$(database)/documents/personal/$(request.auth.uid)) &&
+        getUserData().cargo.matches('(?i)^Inspector.*');
+    }
+
+    function hasModulo(modulo) {
+      return isComandanteOrAdmin() || (isInspector() && getUserData().modulosComandancia != null && modulo in getUserData().modulosComandancia);
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // personal collection
+    match /personal/{idRegistro} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator();
+      allow read: if isAuthenticated() || hasModulo('personal');
+      // Cualquier usuario autenticado puede actualizar su propio documento
+      // (idRegistro es el ID numérico del sistema, no el UID de Firebase Auth)
+      allow write: if isAuthenticated();
+
+      // estados subcollection - cualquier usuario autenticado puede escribir sus propios estados
+      match /estados/{idEstado} {
+        allow read, write: if isAuthenticated();
+      }
+
+      // hojaDeVida subcollection
+      match /hojaDeVida/{logId} {
+        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('personal');
+        allow read: if isAuthenticated();
+      }
+
+      // equipamiento subcollection
+      match /equipamiento/{docId} {
+        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('personal');
+        allow read: if isAuthenticated();
+      }
+
+      // salud subcollection
+      match /salud/{docId} {
+        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('personal');
+        allow read: if isAuthenticated();
+      }
+    }
+
+    // despachos collection
+    match /despachos/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('despachos');
+      allow read: if isAuthenticated();
+      // Regular firefighters can update specific fields (e.g. confirming attendance / units status)
+      allow update: if isAuthenticated();
+    }
+
+    // alertas collection
+    match /alertas/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('alertas');
+      allow read: if isAuthenticated();
+      // Regular firefighters can update "conforme", "fijar" and "mensajeAlerta"
+      allow update: if isAuthenticated();
+    }
+
+    // vehiculos collection
+    match /vehiculos/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('vehiculos');
+      allow read: if isAuthenticated();
+
+      // historial subcollection
+      match /historial/{logId} {
+        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('vehiculos');
+        allow read: if isAuthenticated();
+      }
+    }
+
+    // bitacora collection
+    match /bitacora/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('bitacora');
+      allow read: if isAuthenticated();
+    }
+
+    // asistencia collection
+    match /asistencia/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('asistencia');
+      allow read: if isAuthenticated();
+
+      match /bomberos/{userId} {
+        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('asistencia');
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated() && request.auth.uid == userId;
+      }
+    }
+
+    // sirena collection
+    match /sirena/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('sirena');
+      allow read: if isAuthenticated();
+    }
+
+    // prueba_radial collection
+    match /prueba_radial/{id} {
+      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('prueba_radial');
+      allow read: if isAuthenticated();
+
+      match /{document=**} {
+        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('prueba_radial');
+        allow read: if isAuthenticated();
+      }
+    }
+
+    // accesos collection
+    match /accesos/central {
+      allow read: if isAuthenticated();
+      allow create: if isComandanteOrAdmin() || (isActiveUser() && request.resource.data.idRegistro == request.auth.uid);
+      allow update: if isComandanteOrAdmin() || (isActiveUser() && (resource.data.idRegistro == request.auth.uid || request.resource.data.idRegistro == request.auth.uid));
+    }
+
+    match /accesos/central/registros/{id} {
+      allow read: if isAuthenticated();
+      allow create: if isComandanteOrAdmin() || (isActiveUser() && request.resource.data.idRegistro == request.auth.uid);
+      allow update: if isComandanteOrAdmin() || (isActiveUser() && (resource.data.idRegistro == request.auth.uid || request.resource.data.idRegistro == request.auth.uid));
+      allow delete: if isComandanteOrAdmin();
+    }
+
+    match /accesos/comandancia/{document=**} {
+      allow read, write: if isComandanteOrAdmin() || hasModulo('accesos');
+      allow read: if isAuthenticated();
+    }
+
+    // fcm_tokens collection
+    match /fcm_tokens/{token} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // saas_clientes collection
+    match /saas_clientes/{licenciaKey} {
+      allow read, write: if true;
+    }
+  }
+}

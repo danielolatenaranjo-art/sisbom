@@ -1,0 +1,357 @@
+import Foundation
+
+// MARK: - UserPersonal Model
+struct UserPersonal: Identifiable, Codable, Equatable {
+    var id: String { idRegistro }
+    let idRegistro: String
+    let nombreBombero: String
+    let idRadial: String
+    let contrasena: String
+    let activo: Bool
+    let conductor: Int
+    let enServicio: String
+    let cargo: String
+    let foto: String
+    let estado: String
+
+    enum CodingKeys: String, CodingKey {
+        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado
+    }
+
+    init(
+        idRegistro: String = "",
+        nombreBombero: String = "",
+        idRadial: String = "",
+        contrasena: String = "",
+        activo: Bool = false,
+        conductor: Int = 0,
+        enServicio: String = "0",
+        cargo: String = "",
+        foto: String = "",
+        estado: String = ""
+    ) {
+        self.idRegistro = idRegistro
+        self.nombreBombero = nombreBombero
+        self.idRadial = idRadial
+        self.contrasena = contrasena
+        self.activo = activo
+        self.conductor = conductor
+        self.enServicio = enServicio
+        self.cargo = cargo
+        self.foto = foto
+        self.estado = estado
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        idRegistro = try container.decodeIfPresent(String.self, forKey: .idRegistro) ?? ""
+        nombreBombero = try container.decodeIfPresent(String.self, forKey: .nombreBombero) ?? ""
+        idRadial = try container.decodeIfPresent(String.self, forKey: .idRadial) ?? ""
+        contrasena = try container.decodeIfPresent(String.self, forKey: .contrasena) ?? ""
+        conductor = try container.decodeIfPresent(Int.self, forKey: .conductor) ?? 0
+        enServicio = try container.decodeIfPresent(String.self, forKey: .enServicio) ?? "0"
+        cargo = try container.decodeIfPresent(String.self, forKey: .cargo) ?? ""
+        foto = try container.decodeIfPresent(String.self, forKey: .foto) ?? ""
+        estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? ""
+
+        // Flexible decoding for 'activo' (could be Bool, Int, or String)
+        if let boolVal = try? container.decode(Bool.self, forKey: .activo) {
+            activo = boolVal
+        } else if let intVal = try? container.decode(Int.self, forKey: .activo) {
+            activo = (intVal == 1)
+        } else if let strVal = try? container.decode(String.self, forKey: .activo) {
+            activo = (strVal == "1" || strVal.uppercased() == "SI")
+        } else {
+            activo = false
+        }
+    }
+}
+
+// MARK: - Dispatch Model
+struct Dispatch: Identifiable, Codable, Equatable {
+    var id: String { idServicio }
+    let idServicio: String
+    let clave: String
+    let lugar: String
+    let preinforme: String
+    let carros: String // Can be parsed flexibly inside Repository
+    let horaDespacho: String
+    let fechaDespacho: String
+    let hora67: String
+    let quienDespacha: String
+    let operadorFinal: String
+    
+    // Optional helper fields matching despacho.html
+    let carrosTexto: String?
+    let source: String?
+    let obacServicio: String?
+    let informeObac: String?
+    let fechaTermino: String?
+    let operadorInicial: String?
+
+    enum CodingKeys: String, CodingKey {
+        case idServicio, clave, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal
+        case carrosTexto, source, obacServicio, informeObac, fechaTermino, operadorInicial
+    }
+
+    init(
+        idServicio: String = "",
+        clave: String = "",
+        lugar: String = "",
+        preinforme: String = "",
+        carros: String = "",
+        horaDespacho: String = "",
+        fechaDespacho: String = "",
+        hora67: String = "",
+        quienDespacha: String = "",
+        operadorFinal: String = "",
+        carrosTexto: String? = nil,
+        source: String? = nil,
+        obacServicio: String? = nil,
+        informeObac: String? = nil,
+        fechaTermino: String? = nil,
+        operadorInicial: String? = nil
+    ) {
+        self.idServicio = idServicio
+        self.clave = clave
+        self.lugar = lugar
+        self.preinforme = preinforme
+        self.carros = carros
+        self.horaDespacho = horaDespacho
+        self.fechaDespacho = fechaDespacho
+        self.hora67 = hora67
+        self.quienDespacha = quienDespacha
+        self.operadorFinal = operadorFinal
+        self.carrosTexto = carrosTexto
+        self.source = source
+        self.obacServicio = obacServicio
+        self.informeObac = informeObac
+        self.fechaTermino = fechaTermino
+        self.operadorInicial = operadorInicial
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        idServicio = try container.decodeIfPresent(String.self, forKey: .idServicio) ?? ""
+        clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
+        lugar = try container.decodeIfPresent(String.self, forKey: .lugar) ?? ""
+        preinforme = try container.decodeIfPresent(String.self, forKey: .preinforme) ?? ""
+        horaDespacho = try container.decodeIfPresent(String.self, forKey: .horaDespacho) ?? ""
+        fechaDespacho = try container.decodeIfPresent(String.self, forKey: .fechaDespacho) ?? ""
+        hora67 = try container.decodeIfPresent(String.self, forKey: .hora67) ?? ""
+        quienDespacha = try container.decodeIfPresent(String.self, forKey: .quienDespacha) ?? ""
+        operadorFinal = try container.decodeIfPresent(String.self, forKey: .operadorFinal) ?? ""
+        
+        carrosTexto = try container.decodeIfPresent(String.self, forKey: .carrosTexto)
+        source = try container.decodeIfPresent(String.self, forKey: .source)
+        obacServicio = try container.decodeIfPresent(String.self, forKey: .obacServicio)
+        informeObac = try container.decodeIfPresent(String.self, forKey: .informeObac)
+        fechaTermino = try container.decodeIfPresent(String.self, forKey: .fechaTermino)
+        operadorInicial = try container.decodeIfPresent(String.self, forKey: .operadorInicial)
+
+        // Flexible decoding for 'carros' (can be String or Array/List)
+        if let stringCarros = try? container.decode(String.self, forKey: .carros) {
+            carros = stringCarros
+        } else if let arrayCarros = try? container.decode([String].self, forKey: .carros) {
+            carros = arrayCarros.joined(separator: ", ")
+        } else {
+            carros = ""
+        }
+    }
+}
+
+// MARK: - Alert Model
+struct Alert: Identifiable, Codable, Equatable {
+    var id: String { idAlerta }
+    let idAlerta: String
+    let tipo: String // "orden" or "alerta"
+    let gradoAlerta: String
+    let aQuienAlerta: String
+    let quienAlerta: String
+    let razonAlerta: String
+    let mensajeAlerta: String
+    let fechaAlerta: String
+    let horaAlerta: String
+    let duracion: String
+    let conforme: String // Can contain comma-separated IDs
+    let fijar: String // Can contain comma-separated IDs
+    let numeroOrden: String
+    let fechaOrden: String
+    let firmaNombre: String
+    let firmaCargo: String
+
+    enum CodingKeys: String, CodingKey {
+        case idAlerta, tipo, gradoAlerta, aQuienAlerta, quienAlerta, razonAlerta, mensajeAlerta, fechaAlerta, horaAlerta, duracion, conforme, fijar, numeroOrden, fechaOrden, firmaNombre, firmaCargo
+    }
+
+    init(
+        idAlerta: String = "",
+        tipo: String = "",
+        gradoAlerta: String = "1",
+        aQuienAlerta: String = "TC",
+        quienAlerta: String = "",
+        razonAlerta: String = "",
+        mensajeAlerta: String = "",
+        fechaAlerta: String = "",
+        horaAlerta: String = "",
+        duracion: String = "",
+        conforme: String = "",
+        fijar: String = "",
+        numeroOrden: String = "",
+        fechaOrden: String = "",
+        firmaNombre: String = "",
+        firmaCargo: String = ""
+    ) {
+        self.idAlerta = idAlerta
+        self.tipo = tipo
+        self.gradoAlerta = gradoAlerta
+        self.aQuienAlerta = aQuienAlerta
+        self.quienAlerta = quienAlerta
+        self.razonAlerta = razonAlerta
+        self.mensajeAlerta = mensajeAlerta
+        self.fechaAlerta = fechaAlerta
+        self.horaAlerta = horaAlerta
+        self.duracion = duracion
+        self.conforme = conforme
+        self.fijar = fijar
+        self.numeroOrden = numeroOrden
+        self.fechaOrden = fechaOrden
+        self.firmaNombre = firmaNombre
+        self.firmaCargo = firmaCargo
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        idAlerta = try container.decodeIfPresent(String.self, forKey: .idAlerta) ?? ""
+        tipo = try container.decodeIfPresent(String.self, forKey: .tipo) ?? ""
+        gradoAlerta = try container.decodeIfPresent(String.self, forKey: .gradoAlerta) ?? "1"
+        aQuienAlerta = try container.decodeIfPresent(String.self, forKey: .aQuienAlerta) ?? "TC"
+        quienAlerta = try container.decodeIfPresent(String.self, forKey: .quienAlerta) ?? ""
+        razonAlerta = try container.decodeIfPresent(String.self, forKey: .razonAlerta) ?? ""
+        mensajeAlerta = try container.decodeIfPresent(String.self, forKey: .mensajeAlerta) ?? ""
+        fechaAlerta = try container.decodeIfPresent(String.self, forKey: .fechaAlerta) ?? ""
+        horaAlerta = try container.decodeIfPresent(String.self, forKey: .horaAlerta) ?? ""
+        duracion = try container.decodeIfPresent(String.self, forKey: .duracion) ?? ""
+        conforme = try container.decodeIfPresent(String.self, forKey: .conforme) ?? ""
+        fijar = try container.decodeIfPresent(String.self, forKey: .fijar) ?? ""
+        numeroOrden = try container.decodeIfPresent(String.self, forKey: .numeroOrden) ?? ""
+        fechaOrden = try container.decodeIfPresent(String.self, forKey: .fechaOrden) ?? ""
+        firmaNombre = try container.decodeIfPresent(String.self, forKey: .firmaNombre) ?? ""
+        firmaCargo = try container.decodeIfPresent(String.self, forKey: .firmaCargo) ?? ""
+    }
+}
+
+// MARK: - Vehicle Model
+struct Vehicle: Identifiable, Codable, Equatable {
+    var id: String { idCarro }
+    let idCarro: String
+    let clave: String
+    let estado: String
+    let enServicio: String
+
+    enum CodingKeys: String, CodingKey {
+        case idCarro, clave, estado, enServicio
+    }
+
+    init(idCarro: String = "", clave: String = "", estado: String = "0-8", enServicio: String = "0") {
+        self.idCarro = idCarro
+        self.clave = clave
+        self.estado = estado
+        self.enServicio = enServicio
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        idCarro = try container.decodeIfPresent(String.self, forKey: .idCarro) ?? ""
+        clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
+        estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? "0-8"
+        enServicio = try container.decodeIfPresent(String.self, forKey: .enServicio) ?? "0"
+    }
+}
+
+// MARK: - AttendanceSheet Model
+struct AttendanceSheet: Identifiable, Codable, Equatable {
+    var id: String { idLista }
+    let idLista: String
+    let clave: String
+    let tipo: String
+    let fecha: String
+    let hora: String
+    let lugar: String
+    let aprobadoPor: String
+    let anulada: Bool
+    var userEstado: String // Populated locally from attendance subcollection
+    var userAbono: Double   // Populated locally from attendance subcollection
+
+    enum CodingKeys: String, CodingKey {
+        case idLista, clave, tipo, fecha, hora, lugar, aprobadoPor, anulada, userEstado, userAbono
+    }
+
+    init(
+        idLista: String = "",
+        clave: String = "",
+        tipo: String = "",
+        fecha: String = "",
+        hora: String = "",
+        lugar: String = "",
+        aprobadoPor: String = "",
+        anulada: Bool = false,
+        userEstado: String = "",
+        userAbono: Double = 0.0
+    ) {
+        self.idLista = idLista
+        self.clave = clave
+        self.tipo = tipo
+        self.fecha = fecha
+        self.hora = hora
+        self.lugar = lugar
+        self.aprobadoPor = aprobadoPor
+        self.anulada = anulada
+        self.userEstado = userEstado
+        self.userAbono = userAbono
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        idLista = try container.decodeIfPresent(String.self, forKey: .idLista) ?? ""
+        clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
+        tipo = try container.decodeIfPresent(String.self, forKey: .tipo) ?? ""
+        fecha = try container.decodeIfPresent(String.self, forKey: .fecha) ?? ""
+        hora = try container.decodeIfPresent(String.self, forKey: .hora) ?? ""
+        lugar = try container.decodeIfPresent(String.self, forKey: .lugar) ?? ""
+        aprobadoPor = try container.decodeIfPresent(String.self, forKey: .aprobadoPor) ?? ""
+        userEstado = try container.decodeIfPresent(String.self, forKey: .userEstado) ?? ""
+
+        // Flexible decoding for 'anulada' (Bool, Int, or String)
+        if let boolVal = try? container.decode(Bool.self, forKey: .anulada) {
+            anulada = boolVal
+        } else if let intVal = try? container.decode(Int.self, forKey: .anulada) {
+            anulada = (intVal == 1)
+        } else if let strVal = try? container.decode(String.self, forKey: .anulada) {
+            anulada = (strVal == "1" || strVal.uppercased() == "SI")
+        } else {
+            anulada = false
+        }
+
+        // Flexible decoding for 'userAbono' (Double, Int, or String)
+        if let doubleVal = try? container.decode(Double.self, forKey: .userAbono) {
+            userAbono = doubleVal
+        } else if let intVal = try? container.decode(Int.self, forKey: .userAbono) {
+            userAbono = Double(intVal)
+        } else if let strVal = try? container.decode(String.self, forKey: .userAbono) {
+            userAbono = Double(strVal) ?? 0.0
+        } else {
+            userAbono = 0.0
+        }
+    }
+}
+
+// MARK: - ChatMsgItem Model
+struct ChatMsgItem: Identifiable, Codable, Equatable {
+    var id: String { "\(senderId)-\(time)-\(message.hashValue)" }
+    let senderName: String
+    let senderId: String
+    let message: String
+    let time: String
+    let isMe: Bool
+}

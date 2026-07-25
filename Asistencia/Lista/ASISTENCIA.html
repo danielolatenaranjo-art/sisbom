@@ -1,0 +1,2647 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ingreso de Lista - SisBom</title>
+    
+    <!-- Configuración PWA -->
+    <meta name="theme-color" content="#0f172a">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="SisBom">
+    
+    <link rel="icon" type="image/png" href="Logo.png">
+    <link rel="apple-touch-icon" href="Logo.png">
+
+    <!-- MANIFIESTO PWA DINÁMICO -->
+    <link rel="manifest" id="my-manifest-placeholder">
+    
+    <!-- LIBRERÍAS EXTERNAS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['"Segoe UI Light"', '"Segoe UI"', 'Inter', 'system-ui', 'sans-serif'],
+                    },
+                    colors: {
+                        bomberos: {
+                            red: '#B91C1C',
+                            dark: '#7F1D1D',
+                            light: '#FEF2F2'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Estilos Base y Tipografía */
+        body { 
+            font-family: 'Segoe UI Light', 'Segoe UI', sans-serif; 
+            font-weight: 300;
+            font-size: 12px;
+            -webkit-tap-highlight-color: transparent; 
+            background-color: #f8fafc;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        strong, b, .font-bold, .font-black { font-family: 'Segoe UI', sans-serif; font-weight: 700; }
+        .font-black { font-weight: 900; }
+
+        /* Botones Animados */
+        .button-10 {
+            display: inline-flex; align-items: center; justify-content: center;
+            font-family: 'Segoe UI', sans-serif; font-weight: 700; 
+            border-radius: 8px; border: none; color: #fff;
+            transition: all 0.2s ease-out; cursor: pointer;
+        }
+        .button-10:active { transform: scale(0.98); opacity: 0.9; }
+        .btn-red { background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%); }
+        .btn-slate { background: #1e293b; }
+        .btn-white { background: #ffffff; color: #475569; border: 1px solid #e2e8f0; }
+
+        /* Botones de Estado Elegantes y Ampliados */
+        .status-btn {
+            width: 50px; height: 50px; border-radius: 10px; font-family: 'Segoe UI', sans-serif; font-weight: 800; font-size: 16px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: all 0.2s; flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center; text-transform: uppercase;
+        }
+
+        /* Inputs Elegantes */
+        .input-premium {
+            width: 100%; padding: 8px 12px; background-color: #ffffff; border: 1px solid #cbd5e1; border-radius: 8px;
+            outline: none; font-size: 14px; font-family: 'Segoe UI', sans-serif; font-weight: 600; color: #1e293b; transition: all 0.2s;
+        }
+        .input-premium:focus { border-color: #B91C1C; box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.08); }
+        .input-premium::placeholder { color: #94a3b8; font-weight: 400; font-family: 'Segoe UI Light', sans-serif; }
+
+        /* Spinner Global Minimalista (Pequeño y sin fondo gris) */
+        .spinner {
+            border: 3px solid transparent;
+            border-radius: 50%;
+            border-top: 3px solid #B91C1C;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        .spinner-sm {
+            border: 3px solid transparent;
+            border-radius: 50%;
+            border-top: 3px solid #B91C1C;
+            width: 32px;
+            height: 32px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Autocompletado */
+        .autocomplete-results {
+            position: absolute; left: 0; right: 0; background: white; border: 1px solid #e2e8f0; 
+            border-radius: 8px; max-height: 180px; overflow-y: auto; z-index: 100; bottom: 100%; margin-bottom: 4px;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.1); display: flex; flex-direction: column-reverse;
+        }
+        .autocomplete-item { padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; font-family: 'Segoe UI', sans-serif; font-weight: 600; font-size: 13px; }
+        .autocomplete-item:hover { background-color: #FEF2F2; color: #B91C1C; }
+        
+        /* Utilidades */
+        .hidden { display: none !important; }
+        .modal-closed { opacity: 0; pointer-events: none; transform: scale(0.98); }
+        .modal-container { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+
+        /* Ocultar el ojo nativo de los navegadores en inputs de contraseña */
+        input[type="password"]::-ms-reveal,
+        input[type="password"]::-ms-clear {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen overflow-x-hidden" onclick="window.closeAllAutocomplete()">
+
+    <!-- PANTALLA DE ACTIVACIÓN DE LICENCIA SAAS -->
+    <div id="license-lock-screen" class="fixed inset-0 hidden flex-col items-center justify-center bg-slate-950 text-white p-6 text-center select-none" style="z-index: 99990; background: radial-gradient(circle at top right, #1e1b4b, #09090b);">
+        <div class="max-w-md w-full p-8 rounded-3xl border border-white/5 bg-slate-900/60 backdrop-blur-md shadow-2xl">
+            <!-- STEP 1: LICENSE KEY -->
+            <div id="license-form-step" class="space-y-6">
+                <div class="w-16 h-16 bg-red-500/10 border border-red-500/25 rounded-2xl flex items-center justify-center mx-auto text-red-500 text-2xl shadow-lg shadow-red-500/5">
+                    <i class="fas fa-key"></i>
+                </div>
+                
+                <div>
+                    <h1 class="text-3xl font-black tracking-tight text-white mb-2">SisBom Lista</h1>
+                    <p class="text-zinc-400 font-semibold uppercase text-[10px] tracking-widest">Activación de Licencia de Aplicación</p>
+                </div>
+                
+                <div class="text-left space-y-4">
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 font-black">Clave de Licencia</label>
+                        <input type="text" id="activation-key-input" class="w-full bg-black/50 border border-white/10 rounded-xl py-3 px-4 text-white font-mono text-center tracking-wider text-xs uppercase focus:outline-none focus:border-red-500 focus:ring-2 focus:ring-red-500/10" placeholder="Ej: SB-LICENCIA-KEY">
+                    </div>
+                    
+                    <div id="activation-error" class="text-red-500 text-xs font-bold text-center h-5 hidden"></div>
+                    
+                    <button type="button" onclick="activateLicenseKey()" class="w-full py-3.5 bg-red-600 hover:bg-red-700 active:scale-[0.98] transition-all text-white font-bold rounded-xl shadow-lg shadow-red-600/20 uppercase tracking-widest text-xs">
+                        Activar Aplicación
+                    </button>
+                </div>
+            </div>
+
+            <!-- STEP 2: COMANDANTE SECURITY GATE -->
+            <div id="comandante-form-step" class="hidden space-y-6">
+                <div class="w-16 h-16 bg-amber-500/10 border border-amber-500/25 rounded-2xl flex items-center justify-center mx-auto text-amber-500 text-2xl shadow-lg shadow-amber-500/5">
+                    <i class="fas fa-shield-halved"></i>
+                </div>
+                
+                <div>
+                    <h1 class="text-2xl font-black tracking-tight text-white mb-2">Seguridad Comandante</h1>
+                    <p class="text-zinc-400 font-semibold uppercase text-[10px] tracking-widest">Verificación Requerida de Primer Uso</p>
+                </div>
+                
+                <div class="text-left space-y-4">
+                    <p class="text-zinc-400 text-xs text-center leading-relaxed">
+                        Para activar esta licencia por primera vez, se requiere la autorización del <strong>Comandante</strong> (idRadial 1). Ingrese su N° Registro y clave.
+                    </p>
+                    
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 font-black">N° Registro Comandante</label>
+                        <input type="text" id="com-user-input" class="w-full bg-black/50 border border-white/10 rounded-xl py-3 px-4 text-white text-center font-bold text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/10" placeholder="Ej: 1">
+                    </div>
+
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2 font-black">Contraseña Comandante</label>
+                        <input type="password" id="com-pass-input" class="w-full bg-black/50 border border-white/10 rounded-xl py-3 px-4 text-white text-center font-bold text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/10" placeholder="••••••••">
+                    </div>
+                    
+                    <div id="com-error" class="text-red-500 text-xs font-bold text-center h-5 hidden"></div>
+                    
+                    <div class="flex gap-3">
+                        <button type="button" onclick="cancelComandanteStep()" class="w-1/3 py-3.5 bg-zinc-800 hover:bg-zinc-700 active:scale-[0.98] transition-all text-zinc-300 font-bold rounded-xl uppercase tracking-widest text-xs">
+                            Volver
+                        </button>
+                        <button type="button" onclick="verifyComandanteAndActivate()" class="w-2/3 py-3.5 bg-amber-600 hover:bg-amber-700 active:scale-[0.98] transition-all text-white font-bold rounded-xl shadow-lg shadow-amber-600/20 uppercase tracking-widest text-xs">
+                            Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Global Error Banner -->
+    <div id="global-error-banner" class="fixed top-0 left-0 right-0 bg-red-600 text-white p-4 font-mono text-xs hidden flex-col" style="z-index: 100010;">
+        <div class="flex justify-between items-center mb-1">
+            <span class="font-bold uppercase">⚠️ Error del Sistema</span>
+            <button onclick="document.getElementById('global-error-banner').classList.add('hidden')" class="bg-red-800 px-2 py-0.5 rounded font-sans font-bold">Cerrar</button>
+        </div>
+        <pre id="global-error-message" class="whitespace-pre-wrap font-mono"></pre>
+    </div>
+
+    <!-- LOADER GLOBAL SEGURO SIN CORCHETES -->
+    <div id="full-screen-loader" class="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm hidden flex-col items-center justify-center transition-opacity duration-300" style="z-index: 9990;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- PANTALLA DE INICIO -->
+    <div id="start-screen" class="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 transition-all duration-500">
+        <div class="bg-white p-10 rounded-3xl shadow-xl w-full max-w-sm flex flex-col items-center border border-slate-200">
+            <img src="Logo.png" class="dynamic-logo w-24 h-24 mb-6 object-contain drop-shadow-md">
+            <h1 class="text-xl font-black text-slate-800 text-center uppercase tracking-tight mb-2 dynamic-client-name">SisBom</h1>
+            <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-8">Módulo de Asistencia</p>
+            <div class="w-full space-y-3">
+                <button onclick="window.enterApp()" class="button-10 btn-red w-full py-4 text-sm shadow-md uppercase tracking-widest">
+                    <i class="fas fa-plus-circle mr-2"></i> Nueva Lista
+                </button>
+                <button onclick="window.showHistory()" class="button-10 btn-white w-full py-4 text-sm uppercase tracking-widest hover:bg-slate-50">
+                    <i class="fas fa-history mr-2"></i> Ver Historial
+                </button>
+            </div>
+            <div class="mt-6 text-center text-slate-400 font-bold text-[9px] uppercase tracking-widest">
+                SISBOM V1.3.0 • Uso Oficial
+            </div>
+        </div>
+    </div>
+
+    <!-- APP CONTAINER -->
+    <div id="app-container" class="hidden min-h-screen flex flex-col">
+        <!-- Navbar -->
+        <nav class="bg-slate-900 text-white shadow-md fixed top-0 left-0 right-0 w-full z-[100] px-6 py-3 shrink-0">
+            <div class="container mx-auto flex items-center justify-between max-w-5xl">
+                <!-- Botón Cancelar -->
+                <button onclick="window.goHome()" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white hover:bg-slate-700 transition flex-shrink-0 border border-slate-700">
+                    <i class="fas fa-arrow-left text-xs"></i>
+                    <span class="text-xs font-bold uppercase tracking-widest hidden sm:block">Cancelar</span>
+                </button>
+
+                <!-- Logo + Título -->
+                <div class="flex items-center gap-3">
+                    <img src="Logo.png" class="dynamic-logo w-8 h-8 object-contain">
+                    <div class="flex flex-col text-left">
+                        <span class="font-bold text-base tracking-tight leading-none dynamic-client-name">Cuerpo de SisBom</span>
+                        <span class="text-xs text-slate-400 uppercase tracking-widest mt-0.5">Ingreso de Lista Operativa</span>
+                    </div>
+                </div>
+                
+                <div class="w-16"></div> <!-- Espaciador -->
+            </div>
+        </nav>
+
+        <main class="container mx-auto max-w-5xl p-4 sm:p-6 lg:p-8 space-y-6 flex-1 mt-16">
+            
+            <!-- SECCIÓN 1: Pasar Lista -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-4 border-b border-slate-100 bg-slate-50 flex items-center gap-2">
+                    <div class="w-8 h-8 rounded bg-blue-100 text-blue-600 flex items-center justify-center text-sm"><i class="fas fa-users"></i></div>
+                    <h2 class="text-xs font-bold text-slate-600 uppercase tracking-widest">1. Pasar Lista al Personal</h2>
+                </div>
+                
+                <!-- CONTENEDOR GRID RESPONSIVO -->
+                <div id="personnel-list" class="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 bg-slate-50 bg-opacity-50">
+                    <div class="text-center py-12 text-slate-300 flex flex-col items-center col-span-full">
+                        <div class="spinner mb-4"></div>
+                        <span class="font-semibold text-sm">Cargando base de datos...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECCIÓN 2: Detalles Servicio -->
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-5">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-8 h-8 rounded bg-bomberos-light text-bomberos-red flex items-center justify-center text-sm"><i class="fas fa-file-invoice"></i></div>
+                    <h2 class="text-xs font-bold text-slate-600 uppercase tracking-widest">2. Detalles del Servicio</h2>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 text-left">
+                    
+                    <!-- ENLAZADOR A DESPACHOS -->
+                    <div id="enlazador-despachos" class="lg:col-span-4 bg-blue-50 border border-blue-200 rounded-xl p-4 shadow-sm mb-2 hidden">
+                        <label class="text-xs font-black text-blue-700 uppercase tracking-widest ml-1 mb-2 block"><i class="fas fa-link mr-1"></i> ASOCIAR A SERVICIOS (DESPACHOS)</label>
+                        <div id="despachosCheckboxesContainer" class="flex flex-col gap-2 max-h-40 overflow-y-auto bg-white p-3 rounded-lg border border-blue-200 custom-scrollbar mb-2">
+                            <!-- Checkboxes will be inserted here dynamically -->
+                        </div>
+                        <p class="text-xs text-blue-500 font-bold mt-1 ml-1">Autocompleta los datos del primer despacho seleccionado.</p>
+                    </div>
+
+                    <!-- ID -->
+                    <div class="lg:col-span-1">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Lista N°</label>
+                        <input type="text" id="inputServiceId" readonly class="input-premium bg-slate-50 text-slate-500 cursor-not-allowed font-bold text-center border-slate-200 shadow-inner text-base">
+                    </div>
+                    
+                    <!-- Fecha -->
+                    <div class="lg:col-span-1">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Fecha y Hora</label>
+                        <input type="datetime-local" id="inputDateTime" class="input-premium font-medium text-base">
+                    </div>
+
+                    <!-- Tipo (Obligatorio o Abono) -->
+                    <div class="lg:col-span-2">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Tipo de lista</label>
+                        <select id="inputServiceType" class="input-premium appearance-none font-bold text-slate-700 text-base">
+                            <option value="0">Obligatoria</option>
+                            <option value="1">Abono (Extra)</option>
+                        </select>
+                    </div>
+
+                    <!-- Clave -->
+                    <div class="lg:col-span-2">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Clave Radial</label>
+                        <select id="inputKey" onchange="window.updateEventName()" class="input-premium appearance-none font-bold text-bomberos-red text-base">
+                            <option value="">Seleccione Clave...</option>
+                            <option value="10-0">10-0 (Llamado Estructural)</option>
+                            <option value="10-1">10-1 (Llamado a Vehículos)</option>
+                            <option value="10-2">10-2 (Pastizales y/o Basura)</option>
+                            <option value="10-3">10-3 (Rescate de Emergencia)</option>
+                            <option value="10-4">10-4 (Rescate Vehicular)</option>
+                            <option value="10-5">10-5 (Haz-Mat)</option>
+                            <option value="10-6">10-6 (Emanación de Gas)</option>
+                            <option value="10-7">10-7 (Llamado Eléctrico)</option>
+                            <option value="10-8">10-8 (No Clasificado)</option>
+                            <option value="10-9">10-9 (Otros Servicios)</option>
+                            <option value="10-10">10-10 (Llamado a Escombros)</option>
+                            <option value="10-12">10-12 (Apoyo a otros Cuerpos)</option>
+                            <option value="10-15">10-15 (Simulacro)</option>
+                            <option value="9-0">9-0 (Acuartelamiento General)</option>
+                        </select>
+                    </div>
+
+                    <!-- Evento -->
+                    <div class="lg:col-span-2">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Subclave / Tipo de Evento</label>
+                        <select id="inputEvent" class="input-premium appearance-none bg-slate-50 text-slate-700 font-medium text-base">
+                            <option value="">Seleccione Clave primero</option>
+                        </select>
+                    </div>
+
+                    <!-- Input Cuerpo a Apoyar (Solo para 10-12) -->
+                    <div id="supportBodyContainer" class="lg:col-span-4 hidden">
+                        <label class="text-xs font-bold text-blue-500 uppercase tracking-wider ml-1 mb-1 block">Cuerpo a Apoyar</label>
+                        <input type="text" id="inputSupportBody" class="input-premium border-blue-300 bg-blue-50 focus:bg-white text-blue-800 font-bold text-base" placeholder="Ej: Cuerpo de Bomberos Nancagua, San Fernando...">
+                    </div>
+
+                    <!-- Lugar -->
+                    <div class="lg:col-span-4">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Lugar o Dirección de la Emergencia</label>
+                        <input type="text" id="inputLocation" class="input-premium font-medium text-base" placeholder="Ej: Av. Los Aromos...">
+                    </div>
+
+                    <!-- OBAC -->
+                    <div class="relative lg:col-span-2">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Oficial a Cargo (OBAC)</label>
+                        <input type="text" id="inputOBAC" class="input-premium font-bold text-slate-800 text-base" placeholder="Buscar oficial..." onkeyup="window.filterOfficers(this, 'resultsOBAC')" autocomplete="off">
+                        <div id="resultsOBAC" class="autocomplete-results hidden"></div>
+                    </div>
+
+                    <!-- Quién Pasa la Lista -->
+                    <div class="relative lg:col-span-2">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Quién Pasa la Lista</label>
+                        <input type="text" id="inputListaPor" class="input-premium font-bold text-slate-800 text-base" placeholder="Buscar voluntario..." onkeyup="window.filterOfficers(this, 'resultsListaPor')" autocomplete="off">
+                        <div id="resultsListaPor" class="autocomplete-results hidden"></div>
+                    </div>
+
+                    <!-- Observaciones -->
+                    <div class="lg:col-span-4">
+                        <label class="text-xs font-black text-slate-400 uppercase tracking-wider ml-1 mb-1 block">Observaciones Adicionales</label>
+                        <textarea id="inputObs" rows="2" class="input-premium font-medium text-base resize-none" placeholder="Detalles adicionales..."></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANEL ACCIONES Y TOTALES -->
+            <div class="w-full bg-white border border-slate-200 shadow-sm p-4 rounded-xl mt-4 mb-4">
+                <div class="flex justify-between gap-2 mb-4 text-center">
+                    <div class="flex-1 bg-green-50 border border-green-200 rounded-lg p-2 shadow-sm">
+                        <span class="block text-lg font-black text-green-600 leading-none mb-1" id="count-asiste">0</span>
+                        <span class="text-xs font-bold text-green-600 uppercase">Asistentes</span>
+                    </div>
+                    <div class="flex-1 bg-red-50 border border-red-200 rounded-lg p-2 shadow-sm">
+                        <span class="block text-lg font-black text-red-600 leading-none mb-1" id="count-falta">0</span>
+                        <span class="text-xs font-bold text-red-600 uppercase">Faltas</span>
+                    </div>
+                    <div class="flex-1 bg-yellow-50 border border-yellow-200 rounded-lg p-2 shadow-sm">
+                        <span class="block text-lg font-black text-yellow-600 leading-none mb-1" id="count-permiso">0</span>
+                        <span class="text-xs font-bold text-yellow-600 uppercase">Permisos</span>
+                    </div>
+                    <div class="flex-1 bg-blue-50 border border-blue-200 rounded-lg p-2 shadow-sm">
+                        <span class="block text-lg font-black text-blue-600 leading-none mb-1" id="count-lm">0</span>
+                        <span class="text-xs font-bold text-blue-600 uppercase">Licencias</span>
+                    </div>
+                    <div class="flex-1 bg-purple-50 border border-purple-200 rounded-lg p-2 shadow-sm">
+                        <span class="block text-lg font-black text-purple-600 leading-none mb-1" id="count-susp">0</span>
+                        <span class="text-xs font-bold text-purple-700 uppercase">Suspendidos</span>
+                    </div>
+                </div>
+                <div class="grid grid-cols-6 gap-3">
+                    <button onclick="window.showHistory()" class="button-10 btn-white col-span-1 py-2.5 shadow-sm text-blue-600 border-slate-200 text-xs">
+                        <i class="fas fa-history md:mr-2"></i> <span class="hidden md:inline font-bold">Historial</span>
+                    </button>
+                    <button onclick="window.askClearSelections()" class="button-10 btn-white col-span-1 py-2.5 shadow-sm text-red-500 border-slate-200 text-xs">
+                        <i class="fas fa-eraser md:mr-2"></i> <span class="hidden md:inline font-bold">Limpiar</span>
+                    </button>
+                    <button onclick="window.saveAsLocalDraft()" id="btn-draft" class="button-10 bg-amber-500 hover:bg-amber-600 text-white col-span-2 py-2.5 rounded-lg shadow-sm text-xs tracking-widest uppercase font-black">
+                        <i class="fas fa-file-signature mr-2"></i> Borrador
+                    </button>
+                    <button onclick="window.submitList()" id="btn-submit" class="button-10 btn-slate col-span-2 py-2.5 rounded-lg shadow-sm text-xs tracking-widest uppercase font-black">
+                        <i class="fas fa-save mr-2"></i> Guardar Lista
+                    </button>
+                </div>
+                <div id="formErrorMessage" class="text-center text-red-500 text-xs font-bold hidden mt-3 bg-red-50 py-1.5 rounded border border-red-100"></div>
+            </div>
+            
+        </main>
+    </div>
+
+    <!-- MODAL CONFIRMACIÓN LISTA -->
+    <div id="confirmationModal" class="fixed inset-0 bg-slate-900 bg-opacity-60 backdrop-blur-sm hidden flex-col items-center justify-center p-4 transition-opacity duration-300 opacity-0" style="z-index: 9995;">
+        <div id="modalScrollArea" class="modal-container bg-white rounded-xl w-full max-w-2xl overflow-y-auto shadow-2xl custom-scrollbar relative transform scale-95 transition-transform duration-300 flex flex-col" style="max-height: 90vh;">
+            
+            <div class="p-5 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                <div>
+                    <h3 class="text-lg font-black text-slate-800 uppercase tracking-tight">Confirmar Lista</h3>
+                    <p class="text-xs text-slate-500 font-bold uppercase tracking-widest mt-0.5">Verifique los datos antes de registrar</p>
+                </div>
+                <div class="w-10 h-10 bg-bomberos-light text-bomberos-red rounded-full flex items-center justify-center text-lg shadow-sm border border-red-100">
+                    <i class="fas fa-clipboard-check"></i>
+                </div>
+            </div>
+            
+            <div class="p-5 space-y-5 bg-white">
+                <div id="summaryContainer" class="text-left w-full"></div>
+                
+                <div class="text-left bg-slate-50 rounded-lg p-5 border border-slate-200 shadow-sm mt-5">
+                    <label class="block text-xs font-black text-slate-600 uppercase tracking-widest mb-2"><i class="fas fa-shield-alt text-slate-400 mr-2"></i> Firma del Oficial (Contraseña)</label>
+                    <div class="relative mb-2">
+                        <div class="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none text-slate-300">
+                            <i class="fas fa-lock text-lg"></i>
+                        </div>
+                        <input type="password" id="confirmPassword" placeholder="• • • •" class="input-premium text-center font-black tracking-widest text-xl h-12 w-full bg-white px-12">
+                        <button type="button" onclick="window.togglePassword()" class="absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400 hover:text-bomberos-red transition-colors focus:outline-none">
+                            <i class="fas fa-eye text-lg" id="togglePassIcon"></i>
+                        </button>
+                    </div>
+                    <p class="text-xs text-red-500 mt-2 font-bold hidden text-center bg-red-50 py-1.5 rounded-lg" id="passwordError">
+                        <i class="fas fa-exclamation-triangle mr-1"></i> Contraseña incorrecta.
+                    </p>
+
+                    <div class="flex gap-3 mt-4 pt-4 border-t border-slate-200">
+                        <button onclick="window.closeConfirmation()" class="button-10 btn-white flex-1 text-xs py-3 shadow-sm border border-slate-200 uppercase tracking-widest font-black">
+                            <i class="fas fa-edit mr-2"></i> Editar
+                        </button>
+                        <button onclick="window.confirmSave()" class="button-10 btn-red flex-1 text-xs py-3 shadow-sm uppercase tracking-widest font-black">
+                            <i class="fas fa-check-double mr-2"></i> Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL HISTORIAL CON PAGINACIÓN -->
+    <div id="historyModal" class="fixed inset-0 hidden flex-col items-center justify-center bg-slate-900 bg-opacity-60 backdrop-blur-sm p-4 modal-closed opacity-0 transition-opacity duration-300" style="z-index: 10010;">
+        <div class="modal-container bg-white w-full max-w-4xl rounded-2xl flex flex-col shadow-2xl overflow-hidden transform scale-95" style="height: 90vh;">
+            <div class="px-5 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0 z-20">
+                <div>
+                    <h3 class="text-lg font-black text-slate-800 uppercase">Historial Operativo</h3>
+                    <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">Registro de Servicios</p>
+                </div>
+                <button onclick="window.closeHistory()" class="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-400 hover:text-red-500 shadow-sm transition-colors">
+                    <i class="fas fa-times text-sm"></i>
+                </button>
+            </div>
+            
+            <div class="p-3 bg-white border-b border-slate-200 grid grid-cols-2 sm:grid-cols-5 gap-2 shrink-0 z-10 shadow-sm">
+                <input type="number" id="filterHistId" placeholder="N° Lista..." class="input-premium text-xs py-2" oninput="window.applyHistoryFilters()">
+                <select id="filterHistDate" class="input-premium text-xs py-2" onchange="window.applyHistoryFilters()"><option value="">Fecha (Todas)</option></select>
+                <select id="filterHistKey" class="input-premium text-xs py-2" onchange="window.applyHistoryFilters()"><option value="">Clave (Todas)</option></select>
+                <select id="filterHistStatus" class="input-premium text-xs py-2" onchange="window.applyHistoryFilters()">
+                    <option value="">Estado (Todos)</option>
+                    <option value="Aprobada">Aprobada</option>
+                    <option value="Anulada">Anulada</option>
+                    <option value="Normal">Pendiente</option>
+                </select>
+                <div class="flex gap-2 h-full">
+                    <button onclick="window.clearHistoryFilters()" class="button-10 btn-white text-xs uppercase font-black tracking-widest flex-1 py-2" title="Limpiar Filtros">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                    <button onclick="window.forceRefreshHistory()" class="button-10 btn-slate text-xs uppercase font-black tracking-widest flex-1 py-2" title="Sincronizar Nube">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="p-4 overflow-y-auto flex-1 bg-slate-50 custom-scrollbar" id="history-content">
+                <div class="py-20 text-center text-slate-400 flex flex-col items-center justify-center h-full">
+                    <div class="spinner mb-4"></div>
+                    <p class="text-xs font-bold uppercase tracking-widest">Consultando el historial...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODALES DE APOYO -->
+    <div id="cleanConfirmationModal" class="fixed inset-0 hidden flex-col items-center justify-center bg-slate-900 bg-opacity-60 backdrop-blur-sm p-4 modal-closed opacity-0 transition-opacity duration-300" style="z-index: 9995;">
+        <div class="modal-container bg-white rounded-xl p-6 max-w-sm w-full text-center shadow-xl border border-slate-100">
+            <div class="w-12 h-12 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                <i class="fas fa-eraser text-xl text-red-500"></i>
+            </div>
+            <h3 class="text-lg font-black text-slate-800 mb-1">¿Limpiar formulario?</h3>
+            <p class="text-slate-500 text-xs mb-5">Se borrarán todos los datos ingresados actualmente.</p>
+            <div class="grid grid-cols-2 gap-2">
+                <button onclick="window.closeCleanModal()" class="button-10 btn-white py-2.5 text-xs uppercase tracking-widest font-bold">Cancelar</button>
+                <button onclick="window.performClear()" class="button-10 btn-red py-2.5 text-xs shadow-sm uppercase tracking-widest font-bold">Sí, Limpiar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="customAlertModal" class="fixed inset-0 hidden flex-col items-center justify-center bg-slate-900 bg-opacity-60 backdrop-blur-sm p-4 modal-closed opacity-0 transition-opacity duration-300" style="z-index: 10005;">
+        <div class="modal-container bg-white rounded-2xl p-6 max-w-sm w-full text-center shadow-xl border border-slate-100">
+            <div class="w-12 h-12 bg-yellow-50 rounded-full flex items-center justify-center mx-auto mb-3">
+                <i class="fas fa-exclamation text-xl text-yellow-500"></i>
+            </div>
+            <h3 class="text-lg font-black text-slate-800 mb-1">Atención</h3>
+            <p id="customAlertMessage" class="text-slate-500 text-xs mb-5"></p>
+            <button onclick="window.closeCustomAlert()" class="button-10 btn-slate w-full py-2.5 text-xs uppercase font-bold tracking-widest">Entendido</button>
+        </div>
+    </div>
+
+    <div id="successModal" class="fixed inset-0 hidden flex-col items-center justify-center bg-slate-900 bg-opacity-80 backdrop-blur-sm p-4 modal-closed opacity-0 transition-opacity duration-300" style="z-index: 10000;">
+        <div class="modal-container bg-white rounded-3xl p-8 max-w-sm w-full text-center shadow-2xl border border-slate-100">
+            <div class="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-5 animate-bounce shadow-inner border-4 border-green-200">
+                <i class="fas fa-check text-4xl text-green-500"></i>
+            </div>
+            <h3 class="text-2xl font-black text-slate-800 uppercase tracking-tight mb-2">¡Registrado!</h3>
+            <p class="text-slate-500 text-sm font-medium mb-6">La lista ha sido guardada exitosamente en el sistema.</p>
+            <button onclick="window.location.reload()" class="button-10 btn-slate w-full py-3 rounded-xl text-sm font-bold shadow-md uppercase tracking-widest">
+                <i class="fas fa-home mr-2"></i> Volver al Inicio
+            </button>
+        </div>
+    </div>
+
+    <!-- LÓGICA JAVASCRIPT & FIREBASE -->
+    <script>
+        // Dynamic Branding cache initialization
+        (function applyBrandingCache() {
+            const cachedName = localStorage.getItem('saas_client_name') || 'SisBom';
+            const cachedLogo = localStorage.getItem('saas_logo_url') || 'Logo.png';
+            
+            document.title = cachedName + " - INGRESO DE LISTA";
+            
+            window.applyDynamicBranding = function() {
+                const name = localStorage.getItem('saas_client_name') || 'SisBom';
+                const logo = localStorage.getItem('saas_logo_url') || 'Logo.png';
+                
+                document.title = name + " - INGRESO DE LISTA";
+                document.querySelectorAll('.dynamic-logo').forEach(img => {
+                    img.src = logo;
+                });
+                
+                document.querySelectorAll('.dynamic-client-name').forEach(el => {
+                    el.innerText = name;
+                });
+            };
+
+            window.checkSaaSLicenseStatus = function() {
+                const hasSaaS = localStorage.getItem('saas_firebase_config');
+                if (!hasSaaS) {
+                    document.getElementById('license-lock-screen').classList.remove('hidden');
+                    document.getElementById('license-lock-screen').classList.add('flex');
+                    document.getElementById('start-screen').classList.add('hidden');
+                }
+                const licenseKey = localStorage.getItem('saas_license_key') || "";
+                if (window.AndroidApp && typeof window.AndroidApp.updateLauncherIcon === 'function') {
+                    window.AndroidApp.updateLauncherIcon(licenseKey);
+                }
+            };
+
+            document.addEventListener('DOMContentLoaded', () => {
+                window.applyDynamicBranding();
+                window.checkSaaSLicenseStatus();
+            });
+        })();
+
+        // Helper universally compatible padding function (no padStart needed)
+        const pad2 = (val) => {
+            const s = String(val || '');
+            return s.length >= 2 ? s : ('0' + s).slice(-2);
+        };
+
+        // WebView Global Error Logger
+        window.onerror = function(message, source, lineno, colno, error) {
+            const banner = document.getElementById('global-error-banner');
+            const msgEl = document.getElementById('global-error-message');
+            if (banner && msgEl) {
+                banner.classList.remove('hidden');
+                banner.classList.add('flex');
+                msgEl.innerText = `${message}\nEn: ${source}:${lineno}:${colno}\nStack: ${error ? error.stack : 'No stack'}`;
+            }
+            return false;
+        };
+
+        window.onunhandledrejection = function(event) {
+            const banner = document.getElementById('global-error-banner');
+            const msgEl = document.getElementById('global-error-message');
+            if (banner && msgEl) {
+                banner.classList.remove('hidden');
+                banner.classList.add('flex');
+                msgEl.innerText = `Promesa rechazada: ${event.reason ? (event.reason.message || event.reason) : event}\nStack: ${event.reason && event.reason.stack ? event.reason.stack : 'No stack'}`;
+            }
+        };
+
+        const FALLBACK_LOGO = "Logo.png";
+
+        // ── VERSIÓN Y OTA ────────────────────────────────────────────────────────
+        const LISTA_APP_VERSION = "1.3.0";
+        const OTA_VERSION_URL = "https://sisbom-de5f8.web.app/lista-version.json";
+        
+        window.formatListIdForUser = (id) => {
+            if (!id) return '';
+            const idStr = String(id);
+            if (idStr.length === 7) {
+                return String(parseInt(idStr.substring(4), 10));
+            }
+            return idStr;
+        };
+
+        function calculateNextServiceId(historyArray) {
+            const now = new Date();
+            const y = now.getFullYear();
+            const m = now.getMonth() + 1;
+            const cycleYear = (m === 12) ? (y + 1) : y;
+            
+            let maxSeq = 0;
+            historyArray.forEach(h => {
+                const idStr = String(h.serviceId);
+                if (idStr.startsWith(String(cycleYear)) && idStr.length === 7) {
+                    const seq = parseInt(idStr.substring(4), 10);
+                    if (!isNaN(seq) && seq > maxSeq) {
+                        maxSeq = seq;
+                    }
+                }
+            });
+            const suggestedSeq = maxSeq + 1;
+            return `${cycleYear}${String(suggestedSeq).padStart(3, '0')}`;
+        }
+
+        window.editingDraftId = null;
+        window.draftStatuses = null;
+
+        let personnelData = new Array();
+        let historyData = new Array();
+        let despachosData = new Array();
+        let nextServiceId = 1, currentOBACPass = "";
+        
+        // Variables de Paginación para el Historial
+        let currentFilteredHistory = new Array();
+        let currentHistoryPage = 1;
+        const HISTORY_ITEMS_PER_PAGE = 10;
+
+        // ── PRE-CARGA DE CACHÉ LOCAL (Historial instantáneo) ─────────────────────
+        window.preloadLocalCache = function() {
+            try {
+                const cachedHistory = localStorage.getItem('sisbom_history_cache');
+                if (cachedHistory) {
+                    historyData = JSON.parse(cachedHistory);
+                }
+
+                let drafts = [];
+                try {
+                    const draftsStr = localStorage.getItem('sisbom_local_drafts');
+                    if (draftsStr) drafts = JSON.parse(draftsStr);
+                } catch(e){}
+
+                // Merge drafts into cached history, filtering out any drafts already saved
+                const savedIds = historyData.map(h => String(h.serviceId));
+                drafts = drafts.filter(d => !savedIds.includes(String(d.serviceId)));
+                historyData = [...drafts, ...historyData];
+
+                historyData.sort((a, b) => parseInt(b.serviceId) - parseInt(a.serviceId));
+                nextServiceId = calculateNextServiceId(historyData);
+
+                const cachedPersonal = localStorage.getItem('sisbom_personal_cache');
+                if (cachedPersonal) personnelData = JSON.parse(cachedPersonal);
+                const cachedDespachos = localStorage.getItem('sisbom_despachos_cache');
+                if (cachedDespachos) despachosData = JSON.parse(cachedDespachos);
+            } catch(e) { console.warn('[SisBom] Error leyendo caché local:', e); }
+        };
+        window.preloadLocalCache();
+        
+        // --- CONFIGURACIÓN FIREBASE ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+            authDomain: "sisbom-de5f8.firebaseapp.com",
+            projectId: "sisbom-de5f8",
+            storageBucket: "sisbom-de5f8.firebasestorage.app",
+            messagingSenderId: "39449538456",
+            appId: "1:39449538456:web:64f767264356ae587485ed"
+        };
+
+        let fbDb = null;
+        let fbDoc, fbSetDoc, fbUpdateDoc, fbCollection, fbGetDocs, fbWriteBatch, fbOnSnapshot, fbQuery, fbWhere;
+
+        window.parseDateToISO = function(safeFecha) {
+            if (!safeFecha) return "";
+            if (safeFecha.includes('/')) {
+                const p = safeFecha.split('/');
+                if (p.length === 3) {
+                    return `${p[2]}-${pad2(p[0])}-${pad2(p[1])}`;
+                }
+            } else if (safeFecha.includes('-')) {
+                const p = safeFecha.split('-');
+                if (p.length === 3) {
+                    if (p[0].length === 4) {
+                        return `${p[0]}-${pad2(p[1])}-${pad2(p[2])}`;
+                    } else {
+                        return `${p[2]}-${pad2(p[1])}-${pad2(p[0])}`;
+                    }
+                }
+            }
+            return "";
+        };
+
+        window.formatDateForDisplay = function(dateString) {
+            let s = dateString ? String(dateString).replace(/['"]/g, '').trim() : '';
+            if (!s) return '';
+            
+            const clean = s.replace(/\//g, '-');
+            const parts = clean.split('-');
+            if (parts.length === 3) {
+                let d, m, y;
+                if (parts[0].length === 4) {
+                    // yyyy-mm-dd
+                    y = parts[0];
+                    m = parts[1];
+                    d = parts[2];
+                } else {
+                    // dd-mm-yyyy
+                    d = parts[0];
+                    m = parts[1];
+                    y = parts[2];
+                }
+                // Detectar formato antiguo MM/DD/YYYY donde el mes superaba a 12
+                if (parseInt(d, 10) <= 12 && parseInt(m, 10) > 12) {
+                    const temp = d;
+                    d = m;
+                    m = temp;
+                }
+                return `${String(d).padStart(2, '0')}-${String(m).padStart(2, '0')}-${y}`;
+            }
+            return s;
+        };
+
+        window.formatShortName = function(fullName) {
+            if (!fullName) return "";
+            const words = String(fullName).trim().split(/\s+/);
+            if (words.length <= 1) return fullName;
+            if (words.length === 2) return `${words[0]} ${words[1]}`;
+            return `${words[0]} ${words[words.length-2]}`;
+        };
+
+        function checkDateActive(dateStr) {
+            let s = dateStr ? String(dateStr).replace(/['"]/g, '').trim() : '';
+            if (!s) return false;
+            let end;
+            
+            if(s.includes('/')) {
+                const p = s.split('/');
+                end = new Date(p[2], parseInt(p[0]) - 1, p[1]);
+            } else if (s.includes('T')) {
+                const parts = s.split('T')[0].split('-');
+                end = new Date(parts[0], parseInt(parts[1]) - 1, parts[2]);
+            } else if (s.includes('-') && s.split('-')[0].length === 2) {
+                const parts = s.split('-');
+                end = new Date(parts[2], parseInt(parts[1]) - 1, parts[0]);
+            } else if (s.includes('-') && s.split('-')[0].length === 4) {
+                const parts = s.split('-');
+                end = new Date(parts[0], parseInt(parts[1]) - 1, parts[2]);
+            } else { 
+                end = new Date(s); 
+            }
+            
+            if (isNaN(end.getTime())) return false;
+            
+            const today = new Date(); 
+            today.setHours(0,0,0,0); 
+            end.setHours(0,0,0,0);
+            return end >= today;
+        }
+
+        function isUserSuspended(p) {
+            if (p.fechaSuspensionFin && String(p.fechaSuspensionFin).trim() !== '') {
+                return checkDateActive(p.fechaSuspensionFin);
+            }
+            return false;
+        }
+
+        function isUserCDS(p) {
+            return (String(p.cds) === '1' || String(p.cds).toUpperCase() === 'SI' || String(p.estadoBase).toUpperCase() === 'CDS');
+        }
+
+        function isUserPermiso(p) {
+            return (String(p.permiso) === '1' || String(p.permiso).toUpperCase() === 'SI' || String(p.estadoBase).toUpperCase() === 'PERMISO');
+        }
+
+        function isUserLM(p) {
+            if (p.licenciaMedica && String(p.licenciaMedica).trim() !== '') {
+                return checkDateActive(p.licenciaMedica);
+            }
+            const cleanSt = String(p.estadoBase || '').trim().toUpperCase();
+            if (cleanSt === 'LICENCIA' || cleanSt === 'LICENCIA MEDICA' || cleanSt === 'LICENCIA MÉDICA') {
+                return true;
+            }
+            return false;
+        }
+
+        // --- INICIALIZACIÓN ---
+        let _reconnectTimeout = null;
+        let _isReconnecting = false;
+        const _activeUnsubs = [];
+
+        function scheduleReconnect() {
+            if (_isReconnecting) return;
+            _isReconnecting = true;
+            _activeUnsubs.forEach(u => { try { u(); } catch(e){} });
+            _activeUnsubs.length = 0;
+            console.warn('[SisBom] Conexión perdida. Reconectando en 5s...');
+            clearTimeout(_reconnectTimeout);
+            _reconnectTimeout = setTimeout(async () => {
+                _isReconnecting = false;
+                await initFirebaseAndLoadData();
+            }, 5000);
+        }
+
+        // ── OTA UPDATE SYSTEM ────────────────────────────────────────────────────
+        async function checkForOTAUpdate() {
+            try {
+                // Aplicar OTA ya descargada en sesión anterior
+                const otaVersion = localStorage.getItem('ota_version');
+                const otaHtml   = localStorage.getItem('ota_html');
+                if (otaVersion && otaHtml && otaVersion !== LISTA_APP_VERSION) {
+                    console.log('[OTA] Aplicando actualización almacenada v' + otaVersion);
+                    localStorage.setItem('ota_applied_version', otaVersion);
+                    localStorage.removeItem('ota_html');
+                    localStorage.removeItem('ota_version');
+                    document.open();
+                    document.write(otaHtml);
+                    document.close();
+                    return;
+                }
+
+                // Verificar si hay versión nueva en el servidor
+                const res = await fetch(OTA_VERSION_URL + '?t=' + Date.now(), {
+                    cache: 'no-store', method: 'GET',
+                    signal: AbortSignal.timeout(8000)
+                });
+                if (!res.ok) return;
+                const manifest = await res.json();
+                const remoteVersion = manifest.version || '';
+                const remoteUrl     = manifest.url || '';
+
+                if (!remoteVersion || !remoteUrl) return;
+
+                // Comparar versiones (semver simplificado)
+                function versionGT(a, b) {
+                    const pa = a.split('.').map(Number);
+                    const pb = b.split('.').map(Number);
+                    for (let i = 0; i < 3; i++) {
+                        if ((pa[i]||0) > (pb[i]||0)) return true;
+                        if ((pa[i]||0) < (pb[i]||0)) return false;
+                    }
+                    return false;
+                }
+
+                if (!versionGT(remoteVersion, LISTA_APP_VERSION)) return;
+
+                console.log('[OTA] Nueva versión disponible:', remoteVersion);
+
+                // Descargar el nuevo HTML en segundo plano
+                const htmlRes = await fetch(remoteUrl + '?t=' + Date.now(), {
+                    cache: 'no-store',
+                    signal: AbortSignal.timeout(30000)
+                });
+                if (!htmlRes.ok) return;
+                const newHtml = await htmlRes.text();
+
+                // Guardar en localStorage
+                localStorage.setItem('ota_html', newHtml);
+                localStorage.setItem('ota_version', remoteVersion);
+
+                // Mostrar banner de actualización
+                showOTABanner(remoteVersion, manifest.notes || '');
+
+            } catch(e) {
+                console.warn('[OTA] No se pudo verificar actualización:', e.message);
+            }
+        }
+
+        function showOTABanner(version, notes) {
+            const existing = document.getElementById('ota-banner');
+            if (existing) return;
+            const banner = document.createElement('div');
+            banner.id = 'ota-banner';
+            banner.style.cssText = [
+                'position:fixed','bottom:0','left:0','right:0','z-index:99999',
+                'background:linear-gradient(135deg,#1e3a5f,#0f172a)',
+                'border-top:3px solid #3b82f6',
+                'padding:14px 20px','display:flex','align-items:center',
+                'gap:12px','box-shadow:0 -4px 24px rgba(0,0,0,0.4)',
+                'animation:slideUp 0.4s ease'
+            ].join(';');
+            banner.innerHTML = [
+                '<style>@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}</style>',
+                '<div style="flex:1;min-width:0">',
+                '  <p style="margin:0;color:#93c5fd;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.1em">',
+                '    <i class="fas fa-download" style="margin-right:6px"></i>Actualización disponible — v' + version,
+                '  </p>',
+                notes ? '<p style="margin:2px 0 0;color:#64748b;font-size:10px;font-weight:600">' + notes + '</p>' : '',
+                '</div>',
+                '<button onclick="window.applyOTAUpdate()" style="',
+                '  background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;border:none;',
+                '  padding:10px 18px;border-radius:8px;font-weight:800;font-size:11px;',
+                '  cursor:pointer;white-space:nowrap;text-transform:uppercase;letter-spacing:.05em;',
+                '  box-shadow:0 2px 8px rgba(37,99,235,0.4)">',
+                '  <i class="fas fa-sync-alt" style="margin-right:6px"></i>Actualizar ahora',
+                '</button>',
+                '<button onclick="document.getElementById(\"ota-banner\").remove()" style="',
+                '  background:transparent;color:#475569;border:1px solid #334155;',
+                '  padding:10px 14px;border-radius:8px;font-weight:700;font-size:11px;cursor:pointer">',
+                '  Después',
+                '</button>'
+            ].join('');
+            document.body.appendChild(banner);
+        }
+
+        window.applyOTAUpdate = function() {
+            const otaHtml = localStorage.getItem('ota_html');
+            if (!otaHtml) { window.location.reload(); return; }
+            const otaVersion = localStorage.getItem('ota_version') || '';
+            localStorage.setItem('ota_applied_version', otaVersion);
+            localStorage.removeItem('ota_html');
+            localStorage.removeItem('ota_version');
+            document.open();
+            document.write(otaHtml);
+            document.close();
+        };
+
+        window.saveAsLocalDraft = () => {
+            const key = document.getElementById('inputKey').value;
+            const obacInput = document.getElementById('inputOBAC');
+            const obacValue = obacInput.value.trim().toUpperCase();
+            
+            if (!obacValue || !key) {
+                const msg = document.getElementById('formErrorMessage');
+                msg.innerText = "Debe completar Oficial a Cargo (OBAC) y Clave Radial para guardar borrador.";
+                msg.classList.remove('hidden');
+                setTimeout(() => msg.classList.add('hidden'), 4000);
+                return;
+            }
+
+            let event = document.getElementById('inputEvent').value;
+            if(key === '10-12') {
+                const bodySupport = document.getElementById('inputSupportBody').value;
+                if(bodySupport) event += ` - Apoyo a: ${bodySupport}`;
+            }
+
+            const rawDate = new Date(document.getElementById('inputDateTime').value);
+            const day = pad2(rawDate.getDate());
+            const month = pad2(rawDate.getMonth() + 1);
+            const year = rawDate.getFullYear();
+            const hours = pad2(rawDate.getHours());
+            const minutes = pad2(rawDate.getMinutes());
+            
+            const formattedDate = `${day}-${month}-${year}`;
+            const formattedTime = `${hours}:${minutes}`;
+
+            const checkedInputs = Array.from(document.querySelectorAll('input[name="associated_dispatch"]:checked'));
+            const associatedIds = checkedInputs.map(input => input.value);
+            const idDespachoAsoc = associatedIds.join(', ');
+
+            const btns = document.querySelectorAll('.status-btn');
+            const att = new Array();
+            btns.forEach(btn => {
+                let st = btn.dataset.status.toUpperCase();
+                if (st === "LICENCIA MÉDICA") st = "LICENCIA MEDICA"; 
+                att.push({ 
+                    idRegistro: btn.dataset.id,
+                    nombreBombero: btn.dataset.nombre,
+                    estado: st,
+                    ordenEnLista: parseInt(btn.dataset.orden)
+                });
+            });
+            att.sort((a,b) => a.ordenEnLista - b.ordenEnLista);
+
+            let drafts = [];
+            try {
+                const draftsStr = localStorage.getItem('sisbom_local_drafts');
+                if (draftsStr) drafts = JSON.parse(draftsStr);
+            } catch(e){}
+
+            const docId = window.editingDraftId || String(nextServiceId);
+
+            const draftObj = {
+                serviceId: docId,
+                serviceKey: key.toUpperCase(),
+                Evento: event,
+                fecha: formattedDate,
+                hora: formattedTime,
+                esAbono: document.getElementById('inputServiceType').value === '1' ? 1 : 0,
+                obac: obacValue,
+                listaPor: document.getElementById('inputListaPor').value.toUpperCase(),
+                Lugar: document.getElementById('inputLocation').value.trim(),
+                obs: document.getElementById('inputObs').value.trim(),
+                idServicio: idDespachoAsoc || "",
+                aprobadoPor: "",
+                anulada: "",
+                anuladaPor: "",
+                isLocalDraft: true,
+                firefighters: att
+            };
+
+            drafts = drafts.filter(d => String(d.serviceId) !== String(docId));
+            drafts.push(draftObj);
+            localStorage.setItem('sisbom_local_drafts', JSON.stringify(drafts));
+
+            localStorage.setItem(`sisbom_bomberos_${docId}`, JSON.stringify(att));
+
+            window.editingDraftId = null;
+
+            window.preloadLocalCache();
+
+            window.showCustomAlert("Borrador local guardado correctamente. Lo puedes confirmar en el Historial.");
+            window.performClear();
+        };
+
+        window.confirmDeleteDraft = (id) => {
+            if (confirm(`¿Está seguro de que deseas eliminar permanentemente este borrador local (Lista #${window.formatListIdForUser(id)})?`)) {
+                let drafts = [];
+                try {
+                    const draftsStr = localStorage.getItem('sisbom_local_drafts');
+                    if (draftsStr) drafts = JSON.parse(draftsStr);
+                } catch(e){}
+                drafts = drafts.filter(d => String(d.serviceId) !== String(id));
+                localStorage.setItem('sisbom_local_drafts', JSON.stringify(drafts));
+                
+                localStorage.removeItem(`sisbom_bomberos_${id}`);
+
+                window.preloadLocalCache();
+                window.applyHistoryFilters();
+            }
+        };
+
+        window.confirmLoadDraft = (id) => {
+            let drafts = [];
+            try {
+                const draftsStr = localStorage.getItem('sisbom_local_drafts');
+                if (draftsStr) drafts = JSON.parse(draftsStr);
+            } catch(e){}
+            const d = drafts.find(x => String(x.serviceId) === String(id));
+            if (!d) return;
+
+            window.editingDraftId = d.serviceId;
+
+            document.getElementById('inputKey').value = d.serviceKey;
+            window.updateEventName();
+
+            let cleanEvent = d.Evento || '';
+            if (d.serviceKey === '10-12' && d.Evento && d.Evento.includes(' - Apoyo a: ')) {
+                const parts = d.Evento.split(' - Apoyo a: ');
+                cleanEvent = parts[0];
+                document.getElementById('inputSupportBody').value = parts[1];
+                document.getElementById('supportBodyContainer').classList.remove('hidden');
+            } else {
+                document.getElementById('inputSupportBody').value = '';
+                document.getElementById('supportBodyContainer').classList.add('hidden');
+            }
+            document.getElementById('inputEvent').value = cleanEvent;
+
+            if (d.fecha && d.hora) {
+                const parts = d.fecha.split('-');
+                if (parts.length === 3) {
+                    const isoDateTime = `${parts[2]}-${parts[1]}-${parts[0]}T${d.hora}`;
+                    document.getElementById('inputDateTime').value = isoDateTime;
+                }
+            }
+
+            document.getElementById('inputLocation').value = d.Lugar || '';
+            document.getElementById('inputOBAC').value = d.obac || '';
+            document.getElementById('inputListaPor').value = d.listaPor || '';
+            document.getElementById('inputObs').value = d.obs || '';
+            document.getElementById('inputServiceType').value = d.esAbono === 1 ? '1' : '0';
+
+            document.querySelectorAll('input[name="associated_dispatch"]').forEach(cb => {
+                cb.checked = (d.idServicio && d.idServicio.split(', ').includes(cb.value));
+            });
+
+            const stMap = {};
+            if (d.firefighters) {
+                d.firefighters.forEach(ff => {
+                    stMap[ff.idRegistro] = ff.estado;
+                });
+            }
+            window.draftStatuses = stMap;
+
+            renderPersonnelList();
+
+            document.getElementById('start-screen').classList.add('hidden'); 
+            document.getElementById('app-container').classList.remove('hidden'); 
+
+            window.closeHistory();
+
+            document.getElementById('inputServiceId').value = window.formatListIdForUser(d.serviceId);
+        };
+
+        window.onload = async () => {
+            setDateTimeNow();
+            // Render con caché local inmediatamente (antes de Firebase)
+            if (personnelData.length > 0) renderPersonnelList();
+            if (despachosData.length > 0) window.renderDespachosOptions && window.renderDespachosOptions();
+            if (historyData.length > 0) {
+                const idInput = document.getElementById('inputServiceId');
+                if (idInput && !idInput.value) idInput.value = window.formatListIdForUser(nextServiceId);
+            }
+            await initFirebaseAndLoadData();
+            // Verificar OTA en segundo plano (no bloquea la carga)
+            checkForOTAUpdate();
+        };
+
+        async function initFirebaseAndLoadData() {
+            const loader = document.getElementById('full-screen-loader');
+            loader.classList.remove('hidden');
+            loader.classList.add('flex');
+
+            try {
+                // 1. Inicializar Firebase
+                const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const { getAuth, signInAnonymously, signInWithEmailAndPassword } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getFirestore, doc, setDoc, updateDoc, collection, getDocs, writeBatch, onSnapshot, query, where } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+
+                fbDoc = doc;
+                fbSetDoc = setDoc;
+                fbUpdateDoc = updateDoc;
+                fbCollection = collection;
+                fbGetDocs = getDocs;
+                fbWriteBatch = writeBatch;
+                fbOnSnapshot = onSnapshot;
+                fbQuery = query;
+                fbWhere = where;
+
+                let configToUse = firebaseConfig;
+                try {
+                    const dynamicConfigStr = localStorage.getItem('saas_firebase_config');
+                    if (dynamicConfigStr) {
+                        configToUse = JSON.parse(dynamicConfigStr);
+                    }
+                } catch (e) {
+                    console.error("Error parsing saas_firebase_config:", e);
+                }
+                const app = initializeApp(configToUse);
+                const auth = getAuth(app);
+                fbDb = getFirestore(app);
+
+                const savedEmail = localStorage.getItem('saas_com_user');
+                const savedPass = localStorage.getItem('saas_com_pass');
+                if (savedEmail && savedPass) {
+                    await signInWithEmailAndPassword(auth, savedEmail, savedPass);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // 2. onSnapshot Personal
+                _activeUnsubs.push(
+                fbOnSnapshot(fbCollection(fbDb, 'personal'), (snap) => {
+                    personnelData = new Array();
+                    snap.forEach(d => {
+                        const p = d.data();
+                        personnelData.push({
+                            idRegistro: p.idRegistro || "",
+                            ordenEnLista: parseInt(p.ordenEnLista) || 999,
+                            nombreBombero: window.formatShortName(p.nombreBombero || ""),
+                            nombreCompleto: p.nombreBombero || "",
+                            foto: p.foto || "",
+                            idRadial: p.idRadial || "",
+                            cargo: p.cargo || "",
+                            activo: (p.activo == 1 || String(p.activo).toUpperCase() === "SI") ? 1 : 0,
+                            contrasena: String(p.contrasena || "").trim(),
+                            estadoBase: p.estado || "",
+                            fechaSuspensionFin: p.fechaSuspensionFin || null,
+                            cds: parseInt(p.cds) || 0,
+                            permiso: p.permiso || 0,
+                            licenciaMedica: p.licenciaMedica || null
+                        });
+                    });
+                    localStorage.setItem('sisbom_personal_cache', JSON.stringify(personnelData));
+                    renderPersonnelList();
+                }, (err) => {
+                    console.error('[SisBom] Error en listener personal:', err);
+                    scheduleReconnect();
+                }));
+
+                // 3. onSnapshot Despachos
+                _activeUnsubs.push(
+                fbOnSnapshot(fbCollection(fbDb, 'despachos'), (snap) => {
+                    despachosData = new Array();
+                    snap.forEach(d => {
+                        despachosData.push({
+                            idServicio: d.id,
+                            ...d.data()
+                        });
+                    });
+                    localStorage.setItem('sisbom_despachos_cache', JSON.stringify(despachosData));
+                    window.renderDespachosOptions();
+                }, (err) => {
+                    console.error('[SisBom] Error en listener despachos:', err);
+                    scheduleReconnect();
+                }));
+
+                _activeUnsubs.push(
+                fbOnSnapshot(fbQuery(fbCollection(fbDb, 'asistencia'), fbWhere('aprobadoPor', '!=', '')), (snap) => {
+                    let incomingApproved = {};
+                    snap.forEach(d => {
+                        const data = d.data();
+                        incomingApproved[d.id] = {
+                            serviceId: d.id,
+                            serviceKey: data.clave || "",
+                            Evento: data.evento || "",
+                            fecha: data.fecha || "",
+                            hora: data.hora || "",
+                            esAbono: data.abono === 'SÍ' ? 1 : 0,
+                            obac: data.obac || "",
+                            listaPor: data.listaPor || "",
+                            Lugar: data.lugar || "",
+                            obs: data.observacion || "",
+                            aprobadoPor: data.aprobadoPor || "",
+                            anulada: data.anulada || "",
+                            anuladaPor: data.anuladaPor || "",
+                            recordsLoaded: false
+                        };
+                    });
+                    
+                    let localHistory = [];
+                    const cachedHistory = localStorage.getItem('sisbom_history_cache');
+                    if (cachedHistory) {
+                        try {
+                            localHistory = JSON.parse(cachedHistory);
+                        } catch(e){}
+                    }
+
+                    // Merge incoming approved records with local cached records
+                    let uniqueMap = {};
+                    // First load local history
+                    localHistory.forEach(item => {
+                        uniqueMap[item.serviceId] = item;
+                    });
+                    // Then overlay approved records from Firestore
+                    Object.keys(incomingApproved).forEach(id => {
+                        uniqueMap[id] = incomingApproved[id];
+                    });
+                    
+                    let drafts = [];
+                    try {
+                        const draftsStr = localStorage.getItem('sisbom_local_drafts');
+                        if (draftsStr) drafts = JSON.parse(draftsStr);
+                    } catch(e){}
+                    
+                    const savedIds = Object.keys(incomingApproved);
+                    drafts = drafts.filter(d => !savedIds.includes(String(d.serviceId)));
+                    localStorage.setItem('sisbom_local_drafts', JSON.stringify(drafts));
+
+                    const filteredMerged = Object.values(uniqueMap).filter(h => !String(h.serviceId).startsWith("draft_"));
+                    historyData = [...drafts, ...filteredMerged];
+                    historyData.sort((a, b) => parseInt(b.serviceId) - parseInt(a.serviceId));
+                    
+                    localStorage.setItem('sisbom_history_cache', JSON.stringify(historyData));
+                    nextServiceId = calculateNextServiceId(historyData);
+                    
+                    const idInput = document.getElementById('inputServiceId');
+                    if (idInput) {
+                        idInput.value = window.formatListIdForUser(window.editingDraftId || nextServiceId);
+                    }
+
+                    // Actualizar modal si está abierto
+                    if(!document.getElementById('historyModal').classList.contains('hidden')) {
+                        window.applyHistoryFilters();
+                    }
+                }, (err) => {
+                    console.error('[SisBom] Error en listener asistencia:', err);
+                    scheduleReconnect();
+                }));
+
+                renderPersonnelList();
+                window.renderDespachosOptions();
+
+            } catch (e) {
+                console.error("Error cargando Firebase:", e);
+                document.getElementById('personnel-list').innerHTML = `<div class="col-span-full text-red-500 text-center font-bold py-4">Error de conexión con la base de datos Firestore.</div>`;
+            } finally {
+                loader.classList.add('hidden');
+                loader.classList.remove('flex');
+            }
+        }
+
+        let tempSaaSConfig = null;
+
+        window.activateLicenseKey = async function() {
+            const key = document.getElementById('activation-key-input').value.trim().toUpperCase();
+            const errEl = document.getElementById('activation-error');
+            errEl.classList.add('hidden');
+            errEl.innerText = "";
+            
+            if (!key) {
+                errEl.innerText = "Por favor ingrese una clave de licencia.";
+                errEl.classList.remove('hidden');
+                return;
+            }
+            
+            const loader = document.getElementById('full-screen-loader');
+            loader.classList.remove('hidden');
+            loader.classList.add('flex');
+
+            try {
+                const res = await fetch("https://validatelicense-3kkeukidtq-uc.a.run.app", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        licenseKey: key,
+                        hwid: "lista",
+                        module: "lista"
+                    })
+                });
+                
+                const data = res.ok ? await res.json() : null;
+                loader.classList.add('hidden');
+                loader.classList.remove('flex');
+
+                if (res.ok && data && data.authorized) {
+                    tempSaaSConfig = data;
+                    tempSaaSConfig.licenseKey = key;
+                    
+                    document.getElementById('license-form-step').classList.add('hidden');
+                    document.getElementById('comandante-form-step').classList.remove('hidden');
+                    document.getElementById('com-user-input').focus();
+                } else {
+                    errEl.innerText = (data && data.reason) || "Error al validar la licencia. Verifique e intente nuevamente.";
+                    errEl.classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error(err);
+                loader.classList.add('hidden');
+                loader.classList.remove('flex');
+                errEl.innerText = "Error de conexión con el servidor de licencias.";
+                errEl.classList.remove('hidden');
+            }
+        };
+
+        window.cancelComandanteStep = function() {
+            tempSaaSConfig = null;
+            document.getElementById('comandante-form-step').classList.add('hidden');
+            document.getElementById('license-form-step').classList.remove('hidden');
+            document.getElementById('com-user-input').value = "";
+            document.getElementById('com-pass-input').value = "";
+            document.getElementById('com-error').classList.add('hidden');
+            document.getElementById('com-error').innerText = "";
+        };
+
+        window.verifyComandanteAndActivate = async function() {
+            const comUser = document.getElementById('com-user-input').value.trim();
+            const comPass = document.getElementById('com-pass-input').value.trim();
+            const comErrEl = document.getElementById('com-error');
+            comErrEl.classList.add('hidden');
+            comErrEl.innerText = "";
+
+            if (!comUser || !comPass) {
+                comErrEl.innerText = "Ingrese usuario y contraseña del comandante.";
+                comErrEl.classList.remove('hidden');
+                return;
+            }
+
+            if (!tempSaaSConfig || !tempSaaSConfig.firebaseConfig) {
+                comErrEl.innerText = "Falta la configuración de licencia. Reintente.";
+                comErrEl.classList.remove('hidden');
+                return;
+            }
+
+            const loader = document.getElementById('full-screen-loader');
+            loader.classList.remove('hidden');
+            loader.classList.add('flex');
+
+            try {
+                // Initialize a temporary firebase app to verify comandante
+                const { initializeApp } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                const { getAuth, signInAnonymously } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                const { getFirestore, doc, getDoc, collection, query, where, getDocs } = await import("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+
+                const tempAppName = "comandante-verify-app-" + Date.now();
+                const app = initializeApp(tempSaaSConfig.firebaseConfig, tempAppName);
+                const auth = getAuth(app);
+                const db = getFirestore(app);
+                
+                await signInAnonymously(auth);
+
+                let docSnap = null;
+                let data = null;
+                let registryId = comUser.trim();
+
+                const primarySnap = await getDoc(doc(db, 'personal', comUser.trim()));
+                if (primarySnap.exists()) {
+                    docSnap = primarySnap;
+                    data = primarySnap.data();
+                }
+
+                loader.classList.add('hidden');
+                loader.classList.remove('flex');
+
+                if (data) {
+                    const passwordCorrect = String(data.contrasena || "").trim() === comPass;
+                    const idRadialStr = String(data.idRadial || "").trim().toUpperCase();
+                    const isComandante = idRadialStr === "1" || idRadialStr === "C1";
+                    
+                    if (!isComandante) {
+                        comErrEl.innerText = "El usuario ingresado no corresponde al comandante (su idRadial debe ser 1).";
+                        comErrEl.classList.remove('hidden');
+                    } else if (!passwordCorrect) {
+                        comErrEl.innerText = "Contraseña de comandante incorrecta.";
+                        comErrEl.classList.remove('hidden');
+                    } else {
+                        localStorage.setItem('saas_firebase_config', JSON.stringify(tempSaaSConfig.firebaseConfig || {}));
+                        localStorage.setItem('saas_read_only', tempSaaSConfig.status === 'read_only' ? '1' : '0');
+                        localStorage.setItem('saas_logo_url', tempSaaSConfig.logoUrl || '');
+                        localStorage.setItem('saas_client_name', tempSaaSConfig.nombreMostrar || tempSaaSConfig.clientName || 'SisBom');
+                        localStorage.setItem('saas_license_key', tempSaaSConfig.licenseKey);
+                        localStorage.setItem('saas_com_user', registryId + "@sisbom.com");
+                        localStorage.setItem('saas_com_pass', comPass + "_secure_sisbom");
+                        
+                        tempSaaSConfig = null;
+                        window.location.reload();
+                    }
+                } else {
+                    comErrEl.innerText = "Usuario no registrado en la base de datos.";
+                    comErrEl.classList.remove('hidden');
+                }
+            } catch (err) {
+                console.error(err);
+                loader.classList.add('hidden');
+                loader.classList.remove('flex');
+                comErrEl.innerText = "Error de conexión o autenticación.";
+                comErrEl.classList.remove('hidden');
+            }
+        };
+ 
+        window.deactivateLicense = function() {
+            if (confirm("¿Está seguro de que desea desvincular la licencia de esta aplicación?\n\nEsto desconectará el sistema de la base de datos de su institución.")) {
+                localStorage.removeItem('saas_firebase_config');
+                localStorage.removeItem('saas_read_only');
+                localStorage.removeItem('saas_logo_url');
+                localStorage.removeItem('saas_client_name');
+                localStorage.removeItem('saas_license_key');
+                localStorage.removeItem('saas_com_user');
+                localStorage.removeItem('saas_com_pass');
+                if (window.AndroidApp && typeof window.AndroidApp.updateLauncherIcon === 'function') {
+                    window.AndroidApp.updateLauncherIcon("");
+                }
+                window.location.reload();
+            }
+        };
+
+        function setDateTimeNow() {
+            const now = new Date();
+            now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+            document.getElementById('inputDateTime').value = now.toISOString().slice(0, 16);
+        }
+
+        window.renderDespachosOptions = function() {
+            const container = document.getElementById('enlazador-despachos');
+            const checkboxesContainer = document.getElementById('despachosCheckboxesContainer');
+            if(!checkboxesContainer || !container) return;
+
+            container.classList.remove('hidden');
+
+            const despachosSinLista = despachosData.filter(d => {
+                const linkedList = d.idListaPrincipal || d.idLista || '';
+                return !linkedList || String(linkedList).trim() === '' || String(linkedList).trim() === 'null';
+            });
+
+            if (despachosSinLista.length === 0) {
+                checkboxesContainer.innerHTML = '<p class="text-xs text-slate-400 font-bold text-center py-4"><i class="fas fa-info-circle mr-1"></i> No hay despachos disponibles para asociar</p>';
+                return;
+            }
+
+            checkboxesContainer.innerHTML = '';
+
+            const parseDMY = (str) => {
+                if (!str) return new Date(0);
+                const clean = String(str).replace(/['"]/g, '').trim();
+                const parts = clean.split('-');
+                if (parts.length === 3) {
+                    return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
+                }
+                const partsSlash = clean.split('/');
+                if (partsSlash.length === 3) {
+                    return new Date(parseInt(partsSlash[2], 10), parseInt(partsSlash[1], 10) - 1, parseInt(partsSlash[0], 10));
+                }
+                const parsed = new Date(str);
+                return isNaN(parsed.getTime()) ? new Date(0) : parsed;
+            };
+
+            const recent = [...despachosSinLista].sort((a,b) => {
+                return parseDMY(b.fechaDespacho) - parseDMY(a.fechaDespacho);
+            }).slice(0, 50);
+
+            recent.forEach(d => {
+                const label = document.createElement('label');
+                label.className = "flex items-center gap-2.5 p-1.5 hover:bg-blue-50 rounded cursor-pointer select-none text-xs font-bold text-blue-900";
+                
+                let fecha = d.fechaDespacho ? window.formatDateForDisplay(d.fechaDespacho) : '';
+                let hora = d.horaDespacho ? String(d.horaDespacho).substring(0, 5) : '';
+                const lugar = d.lugar ? d.lugar.substring(0, 45) : 'S/Lugar';
+                
+                label.innerHTML = `
+                    <input type="checkbox" name="associated_dispatch" value="${d.idServicio}" class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500" onchange="window.autoFillFromDispatchCheckboxes()">
+                    <span>#${d.idServicio} | ${d.clave || 'S/C'} | ${lugar} | ${fecha} | ${d.horaDespacho || ''}</span>
+                `;
+                checkboxesContainer.appendChild(label);
+            });
+        };
+
+        window.autoFillFromDispatchCheckboxes = function() {
+            const checkedInputs = Array.from(document.querySelectorAll('input[name="associated_dispatch"]:checked'));
+            if (checkedInputs.length === 0) return;
+            
+            const firstId = checkedInputs[0].value;
+            const d = despachosData.find(x => String(x.idServicio) === firstId);
+            if(!d) return;
+
+            const keySelect = document.getElementById('inputKey');
+            if (d.clave) {
+                const optExists = Array.from(keySelect.options).some(o => o.value === d.clave);
+                if(optExists) {
+                    keySelect.value = d.clave;
+                    window.updateEventName();
+                }
+            }
+
+            if (d.fechaDespacho && d.horaDespacho) {
+                let isoDate = "";
+                let rawDate = String(d.fechaDespacho).replace(/['"]/g, '').trim();
+                let separator = rawDate.includes('-') ? '-' : (rawDate.includes('/') ? '/' : '');
+                
+                if (separator !== '') {
+                    let parts = rawDate.split(separator);
+                    let pos2 = parts[2];
+                    let pos0 = parts[0];
+                    let pos1 = parts[1];
+                    
+                    if (pos2 && pos2.length === 4) {
+                        if (separator === '-') {
+                            isoDate = `${pos2}-${pad2(pos1)}-${pad2(pos0)}`;
+                        } else {
+                            isoDate = `${pos2}-${pad2(pos0)}-${pad2(pos1)}`;
+                        }
+                    } else if (pos0 && pos0.length === 4) {
+                        isoDate = `${pos0}-${pad2(pos1)}-${pad2(pos2)}`;
+                    }
+                } else if (rawDate.length >= 10) {
+                    isoDate = rawDate.substring(0, 10);
+                }
+
+                if(isoDate) {
+                    const cleanTime = String(d.horaDespacho).trim().substring(0,5);
+                    document.getElementById('inputDateTime').value = `${isoDate}T${cleanTime}`;
+                }
+            }
+
+            if (d.lugar) {
+                document.getElementById('inputLocation').value = d.lugar;
+            }
+
+            if (d.obacServicio) {
+                const term = String(d.obacServicio).toLowerCase().trim();
+                const person = personnelData.find(p => {
+                    const fullName = String(p.nombreCompleto).toLowerCase();
+                    const shortName = String(p.nombreBombero).toLowerCase();
+                    const radial = String(p.idRadial).toLowerCase();
+                    
+                    if (radial === term) return true;
+                    if (fullName === term || shortName === term) return true;
+                    if (fullName.includes(term) || shortName.includes(term)) return true;
+                    if (term.includes(shortName) || term.includes(fullName)) return true;
+                    
+                    const termWords = term.split(' ').filter(w => w.length > 2);
+                    if (termWords.length > 0 && termWords.every(w => fullName.includes(w))) return true;
+                    
+                    return false;
+                });
+
+                if (person) {
+                    currentOBACPass = person.contrasena;
+                    document.getElementById('inputOBAC').value = `${person.idRadial ? person.idRadial + ' - ' : ''}${person.nombreBombero}`.toUpperCase();
+                    
+                    const btn = document.querySelector(`.status-btn[data-id="${person.idRegistro}"]`);
+                    if(btn && btn.dataset.status !== 'Suspendido') {
+                        const currentStatus = btn.dataset.status;
+                        if(currentStatus === 'Falta') {
+                            btn.dataset.status = 'Asiste';
+                            btn.innerText = 'A';
+                            btn.className = `status-btn bg-green-500 text-white shadow-sm border border-green-600 flex-shrink-0`;
+                            updateCounter();
+                        }
+                    }
+                } else {
+                    document.getElementById('inputOBAC').value = d.obacServicio.toUpperCase();
+                }
+            }
+        };
+
+        window.updateEventName = function() {
+            const keySelect = document.getElementById('inputKey');
+            const eventSelect = document.getElementById('inputEvent');
+            const supportContainer = document.getElementById('supportBodyContainer');
+            const selectedKey = keySelect.value;
+            
+            eventSelect.innerHTML = '';
+            supportContainer.classList.add('hidden');
+            
+            if (!selectedKey) {
+                eventSelect.innerHTML = '<option value="">Seleccione Clave primero</option>';
+                return;
+            }
+
+            if (selectedKey === '10-12') {
+                supportContainer.classList.remove('hidden');
+                eventSelect.innerHTML = '<option value="">Seleccione Emergencia...</option>';
+                const supportTypes = new Array("10-0 (Llamado Estructural)", "10-1 (Llamado a Vehículos)", "10-2 (Pastizales y/o Basura)", "10-3 (Rescate de Emergencia)", "10-4 (Rescate Vehicular)", "10-5 (Haz-Mat)", "10-6 (Emanación de Gas)", "10-7 (Llamado Eléctrico)", "10-8 (No Clasificado)", "10-9 (Otros Servicios)", "10-10 (Llamado a Escombros)", "10-15 (Simulacro)", "Otro");
+                supportTypes.forEach(type => {
+                    const opt = document.createElement('option'); opt.value = type; opt.text = type; eventSelect.appendChild(opt);
+                });
+                return;
+            }
+
+            const subs = {
+                "10-0": new Array("10-0-1 Estructural Básico (Hasta 3 pisos)", "10-0-2 Estructural Edificio (4+ pisos)", "10-0-3 Estructural Lugar Público", "10-0-4 Estructural en Poblaciones", "10-0-5 Estructural Haz-Mat", "10-0-6 Fuego en Patrimonio"),
+                "10-1": new Array("10-1-1 Fuego en automóvil", "10-1-2 Fuego en autobús", "10-1-3 Fuego en camión basura/reciclaje", "10-1-4 Fuego en auto por colisión", "10-1-5 Fuego vehículo combustibles/peligrosos", "10-1-6 Fuego transporte de gas", "10-1-7 Fuego vehículo eléctrico", "10-1-8 Fuego en Túnel autopistas"),
+                "10-3": new Array("10-3-1 Rescate Emergencia simple", "10-3-2 Rescate Emergencia reforzado/complejo", "10-3-3 Rescate en caudal de río", "10-3-4 Rescate en altura (+4º piso)", "10-3-5 Rescate con riesgo de caída", "10-3-6 Rescate en espacios confinados", "10-3-7 Rescate en derrumbes", "10-3-8 Rescate riesgo vital/DAE/Atropello", "10-3-9 Rescate en Zonas Agrestes"),
+                "10-4": new Array("10-4-1 Rescate Vehicular (hasta 4 lesionados)", "10-4-2 Rescate Vehicular (5+ lesionados)", "10-4-3 Rescate Vehicular con Haz-Mat"),
+                "10-5": new Array("10-5-1 Derrame menor/Olor desconocido", "10-5-2 Derrame mayor/Gran cantidad", "10-5-3 Emergencia química industrial mayor", "10-5-4 Atentados QBR o equivalentes", "10-5-5 Suicidio/Accidente con Cianuro"),
+                "10-6": new Array("10-6-1 Gas natural/ciudad/licuado", "10-6-2 Gas con personas interior casa", "10-6-3 Gas con personas interior depto (+3º piso)"),
+                "10-7": new Array("10-7-1 Eléctrico Habitacional/Comercial/Ind.", "10-7-2 Eléctrico en Cámara/Trafo/Subestación"),
+                "10-9": new Array("10-9 Academia", "10-9 Citación", "10-9 Rescate Animal", "10-9 Caída de Árbol", "10-9 Inundación", "10-9 Otros Servicios"),
+                "10-10": new Array("10-10-1 Escombros estructural", "10-10-2 Escombros forestal"),
+                "9-0": new Array("9-0 Acuartelamiento General")
+            };
+
+            const activeSubs = Reflect.get(subs, selectedKey);
+
+            if (activeSubs) {
+                eventSelect.innerHTML = '<option value="">Seleccione Subclave...</option>';
+                activeSubs.forEach(sub => {
+                    const opt = document.createElement('option'); opt.value = sub; opt.text = sub; eventSelect.appendChild(opt);
+                });
+            } else {
+                const opt = document.createElement('option');
+                const keyText = keySelect.options.item(keySelect.selectedIndex).text;
+                const match = keyText.match(/\(([^)]+)\)/);
+                const cleanText = keyText.includes('(') && match ? match[1] : keyText;
+                opt.value = cleanText; opt.text = cleanText;
+                eventSelect.appendChild(opt); eventSelect.selectedIndex = 0; 
+            }
+        };
+
+
+        function renderPersonnelList() {
+            const container = document.getElementById('personnel-list');
+            
+            // Capture currently selected statuses from DOM to preserve them
+            const localStatuses = {};
+            document.querySelectorAll('.status-btn').forEach(btn => {
+                const id = btn.dataset.id;
+                if (id) {
+                    localStatuses[id] = btn.dataset.status;
+                }
+            });
+
+            if (Object.keys(localStatuses).length === 0 && window.draftStatuses) {
+                Object.assign(localStatuses, window.draftStatuses);
+                window.draftStatuses = null;
+            }
+            
+            container.innerHTML = '';
+            
+            const activeList = personnelData.filter(p => p.activo === 1 && String(p.idRadial).toUpperCase() !== 'C1').sort((a, b) => a.ordenEnLista - b.ordenEnLista);
+
+            if (activeList.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-center text-slate-400 py-10">No hay bomberos registrados en el sistema.</div>`;
+                return;
+            }
+
+            activeList.forEach((p, i) => {
+                const isSuspended = isUserSuspended(p);
+                const isLM = !isSuspended && isUserLM(p);
+                const hasCDS = !isSuspended && !isLM && isUserCDS(p);
+                const isPermiso = !isSuspended && !isLM && !hasCDS && isUserPermiso(p);
+                
+                let status = "Falta", label = "F", color = "bg-red-500 text-white shadow-sm border border-red-600", disabled = "";
+                let imgClasses = ""; 
+                
+                if (isSuspended) {
+                    status = "Suspendido"; label = "S"; color = "bg-purple-900 text-white opacity-60";
+                    disabled = "disabled"; imgClasses = "grayscale";
+                } else if (isLM) {
+                    status = "Licencia Médica"; label = "LM"; color = "bg-blue-600 text-white shadow-sm border border-blue-700";
+                } else if (hasCDS) {
+                    status = "CDS"; label = "CDS"; color = "bg-emerald-500 text-white shadow-sm border border-emerald-600";
+                } else if (isPermiso) {
+                    status = "Permiso"; label = "P"; color = "bg-yellow-400 text-white shadow-sm border border-yellow-500";
+                }
+                
+                // Override with local status selection if it exists and user is not suspended
+                if (!isSuspended && localStatuses[p.idRegistro]) {
+                    const savedStatus = localStatuses[p.idRegistro];
+                    if (savedStatus === "Asiste") {
+                        status = "Asiste"; label = "A"; color = "bg-green-500 text-white shadow-sm border border-green-600";
+                    } else if (savedStatus === "Permiso") {
+                        status = "Permiso"; label = "P"; color = "bg-yellow-400 text-white shadow-sm border border-yellow-500";
+                    } else if (savedStatus === "Licencia Médica") {
+                        status = "Licencia Médica"; label = "LM"; color = "bg-blue-600 text-white shadow-sm border border-blue-700";
+                    } else if (savedStatus === "CDS") {
+                        status = "CDS"; label = "CDS"; color = "bg-emerald-500 text-white shadow-sm border border-emerald-600";
+                    } else if (savedStatus === "Falta") {
+                        status = "Falta"; label = "F"; color = "bg-red-500 text-white shadow-sm border border-red-600";
+                    }
+                }
+                
+                const div = document.createElement('div');
+                div.className = "flex items-center justify-between p-4 bg-white border border-slate-200 hover:bg-slate-50 transition-colors rounded-xl shadow-sm h-full";
+                
+                div.innerHTML = `
+                    <div class="flex items-center gap-3 min-w-0 mr-2 flex-1">
+                        <span class="text-slate-300 font-black w-6 text-right text-sm flex-shrink-0">${i+1}</span>
+                        <img src="${p.foto || FALLBACK_LOGO}" class="w-12 h-12 rounded-full object-cover border border-slate-100 bg-slate-50 flex-shrink-0 ${imgClasses}" onerror="this.src='${FALLBACK_LOGO}'">
+                        <div class="flex flex-col truncate min-w-0">
+                            <span class="font-bold text-slate-800 text-base truncate" title="${p.nombreCompleto}">${p.nombreBombero}</span>
+                            <span class="text-xs text-slate-400 font-bold uppercase tracking-widest mt-0.5 truncate">${p.idRadial || '---'} • ${p.cargo || 'Vol.'}</span>
+                        </div>
+                    </div>
+                    <button type="button" class="status-btn ${color}" 
+                        data-id="${p.idRegistro}" data-nombre="${p.nombreCompleto}" data-orden="${p.ordenEnLista}" 
+                        data-status="${status}" onclick="window.toggleStatus(this)" ${disabled}>${label}</button>
+                `;
+                container.appendChild(div);
+            });
+            updateCounter();
+        }
+
+        window.toggleStatus = (btn) => {
+            const current = btn.dataset.status;
+            let next, label, color;
+            
+            if (current === "Falta" || current === "Suspendido") { 
+                next = "Asiste"; label = "A"; color = "bg-green-500 text-white shadow-sm border border-green-600"; 
+            }
+            else if (current === "Asiste") { 
+                next = "Permiso"; label = "P"; color = "bg-yellow-400 text-white shadow-sm border border-yellow-500"; 
+            }
+            else if (current === "Permiso") { 
+                next = "Licencia Médica"; label = "LM"; color = "bg-blue-600 text-white shadow-sm border border-blue-700"; 
+            }
+            else if (current === "Licencia Médica") { 
+                next = "CDS"; label = "CDS"; color = "bg-emerald-500 text-white shadow-sm border border-emerald-600"; 
+            }
+            else { 
+                next = "Falta"; label = "F"; color = "bg-red-500 text-white shadow-sm border border-red-600"; 
+            }
+            
+            btn.dataset.status = next; 
+            btn.innerText = label; 
+            btn.className = `status-btn ${color} flex-shrink-0 transform scale-110 transition-transform duration-200`;
+            setTimeout(() => btn.classList.remove('scale-110'), 200);
+            updateCounter();
+        };
+
+        window.filterOfficers = (input, resId) => {
+            const term = input.value.toLowerCase().trim();
+            const container = document.getElementById(resId);
+            container.innerHTML = '';
+            
+            if (resId === 'resultsOBAC') currentOBACPass = null;
+            if (term.length < 1) { container.classList.add('hidden'); return; }
+
+            const matches = personnelData.filter(p => 
+                p.activo === 1 && String(p.idRadial).toUpperCase() !== 'C1' && !isUserSuspended(p) && 
+                (p.nombreCompleto.toLowerCase().includes(term) || String(p.idRadial).toLowerCase().includes(term))
+            );
+
+            // Sort results by relevance: exact match first, then starts-with, then shorter lengths
+            matches.sort((a, b) => {
+                const radA = String(a.idRadial).toLowerCase();
+                const radB = String(b.idRadial).toLowerCase();
+                
+                const exactA = radA === term ? 1 : 0;
+                const exactB = radB === term ? 1 : 0;
+                if (exactA !== exactB) return exactB - exactA;
+
+                const startsA = radA.startsWith(term) ? 1 : 0;
+                const startsB = radB.startsWith(term) ? 1 : 0;
+                if (startsA !== startsB) return startsB - startsA;
+
+                if (radA.length !== radB.length) return radA.length - radB.length;
+                
+                const numA = parseInt(radA);
+                const numB = parseInt(radB);
+                if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+
+                return radA.localeCompare(radB);
+            });
+
+            const slicedMatches = matches.slice(0, 6);
+
+            slicedMatches.forEach(p => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                const radioPart = p.idRadial ? `${p.idRadial} - ` : '';
+                
+                item.innerHTML = `<span class="font-bold text-slate-700">${radioPart}</span>${p.nombreBombero}`.toUpperCase();
+                
+                item.onclick = () => {
+                    input.value = `${radioPart}${p.nombreBombero}`.toUpperCase();
+                    if (resId === 'resultsOBAC') currentOBACPass = p.contrasena;
+                    container.classList.add('hidden');
+                    
+                    const btn = document.querySelector(`.status-btn[data-id="${p.idRegistro}"]`);
+                    if(btn && btn.dataset.status !== 'Suspendido') {
+                        btn.dataset.status = 'Asiste'; 
+                        btn.innerText = 'A'; 
+                        btn.className = `status-btn bg-green-500 text-white shadow-sm border border-green-600 flex-shrink-0`; 
+                        updateCounter();
+                    }
+                };
+                container.appendChild(item);
+            });
+            container.classList.remove('hidden');
+        };
+
+        window.closeAllAutocomplete = () => document.querySelectorAll('.autocomplete-results').forEach(r => r.classList.add('hidden'));
+
+        function updateCounter() {
+            const getCount = (st) => Array.from(document.querySelectorAll('.status-btn')).filter(b => b.dataset.status === st).length;
+            const countCDS = getCount('CDS');
+            const countAsiste = getCount('Asiste');
+            
+            document.getElementById('count-asiste').innerText = countAsiste + countCDS;
+            document.getElementById('count-falta').innerText = getCount('Falta');
+            document.getElementById('count-permiso').innerText = getCount('Permiso');
+            document.getElementById('count-lm').innerText = getCount('Licencia Médica');
+            document.getElementById('count-susp').innerText = getCount('Suspendido');
+        }
+
+        window.askClearSelections = () => {
+            const modal = document.getElementById('cleanConfirmationModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => { modal.classList.remove('modal-closed', 'opacity-0'); }, 10);
+        };
+
+        window.closeCleanModal = () => {
+            const modal = document.getElementById('cleanConfirmationModal');
+            modal.classList.add('opacity-0', 'modal-closed');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        };
+
+        window.performClear = () => { 
+            window.closeCleanModal();
+            renderPersonnelList(); 
+            document.getElementById('inputKey').value = ""; 
+            document.getElementById('inputEvent').innerHTML = '<option value="">Seleccione Clave primero</option>';
+            document.getElementById('inputEvent').value = "";
+            document.getElementById('inputSupportBody').value = "";
+            document.getElementById('supportBodyContainer').classList.add('hidden');
+            document.getElementById('inputOBAC').value = ""; 
+            document.getElementById('inputListaPor').value = ""; 
+            document.getElementById('inputLocation').value = ""; 
+            document.getElementById('inputObs').value = ""; 
+            document.getElementById('inputServiceType').value = "0"; 
+            document.querySelectorAll('input[name="associated_dispatch"]').forEach(cb => cb.checked = false);
+            currentOBACPass = "";
+            window.editingDraftId = null;
+            document.getElementById('inputServiceId').value = window.formatListIdForUser(nextServiceId);
+            setDateTimeNow();
+            updateCounter(); 
+        };
+
+        window.showCustomAlert = (msg) => {
+            document.getElementById('customAlertMessage').innerText = msg;
+            const modal = document.getElementById('customAlertModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => { modal.classList.remove('modal-closed', 'opacity-0'); }, 10);
+        };
+
+        window.closeCustomAlert = () => {
+            const modal = document.getElementById('customAlertModal');
+            modal.classList.add('opacity-0', 'modal-closed');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300);
+        };
+
+        // --- SISTEMA DE GUARDADO A FIRESTORE ---
+        window.submitList = () => {
+            const obacInput = document.getElementById('inputOBAC');
+            const listaPorInput = document.getElementById('inputListaPor');
+            const key = document.getElementById('inputKey').value;
+            
+            const obacValue = obacInput.value.trim().toUpperCase();
+            const listaPorValue = listaPorInput.value.trim().toUpperCase();
+
+            if (!obacValue || !key) {
+                const msg = document.getElementById('formErrorMessage');
+                msg.innerText = "Debe completar Oficial a Cargo (OBAC) y Clave Radial.";
+                msg.classList.remove('hidden');
+                setTimeout(() => msg.classList.add('hidden'), 4000);
+                return;
+            }
+
+            const validNames = personnelData.filter(p => p.activo === 1 && !isUserSuspended(p)).map(p => {
+                const radioPart = p.idRadial ? `${p.idRadial} - ` : '';
+                return `${radioPart}${p.nombreBombero}`.toUpperCase();
+            });
+
+            if (!validNames.includes(obacValue)) {
+                const msg = document.getElementById('formErrorMessage');
+                msg.innerText = "El OBAC debe ser seleccionado del buscador sugerido.";
+                msg.classList.remove('hidden');
+                setTimeout(() => msg.classList.add('hidden'), 4000);
+                return;
+            }
+
+            if (listaPorValue && !validNames.includes(listaPorValue)) {
+                 const msg = document.getElementById('formErrorMessage');
+                 msg.innerText = "Quien Pasa Lista no es válido. Búscalo en la lista sugerida.";
+                 msg.classList.remove('hidden');
+                 setTimeout(() => msg.classList.add('hidden'), 4000);
+                 return;
+            }
+
+            let event = document.getElementById('inputEvent').value;
+            if(key === '10-12') {
+                const bodySupport = document.getElementById('inputSupportBody').value;
+                if(bodySupport) event += ` - Apoyo a: ${bodySupport}`;
+            }
+            
+            const rawDate = new Date(document.getElementById('inputDateTime').value);
+            const day = pad2(rawDate.getDate());
+            const month = pad2(rawDate.getMonth() + 1);
+            const year = rawDate.getFullYear();
+            const hours = pad2(rawDate.getHours());
+            const minutes = pad2(rawDate.getMinutes());
+            
+            const formattedDate = `${day}-${month}-${year}`;
+            const formattedTime = `${hours}:${minutes}`;
+
+            const checkedInputs = Array.from(document.querySelectorAll('input[name="associated_dispatch"]:checked'));
+            const associatedIds = checkedInputs.map(input => input.value);
+            const idDespachoAsoc = associatedIds.join(', ');
+            let despachoUI = '';
+            if (idDespachoAsoc) {
+                despachoUI = `<div class="col-span-2 mb-2"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">ASOCIADA A LOS DESPACHOS</span><p class="font-bold text-blue-600 text-sm">#${idDespachoAsoc}</p></div>`;
+            }
+
+            const tipoLista = document.getElementById('inputServiceType').value === '1' ? 'Abono (Extra)' : 'Obligatoria';
+            const obsValue = document.getElementById('inputObs').value.trim() || 'SIN OBSERVACIONES REGISTRADAS.';
+
+            const summary = `
+                <div class="grid grid-cols-2 gap-4 text-xs bg-slate-50 p-5 rounded-xl border border-slate-200 mb-5 shadow-sm uppercase">
+                    ${despachoUI}
+                    <div class="col-span-1"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">CLAVE</span><p class="font-black text-bomberos-red text-lg leading-none">${key}</p></div>
+                    <div class="col-span-1"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">FECHA / HORA</span><p class="font-bold text-slate-800 text-sm">${formattedDate} <span class="mx-1">|</span> ${formattedTime}</p></div>
+                    
+                    <div class="col-span-2 border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">TIPO DE LISTA</span><p class="font-bold text-slate-700 text-sm">${tipoLista}</p></div>
+                    
+                    <div class="col-span-2 border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">EVENTO / LUGAR</span><p class="font-bold text-slate-700 text-base mb-1">${event}</p><p class="text-sm font-bold text-slate-500">${document.getElementById('inputLocation').value || 'SIN ESPECIFICAR'}</p></div>
+                    
+                    <div class="col-span-1 border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">OBAC RESPONSABLE</span><p class="font-black text-slate-800 text-sm">${obacValue}</p></div>
+                    <div class="col-span-1 border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">LISTA PASADA POR</span><p class="font-black text-slate-800 text-sm">${listaPorValue}</p></div>
+                    
+                    <div class="col-span-2 border-t border-slate-200 pt-3"><span class="text-xs font-bold text-slate-400 block mb-1 tracking-widest">OBSERVACIONES</span><p class="font-bold text-slate-600 text-sm">${obsValue}</p></div>
+                </div>
+            `;
+            
+            let tA=0, tF=0, tP=0, tLM=0, tS=0;
+            const btns = document.querySelectorAll('.status-btn');
+            const att = new Array();
+
+            btns.forEach(btn => {
+                const s = btn.dataset.status;
+                if(s === 'Asiste' || s === 'CDS') tA++; 
+                else if(s === 'Falta') tF++;
+                else if(s === 'Permiso') tP++;
+                else if(s === 'Licencia Médica') tLM++;
+                else if(s === 'Suspendido') tS++;
+                att.push({ nombre: btn.dataset.nombre, status: s, orden: parseInt(btn.dataset.orden) });
+            });
+
+            att.sort((a,b) => a.orden - b.orden);
+
+            const totalsHTML = `
+            <div class="flex justify-between gap-2 mb-5 text-center">
+                <div class="flex-1 bg-green-50 rounded-lg border border-green-200 p-2 shadow-sm"><span class="block font-black text-green-600 text-lg leading-none mb-1">${tA}</span><span class="text-xs font-bold text-green-600 uppercase block">Asiste</span></div>
+                <div class="flex-1 bg-red-50 rounded-lg border border-red-200 p-2 shadow-sm"><span class="block font-black text-red-600 text-lg leading-none mb-1">${tF}</span><span class="text-xs font-bold text-red-600 uppercase block">Faltas</span></div>
+                <div class="flex-1 bg-yellow-50 rounded-lg border border-yellow-200 p-2 shadow-sm"><span class="block font-black text-yellow-600 text-lg leading-none mb-1">${tP}</span><span class="text-xs font-bold text-yellow-600 uppercase block">Permiso</span></div>
+                <div class="flex-1 bg-blue-50 rounded-lg border border-blue-200 p-2 shadow-sm"><span class="block font-black text-blue-600 text-lg leading-none mb-1">${tLM}</span><span class="text-xs font-bold text-blue-600 uppercase block">Lic. Médica</span></div>
+                <div class="flex-1 bg-purple-50 rounded-lg border border-purple-200 p-2 shadow-sm"><span class="block font-black text-purple-600 text-lg leading-none mb-1">${tS}</span><span class="text-xs font-bold text-purple-700 uppercase block">Suspendido</span></div>
+            </div>`;
+
+            let listHTML = '<div class="space-y-1.5">';
+            att.forEach((r, i) => {
+                let color = "text-slate-500 bg-slate-50";
+                if (r.status === "Falta") color = "text-red-500 font-bold bg-red-50 border-red-100";
+                else if (r.status === "Asiste" || r.status === "CDS") color = "text-green-600 font-black bg-green-50 border-green-200";
+                else if (r.status === "Permiso") color = "text-yellow-600 font-bold bg-yellow-50 border-yellow-200";
+                else if (r.status === "Licencia Médica") color = "text-blue-600 font-bold bg-blue-50 border-blue-200";
+                else if (r.status === "Suspendido") color = "text-purple-700 font-bold bg-purple-50 border-purple-200";
+
+                let label = r.status; 
+                if (r.status === "CDS") label = "CDS"; 
+
+                listHTML += `
+                    <div class="flex justify-between items-center py-2 px-3 border border-slate-200 rounded-lg shadow-sm bg-white">
+                        <div class="flex items-center min-w-0 pr-3">
+                            <span class="text-slate-300 font-black font-mono mr-3 w-5 text-right text-xs">${i+1}.</span>
+                            <span class="font-bold text-slate-800 text-xs truncate">${r.nombre}</span>
+                        </div>
+                        <span class="${color} px-2 py-1 rounded text-xs uppercase tracking-widest border">${label}</span>
+                    </div>`;
+            });
+            listHTML += '</div>';
+
+            document.getElementById('summaryContainer').innerHTML = summary + totalsHTML + listHTML;
+            
+            const passInput = document.getElementById('confirmPassword');
+            passInput.value = "";
+            passInput.type = "password";
+            const passIcon = document.getElementById('togglePassIcon');
+            if(passIcon) {
+                passIcon.classList.remove('fa-eye-slash');
+                passIcon.classList.add('fa-eye');
+            }
+            
+            document.getElementById('passwordError').classList.add('hidden');
+            
+            const modal = document.getElementById('confirmationModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            const scrollArea = document.getElementById('modalScrollArea');
+            if (scrollArea) scrollArea.scrollTop = 0;
+
+            setTimeout(() => { modal.classList.remove('modal-closed', 'opacity-0'); }, 10);
+            
+        };
+
+        window.togglePassword = () => {
+            const input = document.getElementById('confirmPassword');
+            const icon = document.getElementById('togglePassIcon');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            }
+        };
+
+        window.closeConfirmation = () => {
+             const modal = document.getElementById('confirmationModal');
+             modal.classList.add('opacity-0', 'modal-closed');
+             setTimeout(() => {
+                 modal.classList.add('hidden');
+                 modal.classList.remove('flex');
+             }, 300);
+        };
+
+        window.confirmSave = async () => {
+            if (document.getElementById('confirmPassword').value.trim() !== currentOBACPass) {
+                document.getElementById('passwordError').classList.remove('hidden'); return;
+            }
+
+            const loader = document.getElementById('full-screen-loader');
+            loader.classList.remove('hidden');
+            loader.classList.add('flex');
+            window.closeConfirmation();
+
+            const dtRaw = new Date(document.getElementById('inputDateTime').value);
+            const mm = pad2(dtRaw.getMonth() + 1);
+            const dd = dtRaw.getDate();
+            const yyyy = dtRaw.getFullYear();
+            const fechaCL = `${pad2(dd)}-${pad2(mm)}-${yyyy}`;
+            const horaFmt = `${pad2(dtRaw.getHours())}:${pad2(dtRaw.getMinutes())}`;
+
+            let finalEvent = document.getElementById('inputEvent').value;
+            const inputKey = document.getElementById('inputKey').value;
+            if(inputKey === '10-12') finalEvent += ` - Apoyo a: ${document.getElementById('inputSupportBody').value}`;
+
+            const checkedInputs = Array.from(document.querySelectorAll('input[name="associated_dispatch"]:checked'));
+            const associatedIds = checkedInputs.map(input => input.value);
+            const idDespachoAsoc = associatedIds.join(', ');
+
+            try {
+                const batch = fbWriteBatch(fbDb);
+                
+                const docId = window.editingDraftId || String(nextServiceId);
+                const mainRef = fbDoc(fbDb, 'asistencia', docId);
+                
+                batch.set(mainRef, {
+                    idLista: docId,
+                    clave: inputKey.toUpperCase(),
+                    evento: finalEvent,
+                    fecha: fechaCL,
+                    hora: horaFmt,
+                    abono: document.getElementById('inputServiceType').value === '1' ? 'SÍ' : 'NO',
+                    lugar: document.getElementById('inputLocation').value.trim(),
+                    observacion: document.getElementById('inputObs').value.trim(),
+                    obac: document.getElementById('inputOBAC').value.toUpperCase(),
+                    listaPor: document.getElementById('inputListaPor').value.toUpperCase(),
+                    aprobadoPor: "",
+                    fechaAprobacion: "",
+                    anulada: "",
+                    anuladaPor: "",
+                    idServicio: idDespachoAsoc || ""
+                });
+
+                const btns = document.querySelectorAll('.status-btn');
+                const newRecordsToCache = new Array();
+
+                btns.forEach(btn => {
+                    let st = btn.dataset.status.toUpperCase();
+                    if (st === "LICENCIA MÉDICA") st = "LICENCIA MEDICA"; 
+                    
+                    const subRef = fbDoc(fbDb, `asistencia/${docId}/bomberos`, String(btn.dataset.id));
+                    batch.set(subRef, {
+                        idRegistro: btn.dataset.id,
+                        nombreBombero: btn.dataset.nombre,
+                        estado: st,
+                        ordenEnLista: parseInt(btn.dataset.orden)
+                    });
+
+                    newRecordsToCache.push({
+                        idRegistro: btn.dataset.id,
+                        nombreBombero: btn.dataset.nombre,
+                        estado: st,
+                        ordenEnLista: parseInt(btn.dataset.orden)
+                    });
+                });
+
+                associatedIds.forEach(id => {
+                    const despRef = fbDoc(fbDb, 'despachos', String(id));
+                    batch.update(despRef, { 
+                        idListaPrincipal: docId,
+                        idLista: docId
+                    });
+                });
+
+                await batch.commit();
+
+                // Si guardamos exitosamente, eliminar de drafts locales
+                let drafts = [];
+                try {
+                    const draftsStr = localStorage.getItem('sisbom_local_drafts');
+                    if (draftsStr) drafts = JSON.parse(draftsStr);
+                } catch(e){}
+                drafts = drafts.filter(d => String(d.serviceId) !== String(docId));
+                localStorage.setItem('sisbom_local_drafts', JSON.stringify(drafts));
+                window.editingDraftId = null;
+
+                try {
+                    // 1. INYECTAR LA NUEVA LISTA EN LA CACHÉ DEL HISTORIAL LOCAL
+                    const newHistoryRecord = {
+                        serviceId: docId,
+                        serviceKey: inputKey.toUpperCase(),
+                        Evento: finalEvent,
+                        fecha: fechaCL,
+                        hora: horaFmt,
+                        esAbono: document.getElementById('inputServiceType').value === '1' ? 1 : 0,
+                        obac: document.getElementById('inputOBAC').value.toUpperCase(),
+                        listaPor: document.getElementById('inputListaPor').value.toUpperCase(),
+                        Lugar: document.getElementById('inputLocation').value.trim(),
+                        obs: document.getElementById('inputObs').value.trim(),
+                        aprobadoPor: "",
+                        anulada: "",
+                        anuladaPor: "",
+                        recordsLoaded: true
+                    };
+                    
+                    // Filtrar cualquier borrador anterior del historial en memoria
+                    historyData = historyData.filter(h => String(h.serviceId) !== String(docId));
+                    // unshift: la nueva lista aparece al TOPE del historial inmediatamente
+                    historyData.unshift(newHistoryRecord);
+                    localStorage.setItem('sisbom_history_cache', JSON.stringify(historyData));
+
+                    // 2. INYECTAR LOS BOMBEROS ASISTENTES EN LA CACHÉ ESPECÍFICA
+                    localStorage.setItem(`sisbom_bomberos_${docId}`, JSON.stringify(newRecordsToCache));
+
+                    // 3. ACTUALIZAR LA CACHÉ DE DESPACHOS SI FUE ASOCIADO UNO
+                    if (associatedIds.length > 0) {
+                        associatedIds.forEach(id => {
+                            const despIndex = despachosData.findIndex(d => String(d.idServicio) === String(id));
+                            if (despIndex !== -1) {
+                                despachosData[despIndex].idListaPrincipal = docId;
+                                despachosData[despIndex].idLista = docId;
+                            }
+                        });
+                        localStorage.setItem('sisbom_despachos_cache', JSON.stringify(despachosData));
+                    }
+                } catch (cacheErr) {
+                    console.error("Local caching failed:", cacheErr);
+                }
+
+                // 4. PREPARAR INTERFAZ PARA LA SIGUIENTE LISTA
+                nextServiceId = calculateNextServiceId(historyData);
+                document.getElementById('inputServiceId').value = window.formatListIdForUser(nextServiceId);
+
+                const sModal = document.getElementById('successModal');
+                sModal.classList.remove('hidden');
+                sModal.classList.add('flex');
+                setTimeout(() => { sModal.classList.remove('modal-closed', 'opacity-0'); }, 10);
+            } catch (e) {
+                console.error(e);
+                window.showCustomAlert("Error de conexión al guardar en la base de datos.");
+            } finally {
+                loader.classList.add('hidden');
+                loader.classList.remove('flex');
+            }
+        };
+
+        // --- FUNCIONES DE HISTORIAL CON LECTURA PEREZOSA Y PAGINACIÓN ---
+        window.showHistory = () => {
+             const modal = document.getElementById('historyModal');
+             modal.classList.remove('hidden');
+             modal.classList.add('flex');
+             setTimeout(() => { modal.classList.remove('modal-closed', 'opacity-0'); }, 10);
+
+             historyData.sort((a, b) => parseInt(b.serviceId) - parseInt(a.serviceId));
+             
+             const keySelect = document.getElementById('filterHistKey');
+             const uniqueKeys = new Array();
+             historyData.forEach(h => { if(h.serviceKey && !uniqueKeys.includes(h.serviceKey)) uniqueKeys.push(h.serviceKey); });
+             
+             uniqueKeys.sort((a, b) => {
+                 const arrA = String(a).split('-');
+                 const numA = arrA.length > 1 ? parseInt(arrA[1]) : 0;
+                 const arrB = String(b).split('-');
+                 const numB = arrB.length > 1 ? parseInt(arrB[1]) : 0;
+                 return numA - numB;
+             });
+             
+             keySelect.innerHTML = '<option value="">Clave (Todas)</option>';
+             uniqueKeys.forEach(k => { const opt = document.createElement('option'); opt.value = k; opt.innerText = k; keySelect.appendChild(opt); });
+
+             const dateSelect = document.getElementById('filterHistDate');
+             const dateSet = new Map();
+             historyData.forEach(h => {
+                let safeFecha = h.fecha ? String(h.fecha).replace(/['"]/g, '').trim() : '';
+                if(!safeFecha) return;
+                
+                const isoDate = window.parseDateToISO(safeFecha);
+
+                if(isoDate) dateSet.set(isoDate, window.formatDateForDisplay(safeFecha));
+             });
+
+             const sortedDates = new Array();
+             for(let k of dateSet.keys()) { sortedDates.push(k); }
+             sortedDates.sort((a, b) => b.localeCompare(a)); 
+             
+             dateSelect.innerHTML = '<option value="">Fecha (Todas)</option>';
+             sortedDates.forEach(iso => { const opt = document.createElement('option'); opt.value = iso; opt.innerText = dateSet.get(iso); dateSelect.appendChild(opt); });
+
+             const statusSelect = document.getElementById('filterHistStatus');
+             const foundStatuses = new Set();
+             historyData.forEach(s => {
+                 if (s.anulada == 1 || String(s.anulada).toUpperCase() === "SI") foundStatuses.add('Anulada');
+                 else if (s.aprobadoPor) foundStatuses.add('Aprobada');
+                 else foundStatuses.add('Normal'); 
+             });
+             statusSelect.innerHTML = '<option value="">Estado (Todos)</option>';
+             if(foundStatuses.has('Normal')) { const opt = document.createElement('option'); opt.value = 'Normal'; opt.innerText = 'Pendiente'; statusSelect.appendChild(opt); }
+             if(foundStatuses.has('Aprobada')) { const opt = document.createElement('option'); opt.value = 'Aprobada'; opt.innerText = 'Aprobada'; statusSelect.appendChild(opt); }
+             if(foundStatuses.has('Anulada')) { const opt = document.createElement('option'); opt.value = 'Anulada'; opt.innerText = 'Anulada'; statusSelect.appendChild(opt); }
+
+             window.applyHistoryFilters();
+        };
+
+        window.applyHistoryFilters = () => {
+            const idFilter = document.getElementById('filterHistId').value.trim();
+            const dateFilter = document.getElementById('filterHistDate').value; 
+            const keyFilter = document.getElementById('filterHistKey').value;
+            const statusFilter = document.getElementById('filterHistStatus').value;
+            
+            const filtered = historyData.filter(s => {
+                if (idFilter && !String(s.serviceId).includes(idFilter) && !String(window.formatListIdForUser(s.serviceId)).includes(idFilter)) return false;
+                if (keyFilter && s.serviceKey !== keyFilter) return false;
+                if (dateFilter) { 
+                    let safeFecha = s.fecha ? String(s.fecha).replace(/['"]/g, '').trim() : '';
+                    if (!safeFecha) return false;
+                    const recIso = window.parseDateToISO(safeFecha);
+                    if (recIso !== dateFilter) return false; 
+                }
+                let isAnnulled = s.anulada == 1 || String(s.anulada).toUpperCase() === "SI";
+                let isApproved = !!s.aprobadoPor;
+                if (statusFilter === 'Anulada' && !isAnnulled) return false;
+                if (statusFilter === 'Aprobada' && (!isApproved || isAnnulled)) return false;
+                if (statusFilter === 'Normal' && (isApproved || isAnnulled)) return false;
+                return true;
+            });
+            
+            // Re-asegurar el orden de mayor a menor después de filtrar
+            filtered.sort((a, b) => parseInt(b.serviceId) - parseInt(a.serviceId));
+            
+            currentFilteredHistory = filtered;
+            currentHistoryPage = 1;
+            window.renderHistoryHTML();
+        };
+
+        window.clearHistoryFilters = () => {
+             document.getElementById('filterHistId').value = '';
+             document.getElementById('filterHistDate').value = '';
+             document.getElementById('filterHistKey').value = '';
+             document.getElementById('filterHistStatus').value = '';
+             window.applyHistoryFilters();
+        };
+
+        window.forceRefreshHistory = async () => {
+            const icon = document.querySelector('#historyModal .fa-sync-alt');
+            if (icon) icon.classList.add('fa-spin');
+            
+            // Simular actualización (onSnapshot ya lo hace en tiempo real)
+            setTimeout(() => {
+                if (icon) icon.classList.remove('fa-spin');
+                window.applyHistoryFilters();
+            }, 800);
+        };
+
+        window.renderHistoryHTML = () => {
+            const services = currentFilteredHistory;
+            const content = document.getElementById('history-content');
+            
+            if (services.length === 0) { 
+                content.innerHTML = '<div class="py-20 text-center text-slate-400 font-bold uppercase tracking-widest"><i class="fas fa-search text-4xl mb-3 block opacity-30"></i>No se encontraron registros</div>'; 
+                return; 
+            }
+            
+            const totalPages = Math.ceil(services.length / HISTORY_ITEMS_PER_PAGE) || 1;
+            const startIndex = (currentHistoryPage - 1) * HISTORY_ITEMS_PER_PAGE;
+            const pageItems = services.slice(startIndex, startIndex + HISTORY_ITEMS_PER_PAGE);
+
+            let html = '<div class="flex flex-col gap-3 p-2 sm:p-4">';
+            pageItems.forEach(s => {
+                let isApproved = !!s.aprobadoPor;
+                let isAnnulled = s.anulada == 1 || String(s.anulada).toUpperCase() === "SI";
+                let isAbono = s.esAbono === 1 || String(s.serviceKey).toUpperCase().includes('ABONO');
+                let isDraft = !!s.isLocalDraft;
+                
+                let statusBadge = '<span class="text-xs bg-yellow-100 text-yellow-600 px-2 py-0.5 rounded font-black uppercase tracking-wider ml-auto border border-yellow-200"><i class="fas fa-clock mr-1"></i> PENDIENTE</span>';
+                if(isDraft) statusBadge = '<span class="text-xs bg-orange-100 text-orange-600 px-2 py-0.5 rounded font-black uppercase tracking-wider ml-auto border border-orange-200"><i class="fas fa-file-signature mr-1"></i> BORRADOR</span>';
+                else if(isAnnulled) statusBadge = '<span class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-black uppercase tracking-wider ml-auto border border-red-200"><i class="fas fa-ban mr-1"></i> ANULADA</span>';
+                else if(isApproved) statusBadge = '<span class="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded font-black uppercase tracking-wider ml-auto border border-green-200"><i class="fas fa-check-circle mr-1"></i> APROBADA</span>';
+
+                let abonoBadge = isAbono ? '<span class="bg-blue-100 border border-blue-200 text-blue-700 px-1.5 py-0.5 rounded text-xs font-black tracking-widest uppercase">ABONO</span>' : '';
+                const fechaVisual = window.formatDateForDisplay(s.fecha);
+                let horaVisual = s.hora || '--:--';
+
+                let footerHtml = '';
+                if (isDraft) {
+                    footerHtml = `
+                        <div class="mt-3 flex gap-2 border-t border-slate-200 pt-3">
+                            <button onclick="window.confirmDeleteDraft('${s.serviceId}')" class="button-10 btn-white flex-1 text-xs py-2 text-red-500 font-bold uppercase tracking-wider">
+                                <i class="fas fa-trash-alt mr-1"></i> Eliminar Borrador
+                            </button>
+                            <button onclick="window.confirmLoadDraft('${s.serviceId}')" class="button-10 bg-amber-500 hover:bg-amber-600 text-white flex-1 text-xs py-2 font-bold uppercase tracking-wider">
+                                <i class="fas fa-file-signature mr-1"></i> Confirmar
+                            </button>
+                        </div>
+                    `;
+                } else if (isAnnulled) {
+                    const motivoText = s.anuladaPor ? String(s.anuladaPor).replace('|', '<br><span class="text-red-500 font-bold uppercase tracking-widest mt-1 block">Motivo:</span>') : 'No especificado';
+                    footerHtml = `<div class="mt-3 text-red-700 font-bold text-left text-xs border-t border-red-200 pt-3"><i class="fas fa-ban mr-1 text-red-500"></i> ANULADA POR: <span class="font-medium text-red-800">${motivoText}</span></div>`;
+                } else if (isApproved) {
+                    footerHtml = `<div class="mt-3 text-green-600 font-bold text-right text-xs border-t border-slate-200 pt-2"><i class="fas fa-shield-check mr-1"></i> Aprobada por: ${s.aprobadoPor}</div>`;
+                }
+
+                const detailsHtml = `
+                    <div class="bg-slate-50 rounded-xl p-4 mb-4 text-xs border border-slate-100 shadow-sm">
+                        <div class="grid grid-cols-2 gap-4 mb-3">
+                            <div><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">OBAC</span><span class="font-bold text-slate-800 text-sm">${s.obac || '-'}</span></div>
+                            <div><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">Lista Por</span><span class="font-bold text-slate-800 text-sm">${s.listaPor || '-'}</span></div>
+                        </div>
+                        <div class="mb-3"><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">Lugar</span><span class="font-semibold text-slate-700 text-sm"><i class="fas fa-map-marker-alt text-red-400 mr-1"></i>${s.Lugar || 'No especificado'}</span></div>
+                        <div><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">Observación</span><span class="font-medium text-slate-600 italic text-sm">${s.obs || 'Sin observaciones'}</span></div>
+                        ${footerHtml}
+                    </div>
+                `;
+
+                html += `
+                <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md">
+                    <div class="p-3 sm:p-4 cursor-pointer hover:bg-slate-50 flex items-center justify-between gap-3" onclick="window.toggleHistoryDetail('${s.serviceId}')">
+                        
+                        <div class="flex flex-col flex-shrink-0 w-20 sm:w-28">
+                            <div class="font-black text-sm text-slate-800 leading-none mb-1.5 flex items-center gap-1.5">
+                                #${window.formatListIdForUser(s.serviceId)}
+                                ${abonoBadge}
+                            </div>
+                            <span class="text-xs text-bomberos-red font-black uppercase tracking-widest">${s.serviceKey || 'S/C'}</span>
+                        </div>
+
+                        <div class="flex-1 min-w-0 border-l border-slate-200 pl-3 sm:pl-4 sm:pr-4 flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-4 justify-start">
+                            <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                                <i class="fas fa-info-circle text-slate-300 text-xs shrink-0"></i>
+                                <span class="text-xs text-slate-600 font-medium truncate" title="${s.Evento || ''}">${s.Evento || '<span class="italic text-slate-400">Sin desc.</span>'}</span>
+                            </div>
+                            <div class="flex items-center gap-1.5 min-w-0 flex-1 sm:border-l sm:border-slate-200 sm:pl-4">
+                                <i class="fas fa-map-marker-alt text-red-300 text-xs shrink-0"></i>
+                                <span class="text-xs text-slate-600 font-medium truncate" title="${s.Lugar || ''}">${s.Lugar || '<span class="italic text-slate-400">S/Lugar</span>'}</span>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-3 sm:gap-4 flex-shrink-0 border-l border-slate-200 pl-3 sm:pl-4">
+                            <div class="flex flex-col items-end gap-1">
+                                ${statusBadge}
+                                <span class="text-xs text-slate-500 font-bold flex items-center">
+                                    ${fechaVisual} <span class="mx-1 opacity-50">|</span> ${horaVisual}
+                                </span>
+                            </div>
+                            <div class="text-slate-300 text-sm">
+                                <i class="fas fa-chevron-down" id="icon-hist-${s.serviceId}"></i>
+                            </div>
+                        </div>
+
+                    </div>
+                    <div id="hist-detail-${s.serviceId}" class="hist-detail-wrapper hidden px-4 sm:px-5 pb-5 bg-white border-t border-slate-100">
+                        <div class="pt-4" id="hist-detail-content-${s.serviceId}">
+                            ${detailsHtml}
+                            ${localStorage.getItem('sisbom_bomberos_' + s.serviceId) ? '' : `
+                            <div class="py-6 flex flex-col items-center justify-center text-slate-400">
+                                <div class="spinner-sm mb-3"></div>
+                                <p class="text-xs font-bold uppercase tracking-widest">Cargando personal...</p>
+                            </div>`}
+                        </div>
+                    </div>
+                </div>`;
+            });
+            html += '</div>';
+
+            if (totalPages > 1) {
+                html += `
+                <div class="flex justify-between items-center mt-2 mb-4 px-2 sm:px-4">
+                    <button onclick="window.changeHistoryPage(-1)" class="button-10 btn-white text-xs py-2 px-4 shadow-sm font-bold ${currentHistoryPage === 1 ? 'opacity-50 cursor-not-allowed' : ''}" ${currentHistoryPage === 1 ? 'disabled' : ''}><i class="fas fa-chevron-left mr-1"></i> Anterior</button>
+                    <span class="text-xs font-bold text-slate-500 tracking-widest">PÁG. ${currentHistoryPage} DE ${totalPages}</span>
+                    <button onclick="window.changeHistoryPage(1)" class="button-10 btn-white text-xs py-2 px-4 shadow-sm font-bold ${currentHistoryPage === totalPages ? 'opacity-50 cursor-not-allowed' : ''}" ${currentHistoryPage === totalPages ? 'disabled' : ''}>Siguiente <i class="fas fa-chevron-right ml-1"></i></button>
+                </div>`;
+            }
+
+            content.innerHTML = html;
+        };
+
+        window.changeHistoryPage = (direction) => {
+            const totalPages = Math.ceil(currentFilteredHistory.length / HISTORY_ITEMS_PER_PAGE) || 1;
+            const newPage = currentHistoryPage + direction;
+            if (newPage >= 1 && newPage <= totalPages) {
+                currentHistoryPage = newPage;
+                window.renderHistoryHTML();
+                document.getElementById('history-content').scrollTop = 0;
+            }
+        };
+
+        window.toggleHistoryDetail = async (id) => { 
+            const el = document.getElementById(`hist-detail-${id}`); 
+            const icon = document.getElementById(`icon-hist-${id}`);
+            const contentDiv = document.getElementById(`hist-detail-content-${id}`);
+
+            document.querySelectorAll('.hist-detail-wrapper').forEach(wrapper => {
+                if (wrapper.id !== `hist-detail-${id}` && !wrapper.classList.contains('hidden')) {
+                    wrapper.classList.add('hidden');
+                    const wrapperId = wrapper.id.replace('hist-detail-', '');
+                    const wrapperIcon = document.getElementById(`icon-hist-${wrapperId}`);
+                    if (wrapperIcon) {
+                        wrapperIcon.classList.add('fa-chevron-down');
+                        wrapperIcon.classList.remove('fa-chevron-up', 'text-bomberos-red');
+                    }
+                }
+            });
+
+            if (el.classList.contains('hidden')) {
+                el.classList.remove('hidden'); 
+                if(icon) { icon.classList.remove('fa-chevron-down'); icon.classList.add('fa-chevron-up', 'text-bomberos-red'); }
+                
+                const s = historyData.find(x => String(x.serviceId) === String(id));
+                const cacheKey = `sisbom_bomberos_${id}`;
+                const isApproved = s && !!s.aprobadoPor;
+                const isDraft = s && !!s.isLocalDraft;
+                
+                let records = null;
+                
+                // 1. Intentar cargar de la caché local si es borrador o está aprobada
+                if (isDraft) {
+                    records = s.firefighters || [];
+                } else if (isApproved) {
+                    const cachedBomberos = localStorage.getItem(cacheKey);
+                    if (cachedBomberos) {
+                        try { records = JSON.parse(cachedBomberos); } catch(e) {}
+                    }
+                } else {
+                    // Si está pendiente, forzar limpieza de caché local
+                    localStorage.removeItem(cacheKey);
+                }
+
+                // 2. Si no estaba en caché, o está pendiente, buscar de Firebase
+                if (!records && !isDraft) {
+                    try {
+                        let fetchedRecords = new Array();
+                        const snap = await fbGetDocs(fbCollection(fbDb, `asistencia/${id}/bomberos`));
+                        snap.forEach(docSnap => fetchedRecords.push(docSnap.data()));
+                        records = fetchedRecords;
+
+                        // Si está aprobada, guardarla en localStorage permanentemente
+                        if (isApproved) {
+                            localStorage.setItem(cacheKey, JSON.stringify(records));
+                        }
+                    } catch (error) {
+                        console.error(error);
+                        contentDiv.innerHTML = `<div class="py-6 text-center text-red-500 font-bold">Error cargando el personal asociado a esta lista.<br><span class="text-[10px] font-mono font-medium lowercase text-red-400 select-all block mt-1">${error.message || error}</span></div>`;
+                        return;
+                    }
+                }
+
+                // 3. Renderizar los records si es necesario (si aún no se ha renderizado la lista de personal)
+                const alreadyRendered = contentDiv.querySelector('.columns-1') !== null;
+                if (!alreadyRendered && records) {
+                    let tA=0, tF=0, tP=0, tLM=0, tS=0;
+                    records.forEach(r => { 
+                        const st = String(r.estado).toUpperCase().trim();
+                        if(st === 'ASISTE' || st === 'CDS') tA++; 
+                        else if(st === 'FALTA') tF++; 
+                        else if(st === 'PERMISO') tP++; 
+                        else if(st === 'LICENCIA MEDICA' || st === 'LICENCIA MÉDICA') tLM++; 
+                        else if(st === 'SUSPENDIDO') tS++; 
+                    });
+
+                    const totalsHtml = `
+                        <div class="flex justify-between gap-1 mb-4 text-center">
+                            <div class="flex-1 bg-green-50 rounded-lg p-2 border border-green-100"><div class="font-black text-green-600 text-lg">${tA}</div><div class="text-xs font-bold text-green-500 uppercase tracking-widest">Asiste</div></div>
+                            <div class="flex-1 bg-red-50 rounded-lg p-2 border border-red-100"><div class="font-black text-red-600 text-lg">${tF}</div><div class="text-xs font-bold text-red-500 uppercase tracking-widest">Faltas</div></div>
+                            <div class="flex-1 bg-yellow-50 rounded-lg p-2 border border-yellow-100"><div class="font-black text-yellow-600 text-lg">${tP}</div><div class="text-xs font-bold text-yellow-500 uppercase tracking-widest">Permiso</div></div>
+                            <div class="flex-1 bg-blue-50 rounded-lg p-2 border border-blue-100"><div class="font-black text-blue-600 text-lg">${tLM}</div><div class="text-xs font-bold text-blue-500 uppercase tracking-widest">Lic. Médica</div></div>
+                            <div class="flex-1 bg-purple-50 rounded-lg p-2 border border-purple-100"><div class="font-black text-purple-600 text-lg">${tS}</div><div class="text-xs font-bold text-purple-500 uppercase tracking-widest">Suspendido</div></div>
+                        </div>
+                    `;
+
+                    let personnelHtml = '<div class="columns-1 sm:columns-2 gap-3 mt-4 pt-4 border-t border-slate-200">';
+                    records.sort((a,b) => parseInt(a.ordenEnLista) - parseInt(b.ordenEnLista)).forEach((r, index) => {
+                        let colorClass = 'text-slate-500'; let bIcon = ''; let statusText = String(r.estado).trim().toUpperCase();
+                        if(statusText === 'ASISTE') { colorClass = 'text-green-600 font-bold'; bIcon='<i class="fas fa-check mr-1 text-xs"></i>'; }
+                        else if(statusText === 'CDS') { colorClass = 'text-green-600 font-bold'; bIcon='<i class="fas fa-briefcase mr-1 text-xs"></i>'; }
+                        else if(statusText === 'FALTA') { colorClass = 'text-red-500 opacity-70'; bIcon='<i class="fas fa-times mr-1 text-xs"></i>'; }
+                        else if(statusText === 'PERMISO') { colorClass = 'text-yellow-600 font-bold'; bIcon='<i class="fas fa-clock mr-1 text-xs"></i>'; }
+                        else if(statusText.includes('LICENCIA')) { colorClass = 'text-blue-600 font-bold'; bIcon='<i class="fas fa-user-md mr-1 text-xs"></i>'; statusText='Lic. Médica'; }
+                        else if(statusText === 'SUSPENDIDO') { colorClass = 'text-purple-600 font-bold'; bIcon='<i class="fas fa-ban mr-1 text-xs"></i>'; }
+                        
+                        personnelHtml += `
+                            <div class="flex justify-between items-center p-1.5 rounded bg-slate-50 border border-slate-100 text-xs mb-1.5 break-inside-avoid">
+                                <div class="flex items-center truncate mr-2"><span class="text-slate-300 font-black font-mono mr-3 w-5 text-right text-xs">${index + 1}.</span><span class="font-bold text-slate-700 truncate">${r.nombreBombero}</span></div>
+                                <span class="flex items-center flex-shrink-0 bg-white px-2 py-1 rounded shadow-sm border border-slate-100 ${colorClass}">${bIcon}${statusText}</span>
+                            </div>`;
+                    });
+                    personnelHtml += '</div>';
+
+                    const isAnnulled = s && (s.anulada == 1 || String(s.anulada).toUpperCase() === "SI");
+                    let footerHtml = '';
+                    if (isDraft) {
+                        footerHtml = `
+                            <div class="mt-3 flex gap-2 border-t border-slate-200 pt-3">
+                                <button onclick="window.confirmDeleteDraft('${s.serviceId}')" class="button-10 btn-white flex-1 text-xs py-2 text-red-500 font-bold uppercase tracking-wider">
+                                    <i class="fas fa-trash-alt mr-1"></i> Eliminar
+                                </button>
+                                <button onclick="window.confirmLoadDraft('${s.serviceId}')" class="button-10 bg-amber-500 hover:bg-amber-600 text-white flex-1 text-xs py-2 font-bold uppercase tracking-wider">
+                                    <i class="fas fa-file-signature mr-1"></i> Confirmar
+                                </button>
+                            </div>
+                        `;
+                    } else if (isAnnulled) {
+                        const motivoText = s.anuladaPor ? String(s.anuladaPor).replace('|', '<br><span class="text-red-500 font-bold uppercase tracking-widest mt-1 block">Motivo:</span>') : 'No especificado';
+                        footerHtml = `<div class="mt-3 text-red-700 font-bold text-left text-xs border-t border-red-200 pt-3"><i class="fas fa-ban mr-1 text-red-500"></i> ANULADA POR: <span class="font-medium text-red-800">${motivoText}</span></div>`;
+                    } else if (isApproved) {
+                        footerHtml = `<div class="mt-3 text-green-600 font-bold text-right text-xs border-t border-slate-200 pt-2"><i class="fas fa-shield-check mr-1"></i> Aprobada por: ${s.aprobadoPor}</div>`;
+                    }
+
+                    const detailsHtml = `
+                        <div class="bg-slate-50 rounded-xl p-4 mb-4 text-xs border border-slate-100 shadow-sm">
+                            <div class="grid grid-cols-2 gap-4 mb-3">
+                                <div><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">OBAC</span><span class="font-bold text-slate-800 text-sm">${s.obac || '-'}</span></div>
+                                <div><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">Lista Por</span><span class="font-bold text-slate-800 text-sm">${s.listaPor || '-'}</span></div>
+                            </div>
+                            <div class="mb-3"><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">Lugar</span><span class="font-semibold text-slate-700 text-sm"><i class="fas fa-map-marker-alt text-red-400 mr-1"></i>${s.Lugar || 'No especificado'}</span></div>
+                            <div><span class="text-slate-400 font-bold uppercase tracking-widest block text-xs mb-0.5">Observación</span><span class="font-medium text-slate-600 italic text-sm">${s.obs || 'Sin observaciones'}</span></div>
+                            ${footerHtml}
+                        </div>
+                    `;
+
+                    contentDiv.innerHTML = detailsHtml + totalsHtml + personnelHtml;
+                    if (s) s.recordsLoaded = true;
+                }
+            } else {
+                el.classList.add('hidden'); 
+                if(icon) { icon.classList.add('fa-chevron-down'); icon.classList.remove('fa-chevron-up', 'text-bomberos-red'); }
+            }
+        };
+
+        window.enterApp = () => { 
+            document.getElementById('start-screen').classList.add('hidden'); 
+            document.getElementById('app-container').classList.remove('hidden'); 
+            renderPersonnelList();
+        };
+        
+        window.goHome = () => { window.location.reload(); };
+        
+        window.closeHistory = () => { 
+            const modal = document.getElementById('historyModal');
+            modal.classList.add('opacity-0', 'modal-closed'); 
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 300); 
+        };
+    </script>
+</body>
+</html>

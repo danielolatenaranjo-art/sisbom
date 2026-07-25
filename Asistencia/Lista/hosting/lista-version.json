@@ -1,0 +1,11 @@
+{
+  "version": "1.2.0",
+  "url": "https://sisbom-de5f8.web.app/lista-ota.html",
+  "apkUrl": "https://sisbom-de5f8.web.app/asistencia_v120.apk",
+  "notes": "Actualizaci\u00f3n 1.2.0: Corrige formato de fecha en Chile (dd-mm-aaaa) y a\u00f1ade nuevo di\u00e1logo de actualizaci\u00f3n OTA.",
+  "android": {
+    "versionName": "1.2.0",
+    "versionCode": 1200,
+    "url": "https://sisbom-de5f8.web.app/asistencia_v120.apk"
+  }
+}

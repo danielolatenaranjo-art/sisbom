@@ -1,0 +1,1628 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Despacho Central de Alarmas</title>
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+
+    <style>
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder {
+            text-transform: uppercase !important;
+        }
+
+        /* =========================================
+           ESTILO FLUENT / MICROSOFT VISION
+           ========================================= */
+        :root {
+            --bg-app: #0f172a;
+            --bg-card: #1e293b;
+            --bg-input: #0b0f19;
+            --text-main: #f4f4f5;
+            --text-muted: #94a3b8;
+            
+            --primary-red: #ef4444;
+            --primary-green: #10b981;
+            --primary-blue: #3b82f6;
+            --primary-amber: #f59e0b;
+            
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --shadow-soft: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
+            --shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+            
+            --card-radius: 8px;
+            --btn-radius: 6px;
+            
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        body { 
+            font-family: "Segoe UI", "SegoeWP", "Helvetica Neue", sans-serif; 
+            background: var(--bg-app); 
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- ANIMACIONES --- */
+        @keyframes fade-slide-up {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin-ring {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .animate-enter { animation: fade-slide-up 0.5s var(--ease-out-expo) forwards; opacity: 0; }
+        
+        /* Spinner Moderno (Sin borde gris) */
+        .spinner-modern { 
+            border: 4px solid transparent; 
+            border-top-color: #ef4444; 
+            border-radius: 50%; 
+            animation: spin-ring 1s linear infinite; 
+        }
+
+        /* --- LAYOUT --- */
+        .app-container {
+            flex: 1;
+            max-width: 1600px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 24px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .main-grid {
+            display: grid;
+            grid-template-columns: 420px 1fr 320px;
+            gap: 24px;
+            height: 100%;
+            min-height: 0;
+        }
+
+        .card-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            box-shadow: var(--shadow-soft);
+            display: flex; flex-direction: column;
+            overflow: hidden;
+            height: 100%;
+        }
+
+        .panel-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--glass-border);
+            background: rgba(0, 0, 0, 0.2);
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: var(--text-main);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+
+        .panel-body {
+            padding: 16px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        /* --- BOTONES CHIP --- */
+        .btn-chip {
+            background: var(--bg-card);
+            color: var(--text-main);
+            border: 1px solid var(--glass-border);
+            padding: 8px 6px;
+            border-radius: var(--btn-radius);
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s var(--ease-out-expo);
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; gap: 2px;
+            position: relative;
+            user-select: none;
+            min-height: 48px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .btn-chip:hover {
+            background: var(--bg-input);
+            border-color: rgba(239, 68, 68, 0.4);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px -2px rgba(0,0,0,0.3);
+            color: #ffffff;
+        }
+
+        .btn-chip span.desc { font-size: 0.62rem; opacity: 0.8; font-weight: 400; text-transform: uppercase; line-height: 1.1; max-width: 100%; white-space: normal; }
+        
+        .btn-chip.selected { 
+            background: linear-gradient(135deg, #ef4444 0%, #7f1d1d 100%);
+            color: white; border-color: transparent;
+            box-shadow: 0 8px 20px -4px rgba(239, 68, 68, 0.4);
+        }
+        .btn-chip.selected span.desc { color: rgba(255,255,255,0.8); }
+
+        .btn-chip.btn-9-0 { border-color: #f59e0b; background: rgba(245, 158, 11, 0.1); color: #f59e0b; }
+        .btn-chip.btn-9-0:hover { background: rgba(245, 158, 11, 0.2); }
+        
+        .btn-chip.btn-9-0.selected { 
+            background: linear-gradient(135deg, #f59e0b 0%, #78350f 100%) !important;
+            color: white !important; 
+            border-color: transparent !important; 
+            box-shadow: 0 8px 20px -4px rgba(245, 158, 11, 0.4) !important; 
+        }
+
+        .btn-chip.btn-comandancia { border-color: #8b5cf6; background: rgba(139, 92, 246, 0.1); color: #a78bfa; }
+        .btn-chip.btn-comandancia:hover { background: rgba(139, 92, 246, 0.2); border-color: #a78bfa; }
+
+        .btn-chip.btn-comandancia.selected {
+            background: linear-gradient(135deg, #8b5cf6 0%, #4c1d95 100%) !important;
+            color: white !important;
+            border-color: transparent !important;
+            box-shadow: 0 8px 20px -4px rgba(139, 92, 246, 0.4) !important;
+        }
+
+        /* --- UNIDADES --- */
+        .unit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+        
+        .unit-chip {
+            padding: 8px; min-height: 42px;
+        }
+        
+        .unit-chip.disabled { opacity: 0.6; cursor: not-allowed; }
+        .unit-chip.disabled.is-08 { background: rgba(239, 68, 68, 0.08); border-color: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+        .unit-chip.disabled.is-act { background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.2); color: #fde047; }
+
+        /* --- INPUTS --- */
+        .input-label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); margin-bottom: 6px; margin-left: 4px; }
+        
+        .input-pill {
+            background: rgba(30, 41, 59, 0.45) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;
+            border-radius: var(--btn-radius);
+            padding: 12px 16px;
+            font-size: 1rem; color: #f8fafc !important; font-weight: 500;
+            width: 100%; outline: none; transition: all 0.2s;
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .input-pill:focus { background: rgba(30, 41, 59, 0.65) !important; border-color: var(--primary-red) !important; box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.15) !important; color: #f8fafc !important; }
+        .input-pill::placeholder { color: #64748b; font-weight: 400; }
+
+        #svcLocation {
+            padding-left: 2.75rem !important;
+        }
+
+        .textarea-pill {
+            background: rgba(30, 41, 59, 0.45) !important; border: 1px solid rgba(255, 255, 255, 0.1) !important; color: #f8fafc !important; resize: none; min-height: 100px;
+        }
+        .textarea-pill:focus { background: rgba(30, 41, 59, 0.65) !important; border-color: var(--primary-amber) !important; box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15) !important; color: #f8fafc !important; }
+
+        /* --- BOTÓN FINALIZAR --- */
+        .btn-finalize {
+            width: 100%; background: var(--primary-red); color: white; padding: 16px; border-radius: var(--btn-radius);
+            font-weight: 600; font-size: 1.05rem; letter-spacing: 0.5px; display: flex; align-items: center; justify-content: center; gap: 10px;
+            box-shadow: 0 10px 20px -5px rgba(239, 68, 68, 0.4); transition: all 0.3s var(--ease-out-expo); border: none; cursor: pointer;
+        }
+        .btn-finalize:disabled {
+            background: #4b5563;
+            box-shadow: none;
+            transform: none;
+            filter: grayscale(0.5);
+            opacity: 0.5;
+        }
+        .btn-finalize:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 12px 20px -5px rgba(239, 68, 68, 0.45); filter: brightness(110%); }
+        .btn-finalize:active:not(:disabled) { transform: scale(0.98); }
+        .btn-finalize:focus { outline: none; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3); }
+
+        /* Botón Limpiar */
+        .btn-clean {
+            margin-top: 12px; width: 100%; background: transparent; color: var(--text-muted);
+            padding: 10px; border-radius: var(--btn-radius); font-size: 0.85rem; font-weight: 600;
+            border: 1px dashed rgba(255,255,255,0.15); cursor: pointer; transition: all 0.2s;
+        }
+        .btn-clean:hover { background: rgba(255,255,255,0.05); color: var(--text-main); border-style: solid; }
+
+        /* --- OVERLAY & MODAL --- */
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .overlay.active { opacity: 1; pointer-events: auto; }
+        
+        .modal-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 7, 18, 0.8); backdrop-filter: blur(8px); z-index: 150; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .modal-bg.active { opacity: 1; pointer-events: auto; }
+        .modal-box { background: rgba(15, 23, 42, 0.95); padding: 32px; border-radius: var(--card-radius); border: 1px solid #ef4444; width: 90%; max-width: 400px; text-align: center; transform: scale(0.95) translateY(20px); transition: transform 0.4s var(--ease-out-expo); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+        .modal-bg.active .modal-box { transform: scale(1) translateY(0); }
+        
+        .modal-btns { display: flex; gap: 12px; margin-top: 24px; }
+        .btn-modal { flex: 1; padding: 14px; border-radius: var(--btn-radius); font-weight: 600; font-size: 0.95rem; transition: background 0.2s; cursor: pointer; border: none; display: flex; justify-content: center; align-items: center; gap: 8px;}
+        .btn-cancel { background: rgba(255, 255, 255, 0.05); color: var(--text-muted); }
+        .btn-cancel:hover { background: rgba(255, 255, 255, 0.1); color: #ffffff; }
+        .btn-confirm { background: var(--primary-red); color: white; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); }
+        .btn-confirm:hover { background: #dc2626; transform: translateY(-1px); }
+
+        /* --- ESTADOS DEL GRID DE DOS PASOS --- */
+        
+        /* Estado 1: Selección de Clave */
+        .main-grid.state-selection {
+            grid-template-columns: 1fr;
+            justify-content: center;
+            align-content: center;
+        }
+        .main-grid.state-selection .col-keys {
+            max-width: 550px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        .main-grid.state-selection .col-details,
+        .main-grid.state-selection .col-units {
+            display: none !important;
+        }
+
+        /* Estado 2: Ingreso de Información y Carros */
+        .main-grid.state-dispatch {
+            grid-template-columns: 1fr 340px;
+        }
+        .main-grid.state-dispatch .col-keys {
+            display: none !important;
+        }
+        .main-grid.state-dispatch .col-details,
+        .main-grid.state-dispatch .col-units {
+            display: flex !important;
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* --- RESPONSIVE MOBILE --- */
+        @media (max-width: 1024px) {
+            .main-grid { grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr; }
+            .col-keys { grid-column: 1 / -1; max-height: none; }
+            .col-details { grid-column: 1; }
+            .col-units { grid-column: 2; }
+        }
+        @media (max-width: 768px) {
+            body { height: auto; overflow-y: auto; }
+            .app-container { padding: 16px; height: auto; overflow: visible; }
+            .main-grid { display: flex; flex-direction: column; gap: 24px; height: auto; }
+            .card-panel { height: auto !important; overflow: visible; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- MODAL CONFIRMACIÓN PRE-DESPACHO -->
+    <div id="predispatch-modal" class="modal-bg">
+        <div class="modal-box">
+            <div class="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow border border-red-500/20">
+                <i class="fas fa-tower-broadcast animate-pulse"></i>
+            </div>
+            <h3 style="margin-bottom: 8px; font-size: 1.25rem; color: #ffffff; font-weight: 700;">DESPACHAR EMERGENCIA</h3>
+            <div style="background: rgba(0,0,0,0.25); border-radius: 16px; padding: 16px; margin-bottom: 24px; border: 1px solid rgba(255,255,255,0.05);">
+                <p id="predispatch-message-key" style="font-size: 3rem; font-weight: 900; color: #ef4444; line-height: 1; word-wrap: break-word; word-break: break-word;">10-0</p>
+                <p id="predispatch-message-desc" style="font-size: 0.85rem; font-weight: 600; color: #94a3b8; text-transform: uppercase; margin-top: 4px;">INCENDIO ESTRUCTURAL</p>
+            </div>
+            <p style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 20px;">Esta acción despachará la emergencia inmediatamente a todos los teléfonos con la clave seleccionada.</p>
+            <div class="modal-btns">
+                <button onclick="closePreDispatchModal()" class="btn-modal btn-cancel focus:outline-none">Cancelar</button>
+                <button onclick="confirmPreDispatch()" class="btn-modal btn-confirm focus:outline-none">CONFIRMAR DESPACHO</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMACIÓN -->
+    <div id="confirmation-modal" class="modal-bg">
+        <div class="modal-box">
+            <div class="w-16 h-16 bg-red-500/10 text-red-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl shadow border border-red-500/20">
+                <i class="fas fa-tower-broadcast"></i>
+            </div>
+            <h3 style="margin-bottom: 8px; font-size: 1.25rem; color: var(--text-main); font-weight: 700;">Confirmar Salida</h3>
+            <div style="background: rgba(0,0,0,0.25); border-radius: 16px; padding: 16px; margin-bottom: 24px; border: 1px solid var(--glass-border);">
+                <p id="confirm-message-key" style="font-size: 2rem; font-weight: 800; color: var(--primary-red); line-height: 1.1; word-wrap: break-word; word-break: break-word;">10-0</p>
+                <p id="confirm-message-units" style="font-size: 0.85rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; margin-top: 4px;">--</p>
+            </div>
+            <div class="modal-btns">
+                <button onclick="closeConfirmationModal()" class="btn-modal btn-cancel focus:outline-none">Cancelar</button>
+                <button onclick="performDispatch()" class="btn-modal btn-confirm focus:outline-none" id="btn-modal-confirm">CONFIRMAR</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL LIMPIEZA -->
+    <div id="clear-confirmation-modal" class="modal-bg">
+        <div class="modal-box">
+            <div class="w-16 h-16 bg-slate-50 text-slate-500 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl border border-slate-200">
+                <i class="fas fa-eraser"></i>
+            </div>
+            <h3 style="font-size: 1.2rem; font-weight: 700; color: var(--text-main); margin-bottom: 8px;">¿Cancelar despacho?</h3>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 24px;"></p>
+            <div class="modal-btns">
+                <button onclick="closeClearModal()" class="btn-modal btn-cancel focus:outline-none">Volver</button>
+                <button onclick="executeClearForm()" class="btn-modal focus:outline-none" style="background: #1e293b; color: white;">CONFIRMAR</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL MENSAJES -->
+    <div id="generic-modal" class="modal-bg">
+        <div class="modal-box">
+            <div id="generic-modal-icon" class="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl"></div>
+            <h3 id="generic-modal-title" style="font-size: 1.1rem; font-weight: 700; margin-bottom: 8px;"></h3>
+            <p id="generic-modal-message" style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 24px;"></p>
+            <button onclick="closeGenericModal()" class="btn-modal focus:outline-none" style="background: var(--text-main); color: white; width: 100%;">ENTENDIDO</button>
+        </div>
+    </div>
+
+    <div class="app-container pt-8">
+        
+        <!-- Elemento escondido requerido para el funcionamiento -->
+        <input type="hidden" id="svcKey" value="---">
+
+        <!-- CABECERA DE DESPACHO ACTIVO -->
+        <div id="active-dispatch-header" class="hidden flex justify-between items-center mb-4 p-4 bg-slate-900/60 backdrop-blur border border-red-500/20 rounded-md">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-red-500/10 text-red-500 rounded-md flex items-center justify-center border border-red-500/20 shadow-inner">
+                    <i class="fas fa-bullhorn animate-pulse"></i>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-xs font-black text-slate-400 tracking-widest uppercase">EMERGENCIA DESPACHADA</span>
+                    <span id="active-dispatch-key-title" class="text-lg font-bold text-red-500 uppercase tracking-wide mt-0.5" style="text-transform: uppercase !important;">CLAVE: ---</span>
+                </div>
+            </div>
+            
+            <button onclick="window.confirmCancelCurrentPreDispatch()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded font-bold text-sm transition-colors shadow-sm focus:outline-none flex items-center gap-2" style="border-radius: var(--btn-radius) !important;">
+                <i class="fas fa-times"></i>
+                <span>CANCELAR SALIDA</span>
+            </button>
+        </div>
+
+        <!-- GRID PRINCIPAL -->
+        <div class="main-grid animate-enter" style="animation-delay: 0.1s;">
+            
+            <!-- COLUMNA 1: CLAVES -->
+            <div class="card-panel col-keys">
+                <div class="panel-header">
+                    <span>1. SELECCIONAR CLAVE</span>
+                    <i class="fas fa-bullhorn text-slate-400"></i>
+                </div>
+                <div class="panel-body">
+                    <div class="grid grid-cols-3 gap-2">
+                        <button onclick="selectKey(this, '10-0')" class="btn-chip key-btn focus:outline-none">10-0<span class="desc">Incendio Estructural</span></button>
+                        <button onclick="selectKey(this, '10-1')" class="btn-chip key-btn focus:outline-none">10-1<span class="desc">Incendio Vehicular</span></button>
+                        <button onclick="selectKey(this, '10-2')" class="btn-chip key-btn focus:outline-none">10-2<span class="desc">Pastizales / Basura</span></button>
+                        <button onclick="selectKey(this, '10-3')" class="btn-chip key-btn focus:outline-none">10-3<span class="desc">Rescate Personas</span></button>
+                        <button onclick="selectKey(this, '10-4')" class="btn-chip key-btn focus:outline-none">10-4<span class="desc">Rescate Vehicular</span></button>
+                        <button onclick="selectKey(this, '10-5')" class="btn-chip key-btn focus:outline-none">10-5<span class="desc">Hazmat</span></button>
+                        <button onclick="selectKey(this, '10-6')" class="btn-chip key-btn focus:outline-none">10-6<span class="desc">Emanación Gas</span></button>
+                        <button onclick="selectKey(this, '10-7')" class="btn-chip key-btn focus:outline-none">10-7<span class="desc">Eléctrico</span></button>
+                        <button onclick="selectKey(this, '10-8')" class="btn-chip key-btn focus:outline-none">10-8<span class="desc">No Clasificado</span></button>
+                        <button onclick="selectKey(this, '10-9')" class="btn-chip key-btn focus:outline-none">10-9<span class="desc">Otros Servicios</span></button>
+                        <button onclick="selectKey(this, '10-10')" class="btn-chip key-btn focus:outline-none">10-10<span class="desc">Rebrote</span></button>
+                        <button onclick="selectKey(this, '10-12')" class="btn-chip key-btn focus:outline-none">10-12<span class="desc">Apoyo Otros Cuerpos</span></button>
+                        <button onclick="selectKey(this, '10-15')" class="btn-chip key-btn focus:outline-none">10-15<span class="desc">Simulacro</span></button>
+                        <button onclick="selectKey(this, '9-0')" class="btn-chip key-btn btn-9-0 col-span-2 focus:outline-none">9-0<span class="desc" style="color: inherit; opacity: 0.9;">Acuartelamiento</span></button>
+                    </div>
+                    <div class="mt-4 pt-4 border-t border-slate-800">
+                        <button onclick="selectKey(this, 'LLAMADO COMANDANCIA')" class="btn-chip key-btn btn-comandancia focus:outline-none w-full" style="min-height: 48px; flex-direction: row; gap: 8px;">
+                            <i class="fas fa-bullhorn text-purple-400"></i>
+                            <span>LLAMADO DE COMANDANCIA</span>
+                            <span class="desc hidden">LLAMADO DE COMANDANCIA</span>
+                        </button>
+                    </div>
+                    <!-- PANEL SEGUNDA CLAVE (APOYO 10-12) -->
+                    <div id="support-key-container" class="hidden mt-4 pt-4 border-t border-slate-800">
+                        <label class="input-label mb-2 block" style="font-size: 0.85rem; color: #ef4444;"><i class="fas fa-handshake mr-1"></i> Razón del Apoyo (Seleccione Clave)</label>
+                        <div class="grid grid-cols-3 gap-2" id="support-key-grid">
+                            <!-- Dynamically populated keys except 9-0 and 10-12 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COLUMNA 2: DETALLES -->
+            <div class="card-panel col-details">
+                <div class="panel-header">
+                    <span>2. DETALLES DEL DESPACHO</span>
+                    <i class="fas fa-info-circle text-slate-400"></i>
+                </div>
+                
+                <div class="panel-body" style="display: flex; flex-direction: column; gap: 16px; height: 100%;">
+                    <!-- Ubicación -->
+                    <div>
+                        <label class="input-label" style="font-size: 0.85rem;"><i class="fas fa-map-marker-alt mr-1"></i> Ubicación Exacta</label>
+                        <div class="relative">
+                            <input type="text" id="svcLocation" autocomplete="off" placeholder="Calle, Número, Intersección..." class="input-pill pl-10" oninput="guardarBorrador()">
+                            <i class="fas fa-map-marker-alt absolute left-3.5 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                        </div>
+                    </div>
+
+                    <!-- Guía Operador -->
+                    <div id="operator-guide-container" class="hidden transition-all" style="background: rgba(30, 41, 59, 0.25); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 16px;">
+                        <div style="font-size: 0.8rem; font-weight: 700; color: #60a5fa; text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center;">
+                            <i class="fas fa-headset mr-2"></i> Guía Operador
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div id="guide-row-ref">
+                                <label class="input-label">¿Alguna referencia?</label>
+                                <input type="text" id="guide-ref" autocomplete="off" class="input-pill" style="padding: 8px 12px; font-size: 0.9rem;" placeholder="..." oninput="updatePreReportFromGuide()">
+                            </div>
+
+                            <div id="guide-row-caller" class="grid grid-cols-2 gap-3">
+                                <div id="container-caller-name">
+                                    <label id="lbl-caller-name" class="input-label">¿Cuál es su nombre?</label>
+                                    <input type="text" id="guide-caller-name" autocomplete="off" class="input-pill" style="padding: 8px 12px; font-size: 0.9rem;" placeholder="..." oninput="updatePreReportFromGuide()">
+                                </div>
+                                <div id="container-caller-loc">
+                                    <label id="lbl-caller-loc" class="input-label">¿Usted está en el lugar?</label>
+                                    <input type="text" id="guide-caller-loc" autocomplete="off" class="input-pill" style="padding: 8px 12px; font-size: 0.9rem;" placeholder="Sí/No..." oninput="updatePreReportFromGuide()">
+                                </div>
+                            </div>
+
+                            <div>
+                                <p class="input-label" style="color: #60a5fa; margin-top: 4px;">"Bomberos va al lugar, NECESITO QUE me responda unas preguntas porfavor"</p>
+                                <div id="guide-dynamic-inputs" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Preinforme -->
+                    <div style="flex: 1; display: flex; flex-direction: column; min-height: 120px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                            <label class="input-label" style="margin-bottom: 0;"><i class="fas fa-file-alt mr-1"></i> Pre-informe (Automático)</label>
+                        </div>
+                        <textarea id="svcObs" class="input-pill textarea-pill flex-1" placeholder="Seleccione una clave para generar el informe..." oninput="guardarBorrador()"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COLUMNA 3: UNIDADES -->
+            <div class="card-panel col-units">
+                <div class="panel-header">
+                    <span>3. UNIDADES</span>
+                    <i class="fas fa-truck-fire text-slate-400"></i>
+                </div>
+                
+                <div class="panel-body flex flex-col">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-xs font-bold text-slate-400 uppercase">Seleccione Carros</span>
+                        <button onclick="forceRefreshVehicles()" id="btn-refresh-units" class="text-blue-500 hover:text-blue-700 transition focus:outline-none"><i class="fas fa-sync-alt"></i></button>
+                    </div>
+
+                    <div class="unit-grid content-start" id="unit-selector-container">
+                        <div class="col-span-full text-center text-xs font-bold text-slate-400 py-8">
+                            <i class="fas fa-circle-notch fa-spin mr-2"></i> Conectando a Base de Datos...
+                        </div>
+                    </div>
+
+                    <div class="mt-6 space-y-3">
+                        <button onclick="confirmDispatch()" class="btn-finalize focus:outline-none" id="btn-dispatch-main" disabled style="opacity: 0.7; cursor: not-allowed;">
+                            <i class="fas fa-circle-notch fa-spin"></i> INICIANDO SISTEMA...
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- SCRIPT -->
+    <script>
+        try {
+            Object.defineProperty(navigator, 'onLine', { get: () => true });
+        } catch(e) {
+            console.error("Error overriding navigator.onLine:", e);
+        }
+
+        // --- REGLA MAESTRA DE MAYÚSCULAS ---
+        document.addEventListener('input', function(e) {
+            if (e.target.tagName === 'TEXTAREA' || (e.target.tagName === 'INPUT' && e.target.type === 'text')) {
+                const start = e.target.selectionStart;
+                const end = e.target.selectionEnd;
+                e.target.value = e.target.value.toUpperCase();
+                try { e.target.setSelectionRange(start, end); } catch (err) {}
+            }
+        });
+
+        // --- CONFIGURACIÓN FIREBASE ---
+        const firebaseConfig = null;
+
+        let fbDb = null;
+        window.fbDoc = null;
+        window.fbSetDoc = null;
+        window.fbUpdateDoc = null;
+        window.fbDeleteDoc = null;
+        window.fbCollection = null;
+        window.fbGetDocs = null;
+        window.fbOnSnapshot = null;
+
+        let vehiclesData = new Array();
+        let activeServicesCache = new Array();
+        
+        let nextCorrelativeId = parseInt(localStorage.getItem('sisbom_max_despacho_id') || '0') + 1;
+        
+        let selectedUnits = new Set();
+        let solicitarConfirmacion = false;
+
+        window.toggleRequestConfirm = function() {
+            solicitarConfirmacion = !solicitarConfirmacion;
+            const btn = document.getElementById('btn-request-confirm');
+            if (btn) {
+                if (solicitarConfirmacion) {
+                    btn.classList.add('selected');
+                    btn.style.borderColor = 'var(--primary-red)';
+                    btn.style.backgroundColor = 'rgba(239, 68, 68, 0.15)';
+                    btn.style.color = '#ffffff';
+                    btn.querySelector('i').className = 'fas fa-question-circle text-red-500';
+                } else {
+                    btn.classList.remove('selected');
+                    btn.style.borderColor = 'var(--glass-border)';
+                    btn.style.backgroundColor = 'rgba(30, 41, 59, 0.35)';
+                    btn.style.color = 'var(--text-muted)';
+                    btn.querySelector('i').className = 'fas fa-question-circle text-slate-400';
+                }
+            }
+            if (currentDispatchId) {
+                try {
+                    window.queueFirebaseWrite('update', 'despachos', currentDispatchId, new Object({
+                        solicitarConfirmacion: solicitarConfirmacion
+                    }));
+                } catch(e) {
+                    console.error("Error updating solicitarConfirmacion in Firebase:", e);
+                }
+            }
+        };
+        let currentUser = null;
+        let operatorName = 'Operador';
+
+        try {
+            const stored = localStorage.getItem('adminUser');
+            if (stored) {
+                currentUser = JSON.parse(stored);
+                operatorName = currentUser.nombreBombero || currentUser.nombre || 'Operador';
+            }
+        } catch(e) {}
+
+        // ====== COLA DE SINCRONIZACIÓN OFFLINE-FIRST ======
+        window.queueFirebaseWrite = function(type, coll, docId, data, options) {
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.queueFirebaseWrite) {
+                        parent.queueFirebaseWrite(type, coll, docId, data, options);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("Error accessing parent.queueFirebaseWrite in Despacho, falling back to local queue:", e);
+                }
+            }
+            let q = new Array();
+            try { 
+                const savedQ = localStorage.getItem('sisbom_sync_queue');
+                if (savedQ) q = JSON.parse(savedQ); 
+            } catch(e){}
+            const newItem = new Object({ type: type, coll: coll, docId: docId, data: data, options: options || new Object(), time: Date.now() });
+            q.push(newItem);
+            localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+            window.processSyncQueue();
+        };
+
+        window.sanitizeForFirebase = function(val) {
+            if (val === null || val === undefined) return val;
+            if (typeof val === 'function' || (val && val.constructor && val.constructor.name === 'FieldValueImpl')) return val;
+            if (Array.isArray(val) || (typeof val === 'object' && typeof val.length === 'number' && Object.prototype.toString.call(val) === '[object Array]')) {
+                return Array.from(val).map(window.sanitizeForFirebase);
+            }
+            if (typeof val === 'object') {
+                const ParentObj = (window.parent && window.parent.Object) ? window.parent.Object : Object;
+                const clean = new ParentObj();
+                for (const k of Object.keys(val)) { Reflect.set(clean, k, window.sanitizeForFirebase(val[k])); }
+                return clean;
+            }
+            return val;
+        };
+
+        window.processSyncQueue = async function() {
+            if (window.self !== window.top) {
+                if (window.parent && window.parent.processSyncQueue) {
+                    window.parent.processSyncQueue();
+                }
+                return;
+            }
+            if (!navigator.onLine || !window.fbDb || window.isSyncing) return;
+            window.isSyncing = true;
+            
+            while (true) {
+                let q = new Array();
+                try { 
+                    const savedQ = localStorage.getItem('sisbom_sync_queue');
+                    if (savedQ) q = JSON.parse(savedQ); 
+                } catch(e){}
+                
+                if (!q || q.length === 0) break;
+                
+                let item = q.shift();
+                localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+                
+                try {
+                    const sanitizedData = window.sanitizeForFirebase(item.data);
+                    
+                    if (item.type === 'set' && window.fbSetDoc) {
+                        await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), sanitizedData, item.options);
+                    } else if (item.type === 'update' && window.fbSetDoc) {
+                        let finalData = new Object();
+                        let hasDeleteField = false;
+                        for (let k of Object.keys(sanitizedData)) {
+                            if (sanitizedData[k] === '__DELETE_FIELD__' && window.fbDeleteField) {
+                                Reflect.set(finalData, k, window.fbDeleteField());
+                                hasDeleteField = true;
+                            } else {
+                                Reflect.set(finalData, k, sanitizedData[k]);
+                            }
+                        }
+                        if (hasDeleteField && window.fbUpdateDoc) {
+                            await window.fbUpdateDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData);
+                        } else {
+                            await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData, new Object({ merge: true }));
+                        }
+                    } else if (item.type === 'delete' && window.fbDeleteDoc) {
+                        await window.fbDeleteDoc(window.fbDoc(window.fbDb, item.coll, item.docId));
+                    }
+                } catch(e) {
+                    console.warn("Fallo sync item, docId:", item.docId, e);
+                    
+                    let currentQ = new Array();
+                    try { 
+                        const savedQ = localStorage.getItem('sisbom_sync_queue');
+                        if (savedQ) currentQ = JSON.parse(savedQ); 
+                    } catch(ex){}
+                    
+                    if (!currentQ.some(x => x.time === item.time)) {
+                        item.errCount = (item.errCount || 0) + 1;
+                        currentQ.unshift(item);
+                        localStorage.setItem('sisbom_sync_queue', JSON.stringify(currentQ));
+                    }
+                    
+                    if (e && e.code === 'permission-denied') {
+                        if (window.parent && window.parent.authenticateFirebase) {
+                            window.parent.authenticateFirebase();
+                        }
+                    }
+                    
+                    break;
+                }
+            }
+            window.isSyncing = false;
+        };
+
+        window.addEventListener('online', window.processSyncQueue);
+        setInterval(window.processSyncQueue, 15000);
+
+        // RENDERIZADO INSTANTANEO LOCAL (CACHE INICIAL)
+        window.fetchVehiclesLocal = async function() {
+            try {
+                let cachedVeh = localStorage.getItem('db_vehiculos');
+                if (!cachedVeh) {
+                    try {
+                        const res = await fetch('./db_vehiculos.json');
+                        if (res.ok) {
+                            const data = await res.json();
+                            localStorage.setItem('db_vehiculos', JSON.stringify(data));
+                            cachedVeh = localStorage.getItem('db_vehiculos');
+                        }
+                    } catch(e) {}
+                }
+                if (cachedVeh) vehiclesData = JSON.parse(cachedVeh);
+                else if (vehiclesData.length === 0) vehiclesData = new Array();
+                
+                const cachedDisp = localStorage.getItem('activeServices');
+                if (cachedDisp) activeServicesCache = JSON.parse(cachedDisp);
+                else if (activeServicesCache.length === 0) activeServicesCache = new Array();
+                
+                renderUnitSelector();
+            } catch (e) { 
+                console.warn("Error Local Vehicles"); 
+            } finally {
+                window.updateFinalizeButtonState();
+            }
+        };
+
+        let unsubVehiculos = null;
+        let unsubDespachos = null;
+
+        window.onFirebaseParentLogout = function() {
+            console.log("Firebase Parent Logout event received in Despacho.");
+            if (unsubVehiculos) {
+                try { unsubVehiculos(); } catch(e) {}
+                unsubVehiculos = null;
+            }
+            if (unsubDespachos) {
+                try { unsubDespachos(); } catch(e) {}
+                unsubDespachos = null;
+            }
+        };
+
+        window.initFirebase = async function() {
+            let inherited = false;
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.fbDb) {
+                        window.fbDb = parent.fbDb;
+                        window.fbDoc = parent.fbDoc;
+                        window.fbSetDoc = parent.fbSetDoc;
+                        window.fbUpdateDoc = parent.fbUpdateDoc;
+                        window.fbDeleteDoc = parent.fbDeleteDoc;
+                        window.fbCollection = parent.fbCollection;
+                        window.fbGetDocs = parent.fbGetDocs;
+                        window.fbOnSnapshot = parent.fbOnSnapshot;
+                        fbDb = parent.fbDb;
+                        console.log("Firebase inherited from parent in Despacho");
+                        inherited = true;
+                    }
+                } catch (e) {
+                    console.warn("Error inheriting Firebase in Despacho:", e);
+                }
+            }
+
+            try {
+                if (!inherited) {
+                    const { initializeApp } = await import("./libs/firebase-app.js");
+                    const { getAuth, signInAnonymously, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                    const { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, onSnapshot } = await import("./libs/firebase-firestore.js");
+
+                    window.fbDoc = doc;
+                    window.fbSetDoc = setDoc;
+                    window.fbUpdateDoc = updateDoc;
+                    window.fbDeleteDoc = deleteDoc;
+                    window.fbCollection = collection;
+                    window.fbGetDocs = getDocs;
+                    window.fbOnSnapshot = onSnapshot;
+
+                    let configToUse = null;
+                    try {
+                        const dynamicConfigStr = localStorage.getItem('saas_firebase_config') || localStorage.getItem('firebaseConfig');
+                        if (dynamicConfigStr) {
+                            configToUse = JSON.parse(dynamicConfigStr);
+                        }
+                    } catch (e) {
+                        console.error("Error parsing saas_firebase_config in Despacho:", e);
+                    }
+                    if (!configToUse) {
+                        console.error("No se encontró configuración de Firebase en Despacho.");
+                        return;
+                    }
+                    const app = initializeApp(configToUse);
+                    const auth = getAuth(app);
+                    fbDb = getFirestore(app);
+                    window.fbDb = fbDb;
+
+                    const storedUser = localStorage.getItem('authUserId');
+                    const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                    if (storedUser && storedPassSecure) {
+                        const email = storedUser + "@sisbom.com";
+                        await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                        console.log("Firebase conectado con credenciales en Despacho");
+                    } else {
+                        await signInAnonymously(auth);
+                        console.log("Firebase conectado de forma anónima en Despacho");
+                    }
+                }
+
+                window.processSyncQueue();
+
+                window.setupRealtimeListeners = function() {
+                    if (window.self !== window.top) {
+                        console.log("Bloqueando setupRealtimeListeners: Estamos en un Iframe (Central de Alarmas).");
+                        return;
+                    }
+                    if (unsubVehiculos) {
+                        try { unsubVehiculos(); } catch(e) {}
+                        unsubVehiculos = null;
+                    }
+                    if (unsubDespachos) {
+                        try { unsubDespachos(); } catch(e) {}
+                        unsubDespachos = null;
+                    }
+
+                    const handleListenerError = (name, error) => {
+                        console.warn(name + " listener error in Despacho:", error);
+                        
+                        if (error.code === 'permission-denied' && localStorage.getItem('adminUser')) {
+                            if (unsubVehiculos) { try { unsubVehiculos(); } catch(e){} unsubVehiculos = null; }
+                            if (unsubDespachos) { try { unsubDespachos(); } catch(e){} unsubDespachos = null; }
+                            
+                            setTimeout(() => {
+                                if (window.parent && window.parent.authenticateFirebase) {
+                                    window.parent.authenticateFirebase();
+                                }
+                                window.setupRealtimeListeners();
+                            }, 5000);
+                        }
+                    };
+
+                    unsubVehiculos = window.fbOnSnapshot(window.fbCollection(fbDb, 'vehiculos'), (snap) => {
+                        vehiclesData = new Array();
+                        snap.forEach(d => {
+                            const data = d.data();
+                            data.idCarro = d.id;
+                            vehiclesData.push(data);
+                        });
+                        localStorage.setItem('db_vehiculos', JSON.stringify(vehiclesData));
+                        window.renderUnitSelector();
+                        
+                        window.updateFinalizeButtonState();
+                    }, (error) => {
+                        handleListenerError("Vehiculos", error);
+                    });
+
+                    // LECTURA Y ACTUALIZACIÓN DEL CORRELATIVO
+                    unsubDespachos = window.fbOnSnapshot(window.fbCollection(fbDb, 'despachos'), (snap) => {
+                        let maxFbId = 0;
+                        let newActiveCache = new Array();
+                        snap.forEach(d => {
+                            const data = d.data() || new Object();
+                            const val = parseInt(data.idServicio) || parseInt(d.id) || 0;
+                            if (!isNaN(val) && val > maxFbId) maxFbId = val;
+                            
+                            if (String(data.estado).toLowerCase() === 'activa') {
+                                newActiveCache.push(new Object({
+                                    id: String(data.idServicio || d.id),
+                                    key: data.clave || ''
+                                }));
+                            }
+                        });
+                        
+                        if (maxFbId >= 0) {
+                            nextCorrelativeId = maxFbId + 1;
+                            localStorage.setItem('sisbom_max_despacho_id', String(maxFbId));
+                        }
+                        
+                        try {
+                            const lsData = localStorage.getItem('activeServices');
+                            if (lsData) activeServicesCache = JSON.parse(lsData);
+                        } catch(e){}
+                        
+                        window.renderUnitSelector();
+                    }, (error) => {
+                        handleListenerError("Despachos", error);
+                    });
+                };
+
+                window.setupRealtimeListeners();
+
+            } catch(e) {
+                console.warn("Firebase offline", e);
+            }
+        };
+
+        const interrogationGuides = new Object({
+            "LLAMADO COMANDANCIA": new Array(
+                new Object({ q: "¿Quién ordena el llamado?", k: "ORDENA" }),
+                new Object({ q: "¿Instrucciones para el personal?", k: "INSTRUCCIÓN" })
+            ),
+            "9-0": new Array( 
+                new Object({ q: "¿Quién ordena el acuartelamiento?", k: "ORDENA" }), 
+                new Object({ q: "¿Cuál es el grado (1, 2 o 3)?", k: "GRADO" }), 
+                new Object({ q: "¿Instrucciones para el personal?", k: "INSTRUCCIÓN" }) 
+            ),
+            "10-0": new Array( 
+                new Object({ q: "¿Qué es lo que se está quemando?", k: "SE QUEMA" }), 
+                new Object({ q: "¿Sabe si hay personas atrapadas al interior?", k: "PERSONAS AL INTERIOR" }), 
+                new Object({ q: "¿De qué material es la estructura?", k: "MATERIAL ESTRUCTURA" }), 
+                new Object({ q: "¿Hay peligro de propagación a otras casas?", k: "PELIGRO PROPAGACIÓN" }), 
+                new Object({ q: "¿De cuántos pisos es la estructura?", k: "CANTIDAD PISOS" }) 
+            ),
+            "10-1": new Array( new Object({ q: "¿Qué tipo de vehículo es?", k: "TIPO VEHÍCULO" }), new Object({ q: "¿Hay peligro para casas o bosques cercanos?", k: "PELIGRO PROPAGACIÓN" }), new Object({ q: "¿Hay personas dentro del vehículo?", k: "OCUPANTES AL INTERIOR" }), new Object({ q: "¿Sabe qué tipo de combustible usa?", k: "TIPO COMBUSTIBLE" }) ),
+            "10-2": new Array( new Object({ q: "¿Qué se quema (pasto, basura, árboles)?", k: "QUE SE QUEMA" }), new Object({ q: "¿El fuego está cerca de viviendas?", k: "PELIGRO VIVIENDAS" }), new Object({ q: "¿Es de fácil acceso?", k: "ACCESO FÁCIL" }), new Object({ q: "¿Existe peligro de incendio forestal?", k: "PELIGRO FORESTAL" }) ),
+            "10-3": new Array( new Object({ q: "¿Qué le ocurrió a la persona?", k: "SITUACIÓN ACTUAL" }), new Object({ q: "¿Cuántas personas están lesionadas?", k: "PERSONAS LESIONADAS" }), new Object({ q: "¿La persona responde y respira?", k: "RESPONDE Y RESPIRA" }), new Object({ q: "¿La persona se encuentra atrapada?", k: "PERSONA ATRAPADA" }) ),
+            "10-4": new Array( new Object({ q: "¿Cuántos vehículos están involucrados?", k: "CANTIDAD VEHÍCULOS" }), new Object({ q: "¿Hay personas atrapadas?", k: "PERSONAS ATRAPADAS" }), new Object({ q: "¿Ve alguna fuga de combustible o humo?", k: "FUGA O DERRAME" }), new Object({ q: "¿Qué tipo de vehículos chocaron?", k: "TIPOS DE VEHÍCULO" }) ),
+            "10-5": new Array( new Object({ q: "¿Conoce el nombre o número del producto?", k: "NOMBRE PRODUCTO" }), new Object({ q: "¿Hay fuga o derrame activo en este momento?", k: "HAY FUGA ACTIVA" }), new Object({ q: "¿Qué cantidad aproximada se derramó?", k: "CANTIDAD DERRAMADA" }), new Object({ q: "¿Hay personas con síntomas o malestar?", k: "PERSONAS AFECTADAS" }) ),
+            "10-6": new Array( 
+                new Object({ q: "¿Siente el olor en la calle o adentro?", k: "LUGAR DEL OLOR" }), 
+                new Object({ q: "¿Viene de un cilindro o de la cañería?", k: "PROCEDENCIA GAS" }), 
+                new Object({ q: "¿Es gas licuado o gas natural?", k: "TIPO DE GAS" }), 
+                new Object({ q: "¿Hay personas con algún síntoma?", k: "PERSONAS CON SÍNTOMAS" }) 
+            ),
+            "10-7": new Array( 
+                new Object({ q: "¿Hay fuego en el lugar y donde?", k: "LUGAR DEL FUEGO" }), 
+                new Object({ q: "¿Hay cables cortados en el suelo?", k: "CABLES EN EL SUELO" }), 
+                new Object({ q: "¿Existe riesgo para las casas cercanas?", k: "PELIGRO VIVIENDAS" }) 
+            ),
+            "10-8": new Array( new Object({ q: "¿Podría detallar qué está ocurriendo?", k: "SITUACIÓN ACTUAL" }), new Object({ q: "¿Hay riesgo vital inmediato?", k: "HAY RIESGO VITAL" }), new Object({ q: "¿Necesita a Carabineros o SAMU?", k: "REQUIERE APOYO" }) ),
+            "10-9": new Array( new Object({ q: "¿Qué servicio específico necesita?", k: "SERVICIO SOLICITADO" }), new Object({ q: "¿Es una situación de urgencia?", k: "SITUACIÓN URGENCIA" }) ),
+            "10-10": new Array( new Object({ q: "¿Qué es lo que se está quemando nuevamente?", k: "QUE SE QUEMA" }), new Object({ q: "¿Hay peligro de propagación?", k: "PELIGRO PROPAGACIÓN" }) ),
+            "10-12": new Array( 
+                new Object({ q: "¿Con que oficial deben reportarse?", k: "OFICIAL A CARGO" }), 
+                new Object({ q: "¿Qué material o carro necesitan?", k: "MATERIAL SOLICITADO" }), 
+                new Object({ q: "¿Cuál es el punto de encuentro?", k: "PUNTO DE ENCUENTRO" }), 
+                new Object({ q: "¿En qué frecuencia radial trabajarán?", k: "FRECUENCIA RADIAL" }) 
+            ),
+            "10-15": new Array( 
+                new Object({ q: "¿Qué institución realiza el simulacro?", k: "INSTITUCIÓN" }), 
+                new Object({ q: "¿Qué escenario se está simulando?", k: "ESCENARIO SIMULADO" }),
+                new Object({ q: "¿Para qué fecha está programado?", k: "FECHA" }),
+                new Object({ q: "¿A qué hora comenzará?", k: "HORA" })
+            ),
+            "DEFAULT": new Array(new Object({ q: "Por favor, detalle la emergencia:", k: "DETALLE" }))
+        });
+
+        window.onload = async function() {
+            await window.fetchVehiclesLocal(); // RENDER INMEDIATO LOCAL PARA VELOCIDAD
+            window.initFirebase(); // ESTO CARGARÁ FIREBASE Y ACTUALIZARÁ AL INSTANTE
+            restoreDraft();
+            
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') {
+                    const target = e.target;
+                    if (target.tagName === 'BUTTON' || (target.closest && target.closest('.modal-bg') && target.closest('.modal-bg').classList.contains('active'))) return;
+                    e.preventDefault();
+                    const allInputsRaw = Array.from(document.querySelectorAll('input, textarea'));
+                    const visibleInputs = allInputsRaw.filter(el => el.type !== 'hidden' && !el.disabled && el.offsetParent !== null);
+                    const index = visibleInputs.indexOf(target);
+                    if (index > -1 && index < visibleInputs.length - 1) {
+                        visibleInputs.at(index + 1).focus();
+                    } else if (index === visibleInputs.length - 1) {
+                        document.getElementById('btn-dispatch-main').focus();
+                    }
+                }
+            });
+
+            window.addEventListener("message", function(event) {
+                if (event.data === "resetDispatch" || event.data === "clearForm") { executeClearForm(); }
+                if (event.data === "reload") { window.location.reload(); }
+            });
+            
+            // Failsafe auto-refresco super veloz local
+            setInterval(window.fetchVehiclesLocal, 2500);
+            window.addEventListener('online', window.processSyncQueue);
+
+            window.addEventListener("storage", function(e) {
+                if (e.key === 'db_vehiculos' || e.key === 'activeServices' || e.key === null || e.key === undefined) {
+                    window.fetchVehiclesLocal();
+                }
+            });
+        };
+
+        function showMessageModal(title, message, isError = false) {
+            const modal = document.getElementById('generic-modal');
+            const iconEl = document.getElementById('generic-modal-icon');
+            document.getElementById('generic-modal-title').innerText = title;
+            document.getElementById('generic-modal-message').innerText = message;
+            
+            if(isError) {
+                iconEl.innerHTML = '<i class="fas fa-exclamation-circle"></i>';
+                iconEl.className = 'w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl bg-red-50 text-red-500 border border-red-100';
+            } else {
+                iconEl.innerHTML = '<i class="fas fa-check-circle"></i>';
+                iconEl.className = 'w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl bg-green-50 text-green-500 border border-green-100';
+            }
+            modal.classList.add('active');
+        }
+
+        window.closeGenericModal = () => document.getElementById('generic-modal').classList.remove('active');
+        window.closeConfirmationModal = () => document.getElementById('confirmation-modal').classList.remove('active');
+        window.closeClearModal = () => document.getElementById('clear-confirmation-modal').classList.remove('active');
+
+        window.limpiarFormulario = (manual) => {
+            if (manual) document.getElementById('clear-confirmation-modal').classList.add('active');
+            else executeClearForm();
+        }
+
+        function renderUnitSelector() {
+            const container = document.getElementById('unit-selector-container');
+            if(!container) return;
+            
+            const sortedVehicles = Array.from(vehiclesData).sort((a, b) => String(a.idCarro).localeCompare(String(b.idCarro)));
+            
+            if (sortedVehicles.length === 0) {
+                 container.innerHTML = '<div class="col-span-full text-center text-slate-400 py-8 text-xs font-bold"><i class="fas fa-circle-notch fa-spin mr-2"></i> Conectando con la base de datos...</div>';
+                 return;
+            }
+            
+            container.innerHTML = sortedVehicles.map(v => {
+                const isSelected = selectedUnits.has(v.idCarro) ? 'selected' : '';
+                const estadoStr = String(v.estado || '1').trim();
+                let enServicioRaw = String(v.enServicio || '0').trim();
+                
+                let statusClass = 'text-green-500';
+                let btnClass = '';
+                let isDisabled = false;
+                let subText = '';
+                
+                if (estadoStr === '0-8' || estadoStr === '0') { 
+                    statusClass = 'text-red-500'; 
+                    isDisabled = true; 
+                    btnClass = 'unit-chip disabled is-08 flex flex-col justify-center items-center';
+                    subText = '<span class="text-xs font-bold mt-1 text-red-700 tracking-widest uppercase" style="font-size: 10px;">0-8</span>';
+                } else if (enServicioRaw !== '0' && enServicioRaw !== '') { 
+                    statusClass = 'text-orange-500'; 
+                    isDisabled = true; 
+                    btnClass = 'unit-chip disabled is-act flex flex-col justify-center items-center overflow-hidden';
+                    
+                    let textoEstado = 'EN ACTO';
+                    if (enServicioRaw === '6-13') textoEstado = '6-13';
+                    else if (enServicioRaw === '6-14') textoEstado = '6-14';
+                    else {
+                        try {
+                            const svcEncontrado = activeServicesCache.find(s => String(s.id) === enServicioRaw);
+                            if (svcEncontrado && svcEncontrado.key) {
+                                textoEstado = svcEncontrado.key;
+                            } else {
+                                textoEstado = `#${enServicioRaw}`;
+                            }
+                        } catch(e) {
+                            textoEstado = `#${enServicioRaw}`;
+                        }
+                    }
+                    subText = `<span class="text-xs font-bold mt-1 text-orange-700 tracking-widest uppercase truncate w-full px-1 text-center" style="font-size: 10px;" title="Servicio: ${textoEstado}">${textoEstado}</span>`;
+                } else {
+                    btnClass = `btn-chip unit-chip flex flex-col justify-center items-center ${isSelected}`;
+                }
+                
+                return `
+                <button ${isDisabled ? '' : `onclick="toggleUnit(this, '${v.idCarro}')"`} class="${btnClass} focus:outline-none">
+                    <span class="text-sm font-black">${v.idCarro}</span>
+                    ${subText ? subText : `<i class="fas fa-circle mt-1 text-xs ${statusClass}" style="font-size: 8px;"></i>`}
+                </button>`;
+            }).join('');
+        }
+
+        window.toggleUnit = (btn, u) => {
+            btn.classList.toggle('selected');
+            if(selectedUnits.has(u)) selectedUnits.delete(u); else selectedUnits.add(u);
+            guardarBorrador();
+        };
+
+        let pendingBtn = null;
+        let pendingKey = null;
+        let currentDispatchId = localStorage.getItem('draft_dispatchId') || null;
+        let currentSupportKey = localStorage.getItem('draft_claveApoyo') || null;
+
+        window.updateFinalizeButtonState = () => {
+            const btn = document.getElementById('btn-dispatch-main');
+            if (!btn) return;
+            
+            if (vehiclesData.length === 0) {
+                btn.disabled = true;
+                btn.style.opacity = '0.7';
+                btn.style.cursor = 'not-allowed';
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> CARGANDO VEHÍCULOS...';
+                return;
+            }
+            
+            if (!currentDispatchId) {
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'not-allowed';
+                btn.innerHTML = '<i class="fas fa-satellite-dish"></i> SELECCIONE CLAVE PARA DESPACHAR';
+            } else {
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+                btn.innerHTML = '<i class="fas fa-paper-plane"></i> CONFIRMAR';
+            }
+        };
+
+        window.showSupportKeyGrid = () => {
+            const grid = document.getElementById('support-key-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+            
+            const allowedSupportKeys = ['10-0', '10-1', '10-2', '10-3', '10-4', '10-5', '10-6', '10-7', '10-8', '10-9', '10-10', '10-15'];
+            const keyDescriptions = {
+                '10-0': 'Incendio Estructural',
+                '10-1': 'Incendio Vehicular',
+                '10-2': 'Pastizales / Basura',
+                '10-3': 'Rescate Personas',
+                '10-4': 'Rescate Vehicular',
+                '10-5': 'Hazmat',
+                '10-6': 'Emanación Gas',
+                '10-7': 'Eléctrico',
+                '10-8': 'No Clasificado',
+                '10-9': 'Otros Servicios',
+                '10-10': 'Rebrote',
+                '10-15': 'Simulacro'
+            };
+            
+            allowedSupportKeys.forEach(k => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn-chip support-key-btn focus:outline-none';
+                if (currentSupportKey === k) {
+                    btn.classList.add('selected');
+                }
+                btn.onclick = () => window.selectSupportKey(btn, k);
+                btn.innerHTML = `${k}<span class="desc" style="font-size: 0.65rem; opacity: 0.8; font-weight: 400; text-transform: uppercase;">${keyDescriptions[k]}</span>`;
+                grid.appendChild(btn);
+            });
+            
+            document.getElementById('support-key-container').classList.remove('hidden');
+        };
+
+        window.selectSupportKey = (btn, k) => {
+            currentSupportKey = k;
+            document.querySelectorAll('.support-key-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            
+            if (currentDispatchId) {
+                try {
+                    window.queueFirebaseWrite('update', 'despachos', currentDispatchId, new Object({
+                        claveApoyo: k
+                    }));
+                } catch(e) {
+                    console.error("Error updating support key in Firebase:", e);
+                }
+            }
+            guardarBorrador();
+        };
+
+        window.selectKey = (btn, k) => { 
+            if (currentDispatchId && document.getElementById('svcKey').value === k) {
+                return;
+            }
+            
+            pendingBtn = btn;
+            pendingKey = k;
+            
+            // Show confirmation modal
+            const keyDesc = btn.querySelector('.desc') ? btn.querySelector('.desc').innerText : '';
+            const preKey = document.getElementById('predispatch-message-key');
+        preKey.innerText = k;
+        if (k.length > 10) {
+            preKey.style.fontSize = '1.8rem';
+            preKey.style.letterSpacing = '-1px';
+        } else {
+            preKey.style.fontSize = '3rem';
+            preKey.style.letterSpacing = 'normal';
+        }
+            document.getElementById('predispatch-message-desc').innerText = keyDesc;
+            
+            document.getElementById('predispatch-modal').classList.add('active');
+        };
+
+        window.closePreDispatchModal = () => {
+            document.getElementById('predispatch-modal').classList.remove('active');
+            pendingBtn = null;
+            pendingKey = null;
+        };
+
+        window.confirmPreDispatch = async () => {
+            if (!pendingKey || !pendingBtn) return;
+            const btn = pendingBtn;
+            const k = pendingKey;
+            closePreDispatchModal();
+
+            document.getElementById('svcKey').value = k; 
+            document.querySelectorAll('.key-btn').forEach(b => b.classList.remove('selected')); 
+            btn.classList.add('selected'); 
+            
+            if (k === '9-0' || k === 'LLAMADO COMANDANCIA') {
+                document.getElementById('svcLocation').value = "Cuartel General";
+            }
+            
+            // Generate dispatch ID
+            const freshMaxId = parseInt(localStorage.getItem('sisbom_max_despacho_id') || '0');
+            nextCorrelativeId = freshMaxId + 1;
+            const dispatchId = String(nextCorrelativeId);
+            localStorage.setItem('sisbom_max_despacho_id', dispatchId); 
+            nextCorrelativeId++;
+            
+            currentDispatchId = dispatchId;
+            localStorage.setItem('draft_dispatchId', dispatchId);
+            
+            // Time info
+            const now = new Date();
+            const startTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            const fechaDespacho = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+            
+            // Create in Firestore
+            try {
+                window.queueFirebaseWrite('set', 'despachos', dispatchId, new Object({
+                    id: dispatchId,
+                    idServicio: dispatchId,
+                    estado: "activa",
+                    clave: k,
+                    claveApoyo: "",
+                    lugar: (k === '9-0' || k === 'LLAMADO COMANDANCIA') ? "Cuartel General" : "OBTENIENDO DIRECCIÓN...",
+                    preinforme: "",
+                    fechaDespacho: fechaDespacho,
+                    horaDespacho: startTime,
+                    carros: [],
+                    carrosTexto: "",
+                    obacServicio: "",
+                    informeObac: "",
+                    fecha67: "",
+                    hora67: "",
+                    fechaTermino: "",
+                    horaTermino: "",
+                    operadorInicial: operatorName,
+                    operadorFinal: "",
+                    observacion: "",
+                    idListaPrincipal: null,
+                    visibleMovil: true,
+                    source: "despacho.html",
+                    createdAt: Date.now(),
+                    unidades: new Object(),
+                    solicitarConfirmacion: solicitarConfirmacion
+                }), new Object({ merge: true }));
+            } catch (e) {
+                console.error("Error saving pre-dispatch:", e);
+            }
+            
+            // If 10-12, show second key selector
+            if (k === '10-12') {
+                showSupportKeyGrid();
+            } else {
+                document.getElementById('support-key-container').classList.add('hidden');
+                currentSupportKey = null;
+            }
+            
+            updateFinalizeButtonState();
+            
+            updateGuide(k);
+            guardarBorrador();
+            if (window.updateLayoutState) window.updateLayoutState();
+            setTimeout(() => { document.getElementById('svcLocation').focus(); }, 50);
+        };
+
+        function updateGuide(key) {
+            const container = document.getElementById('operator-guide-container');
+            const inputsContainer = document.getElementById('guide-dynamic-inputs');
+            
+            const rowRef = document.getElementById('guide-row-ref');
+            const rowCaller = document.getElementById('guide-row-caller');
+            
+            const boxLoc = document.getElementById('container-caller-loc'); 
+            const lblName = document.getElementById('lbl-caller-name');
+
+            document.getElementById('guide-ref').value = ""; 
+            document.getElementById('guide-caller-name').value = "";
+            document.getElementById('guide-caller-loc').value = "";
+            inputsContainer.innerHTML = '';
+
+            rowRef.classList.remove('hidden');
+            rowCaller.classList.remove('hidden');
+            boxLoc.classList.remove('hidden'); 
+            lblName.innerText = "¿Cuál es su nombre?";
+
+            if (key === '9-0' || key === 'LLAMADO COMANDANCIA') {
+                rowRef.classList.add('hidden');
+                rowCaller.classList.add('hidden');
+            } else if (key === '10-12') {
+                lblName.innerText = "¿Cuerpo de Bomberos que solicita?";
+                boxLoc.classList.add('hidden');
+            }
+
+            container.classList.remove('hidden');
+            const questions = Reflect.get(interrogationGuides, key) || Reflect.get(interrogationGuides, "DEFAULT");
+            
+            questions.forEach((item) => {
+                const wrapper = document.createElement('div');
+                wrapper.innerHTML = `<label class="input-label truncate">${item.q}</label><input type="text" id="guide-dyn-${item.k}" autocomplete="off" data-keyword="${item.k}" class="guide-dynamic-field input-pill" style="padding:8px 12px; font-size:0.85rem;" oninput="updatePreReportFromGuide()">`;
+                inputsContainer.appendChild(wrapper);
+            });
+        }
+
+        window.updatePreReportFromGuide = () => {
+            const ref = document.getElementById('guide-ref').value.trim();
+            const name = document.getElementById('guide-caller-name').value.trim();
+            const loc = document.getElementById('guide-caller-loc').value.trim();
+            const currentKey = document.getElementById('svcKey').value;
+            const dynamicInputs = document.querySelectorAll('.guide-dynamic-field');
+            let parts = new Array();
+            
+            if (currentKey !== '9-0' && currentKey !== 'LLAMADO COMANDANCIA') {
+                if (ref) parts.push(`REF: ${ref}`); 
+                
+                if (currentKey === '10-12') {
+                     if (name) parts.push(`CB SOLICITA: ${name}`);
+                } else {
+                     if (name) parts.push(`SOLICITANTE: ${name}`);
+                     if (loc) parts.push(`ESTÁ EN EL LUGAR: ${loc}`);
+                }
+            }
+
+            dynamicInputs.forEach(input => {
+                if (input.value.trim()) parts.push(`${input.getAttribute('data-keyword')}: ${input.value.trim()}`);
+            });
+            document.getElementById('svcObs').value = parts.join(', ');
+            guardarBorrador();
+        };
+
+        window.confirmDispatch = () => {
+            const k = document.getElementById('svcKey').value;
+            const loc = document.getElementById('svcLocation').value;
+            if(!k || k==='---' || !currentDispatchId) return showMessageModal("Falta Clave", "Seleccione una clave.", true);
+            if(!loc) return showMessageModal("Falta Ubicación", "Ingrese la ubicación.", true);
+            if(k !== '9-0' && k !== 'LLAMADO COMANDANCIA' && selectedUnits.size === 0) return showMessageModal("Falta Unidad", "Seleccione unidades.", true);
+
+            const msgKey = document.getElementById('confirm-message-key');
+    msgKey.innerText = k;
+    if (k.length > 8) {
+        msgKey.style.fontSize = '1.15rem';
+        msgKey.style.letterSpacing = '-0.5px';
+    } else {
+        msgKey.style.fontSize = '2rem';
+        msgKey.style.letterSpacing = 'normal';
+    }
+            document.getElementById('confirm-message-units').innerText = (k === '9-0') ? "ACUARTELAMIENTO" : (k === 'LLAMADO COMANDANCIA') ? "LLAMADO DE COMANDANCIA" : Array.from(selectedUnits).join(' / ');
+            
+            const btn = document.getElementById('btn-modal-confirm');
+            btn.innerHTML = 'CONFIRMAR';
+            btn.disabled = false;
+
+            document.getElementById('confirmation-modal').classList.add('active');
+            setTimeout(() => btn.focus(), 100);
+        };
+
+        window.performDispatch = async () => {
+            const btn = document.getElementById('btn-modal-confirm');
+            btn.innerHTML = '<div class="spinner-modern" style="width: 20px; height: 20px; border-width: 2px; margin-right: 8px; display: inline-block; vertical-align: middle;"></div> CONFIRMANDO...';
+            btn.disabled = true;
+
+            const k = document.getElementById('svcKey').value;
+            const loc = document.getElementById('svcLocation').value;
+            const obs = document.getElementById('svcObs').value;
+
+            const now = new Date();
+            const startTime = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            const fechaDespacho = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+            const selectedUnitsSnapshot = Array.from(selectedUnits);
+
+            let carrosStr = "";
+            if (selectedUnitsSnapshot.length > 0) {
+                carrosStr = selectedUnitsSnapshot.join(' / ');
+            }
+            else if (k !== '9-0' && k !== 'LLAMADO COMANDANCIA') {
+                carrosStr = "PERSONAL";
+            }
+            else {
+                carrosStr = (k === '9-0') ? "ACUARTELAMIENTO" : "LLAMADO DE COMANDANCIA";
+            }
+
+            const dispatchId = currentDispatchId;
+            
+            const servicioVivo = new Object({
+                id: dispatchId,
+                key: k,
+                location: loc,
+                obs: obs,
+                startTime: startTime,
+                status: 'En Curso',
+                lastLocalUpdate: Date.now(),
+                units: selectedUnitsSnapshot.map(u => new Object({
+                    name: u,
+                    status: 'pending_departure'
+                }))
+            });
+              
+            // 1. Local inmediato
+            let servicios = new Array();
+            try {
+                const sData = localStorage.getItem('activeServices');
+                if (sData) servicios = JSON.parse(sData);
+            } catch(e) {}
+            
+            servicios.push(servicioVivo);
+            localStorage.setItem('activeServices', JSON.stringify(servicios));
+
+            try {
+                if (window.parent && window.parent !== window) {
+                    window.parent.postMessage(new Object({
+                        action: 'openNewDispatchInstant',
+                        services: servicios
+                    }), '*');
+                }
+            } catch (e) {}
+
+            document.getElementById('confirmation-modal').classList.remove('active');
+            executeClearForm(false); // don't cancel pre-dispatch in cleanup since we are finalizing it!
+
+            // 2. Firebase en segundo plano
+            (async () => {
+                try {
+                    const unidadesData = new Object();
+                    selectedUnitsSnapshot.forEach(carro => {
+                        Reflect.set(unidadesData, carro, new Object({
+                            estado: "pending_departure",
+                            horaSalida: ""
+                        }));
+                    });
+
+                    // Master collection updates
+                    window.queueFirebaseWrite('update', 'despachos', dispatchId, new Object({
+                        lugar: loc,
+                        preinforme: obs,
+                        carros: selectedUnitsSnapshot,
+                        carrosTexto: carrosStr,
+                        unidades: unidadesData,
+                        solicitarConfirmacion: solicitarConfirmacion
+                    }));
+
+                    // Actualizar vehículos
+                    if (selectedUnitsSnapshot.length > 0) {
+                        selectedUnitsSnapshot.forEach(carro => {
+                            window.queueFirebaseWrite('update', 'vehiculos', carro, new Object({ enServicio: String(dispatchId) }));
+                        });
+                    }
+
+                } catch (e) {
+                    console.error("Error Firebase background:", e);
+                }
+            })();
+        };
+
+        window.executeClearForm = (shouldCancelPreDispatch = true) => {
+            closeClearModal();
+            
+            if (shouldCancelPreDispatch && currentDispatchId) {
+                try {
+                    window.queueFirebaseWrite('update', 'despachos', currentDispatchId, new Object({
+                        estado: "cancelada",
+                        visibleMovil: false
+                    }));
+                    
+                    const pWindow = window.parent;
+                    if (pWindow && pWindow.personnelData) {
+                        const targetId = String(currentDispatchId);
+                        const pToRelease = pWindow.personnelData.filter(p => String(p.enServicio) === targetId || String(p.enServicio) === "-" + targetId);
+                        if (pToRelease.length > 0) {
+                            pToRelease.forEach(p => {
+                                p.enServicio = "0";
+                                window.queueFirebaseWrite('update', 'personal', String(p.ID || p.idRegistro), new Object({ enServicio: "0" }));
+                            });
+                            pWindow.localStorage.setItem('db_personal', JSON.stringify(pWindow.personnelData));
+                        }
+                    }
+                } catch(e) {
+                    console.error("Error releasing personnel on cancel:", e);
+                }
+            }
+
+            document.getElementById('svcKey').value = "---";
+            document.querySelectorAll('.key-btn').forEach(b => b.classList.remove('selected'));
+            
+            document.getElementById('svcLocation').value = "";
+            document.getElementById('svcObs').value = "";
+            
+            document.getElementById('guide-ref').value = ""; 
+            document.getElementById('guide-caller-name').value = "";
+            document.getElementById('guide-caller-loc').value = "";
+            document.getElementById('guide-dynamic-inputs').innerHTML = ""; 
+            document.getElementById('operator-guide-container').classList.add('hidden'); 
+            
+            selectedUnits.clear();
+            renderUnitSelector();
+            
+            solicitarConfirmacion = false;
+            const btnConfirm = document.getElementById('btn-request-confirm');
+            if (btnConfirm) {
+                btnConfirm.classList.remove('selected');
+                btnConfirm.style.borderColor = 'var(--glass-border)';
+                btnConfirm.style.backgroundColor = 'rgba(30, 41, 59, 0.35)';
+                btnConfirm.style.color = 'var(--text-muted)';
+                btnConfirm.querySelector('i').className = 'fas fa-question-circle text-slate-400';
+            }
+
+            localStorage.removeItem('draft_svcKey');
+            localStorage.removeItem('draft_svcLocation');
+            localStorage.removeItem('draft_svcObs');
+            localStorage.removeItem('draft_dispatchId');
+            localStorage.removeItem('draft_claveApoyo');
+            currentDispatchId = null;
+            currentSupportKey = null;
+            document.getElementById('support-key-container').classList.add('hidden');
+            window.updateFinalizeButtonState();
+            if (window.updateLayoutState) window.updateLayoutState();
+        }
+
+        window.forceRefreshVehicles = function() {
+            const btnIcon = document.querySelector('#btn-refresh-units i');
+            if(btnIcon) btnIcon.classList.add('fa-spin');
+            window.fetchVehiclesLocal();
+            setTimeout(() => { if(btnIcon) btnIcon.classList.remove('fa-spin'); }, 500);
+        }
+
+        function guardarBorrador() {
+            localStorage.setItem('draft_svcKey', document.getElementById('svcKey').value);
+            localStorage.setItem('draft_svcLocation', document.getElementById('svcLocation').value);
+            localStorage.setItem('draft_svcObs', document.getElementById('svcObs').value);
+            if (currentDispatchId) localStorage.setItem('draft_dispatchId', currentDispatchId);
+            if (currentSupportKey) localStorage.setItem('draft_claveApoyo', currentSupportKey);
+        }
+
+        window.updateLayoutState = () => {
+            const grid = document.querySelector('.main-grid');
+            const header = document.getElementById('active-dispatch-header');
+            const titleSpan = document.getElementById('active-dispatch-key-title');
+            
+            if (!grid) return;
+            
+            const k = document.getElementById('svcKey').value;
+            
+            if (currentDispatchId && k && k !== '---') {
+                grid.classList.remove('state-selection');
+                grid.classList.add('state-dispatch');
+                
+                if (header) {
+                    header.classList.remove('hidden');
+                    header.classList.add('flex');
+                }
+                
+                if (titleSpan) {
+                    let keyDesc = "";
+                    document.querySelectorAll('.key-btn').forEach(btn => {
+                        const btnText = btn.firstChild ? btn.firstChild.textContent.trim() : "";
+                        if (btnText === k || (k === 'LLAMADO COMANDANCIA' && btnText.includes('LLAMADO'))) {
+                            const descSpan = btn.querySelector('.desc');
+                            if (descSpan) keyDesc = descSpan.innerText.trim();
+                        }
+                    });
+                    titleSpan.innerText = `CLAVE: ${k} ${keyDesc ? ' - ' + keyDesc : ''}`;
+                }
+            } else {
+                grid.classList.remove('state-dispatch');
+                grid.classList.add('state-selection');
+                
+                if (header) {
+                    header.classList.remove('flex');
+                    header.classList.add('hidden');
+                }
+            }
+            
+            if (window.updateFinalizeButtonState) {
+                window.updateFinalizeButtonState();
+            }
+        };
+
+        window.confirmCancelCurrentPreDispatch = () => {
+            window.limpiarFormulario(true);
+        };
+
+        function restoreDraft() {
+            const k = localStorage.getItem('draft_svcKey');
+            if(k && k !== "---") {
+                document.getElementById('svcKey').value = k;
+                const btn = Array.from(document.querySelectorAll('.key-btn')).find(b => b.textContent.includes(k) || (k === 'LLAMADO COMANDANCIA' && b.textContent.includes('COMANDANCIA')));
+                if(btn) { btn.classList.add('selected'); updateGuide(k); }
+            }
+            if(localStorage.getItem('draft_svcLocation')) document.getElementById('svcLocation').value = localStorage.getItem('draft_svcLocation');
+            if(localStorage.getItem('draft_svcObs')) document.getElementById('svcObs').value = localStorage.getItem('draft_svcObs');
+            
+            currentDispatchId = localStorage.getItem('draft_dispatchId') || null;
+            currentSupportKey = localStorage.getItem('draft_claveApoyo') || null;
+            
+            if (k === '10-12') {
+                showSupportKeyGrid();
+            }
+            
+            updateFinalizeButtonState();
+            if (window.updateLayoutState) window.updateLayoutState();
+        }
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+</body>
+</html>

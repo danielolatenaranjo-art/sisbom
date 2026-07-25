@@ -1,0 +1,1683 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SaaS Control Panel - SisBom</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDK Compat -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-storage-compat.js"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Outfit', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            red: '#EF4444',
+                            darkRed: '#B91C1C',
+                            dark: '#0B0F19',
+                            slate: '#1E293B',
+                            card: '#131C2E',
+                            gold: '#F59E0B'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at top right, #1a1e36, #070913);
+            color: #f4f4f5;
+            min-height: 100vh;
+        }
+        .glass-panel {
+            background: rgba(19, 28, 46, 0.65);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+        }
+        .glass-input {
+            background: rgba(10, 15, 28, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-input:focus {
+            border-color: #EF4444;
+            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+            background: rgba(15, 23, 42, 0.95);
+            outline: none;
+        }
+        .glow-btn {
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+        .glow-btn::after {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+            transition: all 0.5s ease;
+        }
+        .glow-btn:hover::after {
+            left: 100%;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.01);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(239, 68, 68, 0.35);
+        }
+
+        /* Light Theme Styles */
+        .light-theme {
+            background: radial-gradient(circle at top right, #f8fafc, #cbd5e1);
+            color: #0f172a;
+        }
+        .light-theme .text-white {
+            color: #0f172a !important;
+        }
+        .light-theme .text-zinc-400 {
+            color: #475569 !important;
+        }
+        .light-theme .text-zinc-500 {
+            color: #64748b !important;
+        }
+        .light-theme .text-zinc-300 {
+            color: #1e293b !important;
+        }
+        .light-theme .bg-zinc-950/20,
+        .light-theme .bg-zinc-900/10 {
+            background-color: rgba(0, 0, 0, 0.04) !important;
+        }
+        .light-theme .bg-zinc-950/30 {
+            background-color: rgba(0, 0, 0, 0.05) !important;
+        }
+        .light-theme .bg-zinc-950/45 {
+            background-color: rgba(0, 0, 0, 0.06) !important;
+            color: #64748b !important;
+        }
+        .light-theme .border-white/5 {
+            border-color: rgba(0, 0, 0, 0.08) !important;
+        }
+        .light-theme .border-white/10 {
+            border-color: rgba(0, 0, 0, 0.12) !important;
+        }
+        .light-theme .bg-white/5 {
+            background-color: rgba(0, 0, 0, 0.05) !important;
+        }
+        .light-theme .bg-white/10 {
+            background-color: rgba(0, 0, 0, 0.08) !important;
+        }
+        .light-theme .bg-brand-dark/40 {
+            background-color: rgba(255, 255, 255, 0.4) !important;
+        }
+        .light-theme .bg-brand-dark/95 {
+            background-color: rgba(255, 255, 255, 0.95) !important;
+        }
+        .light-theme #global-loader p {
+            color: #475569 !important;
+        }
+        .light-theme .glass-panel {
+            background: rgba(255, 255, 255, 0.75);
+            border-color: rgba(0, 0, 0, 0.06);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.05);
+        }
+        .light-theme .glass-input {
+            background: rgba(255, 255, 255, 0.95);
+            border-color: rgba(0, 0, 0, 0.1);
+            color: #0f172a;
+        }
+        .light-theme .glass-input:focus {
+            background: #ffffff;
+            border-color: #EF4444;
+            box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+        }
+        .light-theme ::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.12);
+        }
+        .light-theme ::-webkit-scrollbar-thumb:hover {
+            background: rgba(239, 68, 68, 0.5);
+        }
+        .light-theme .bg-zinc-850 {
+            background-color: rgba(0, 0, 0, 0.04) !important;
+        }
+        .light-theme .bg-zinc-850:hover {
+            background-color: rgba(0, 0, 0, 0.08) !important;
+        }
+        .light-theme .bg-zinc-900 {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+        }
+        .light-theme .bg-zinc-800 {
+            background-color: #cbd5e1 !important;
+            color: #1e293b !important;
+        }
+        .light-theme .bg-zinc-800:hover {
+            background-color: #94a3b8 !important;
+        }
+        .light-theme .text-red-400 {
+            color: #dc2626 !important;
+        }
+        .light-theme .text-red-400:hover {
+            color: #991b1b !important;
+        }
+        .light-theme .bg-red-600/20 {
+            background-color: rgba(239, 68, 68, 0.1) !important;
+        }
+        .light-theme .bg-red-600/20:hover {
+            background-color: rgba(239, 68, 68, 0.2) !important;
+        }
+        .light-theme .text-red-400.hover\:text-white:hover {
+            color: #b91c1c !important;
+        }
+        .light-theme .bg-zinc-900/40 {
+            background-color: rgba(0, 0, 0, 0.02) !important;
+        }
+        .light-theme .hover\:bg-white\/5:hover {
+            background-color: rgba(0, 0, 0, 0.03) !important;
+        }
+        .light-theme .divide-white\/5 > :not([hidden]) ~ :not([hidden]) {
+            border-color: rgba(0, 0, 0, 0.06) !important;
+        }
+        .light-theme .divide-y.divide-white\/5 > * {
+            border-color: rgba(0, 0, 0, 0.06) !important;
+        }
+        .light-theme .divide-white\/5 {
+            border-color: rgba(0, 0, 0, 0.06) !important;
+        }
+        .light-theme #custom-dialog-box {
+            background: rgba(255, 255, 255, 0.95) !important;
+            border-color: rgba(0, 0, 0, 0.08) !important;
+        }
+        .light-theme #dialog-prompt-input {
+            background: #ffffff !important;
+            color: #0f172a !important;
+            border-color: rgba(0, 0, 0, 0.15) !important;
+        }
+        .light-theme ::placeholder {
+            color: #94a3b8 !important;
+        }
+        .light-theme input::placeholder {
+            color: #94a3b8 !important;
+        }
+        .light-theme select {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+        }
+        .light-theme select option {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+        }
+        .light-theme .bg-zinc-950\/40 {
+            background-color: rgba(255, 255, 255, 0.8) !important;
+        }
+    </style>
+</head>
+<body class="antialiased select-none">
+
+    <!-- GLOBAL LOADER -->
+    <div id="global-loader" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-brand-dark/95 backdrop-blur-xl transition-opacity duration-300">
+        <div class="relative flex items-center justify-center">
+            <div class="animate-spin rounded-full h-32 w-32 border-t-4 border-b-4 border-red-500"></div>
+            <i class="fas fa-shield-fire text-red-500 text-3xl absolute animate-pulse"></i>
+        </div>
+        <p class="mt-6 text-zinc-400 font-semibold tracking-widest text-xs uppercase animate-pulse">Conectando con SisBom SaaS...</p>
+    </div>
+
+    <!-- NOTIFICATION TOAST -->
+    <div id="toast-container" class="fixed top-6 right-6 z-50 flex flex-col gap-3 pointer-events-none"></div>
+
+    <!-- MAIN SHELL -->
+    <div id="app-container" class="hidden min-h-screen flex flex-col">
+        <!-- HEADER -->
+        <header class="h-20 bg-brand-dark/40 backdrop-blur-md border-b border-white/5 flex items-center justify-between px-6 sm:px-12 sticky top-0 z-30">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-red-500/10 border border-red-500/25 rounded-xl flex items-center justify-center text-red-500 text-lg shadow">
+                    <i class="fas fa-satellite-dish"></i>
+                </div>
+                <div class="flex flex-col">
+                    <span class="font-black text-white tracking-tight text-lg leading-none">SisBom SaaS</span>
+                    <div class="flex items-center gap-1.5 mt-1 text-[8px] font-extrabold uppercase tracking-widest">
+                        <span class="text-red-500">Portal de Licenciamiento</span>
+                        <span class="text-zinc-600">•</span>
+                        <span class="text-zinc-400">Servidor: <span id="header-project-id" class="text-zinc-300 font-mono font-black">Cargando...</span></span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-4">
+                <button id="theme-toggle-btn" onclick="toggleTheme()" class="text-zinc-400 hover:text-white bg-white/5 border border-white/5 hover:border-white/10 w-9 h-9 flex items-center justify-center rounded-lg transition-colors shadow" title="Cambiar Tema (Claro / Oscuro)">
+                    <i class="fas fa-sun text-xs" id="theme-toggle-icon"></i>
+                </button>
+                <button onclick="openCentralConfigModal()" class="text-zinc-400 hover:text-white bg-white/5 border border-white/5 hover:border-white/10 w-9 h-9 flex items-center justify-center rounded-lg transition-colors shadow" title="Configuración de Base de Datos SaaS">
+                    <i class="fas fa-database text-xs"></i>
+                </button>
+                <span id="user-display" class="hidden md:inline text-zinc-400 font-bold text-[10px] uppercase bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 tracking-wider">Administrador SaaS</span>
+                <button onclick="handleLogout()" class="w-9 h-9 bg-zinc-900 border border-white/5 hover:bg-red-500/10 hover:border-red-500/20 text-zinc-400 hover:text-red-500 transition-colors flex items-center justify-center rounded-lg shadow" title="Recargar Panel">
+                    <i class="fas fa-arrows-rotate text-xs"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- DASHBOARD BODY -->
+        <main class="flex-1 p-6 sm:p-12 max-w-7xl w-full mx-auto">
+            <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-8">
+                <div>
+                    <h2 class="text-3xl font-black text-white tracking-tight">Licencias de Compañías</h2>
+                    <p class="text-zinc-400 text-sm mt-1">Gestión multitenant, bloqueo de accesos y personalización de identidad de SisBom.</p>
+                </div>
+                <button onclick="openClientModal()" class="bg-red-600 hover:bg-red-700 active:scale-[0.98] transition-all text-white font-bold px-6 py-3.5 rounded-xl shadow-lg shadow-red-600/25 uppercase tracking-wider text-xs flex items-center gap-2 glow-btn">
+                    <i class="fas fa-plus-circle"></i> Agregar Institución
+                </button>
+            </div>
+
+            <!-- SEARCH BAR -->
+            <div class="mb-6 max-w-md">
+                <div class="relative">
+                    <input type="text" id="search-input" onkeyup="filterClients()" class="w-full glass-input py-3 px-4 pl-11 rounded-xl text-white font-semibold placeholder-zinc-500 text-sm" placeholder="Buscar institución o licencia...">
+                    <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 text-xs"></i>
+                </div>
+            </div>
+
+            <!-- CLIENTS TABLE -->
+            <div class="glass-panel rounded-3xl overflow-hidden shadow-2xl border border-white/5">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="border-b border-white/5 bg-zinc-950/20 text-zinc-400 text-[9px] font-bold uppercase tracking-widest">
+                                <th class="px-6 py-4">Institución / Licencia</th>
+                                <th class="px-6 py-4">Módulos</th>
+                                <th class="px-6 py-4">Dispositivos</th>
+                                <th class="px-6 py-4">Estado</th>
+                                <th class="px-6 py-4">Vencimiento</th>
+                                <th class="px-6 py-4 text-right">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clients-tbody" class="divide-y divide-white/5 text-sm font-medium">
+                            <!-- Injected dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- CLIENT MODAL -->
+    <div id="client-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4 sm:p-8 z-40">
+        <div class="glass-panel w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden my-4 sm:my-8 transform scale-95 opacity-0 transition-all duration-300 flex flex-col max-h-[90vh]" id="client-modal-box">
+            <div class="bg-zinc-950/30 px-8 py-5 border-b border-white/5 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-sliders text-red-500 text-base"></i>
+                    <h3 id="modal-title" class="text-base font-black text-white uppercase tracking-wider">Configuración de Licencia</h3>
+                </div>
+                <button onclick="closeClientModal()" class="text-zinc-500 hover:text-white transition-colors"><i class="fas fa-times text-lg"></i></button>
+            </div>
+
+            <!-- TABS HEADER -->
+            <div class="flex border-b border-white/5 px-8 bg-zinc-950/20 shrink-0 gap-6">
+                <button type="button" onclick="switchModalTab('licencia')" id="tab-btn-licencia" class="py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-white border-b-2 border-red-500 transition-colors">Licencia y Configuración</button>
+                <button type="button" onclick="switchModalTab('equipos')" id="tab-btn-equipos" class="py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-zinc-500 border-b-2 border-transparent hover:text-zinc-300 transition-colors">Equipos Autorizados</button>
+            </div>
+
+            <form onsubmit="saveClient(event)" class="flex flex-col flex-1 overflow-hidden">
+                <!-- Scrollable Body -->
+                <div class="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6">
+
+                <!-- CONTENIDO PESTAÑA 1: LICENCIA -->
+                <div id="tab-content-licencia" class="space-y-6 block">
+
+                <!-- ID/Licencia y Nombre -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Clave de Licencia</label>
+                            <button type="button" id="gen-key-btn" onclick="generateKey()" class="text-[9px] font-black text-red-400 hover:text-red-300 uppercase tracking-wider">
+                                <i class="fas fa-wand-magic-sparkles mr-1"></i> Sugerir Clave
+                            </button>
+                        </div>
+                        <input type="text" id="modal-key" required class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold uppercase placeholder-zinc-700 text-xs tracking-wider" placeholder="Ej: SB-LICENCIA-KEY">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Razón Social de la Institución</label>
+                        <input type="text" id="modal-name" required class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold text-xs" placeholder="Ej: Cuerpo de Bomberos">
+                    </div>
+                </div>
+
+                <!-- Nombre Mostrar y Logo -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Nombre Comercial a Mostrar</label>
+                        <input type="text" id="modal-display-name" required class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold text-xs" placeholder="Ej: BOMBEROS">
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Escudo / Logotipo oficial</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="file" id="modal-logo-file" accept="image/*" class="hidden" onchange="previewLogo(this)">
+                            <button type="button" onclick="document.getElementById('modal-logo-file').click()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold px-4 py-3 rounded-xl text-[10px] uppercase tracking-widest border border-white/5 transition-colors shrink-0">
+                                Subir Imagen
+                            </button>
+                            <input type="text" id="modal-logo-url" class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold text-[10px]" placeholder="URL del escudo (o suba un archivo)">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Estado y Vencimiento -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Nivel de Acceso (Suscripción)</label>
+                        <select id="modal-status" class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold bg-zinc-900 cursor-pointer text-xs">
+                            <option value="activo">✅ CONTROL TOTAL (ACTIVO)</option>
+                            <option value="read_only">👁️ SOLO LECTURA</option>
+                            <option value="bloqueado">❌ BLOQUEO TOTAL</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-2">Vencimiento del Servicio</label>
+                        <input type="date" id="modal-payment-warning" class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold text-center cursor-pointer text-xs">
+                    </div>
+                </div>
+
+                <!-- Módulos Habilitados -->
+                <div>
+                    <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">Módulos del Sistema Habilitados</label>
+                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                            <input type="checkbox" id="modal-mod-central" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Central de Alarmas</span>
+                        </label>
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                            <input type="checkbox" id="modal-mod-comandancia" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Comandancia</span>
+                        </label>
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                            <input type="checkbox" id="modal-mod-apk" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">MiSisBom Móvil</span>
+                        </label>
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                            <input type="checkbox" id="modal-mod-lista" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Asistencia/Lista</span>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Credenciales Firebase -->
+                <div>
+                    <div class="flex justify-between items-center mb-3">
+                        <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Proyecto Firebase Asignado a la Institución</label>
+                        <div class="flex gap-4">
+                            <button type="button" onclick="setAsSaaSCentralServer()" class="text-[9px] font-black text-emerald-400 hover:text-emerald-300 uppercase tracking-wider">
+                                <i class="fas fa-server mr-1"></i> Establecer como Servidor Central
+                            </button>
+                            <button type="button" onclick="autoFillFirebaseCentral()" class="text-[9px] font-black text-red-400 hover:text-red-300 uppercase tracking-wider">
+                                <i class="fas fa-copy mr-1"></i> Usar Proyecto Central
+                            </button>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-zinc-950/20 border border-white/5 p-6 rounded-2xl">
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">API Key</label>
+                            <input type="text" id="modal-fb-apikey" required class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs" placeholder="AIzaSy...">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Auth Domain</label>
+                            <input type="text" id="modal-fb-domain" required class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs" placeholder="nombre-proyecto.firebaseapp.com">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Project ID</label>
+                            <input type="text" id="modal-fb-project" required class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs" placeholder="nombre-proyecto">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Storage Bucket</label>
+                            <input type="text" id="modal-fb-bucket" required class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs" placeholder="nombre-proyecto.appspot.com">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Messaging Sender ID</label>
+                            <input type="text" id="modal-fb-sender" required class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs" placeholder="39449538456">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">App ID</label>
+                            <input type="text" id="modal-fb-appid" required class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs" placeholder="1:39449538456:web:64f7...">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Datos del Comandante / Administrador Inicial -->
+                <div class="mt-6">
+                    <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">Datos del Comandante / Administrador Inicial (Se creará en Auth y Firestore)</label>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-zinc-950/20 border border-white/5 p-6 rounded-2xl">
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Nombre Completo</label>
+                            <input type="text" id="modal-cmd-name" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold" placeholder="Ej: ALEJANDRO ABARCA CORDOVA">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Cargo</label>
+                            <input type="text" id="modal-cmd-cargo" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold" placeholder="Ej: COMANDANTE GENERAL" value="COMANDANTE">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">ID Registro (N° de Cuenta)</label>
+                            <input type="text" id="modal-cmd-idreg" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold font-mono" placeholder="Ej: 107">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">ID Radial (N° de Radio)</label>
+                            <input type="text" id="modal-cmd-radial" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold font-mono" placeholder="Ej: 1">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Contraseña de Acceso</label>
+                            <input type="text" id="modal-cmd-pass" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold font-mono" placeholder="Ej: 123456">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">RUT</label>
+                            <input type="text" id="modal-cmd-rut" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold font-mono" placeholder="Ej: 12345678-9">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Teléfono</label>
+                            <input type="text" id="modal-cmd-phone" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold font-mono" placeholder="Ej: +56912345678">
+                        </div>
+                        <div>
+                            <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Email</label>
+                            <input type="text" id="modal-cmd-email" class="w-full glass-input py-2.5 px-3 rounded-lg text-white text-xs font-semibold font-mono" placeholder="Ej: comandante@sisbom.com">
+                        </div>
+                        <div class="col-span-1 md:col-span-2 flex justify-end pt-2">
+                            <button type="button" onclick="provisionClientDatabase()" class="bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-white border border-red-500/30 font-bold px-4 py-2.5 rounded-xl text-[10px] uppercase tracking-widest transition-colors flex items-center gap-2">
+                                <i class="fas fa-magic"></i> Habilitar / Provisionar Base de Datos del Cliente
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                </div> <!-- CIERRE DE PESTAÑA 1 -->
+
+                <!-- CONTENIDO PESTAÑA 2: EQUIPOS AUTORIZADOS -->
+                <div id="tab-content-equipos" class="space-y-6 hidden">
+                    <div id="modal-hwid-section">
+                        <div class="flex flex-col sm:flex-row sm:items-end justify-between mb-3 gap-2">
+                            <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest">Equipos Físicos Vinculados</label>
+                            <span class="text-[9px] text-red-400 font-bold uppercase tracking-widest"><i class="fas fa-info-circle mr-1"></i> Asigna un alias a cada PC</span>
+                        </div>
+                        <div class="bg-zinc-950/20 border border-white/5 p-6 rounded-2xl space-y-4">
+                            <div class="flex flex-col sm:flex-row gap-2">
+                                <input type="text" id="new-hwid-input" class="w-full glass-input py-2.5 px-3 rounded-lg text-white font-mono text-xs uppercase" placeholder="Ej: FFFFFFFF-FFFF-FFFF-FFFF...">
+                                <input type="text" id="new-hwid-alias" class="w-full sm:w-1/3 glass-input py-2.5 px-3 rounded-lg text-white font-semibold text-xs" placeholder="Alias (Ej: PC Recepción)">
+                                <select id="new-hwid-module" class="glass-input py-2.5 px-3 rounded-lg text-white font-bold text-[10px] bg-zinc-900 cursor-pointer uppercase tracking-wider shrink-0">
+                                    <option value="central">Central</option>
+                                    <option value="comandancia">Comandancia</option>
+                                </select>
+                                <button type="button" onclick="addHwidManually()" class="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-lg text-[10px] uppercase tracking-widest transition-colors shrink-0">
+                                    Añadir
+                                </button>
+                            </div>
+                            <div id="hwid-list" class="flex flex-col gap-2 pt-2">
+                                <!-- HWID badges injected dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div> <!-- CIERRE DE PESTAÑA 2 -->
+
+                </div>
+                <div class="flex border-t border-white/5 p-6 justify-end gap-3 bg-zinc-950/40 shrink-0">
+                    <button type="button" onclick="closeClientModal()" class="bg-zinc-800 hover:bg-zinc-700 border border-white/5 text-zinc-300 font-bold px-6 py-3 rounded-xl text-xs uppercase tracking-wider transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg shadow-red-600/20 transition-colors">
+                        Guardar Licencia
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SAAS CENTRAL CONFIG CONFIGURATION MODAL -->
+    <div id="central-config-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4 sm:p-8 z-50">
+        <div class="glass-panel w-full max-w-md rounded-3xl shadow-2xl overflow-hidden my-4 sm:my-8 transform scale-95 opacity-0 transition-all duration-300 flex flex-col max-h-[90vh]" id="central-config-modal-box">
+            <div class="bg-zinc-950/30 px-6 py-4 border-b border-white/5 flex items-center justify-between shrink-0">
+                <div class="flex items-center gap-2 text-zinc-300">
+                    <i class="fas fa-database text-red-500"></i>
+                    <h3 class="text-sm font-black uppercase tracking-wider">Servidor SaaS Central</h3>
+                </div>
+                <button onclick="closeCentralConfigModal()" class="text-zinc-500 hover:text-white transition-colors"><i class="fas fa-times text-lg"></i></button>
+            </div>
+            <form onsubmit="saveCentralConfig(event)" class="flex flex-col flex-1 overflow-hidden">
+                <!-- Scrollable Body -->
+                <div class="flex-1 overflow-y-auto p-6 space-y-4">
+                <p class="text-xs text-zinc-400 leading-relaxed uppercase tracking-wider">
+                    Configuración de Firebase que almacena las licencias globales. Por defecto se conecta al proyecto central de SisBom.
+                </p>
+                <div class="space-y-3">
+                    <div>
+                        <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">API Key</label>
+                        <input type="text" id="central-fb-apikey" required class="w-full glass-input py-2 px-3 rounded-lg text-white font-mono text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Auth Domain</label>
+                        <input type="text" id="central-fb-domain" required class="w-full glass-input py-2 px-3 rounded-lg text-white font-mono text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Project ID</label>
+                        <input type="text" id="central-fb-project" required class="w-full glass-input py-2 px-3 rounded-lg text-white font-mono text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Storage Bucket</label>
+                        <input type="text" id="central-fb-bucket" required class="w-full glass-input py-2 px-3 rounded-lg text-white font-mono text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">Messaging Sender ID</label>
+                        <input type="text" id="central-fb-sender" required class="w-full glass-input py-2 px-3 rounded-lg text-white font-mono text-xs">
+                    </div>
+                    <div>
+                        <label class="block text-[8px] font-bold text-zinc-500 uppercase mb-1">App ID</label>
+                        <input type="text" id="central-fb-appid" required class="w-full glass-input py-2 px-3 rounded-lg text-white font-mono text-xs">
+                    </div>
+                </div>
+                </div>
+                <div class="flex justify-end gap-2 p-6 border-t border-white/5 bg-zinc-950/40 shrink-0">
+                    <button type="button" onclick="resetCentralConfig()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 font-bold px-4 py-2.5 rounded-xl text-[10px] uppercase tracking-wider mr-auto transition-colors">
+                        Restablecer
+                    </button>
+                    <button type="button" onclick="closeCentralConfigModal()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold px-4 py-2.5 rounded-xl text-[10px] uppercase tracking-wider transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit" class="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2.5 rounded-xl text-[10px] uppercase tracking-wider transition-colors shadow shadow-red-600/10">
+                        Guardar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- CUSTOM DIALOG MODAL (Alert / Confirm / Prompt) -->
+    <div id="custom-dialog-modal" class="fixed inset-0 bg-black/85 backdrop-blur-sm hidden items-center justify-center p-4 sm:p-8 z-50">
+        <div class="glass-panel w-full max-w-md rounded-3xl shadow-2xl overflow-hidden my-4 sm:my-8 transform scale-95 opacity-0 transition-all duration-300" id="custom-dialog-box">
+            <div class="p-8 text-center space-y-6">
+                <!-- Icon/Header -->
+                <div class="w-16 h-16 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center mx-auto text-red-500 text-2xl shadow-lg" id="dialog-icon-container">
+                    <i class="fas fa-exclamation-triangle" id="dialog-icon"></i>
+                </div>
+                
+                <div class="space-y-2">
+                    <h3 class="text-lg font-black text-white uppercase tracking-wider" id="dialog-title">Confirmación</h3>
+                    <p class="text-zinc-400 text-xs leading-relaxed" id="dialog-message">¿Está seguro de realizar esta acción?</p>
+                </div>
+
+                <!-- Prompt Input Field -->
+                <div class="hidden text-left space-y-2" id="dialog-prompt-container">
+                    <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest" id="dialog-prompt-label">Valor</label>
+                    <input type="text" id="dialog-prompt-input" class="w-full glass-input py-3 px-4 rounded-xl text-white font-semibold text-sm">
+                    <div id="dialog-prompt-error" class="text-red-500 text-[10px] font-bold mt-1 h-4"></div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="flex gap-3 justify-center pt-2">
+                    <button type="button" id="dialog-cancel-btn" class="bg-zinc-800 hover:bg-zinc-700 border border-white/5 text-zinc-300 font-bold px-6 py-3 rounded-xl text-xs uppercase tracking-wider transition-colors shrink-0">
+                        Cancelar
+                    </button>
+                    <button type="button" id="dialog-confirm-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-xl text-xs uppercase tracking-wider shadow-lg shadow-red-600/20 transition-colors shrink-0">
+                        Confirmar
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- INITIALIZATION SCRIPT -->
+    <script>
+        // Default configuration of sisbom-central
+        const defaultFirebaseConfig = {
+            apiKey: "AIzaSyBjjSBwmUevGC0vT0GdxtQUw-yvawdrH44",
+            authDomain: "sisbom-central.firebaseapp.com",
+            projectId: "sisbom-central",
+            storageBucket: "sisbom-central.firebasestorage.app",
+            messagingSenderId: "432594591351",
+            appId: "1:432594591351:web:99a442ea6ae05276beb072"
+        };
+
+        // Theme management logic
+        function initTheme() {
+            const savedTheme = localStorage.getItem('saas_theme') || 'dark';
+            applyTheme(savedTheme);
+        }
+
+        function applyTheme(theme) {
+            const body = document.body;
+            const icon = document.getElementById('theme-toggle-icon');
+            if (theme === 'light') {
+                body.classList.add('light-theme');
+                if (icon) {
+                    icon.className = "fas fa-moon text-xs";
+                }
+            } else {
+                body.classList.remove('light-theme');
+                if (icon) {
+                    icon.className = "fas fa-sun text-xs";
+                }
+            }
+            localStorage.setItem('saas_theme', theme);
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.body.classList.contains('light-theme') ? 'dark' : 'light';
+            applyTheme(currentTheme);
+            showToast(`Tema cambiado a modo ${currentTheme === 'light' ? 'claro' : 'oscuro'}.`, "success");
+        }
+
+        // Apply theme immediately as early as possible in body parsing
+        initTheme();
+
+        let db, auth, storage;
+        let clientsList = [];
+        let editingKey = null;
+        let logoFile = null;
+        let selectedHwids = [];
+        let selectedDevices = {};
+
+        function switchModalTab(tabId) {
+            const tabLicencia = document.getElementById('tab-content-licencia');
+            const tabEquipos = document.getElementById('tab-content-equipos');
+            const btnLicencia = document.getElementById('tab-btn-licencia');
+            const btnEquipos = document.getElementById('tab-btn-equipos');
+
+            if (tabId === 'licencia') {
+                tabLicencia.classList.remove('hidden');
+                tabLicencia.classList.add('block');
+                tabEquipos.classList.add('hidden');
+                tabEquipos.classList.remove('block');
+
+                btnLicencia.className = "py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-white border-b-2 border-red-500 transition-colors";
+                btnEquipos.className = "py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-zinc-500 border-b-2 border-transparent hover:text-zinc-300 transition-colors";
+            } else {
+                tabEquipos.classList.remove('hidden');
+                tabEquipos.classList.add('block');
+                tabLicencia.classList.add('hidden');
+                tabLicencia.classList.remove('block');
+
+                btnEquipos.className = "py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-white border-b-2 border-red-500 transition-colors";
+                btnLicencia.className = "py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider text-zinc-500 border-b-2 border-transparent hover:text-zinc-300 transition-colors";
+            }
+        }
+
+        // Auto-fill client firebase with central project configs
+        function autoFillFirebaseCentral() {
+            document.getElementById('modal-fb-apikey').value = defaultFirebaseConfig.apiKey;
+            document.getElementById('modal-fb-domain').value = defaultFirebaseConfig.authDomain;
+            document.getElementById('modal-fb-project').value = defaultFirebaseConfig.projectId;
+            document.getElementById('modal-fb-bucket').value = defaultFirebaseConfig.storageBucket;
+            document.getElementById('modal-fb-sender').value = defaultFirebaseConfig.messagingSenderId;
+            document.getElementById('modal-fb-appid').value = defaultFirebaseConfig.appId;
+            showToast("Campos Firebase autocompletados con el Proyecto Central.", "success");
+        }
+
+        async function setAsSaaSCentralServer() {
+            const apiKey = document.getElementById('modal-fb-apikey').value.trim();
+            const authDomain = document.getElementById('modal-fb-domain').value.trim();
+            const projectId = document.getElementById('modal-fb-project').value.trim();
+            const storageBucket = document.getElementById('modal-fb-bucket').value.trim();
+            const messagingSenderId = document.getElementById('modal-fb-sender').value.trim();
+            const appId = document.getElementById('modal-fb-appid').value.trim();
+
+            if (!apiKey || !authDomain || !projectId || !storageBucket || !messagingSenderId || !appId) {
+                showToast("Por favor complete todas las credenciales de Firebase en el formulario antes de establecer como servidor central.", "warning");
+                return;
+            }
+
+            const confirmSet = await showCustomConfirm(
+                "Cambiar Servidor Central",
+                `¿Está seguro de que desea establecer el proyecto '${projectId}' como el servidor central de licencias de SaaS?\n\nSaaS.exe se reiniciará conectado a esta base de datos.`,
+                "fa-server"
+            );
+
+            if (confirmSet) {
+                const config = { apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId };
+                localStorage.setItem('saas_central_firebase_config', JSON.stringify(config));
+                showToast("Configuración guardada. Reiniciando...", "success");
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            }
+        }
+
+        // Custom HTML Modals (Alerts, Confirms, Prompts) instead of native elements
+        function closeCustomDialog() {
+            const modal = document.getElementById('custom-dialog-modal');
+            const box = document.getElementById('custom-dialog-box');
+            box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 200);
+        }
+
+        function showCustomConfirm(title, message, iconClass = "fa-question-circle") {
+            return new Promise((resolve) => {
+                document.getElementById('dialog-title').innerText = title;
+                document.getElementById('dialog-message').innerText = message;
+                
+                const icon = document.getElementById('dialog-icon');
+                icon.className = `fas ${iconClass}`;
+
+                document.getElementById('dialog-prompt-container').classList.add('hidden');
+                document.getElementById('dialog-cancel-btn').classList.remove('hidden');
+
+                const confirmBtn = document.getElementById('dialog-confirm-btn');
+                const cancelBtn = document.getElementById('dialog-cancel-btn');
+
+                confirmBtn.onclick = () => {
+                    closeCustomDialog();
+                    resolve(true);
+                };
+
+                cancelBtn.onclick = () => {
+                    closeCustomDialog();
+                    resolve(false);
+                };
+
+                const modal = document.getElementById('custom-dialog-modal');
+                const box = document.getElementById('custom-dialog-box');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                    box.classList.remove('scale-95', 'opacity-0');
+                }, 50);
+            });
+        }
+
+        function showCustomPrompt(title, message, inputLabel, placeholder = "", iconClass = "fa-id-card") {
+            return new Promise((resolve) => {
+                document.getElementById('dialog-title').innerText = title;
+                document.getElementById('dialog-message').innerText = message;
+                
+                const icon = document.getElementById('dialog-icon');
+                icon.className = `fas ${iconClass}`;
+
+                const promptContainer = document.getElementById('dialog-prompt-container');
+                promptContainer.classList.remove('hidden');
+                
+                const label = document.getElementById('dialog-prompt-label');
+                label.innerText = inputLabel;
+
+                const input = document.getElementById('dialog-prompt-input');
+                input.value = "";
+                input.placeholder = placeholder;
+
+                document.getElementById('dialog-prompt-error').innerText = "";
+                document.getElementById('dialog-cancel-btn').classList.remove('hidden');
+
+                const confirmBtn = document.getElementById('dialog-confirm-btn');
+                const cancelBtn = document.getElementById('dialog-cancel-btn');
+
+                confirmBtn.onclick = () => {
+                    const val = input.value.trim();
+                    if (!val) {
+                        document.getElementById('dialog-prompt-error').innerText = "Este campo es requerido.";
+                        return;
+                    }
+                    closeCustomDialog();
+                    resolve(val);
+                };
+
+                cancelBtn.onclick = () => {
+                    closeCustomDialog();
+                    resolve(null);
+                };
+
+                const modal = document.getElementById('custom-dialog-modal');
+                const box = document.getElementById('custom-dialog-box');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                    box.classList.remove('scale-95', 'opacity-0');
+                    input.focus();
+                }, 50);
+            });
+        }
+
+        // Load custom or default central config
+        function getSaaSCentralConfig() {
+            try {
+                const config = localStorage.getItem('saas_central_firebase_config');
+                if (config) {
+                    return JSON.parse(config);
+                }
+            } catch (e) {
+                console.error("Error loading saved config:", e);
+            }
+            return defaultFirebaseConfig;
+        }
+
+        // Initialize Firebase
+        function initFirebaseServices() {
+            // Show global loader
+            document.getElementById('global-loader').classList.remove('opacity-0', 'hidden');
+            
+            // Safety timeout: if loader is stuck for 5s, hide it and show HTML warning
+            setTimeout(() => {
+                const loader = document.getElementById('global-loader');
+                if (loader && !loader.classList.contains('hidden')) {
+                    loader.classList.add('opacity-0');
+                    setTimeout(() => loader.classList.add('hidden'), 300);
+                    showToast("Conexión inicial demorada. Compruebe la configuración del servidor central si es necesario.", "warning");
+                    showAppScreen();
+                }
+            }, 5000);
+
+            const currentConfig = getSaaSCentralConfig();
+            
+            // Delete previous app instance if it exists to avoid re-init errors
+            if (firebase.apps.length > 0) {
+                firebase.app().delete()
+                    .then(() => doInit(currentConfig))
+                    .catch(err => {
+                        console.error("Error deleting old app:", err);
+                        doInit(currentConfig);
+                    });
+            } else {
+                doInit(currentConfig);
+            }
+        }
+
+        function doInit(config) {
+            try {
+                firebase.initializeApp(config);
+                db = firebase.firestore();
+                storage = firebase.storage();
+                
+                // Actualizar identificador de servidor en cabecera
+                const projIdEl = document.getElementById('header-project-id');
+                if (projIdEl && config.projectId) {
+                    projIdEl.innerText = config.projectId.toUpperCase();
+                }
+                
+                // Hide loader and show app directly without login
+                document.getElementById('global-loader').classList.add('opacity-0');
+                setTimeout(() => document.getElementById('global-loader').classList.add('hidden'), 300);
+                
+                showAppScreen();
+                listenToClientsData();
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+                document.getElementById('global-loader').classList.add('opacity-0');
+                setTimeout(() => document.getElementById('global-loader').classList.add('hidden'), 300);
+                showToast("Fallo al inicializar Firebase. Revise la configuración del servidor.", "error");
+            }
+        }
+
+        function showLoginScreen() {
+            showAppScreen();
+        }
+
+        function showAppScreen() {
+            document.getElementById('app-container').classList.remove('hidden');
+        }
+
+        function handleLogout() {
+            window.location.reload();
+        }
+
+        // Listen for Firestore updates
+        let clientsUnsubscribe = null;
+        function listenToClientsData() {
+            const cacheKey = 'saas_clients_cache';
+            
+            // Load from cache first for instant display
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                try {
+                    clientsList = JSON.parse(cached);
+                    renderClientsTable();
+                } catch (e) {
+                    console.error("Error parsing clients cache:", e);
+                }
+            }
+
+            if (clientsUnsubscribe) {
+                clientsUnsubscribe();
+            }
+            
+            clientsUnsubscribe = db.collection("saas_clientes").onSnapshot(snap => {
+                clientsList = [];
+                snap.forEach(doc => {
+                    clientsList.push({
+                        key: doc.id,
+                        ...doc.data()
+                    });
+                });
+                localStorage.setItem(cacheKey, JSON.stringify(clientsList));
+                renderClientsTable();
+            }, err => {
+                console.error("Snapshot client error:", err);
+                showToast("Error al sincronizar clientes de Firestore.", "error");
+            });
+        }
+
+        function renderClientsTable() {
+            const tbody = document.getElementById('clients-tbody');
+            tbody.innerHTML = "";
+
+            if (clientsList.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="6" class="text-center py-12 text-zinc-500 font-bold uppercase tracking-wider text-xs">No hay instituciones registradas</td></tr>`;
+                return;
+            }
+
+            clientsList.forEach(c => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-white/5 border-b border-white/5 transition-colors";
+                
+                const modules = [];
+                if (c.modulos?.central) modules.push(`<span class="bg-red-500/10 text-red-500 border border-red-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">CENTRAL</span>`);
+                if (c.modulos?.comandancia) modules.push(`<span class="bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">COMANDANCIA</span>`);
+                if (c.modulos?.apk) modules.push(`<span class="bg-green-500/10 text-green-500 border border-green-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">MÓVIL</span>`);
+                if (c.modulos?.lista) modules.push(`<span class="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">LISTA</span>`);
+                const modulesHtml = modules.length > 0 ? modules.join(" ") : `<span class="text-zinc-500 font-bold text-xs">SIN MÓDULOS</span>`;
+
+                const hwidsCount = c.hardwareUUIDs ? c.hardwareUUIDs.length : 0;
+                const devicesHtml = `<span class="text-zinc-300 font-bold text-xs">${hwidsCount} PCs autorizados</span>`;
+
+                let statusBadge = '';
+                if (c.estadoSuscripcion === 'activo') {
+                    statusBadge = `<span class="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">✅ ACTIVO</span>`;
+                } else if (c.estadoSuscripcion === 'read_only') {
+                    statusBadge = `<span class="bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">👁️ LECTURA</span>`;
+                } else {
+                    statusBadge = `<span class="bg-red-500/10 text-red-400 border border-red-500/20 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-widest">❌ BLOQUEADO</span>`;
+                }
+
+                let paymentWarningHtml = '<span class="text-zinc-500 text-xs font-bold">-</span>';
+                if (c.avisoPagoHasta) {
+                    const warnDate = new Date(c.avisoPagoHasta + 'T23:59:59');
+                    const formattedDate = warnDate.toLocaleDateString('es-CL');
+                    const isOverdue = warnDate < new Date();
+                    paymentWarningHtml = `<span class="${isOverdue ? 'text-red-400 font-black' : 'text-zinc-300 font-bold'}">${formattedDate}</span>`;
+                }
+
+                tr.innerHTML = `
+                    <td class="px-6 py-4 flex items-center gap-3">
+                        ${c.logoUrl ? `<img src="${c.logoUrl}" class="w-10 h-10 object-contain bg-white/5 border border-white/10 rounded-xl p-1 shadow-inner">` : `<div class="w-10 h-10 bg-zinc-800 border border-white/5 rounded-xl flex items-center justify-center text-zinc-500"><i class="fas fa-shield text-xs"></i></div>`}
+                        <div class="flex flex-col">
+                            <span class="font-black text-white text-base leading-none tracking-tight">${(c.nombreMostrar || c.nombreCliente || "SIN NOMBRE").toUpperCase()}</span>
+                            <code class="text-red-500 font-mono text-xs mt-1 select-all font-bold tracking-wider">${c.key}</code>
+                        </div>
+                    </td>
+                    <td class="px-6 py-4">${modulesHtml}</td>
+                    <td class="px-6 py-4">${devicesHtml}</td>
+                    <td class="px-6 py-4">${statusBadge}</td>
+                    <td class="px-6 py-4">${paymentWarningHtml}</td>
+                    <td class="px-6 py-4 text-right">
+                        <div class="flex justify-end gap-2">
+                            <button onclick="openClientModal('${c.key}')" class="bg-zinc-850 border border-white/5 hover:bg-zinc-700 text-zinc-300 w-8 h-8 rounded-lg flex items-center justify-center transition-colors shadow" title="Configurar"><i class="fas fa-edit text-xs"></i></button>
+                            <button onclick="deleteClient('${c.key}')" class="bg-zinc-850 border border-white/5 hover:bg-red-500/10 hover:border-red-500/20 text-zinc-500 hover:text-red-500 w-8 h-8 rounded-lg flex items-center justify-center transition-colors shadow" title="Eliminar"><i class="fas fa-trash-alt text-xs"></i></button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterClients() {
+            const query = document.getElementById('search-input').value.toLowerCase();
+            const rows = document.querySelectorAll('#clients-tbody tr');
+            
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                if (text.includes(query)) {
+                    row.classList.remove('hidden');
+                } else {
+                    row.classList.add('hidden');
+                }
+            });
+        }
+
+        // Suggest License Key based on Display Name
+        function generateKey() {
+            const name = document.getElementById('modal-display-name').value.trim();
+            if (!name) {
+                showToast("Escribe un nombre comercial para sugerir la clave.", "warning");
+                return;
+            }
+            // Normalize: capitalize, replace spaces with hyphens, remove special characters
+            let clean = name.toUpperCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "") // remove accent accents
+                .replace(/[^A-Z0-9\s]/g, "") // alphanumeric only
+                .replace(/\s+/g, "-"); // spaces to hyphens
+            
+            // Random 4 digit suffix
+            const rnd = Math.floor(1000 + Math.random() * 9000);
+            document.getElementById('modal-key').value = `SB-${clean}-${rnd}`;
+            showToast("Clave de licencia sugerida generada.", "success");
+        }
+
+        function openClientModal(key = null) {
+            editingKey = key;
+            logoFile = null;
+            document.getElementById('modal-logo-file').value = "";
+            document.getElementById('new-hwid-input').value = "";
+            document.getElementById('new-hwid-alias').value = "";
+            
+            // Limpiar campos del Comandante
+            document.getElementById('modal-cmd-name').value = "";
+            document.getElementById('modal-cmd-cargo').value = "COMANDANTE";
+            document.getElementById('modal-cmd-idreg').value = "";
+            document.getElementById('modal-cmd-radial').value = "";
+            document.getElementById('modal-cmd-pass').value = "";
+            document.getElementById('modal-cmd-rut').value = "";
+            document.getElementById('modal-cmd-phone').value = "";
+            document.getElementById('modal-cmd-email').value = "";
+            
+            // Siempre iniciamos en la pestaña Licencia al abrir el modal
+            switchModalTab('licencia');
+
+            const title = document.getElementById('modal-title');
+            const keyInput = document.getElementById('modal-key');
+            const genKeyBtn = document.getElementById('gen-key-btn');
+            
+            if (key) {
+                title.innerText = "Configuración de Institución";
+                keyInput.readOnly = false;
+                keyInput.classList.remove('bg-zinc-950/45', 'text-zinc-500', 'cursor-default');
+                genKeyBtn.classList.remove('hidden');
+
+                const client = clientsList.find(x => x.key === key);
+                if (client) {
+                    keyInput.value = client.key;
+                    document.getElementById('modal-name').value = client.nombreCliente || "";
+                    document.getElementById('modal-display-name').value = client.nombreMostrar || "";
+                    document.getElementById('modal-logo-url').value = client.logoUrl || "";
+                    document.getElementById('modal-status').value = client.estadoSuscripcion || "activo";
+                    document.getElementById('modal-payment-warning').value = client.avisoPagoHasta || "";
+                    
+                    document.getElementById('modal-mod-central').checked = !!client.modulos?.central;
+                    document.getElementById('modal-mod-comandancia').checked = !!client.modulos?.comandancia;
+                    document.getElementById('modal-mod-apk').checked = !!client.modulos?.apk;
+                    document.getElementById('modal-mod-lista').checked = !!client.modulos?.lista;
+
+                    const fc = client.firebaseConfig || {};
+                    document.getElementById('modal-fb-apikey').value = fc.apiKey || "";
+                    document.getElementById('modal-fb-domain').value = fc.authDomain || "";
+                    document.getElementById('modal-fb-project').value = fc.projectId || "";
+                    document.getElementById('modal-fb-bucket').value = fc.storageBucket || "";
+                    document.getElementById('modal-fb-sender').value = fc.messagingSenderId || "";
+                    document.getElementById('modal-fb-appid').value = fc.appId || "";
+
+                    let rawDevices = client.dispositivos || {};
+                    selectedDevices = {};
+                    
+                    // Normalizamos para manejar los datos tanto en el formato antiguo (string) como en el nuevo (objeto)
+                    Object.keys(rawDevices).forEach(hwid => {
+                        if (typeof rawDevices[hwid] === 'string') {
+                            selectedDevices[hwid] = { module: rawDevices[hwid], alias: "" };
+                        } else {
+                            selectedDevices[hwid] = rawDevices[hwid];
+                        }
+                    });
+
+                    selectedHwids = client.hardwareUUIDs || [];
+                    // Fallback for legacy HWIDs
+                    selectedHwids.forEach(hwid => {
+                        if (!selectedDevices[hwid]) {
+                            selectedDevices[hwid] = { module: "central", alias: "" };
+                        }
+                    });
+                    renderHwids();
+                }
+            } else {
+                title.innerText = "Nueva Institución";
+                keyInput.readOnly = false;
+                keyInput.classList.remove('bg-zinc-950/45', 'text-zinc-500', 'cursor-default');
+                keyInput.value = "";
+                genKeyBtn.classList.remove('hidden');
+
+                document.getElementById('modal-name').value = "";
+                document.getElementById('modal-display-name').value = "";
+                document.getElementById('modal-logo-url').value = "";
+                document.getElementById('modal-status').value = "activo";
+                document.getElementById('modal-payment-warning').value = "";
+                
+                document.getElementById('modal-mod-central').checked = true;
+                document.getElementById('modal-mod-comandancia').checked = true;
+                document.getElementById('modal-mod-apk').checked = true;
+                document.getElementById('modal-mod-lista').checked = true;
+
+                document.getElementById('modal-fb-apikey').value = "";
+                document.getElementById('modal-fb-domain').value = "";
+                document.getElementById('modal-fb-project').value = "";
+                document.getElementById('modal-fb-bucket').value = "";
+                document.getElementById('modal-fb-sender').value = "";
+                document.getElementById('modal-fb-appid').value = "";
+
+                selectedHwids = [];
+                selectedDevices = {};
+                renderHwids(); // Agregado: Limpiar visualmente la lista de equipos en la UI
+            }
+
+            const modal = document.getElementById('client-modal');
+            const box = document.getElementById('client-modal-box');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                box.classList.remove('scale-95', 'opacity-0');
+            }, 50);
+        }
+
+        function closeClientModal() {
+            const modal = document.getElementById('client-modal');
+            const box = document.getElementById('client-modal-box');
+            box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+                editingKey = null;
+            }, 200);
+        }
+
+        function previewLogo(input) {
+            if (input.files && input.files[0]) {
+                logoFile = input.files[0];
+                document.getElementById('modal-logo-url').value = `SUBIDA PENDIENTE: ${logoFile.name.toUpperCase()}`;
+                showToast("Logotipo seleccionado correctamente.", "success");
+            }
+        }
+
+        function renderHwids() {
+            const container = document.getElementById('hwid-list');
+            container.innerHTML = "";
+            
+            const hwids = Object.keys(selectedDevices);
+            if (hwids.length === 0) {
+                container.innerHTML = `<span class="text-zinc-500 text-[10px] italic font-bold">Ningún PC registrado en la licencia</span>`;
+                return;
+            }
+
+            hwids.forEach((hwid) => {
+                const deviceData = selectedDevices[hwid];
+                const module = typeof deviceData === 'string' ? deviceData : (deviceData?.module || "central");
+                const alias = typeof deviceData === 'string' ? "" : (deviceData?.alias || "");
+
+                const card = document.createElement('div');
+                card.className = "bg-zinc-900/40 border border-white/5 p-3 sm:p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-[10px] font-bold shadow shadow-inner w-full transition-colors hover:bg-zinc-900/60";
+                card.innerHTML = `
+                    <div class="flex flex-col gap-1.5 flex-1 w-full sm:w-auto">
+                        <span class="font-mono text-red-400 select-all text-[11px]">${hwid}</span>
+                        <input type="text" onchange="updateHwidAlias('${hwid}', this.value)" value="${alias}" placeholder="Sin alias asignado" class="bg-transparent border-b border-white/10 focus:border-red-500 outline-none text-zinc-300 font-semibold px-1 py-0.5 w-full max-w-[200px] placeholder-zinc-600 transition-colors" title="Editar alias de este equipo">
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <select onchange="updateHwidModule('${hwid}', this.value)" class="glass-input py-1.5 px-3 rounded-lg text-white text-[10px] bg-zinc-950/60 cursor-pointer border border-white/5 uppercase font-bold">
+                            <option value="central" ${module === 'central' ? 'selected' : ''}>Central</option>
+                            <option value="comandancia" ${module === 'comandancia' ? 'selected' : ''}>Comandancia</option>
+                        </select>
+                        <button type="button" onclick="removeHwid('${hwid}')" class="text-zinc-500 hover:text-red-400 transition-colors w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-red-500/10 border border-transparent hover:border-red-500/20 shadow"><i class="fas fa-trash-alt"></i></button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function updateHwidAlias(hwid, newAlias) {
+            if (typeof selectedDevices[hwid] === 'string') {
+                selectedDevices[hwid] = { module: selectedDevices[hwid], alias: newAlias.trim() };
+            } else {
+                selectedDevices[hwid].alias = newAlias.trim();
+            }
+            showToast("Alias de equipo actualizado.", "success");
+        }
+
+        function updateHwidModule(hwid, newModule) {
+            if (typeof selectedDevices[hwid] === 'string') {
+                selectedDevices[hwid] = { module: newModule, alias: "" };
+            } else {
+                selectedDevices[hwid].module = newModule;
+            }
+            showToast("Módulo asignado a este equipo.", "success");
+        }
+
+        function addHwidManually() {
+            const input = document.getElementById('new-hwid-input');
+            const aliasInput = document.getElementById('new-hwid-alias');
+            const select = document.getElementById('new-hwid-module');
+            
+            const hwid = input.value.trim().toUpperCase();
+            const alias = aliasInput.value.trim();
+            const moduleType = select.value;
+            
+            if (!hwid) {
+                showToast("Ingrese un HWID válido.", "warning");
+                return;
+            }
+            
+            if (selectedDevices[hwid]) {
+                showToast("Este HWID ya está registrado en la lista.", "warning");
+                return;
+            }
+            
+            selectedDevices[hwid] = { module: moduleType, alias: alias };
+            input.value = "";
+            aliasInput.value = "";
+            renderHwids();
+            showToast("PC autorizado temporalmente.", "success");
+        }
+
+        function removeHwid(hwid) {
+            delete selectedDevices[hwid];
+            renderHwids();
+            showToast("PC removido de la lista.", "warning");
+        }
+
+        async function saveClient(e) {
+            e.preventDefault();
+            
+            const key = document.getElementById('modal-key').value.trim().toUpperCase();
+            if (!key) return;
+
+            showActionLoader(true);
+            showToast("Guardando cambios...", "warning");
+
+            try {
+                let logoUrl = document.getElementById('modal-logo-url').value;
+
+                // 1. Upload logo to Firebase Storage if selected
+                if (logoFile) {
+                    showToast("Subiendo escudo a Storage central...", "warning");
+                    const storageRef = storage.ref(`logos/${key}_logo.png`);
+                    
+                    // Promise wrapper with a 6-second timeout to prevent indefinite hangs
+                    const uploadPromise = storageRef.put(logoFile);
+                    const timeoutPromise = new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Tiempo de espera agotado al subir el logotipo. Verifique que Firebase Storage esté activado y configurado en el proyecto central de Firebase. Como alternativa, puede pegar una URL de imagen pública directamente en el campo de texto.")), 6000)
+                    );
+                    
+                    const uploadTask = await Promise.race([uploadPromise, timeoutPromise]);
+                    logoUrl = await uploadTask.ref.getDownloadURL();
+                }
+
+                // 2. Build payload
+                const payload = {
+                    nombreCliente: document.getElementById('modal-name').value.trim(),
+                    nombreMostrar: document.getElementById('modal-display-name').value.trim(),
+                    logoUrl: logoUrl,
+                    estadoSuscripcion: document.getElementById('modal-status').value,
+                    avisoPagoHasta: document.getElementById('modal-payment-warning').value,
+                    modulos: {
+                        central: document.getElementById('modal-mod-central').checked,
+                        comandancia: document.getElementById('modal-mod-comandancia').checked,
+                        apk: document.getElementById('modal-mod-apk').checked,
+                        lista: document.getElementById('modal-mod-lista').checked
+                    },
+                    firebaseConfig: {
+                        apiKey: document.getElementById('modal-fb-apikey').value.trim(),
+                        authDomain: document.getElementById('modal-fb-domain').value.trim(),
+                        projectId: document.getElementById('modal-fb-project').value.trim(),
+                        storageBucket: document.getElementById('modal-fb-bucket').value.trim(),
+                        messagingSenderId: document.getElementById('modal-fb-sender').value.trim(),
+                        appId: document.getElementById('modal-fb-appid').value.trim()
+                    }
+                };
+
+                if (editingKey) {
+                    payload.dispositivos = selectedDevices;
+                    payload.hardwareUUIDs = Object.keys(selectedDevices);
+                } else {
+                    payload.dispositivos = {};
+                    payload.hardwareUUIDs = [];
+                }
+
+                // 3. Save Client configuration (Firestore Central)
+                await db.collection("saas_clientes").doc(key).set(payload, { merge: true });
+
+                // 4. Guardar copia de la licencia en la base de datos de destino del cliente
+                try {
+                    const fc = payload.firebaseConfig;
+                    if (fc && fc.apiKey && fc.projectId) {
+                        showToast("Guardando copia de licencia en base de datos del cliente...", "warning");
+                        if (firebase.apps.some(app => app.name === "clientTempLicSaveApp")) {
+                            await firebase.app("clientTempLicSaveApp").delete();
+                        }
+                        const tempApp = firebase.initializeApp(fc, "clientTempLicSaveApp");
+                        await tempApp.firestore().collection("saas_clientes").doc(key).set(payload, { merge: true });
+                        await tempApp.delete();
+                        console.log("Copia de licencia guardada en la base de datos de destino con éxito.");
+                    }
+                } catch (clientDbErr) {
+                    console.warn("No se pudo guardar la copia de la licencia en la base de datos de destino:", clientDbErr);
+                }
+
+                // If the key has changed, delete the old document
+                if (editingKey && editingKey !== key) {
+                    try {
+                        await db.collection("saas_clientes").doc(editingKey).delete();
+                        showToast("Licencia antigua eliminada.", "success");
+                    } catch (delErr) {
+                        console.error("Error deleting old license key:", delErr);
+                        showToast("Licencia nueva creada, pero no se pudo eliminar la antigua.", "warning");
+                    }
+                }
+
+                showToast("Licencia guardada correctamente.", "success");
+                closeClientModal();
+            } catch (err) {
+                console.error(err);
+                showToast(`Error al guardar: ${err.message}`, "error");
+            } finally {
+                showActionLoader(false);
+            }
+        }
+
+        async function deleteClient(key) {
+            const confirmDel = await showCustomConfirm(
+                "Eliminar Licencia",
+                `¿Está seguro de que desea eliminar permanentemente la licencia ${key}? Esta acción desconectará las aplicaciones de inmediato.`,
+                "fa-trash-alt"
+            );
+            if (!confirmDel) return;
+
+            showActionLoader(true);
+            try {
+                // Delete license doc only. Do NOT delete anything from the client's Firebase project or storage.
+                await db.collection("saas_clientes").doc(key).delete();
+                showToast("Licencia eliminada de la base de datos central.", "success");
+            } catch (err) {
+                console.error(err);
+                showToast(`Error al eliminar: ${err.message}`, "error");
+            } finally {
+                showActionLoader(false);
+            }
+        }
+
+        // ==========================================
+        // SAAS CENTRAL SERVER CONFIGURATION
+        // ==========================================
+        function openCentralConfigModal() {
+            const current = getSaaSCentralConfig();
+            document.getElementById('central-fb-apikey').value = current.apiKey || "";
+            document.getElementById('central-fb-domain').value = current.authDomain || "";
+            document.getElementById('central-fb-project').value = current.projectId || "";
+            document.getElementById('central-fb-bucket').value = current.storageBucket || "";
+            document.getElementById('central-fb-sender').value = current.messagingSenderId || "";
+            document.getElementById('central-fb-appid').value = current.appId || "";
+
+            const modal = document.getElementById('central-config-modal');
+            const box = document.getElementById('central-config-modal-box');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                box.classList.remove('scale-95', 'opacity-0');
+            }, 50);
+        }
+
+        function closeCentralConfigModal() {
+            const modal = document.getElementById('central-config-modal');
+            const box = document.getElementById('central-config-modal-box');
+            box.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 200);
+        }
+
+        function saveCentralConfig(e) {
+            e.preventDefault();
+            const config = {
+                apiKey: document.getElementById('central-fb-apikey').value.trim(),
+                authDomain: document.getElementById('central-fb-domain').value.trim(),
+                projectId: document.getElementById('central-fb-project').value.trim(),
+                storageBucket: document.getElementById('central-fb-bucket').value.trim(),
+                messagingSenderId: document.getElementById('central-fb-sender').value.trim(),
+                appId: document.getElementById('central-fb-appid').value.trim()
+            };
+            localStorage.setItem('saas_central_firebase_config', JSON.stringify(config));
+            showToast("Configuración SaaS central guardada. Reiniciando servicios...", "success");
+            closeCentralConfigModal();
+            setTimeout(() => {
+                window.location.reload();
+            }, 1000);
+        }
+
+        async function resetCentralConfig() {
+            const confirmReset = await showCustomConfirm(
+                "Restablecer Servidor",
+                "¿Seguro que desea restablecer los valores predeterminados del servidor central de SisBom?",
+                "fa-undo"
+            );
+            if (confirmReset) {
+                localStorage.removeItem('saas_central_firebase_config');
+                showToast("Valores predeterminados restablecidos. Reiniciando...", "success");
+                closeCentralConfigModal();
+                setTimeout(() => {
+                    window.location.reload();
+                }, 1000);
+            }
+        }
+
+        // ==========================================
+        // HELPERS AND LOADER CONTROLS
+        // ==========================================
+        function showActionLoader(show) {
+            const loader = document.getElementById('global-loader');
+            if (show) {
+                loader.classList.remove('hidden');
+                setTimeout(() => loader.classList.remove('opacity-0'), 10);
+            } else {
+                loader.classList.add('opacity-0');
+                setTimeout(() => loader.classList.add('hidden'), 300);
+            }
+        }
+
+        function showToast(message, type = "success") {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `p-4 rounded-2xl shadow-2xl flex items-center gap-3 text-xs font-black uppercase transition-all duration-300 transform translate-y-2 opacity-0 pointer-events-auto border`;
+            
+            let icon = 'fa-check-circle';
+            let color = '';
+            if (type === 'success') {
+                color = 'bg-emerald-500/15 border-emerald-500/20 text-emerald-400';
+                icon = 'fa-check-circle';
+            } else if (type === 'warning') {
+                color = 'bg-amber-500/15 border-amber-500/20 text-amber-400';
+                icon = 'fa-exclamation-triangle';
+            } else {
+                color = 'bg-red-500/15 border-red-500/20 text-red-400';
+                icon = 'fa-circle-exclamation';
+            }
+
+            toast.innerHTML = `
+                <i class="fas ${icon} text-sm shrink-0"></i>
+                <span>${message}</span>
+            `;
+            toast.className += ` ${color}`;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('translate-y-2', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        // Auto-provision client database
+        async function provisionClientDatabase() {
+            const apiKey = document.getElementById('modal-fb-apikey').value.trim();
+            const authDomain = document.getElementById('modal-fb-domain').value.trim();
+            const projectId = document.getElementById('modal-fb-project').value.trim();
+            const storageBucket = document.getElementById('modal-fb-bucket').value.trim();
+            const messagingSenderId = document.getElementById('modal-fb-sender').value.trim();
+            const appId = document.getElementById('modal-fb-appid').value.trim();
+
+            if (!apiKey || !authDomain || !projectId || !storageBucket || !messagingSenderId || !appId) {
+                showToast("Por favor complete todas las credenciales de Firebase del cliente antes de provisionar.", "warning");
+                return;
+            }
+
+            // Obtener campos del Comandante
+            const cmdName = document.getElementById('modal-cmd-name').value.trim();
+            const cmdCargo = document.getElementById('modal-cmd-cargo').value.trim() || "COMANDANTE";
+            const cmdIdReg = document.getElementById('modal-cmd-idreg').value.trim();
+            const cmdRadial = document.getElementById('modal-cmd-radial').value.trim();
+            const cmdPass = document.getElementById('modal-cmd-pass').value.trim();
+            const cmdRut = document.getElementById('modal-cmd-rut').value.trim();
+            const cmdPhone = document.getElementById('modal-cmd-phone').value.trim();
+            const cmdEmail = document.getElementById('modal-cmd-email').value.trim();
+
+            if (!cmdName || !cmdIdReg || !cmdRadial || !cmdPass) {
+                showToast("Por favor complete los campos obligatorios del Comandante: Nombre, ID Registro, ID Radial y Contraseña.", "warning");
+                return;
+            }
+
+            if (!/^\d+$/.test(cmdIdReg)) {
+                showToast("El ID Registro debe ser numérico.", "error");
+                return;
+            }
+
+            const confirmProvision = await showCustomConfirm(
+                "Confirmar Provisionamiento",
+                `¿Está seguro de que desea habilitar y provisionar esta base de datos?\n\nEsto creará el Comandante '${cmdName}' con ID Registro '${cmdIdReg}', ID Radial '${cmdRadial}' y contraseña, y preparará la estructura del sistema en Firestore.`,
+                "fa-database"
+            );
+            
+            if (!confirmProvision) return;
+
+            showActionLoader(true);
+            showToast("Provisionando base de datos...", "warning");
+
+            let clientApp = null;
+            try {
+                const config = { apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId };
+                
+                // If it already exists, delete it first
+                if (firebase.apps.some(app => app.name === "clientTempProvisionApp")) {
+                    await firebase.app("clientTempProvisionApp").delete();
+                }
+                
+                clientApp = firebase.initializeApp(config, "clientTempProvisionApp");
+                const clientDb = clientApp.firestore();
+
+                // 1. Register Commander user in Firebase Authentication
+                showToast("Registrando credenciales de autenticación del Comandante...", "warning");
+                const email = cmdIdReg + "@sisbom.com";
+                const password = cmdPass + "_secure_sisbom";
+                try {
+                    await clientApp.auth().createUserWithEmailAndPassword(email, password);
+                } catch(authErr) {
+                    if (authErr.code !== 'auth/email-already-in-use') {
+                        console.warn("Auth registration warning:", authErr);
+                    }
+                }
+
+                // 2. Create Commander document in personal collection with all target fields
+                showToast(`Creando perfil de Comandante '${cmdIdReg}' en Firestore...`, "warning");
+                
+                const cmdPayload = {
+                    activo: "SI",
+                    autorizadoAdmin: "SI",
+                    cargo: cmdCargo.toUpperCase(),
+                    cds: "NO",
+                    conductor: "NO",
+                    contrasena: cmdPass,
+                    deviceId: "",
+                    direccion: {
+                        calle: "",
+                        comuna: "",
+                        numero: "",
+                        region: ""
+                    },
+                    email: cmdEmail,
+                    enServicio: "NO",
+                    estado: "0-8",
+                    fechaIngreso: "",
+                    fechaReingreso: "",
+                    fechaSalida: "",
+                    fechaSuspensionFin: "",
+                    foto: "",
+                    idRadial: String(cmdRadial),
+                    idRegistro: String(cmdIdReg),
+                    licenciaMedica: "",
+                    nombreBombero: cmdName.toUpperCase(),
+                    ordenEnLista: "1",
+                    permiso: "NO",
+                    radio: "",
+                    rut: cmdRut,
+                    telefono: cmdPhone,
+                    tipoPermiso: ""
+                };
+
+                await clientDb.collection("personal").doc(cmdIdReg).set(cmdPayload);
+
+                // 3. Set initial state for access logs
+                showToast("Inicializando colecciones de acceso...", "warning");
+                const baseAccessData = {
+                    estado: "cerrado",
+                    idInicio: "",
+                    idRegistro: "",
+                    cargo: "",
+                    nombreBombero: "",
+                    operador: "",
+                    fechaIngreso: "",
+                    horaIngreso: ""
+                };
+
+                await clientDb.collection("accesos").doc("central").set(baseAccessData, { merge: true });
+                await clientDb.collection("accesos").doc("comandancia").set(baseAccessData, { merge: true });
+
+                // 4. Seed empty placeholder documents
+                showToast("Inicializando colecciones del sistema...", "warning");
+                const collections = ["vehiculos", "bitacora", "alertas", "asistencia", "sirena", "prueba_radial", "despachos"];
+                
+                // REFACTOR: Usar Promise.all para inicializar colecciones en paralelo (mucho más rápido)
+                const initPromises = collections.map(col => 
+                    clientDb.collection(col).doc("init").set({
+                        placeholder: true,
+                        fechaInicializacion: new Date().toISOString()
+                    })
+                );
+                await Promise.all(initPromises);
+
+                showToast("Base de datos de cliente habilitada y estructurada con éxito.", "success");
+            } catch (err) {
+                console.error("Error provisioning client DB:", err);
+                showToast(`Error al provisionar: ${err.message}`, "error");
+            } finally {
+                if (clientApp) {
+                    try {
+                        await clientApp.delete();
+                    } catch (_) {}
+                }
+                showActionLoader(false);
+            }
+        }
+
+        // Init process on boot
+        window.addEventListener('DOMContentLoaded', () => {
+            initTheme();
+            initFirebaseServices();
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "39449538456",
+    "project_id": "sisbom-de5f8",
+    "storage_bucket": "sisbom-de5f8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39449538456:android:a01fec493bf23b3d7485ed",
+        "android_client_info": {
+          "package_name": "com.misisbom.bomberosplacillaoh"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBA61BksAK7FcCh0va-fP-sAFjjrk1gSiw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39449538456:android:b2f806e0a0e9fc927485ed",
+        "android_client_info": {
+          "package_name": "com.sisbom.misisbom"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBA61BksAK7FcCh0va-fP-sAFjjrk1gSiw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:39449538456:android:d1b794d4f601f0f07485ed",
+        "android_client_info": {
+          "package_name": "com.sisbom.primera_placilla_oh"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBA61BksAK7FcCh0va-fP-sAFjjrk1gSiw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

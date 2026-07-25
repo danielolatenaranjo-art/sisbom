@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prueba Radial 11-5 - SisBom</title>
+    <link rel="icon" href="Logo.png" type="image/png">
+    
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+
+    <style>
+        :root {
+            --bg-app: #0f172a;
+            --bg-card: #1e293b;
+            --bg-input: #0b0f19;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            
+            --primary-red: #ef4444;
+            --primary-green: #10b981;
+            --primary-blue: #3b82f6;
+            
+            --glass-border: #334155;
+            --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 20px 40px -5px rgba(0, 0, 0, 0.3);
+            
+            --card-radius: 20px;
+            --btn-radius: 12px;
+            
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        button { cursor: pointer !important; }
+        ::placeholder { text-transform: uppercase !important; }
+
+        body { 
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; 
+            background-color: var(--bg-app); 
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        @keyframes fade-slide-up {
+            from { opacity: 0; transform: translateY(20px) scale(0.98); }
+            to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        .animate-enter { animation: fade-slide-up 0.5s var(--ease-out-expo) forwards; opacity: 0; }
+
+        @keyframes spin-ring {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .app-container {
+            flex: 1; width: 100%; margin: 0; padding: 24px; overflow-y: auto; position: relative;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .card-grid { 
+            display: flex; flex-direction: column; gap: 16px; padding-bottom: 120px;
+            max-width: 950px; width: 100%; margin: 0 auto;
+        }
+
+        .card {
+            background: var(--bg-card); border: 1px solid var(--glass-border); border-radius: var(--card-radius);
+            box-shadow: var(--shadow-soft); display: flex; align-items: stretch;
+            transition: transform 0.3s var(--ease-out-expo), box-shadow 0.4s var(--ease-out-expo), background-color 0.3s, border-color 0.3s;
+            min-height: 120px; border-left: 6px solid transparent; 
+        }
+        
+        .card:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4); 
+            border-color: #475569; 
+        }
+        
+        .card.disabled { opacity: 0.6; pointer-events: none; filter: grayscale(1); }
+
+        .card.is-08 { background-color: #3f1515; border-left-color: var(--primary-red); }
+        .card.is-08 .card-id { color: #ef4444; text-shadow: 0 1px 2px rgba(239, 68, 68, 0.2); } 
+        .card.is-09 { border-left-color: var(--primary-green); }
+
+        .card-left {
+            width: 28%; min-width: 140px; background: var(--bg-input); padding: 16px 20px;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            text-align: center; border-right: 1px solid var(--glass-border);
+            border-top-left-radius: calc(var(--card-radius) - 2px);
+            border-bottom-left-radius: calc(var(--card-radius) - 2px);
+        }
+
+        .card-id { font-size: 2.2rem; font-weight: 700; color: var(--text-main); line-height: 1; margin-bottom: 4px; letter-spacing: -1px; }
+        .card-name { 
+            font-size: 0.75rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase; line-height: 1.3;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+            margin-bottom: 6px; letter-spacing: 0.5px;
+        }
+
+        .card-right { flex: 1; padding: 16px 24px; display: flex; flex-direction: column; justify-content: center; gap: 12px; }
+
+        .control-row { display: flex; gap: 10px; width: 100%; align-items: center; }
+        .btn-group { display: flex; gap: 6px; flex-wrap: wrap; }
+
+        .btn-chip {
+            padding: 10px 14px; border-radius: var(--btn-radius); font-size: 0.72rem; font-weight: 700;
+            cursor: pointer; transition: all 0.2s var(--ease-out-expo);
+            flex: 1; display: flex; align-items: center; justify-content: center; white-space: nowrap; letter-spacing: 0.5px;
+            border: 1px solid transparent;
+        }
+        .btn-chip:hover:not(:disabled) { transform: translateY(-1px); }
+        .btn-chip:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.5); }
+
+        /* Base Neutral Chips (Unselected) */
+        .chip-ok, .chip-bad, .chip-blue { background-color: #1e293b; color: #94a3b8; border-color: #334155; }
+        .chip-ok:hover:not(:disabled), .chip-bad:hover:not(:disabled), .chip-blue:hover:not(:disabled) { background-color: #334155; color: #f8fafc; }
+
+        /* Colored Chips for Dark Mode (Active) */
+        .chip-ok.active-ok { background-color: var(--primary-green) !important; color: white !important; border-color: var(--primary-green) !important; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4); }
+        .chip-bad.active-bad { background-color: var(--primary-red) !important; color: white !important; border-color: var(--primary-red) !important; box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); }
+        .chip-blue.active-blue { background-color: var(--primary-blue) !important; color: white !important; border-color: var(--primary-blue) !important; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4); }
+
+        .input-pill {
+            background: var(--bg-input); border: 1px solid var(--glass-border); border-radius: var(--btn-radius); padding: 9px 12px;
+            font-size: 0.8rem; color: var(--text-main); width: 100%; text-align: center; outline: none; transition: all 0.3s;
+            flex: 1.5; min-width: 80px; text-transform: uppercase;
+        }
+        .input-pill:focus { border-color: var(--primary-blue); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        .input-pill.active { border-color: var(--primary-blue); background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-weight: 700; }
+        .input-pill:disabled { opacity: 0.5; background: var(--bg-card); }
+
+        /* Start Screen Redesign */
+        .start-container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; }
+        .welcome-card {
+            background: var(--bg-card);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--card-radius);
+            padding: 40px;
+            text-align: center;
+            max-width: 400px;
+            width: 100%;
+            box-shadow: var(--shadow-soft);
+        }
+        .welcome-icon {
+            width: 80px; height: 80px;
+            border-radius: 50%;
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--primary-red);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2rem;
+            margin: 0 auto 20px auto;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            box-shadow: 0 0 20px rgba(239, 68, 68, 0.2);
+        }
+        .welcome-title { font-size: 1.5rem; font-weight: 800; color: var(--text-main); margin-bottom: 10px; letter-spacing: -0.5px; }
+        .welcome-desc { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 30px; line-height: 1.5; }
+        .btn-start-new {
+            background: var(--primary-red);
+            color: white;
+            border: none;
+            border-radius: 12px;
+            padding: 16px 32px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            width: 100%;
+            transition: all 0.3s;
+            box-shadow: 0 10px 20px rgba(239, 68, 68, 0.2);
+            display: flex; align-items: center; justify-content: center; gap: 10px;
+        }
+        .btn-start-new:hover { background: #dc2626; transform: translateY(-2px); box-shadow: 0 15px 25px rgba(239, 68, 68, 0.3); }
+        .btn-start-new:active { transform: scale(0.98); }
+        
+        .start-wrapper.loading .btn-start-new span, .start-wrapper.loading .btn-start-new i { display: none; }
+        .start-wrapper.loading .btn-start-new::after {
+            content: ''; width: 24px; height: 24px; border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: white; border-radius: 50%; animation: spin-ring 1s linear infinite;
+        }
+        .start-wrapper.loading .btn-start-new { pointer-events: none; opacity: 0.9; }
+
+        .btn-finalize {
+            background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border: none; padding: 18px 40px; border-radius: 99px;
+            font-size: 1.15rem; font-weight: 700; cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 10px 25px rgba(239, 68, 68, 0.3); display: inline-flex; align-items: center; gap: 12px;
+        }
+        .btn-finalize:hover { transform: translateY(-4px); box-shadow: 0 20px 40px rgba(239, 68, 68, 0.4); }
+        .btn-finalize:active { transform: scale(0.96); }
+
+        .btn-cancel-tb {
+            background: linear-gradient(135deg, #ef4444, #dc2626); color: white; border: none; padding: 10px 24px; border-radius: 99px;
+            font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-cancel-tb:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(239, 68, 68, 0.4); }
+        .btn-cancel-tb:active { transform: scale(0.96); }
+
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(10px); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .overlay.active { opacity: 1; pointer-events: auto; }
+        .loader-spinner { width: 50px; height: 50px; border: 4px solid rgba(255,255,255,0.1); border-top: 4px solid var(--primary-red); border-radius: 50%; animation: spin-ring 1.5s linear infinite; margin-bottom: 20px; }
+
+        .toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(50px); background: #1f2937; color: white; padding: 12px 30px; border-radius: 99px; font-size: 0.9rem; font-weight: 500; opacity: 0; transition: all 0.4s var(--ease-out-expo); z-index: 200; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        .modal-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(5px); z-index: 150; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .modal-bg.active { opacity: 1; pointer-events: auto; }
+        .modal-box { background: #0f172a; padding: 32px; border-radius: 28px; width: 90%; max-width: 380px; text-align: center; transform: scale(0.95) translateY(20px); transition: transform 0.5s var(--ease-out-expo); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); border: 1px solid rgba(239, 68, 68, 0.5); }
+        .modal-bg.active .modal-box { transform: scale(1) translateY(0); }
+        .modal-btns { display: flex; gap: 12px; margin-top: 24px; }
+        .btn-modal { flex: 1; padding: 14px; border-radius: 16px; font-weight: 600; font-size: 0.9rem; transition: background 0.2s; border: none; cursor: pointer; outline: none; }
+        .btn-cancel { background: #ef4444; color: white; border: 1px solid #b91c1c; box-shadow: 0 4px 15px rgba(239, 68, 68, 0.25); }
+        .btn-cancel:hover { background: #dc2626; }
+        .btn-confirm { background: #10b981; color: white; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.25); }
+        
+        .btn-modal:disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(0.5); }
+
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+
+        @media (max-width: 768px) {
+            .app-container { padding: 16px; }
+            .card { flex-direction: column; height: auto; }
+            .card-left { 
+                width: 100%; border-right: none; border-bottom: 1px solid var(--glass-border); padding: 20px; flex-direction: column; 
+                border-top-left-radius: calc(var(--card-radius) - 2px);
+                border-top-right-radius: calc(var(--card-radius) - 2px);
+                border-bottom-left-radius: 0;
+            }
+            .card-right { padding: 20px; gap: 16px; }
+            .control-row { flex-wrap: wrap; gap: 12px; }
+            .btn-group { flex-wrap: wrap; width: 100%; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- LÓGICA DEL GUARDIÁN -->
+    <script>
+        try {
+            Object.defineProperty(navigator, 'onLine', { get: () => true });
+        } catch(e) {
+            console.error("Error overriding navigator.onLine:", e);
+        }
+    </script>
+
+    <!-- CONTENEDOR DE NOTIFICACIONES TOAST -->
+    <div id="toast-container"></div>
+
+    <div class="app-container pt-8">
+        
+        <!-- TOOLBAR SUPERIOR ESTILO ALERTAS -->
+        <div id="session-toolbar" class="flex justify-between items-center mb-6 hidden w-full max-w-[950px] mx-auto p-4 rounded-xl shadow-md animate-enter" style="background-color: var(--bg-card); border: 1px solid var(--glass-border);">
+            <div id="session-info" class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-[rgba(239,68,68,0.15)] text-[#ef4444] flex items-center justify-center shadow-inner" style="border: 1px solid rgba(239,68,68,0.3);">
+                    <i class="fas fa-broadcast-tower"></i>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-xs font-black text-[#f8fafc] tracking-widest uppercase">Prueba Radial <span id="session-id-display">--</span></span>
+                    <span class="text-3xs font-bold text-[#94a3b8] uppercase tracking-widest mt-0.5"><i class="far fa-clock"></i> INICIO: <span id="session-time-display" class="text-[#ef4444]">--:--</span></span>
+                </div>
+            </div>
+            
+            <button id="btn-cancel-session" onclick="window.confirmCancel()" class="btn-cancel-tb uppercase focus:outline-none">
+                <i class="fas fa-times"></i> <span class="hidden sm:inline">CANCELAR 11-5</span>
+            </button>
+        </div>
+
+        <div id="start-panel" class="start-container animate-enter" style="animation-delay: 0.1s;">
+            <div class="welcome-card">
+                <div class="welcome-icon">
+                    <i class="fas fa-broadcast-tower"></i>
+                </div>
+                <h2 class="welcome-title">Prueba Radial</h2>
+                <p class="welcome-desc"></p>
+                <div id="start-btn-wrapper" class="start-wrapper" style="width:100%; height:auto;">
+                    <button onclick="window.startTest()" class="btn-start-new">
+                        <i class="fas fa-play"></i>
+                        <span>INICIAR</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="radios-grid" class="card-grid" style="display: none;"></div>
+
+    </div>
+
+    <div id="toast" class="toast uppercase">Mensaje</div>
+
+    <div id="confirm-modal" class="modal-bg">
+        <div class="modal-box">
+            <div class="w-14 h-14 rounded-full bg-[rgba(239,68,68,0.15)] text-red-500 flex items-center justify-center text-2xl mx-auto mb-4 border border-[rgba(239,68,68,0.3)]">
+                <i class="fas fa-question"></i>
+            </div>
+            <h3 style="margin-bottom: 10px; font-size: 1.2rem; color: var(--text-main); font-weight: 700; text-transform: uppercase;">Confirmar</h3>
+            <p id="confirm-msg" style="color: var(--text-muted); font-size: 0.95rem; line-height: 1.5; text-transform: uppercase;">¿Seguro?</p>
+            <div class="modal-btns">
+                <button onclick="window.closeModal(false)" class="btn-modal btn-cancel uppercase focus:outline-none">Cancelar</button>
+                <button id="modal-btn-confirm" onclick="window.closeModal(true)" class="btn-modal btn-confirm uppercase focus:outline-none">Aceptar</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-overlay" class="overlay">
+        <div class="loader-spinner"></div>
+        <div style="font-weight: 700; font-size: 1.2rem; color: var(--text-main); letter-spacing: -0.5px;" id="loader-title">Sincronizando</div>
+        <div style="color: var(--text-muted); font-size: 0.9rem; margin-top: 8px; text-transform: uppercase;" id="loader-status"></div>
+    </div>
+
+    <!-- SCRIPT TIPO MODULE CON FIREBASE Y SYNC QUEUE -->
+    <script type="module">
+        import { initializeApp } from "./libs/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithEmailAndPassword } from "./libs/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, collection, getDocs, onSnapshot } from "./libs/firebase-firestore.js";
+
+        const firebaseConfig = null;
+
+        window.fbDb = null;
+        window.fbDoc = doc;
+        window.fbSetDoc = setDoc;
+        window.fbUpdateDoc = updateDoc;
+        window.fbCollection = collection;
+        window.fbGetDocs = getDocs;
+        window.fbOnSnapshot = onSnapshot;
+
+        let radiosList = new Array(); 
+        let pendingCallback = null;
+        let isStarted = false;
+        let currentReportId = null;
+        let fixedDateStr = "";
+        let fixedTimeStr = "";
+        let modalTimer = null;
+        let personnelData = new Array();
+
+        // ====== COLA DE SINCRONIZACIÓN OFFLINE-FIRST ======
+        window.queueFirebaseWrite = function(type, coll, docId, data, options) {
+            if (localStorage.getItem('saas_read_only') === '1') {
+                console.warn("Modo Lectura (SaaS): Escritura bloqueada en queueFirebaseWrite (iframe).");
+                if (window.showToast) {
+                    window.showToast("Modo Lectura - Escrituras deshabilitadas");
+                }
+                return;
+            }
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.queueFirebaseWrite) {
+                        parent.queueFirebaseWrite(type, coll, docId, data, options);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("Error accessing parent.queueFirebaseWrite in 11-5, falling back to local queue:", e);
+                }
+            }
+            let q = new Array();
+            try { 
+                const savedQ = localStorage.getItem('sisbom_sync_queue');
+                if (savedQ) q = JSON.parse(savedQ); 
+            } catch(e){}
+            const newItem = new Object({ type: type, coll: coll, docId: docId, data: data, options: options || new Object(), time: Date.now() });
+            q.push(newItem);
+            localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+            window.processSyncQueue();
+        };
+
+        window.sanitizeForFirebase = function(val) {
+            if (val === null || val === undefined) return val;
+            if (typeof val === 'function' || (val && val.constructor && val.constructor.name === 'FieldValueImpl')) return val;
+            if (Array.isArray(val) || (typeof val === 'object' && typeof val.length === 'number' && Object.prototype.toString.call(val) === '[object Array]')) {
+                return Array.from(val).map(window.sanitizeForFirebase);
+            }
+            if (typeof val === 'object') {
+                const ParentObj = (window.parent && window.parent.Object) ? window.parent.Object : Object;
+                const clean = new ParentObj();
+                for (const k of Object.keys(val)) { Reflect.set(clean, k, window.sanitizeForFirebase(val[k])); }
+                return clean;
+            }
+            return val;
+        };
+
+        window.processSyncQueue = async function() {
+            if (window.self !== window.top) {
+                if (window.parent && window.parent.processSyncQueue) {
+                    window.parent.processSyncQueue();
+                }
+                return;
+            }
+            if (!navigator.onLine || !window.fbDb || window.isSyncing) return;
+            window.isSyncing = true;
+            
+            while (true) {
+                let q = new Array();
+                try { 
+                    const savedQ = localStorage.getItem('sisbom_sync_queue');
+                    if (savedQ) q = JSON.parse(savedQ); 
+                } catch(e){}
+                
+                if (!q || q.length === 0) break;
+                
+                let item = q.shift();
+                localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+                
+                try {
+                    const sanitizedData = window.sanitizeForFirebase(item.data);
+                    
+                    if (item.type === 'set' && window.fbSetDoc) {
+                        await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), sanitizedData, item.options);
+                    } else if (item.type === 'update' && window.fbSetDoc) {
+                        let finalData = new Object();
+                        let hasDeleteField = false;
+                        for (let k of Object.keys(sanitizedData)) {
+                            if (sanitizedData[k] === '__DELETE_FIELD__' && window.fbDeleteField) {
+                                Reflect.set(finalData, k, window.fbDeleteField());
+                                hasDeleteField = true;
+                            } else {
+                                Reflect.set(finalData, k, sanitizedData[k]);
+                            }
+                        }
+                        if (hasDeleteField && window.fbUpdateDoc) {
+                            await window.fbUpdateDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData);
+                        } else {
+                            await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData, new Object({ merge: true }));
+                        }
+                    } else if (item.type === 'delete' && window.fbDeleteDoc) {
+                        await window.fbDeleteDoc(window.fbDoc(window.fbDb, item.coll, item.docId));
+                    }
+                } catch(e) {
+                    console.warn("Fallo sync item, docId:", item.docId, e);
+                    
+                    let currentQ = new Array();
+                    try { 
+                        const savedQ = localStorage.getItem('sisbom_sync_queue');
+                        if (savedQ) currentQ = JSON.parse(savedQ); 
+                    } catch(ex){}
+                    
+                    if (!currentQ.some(x => x.time === item.time)) {
+                        item.errCount = (item.errCount || 0) + 1;
+                        currentQ.unshift(item);
+                        localStorage.setItem('sisbom_sync_queue', JSON.stringify(currentQ));
+                    }
+                    
+                    if (e && e.code === 'permission-denied') {
+                        if (window.parent && window.parent.authenticateFirebase) {
+                            window.parent.authenticateFirebase();
+                        }
+                    }
+                    
+                    break;
+                }
+            }
+            window.isSyncing = false;
+        };
+
+        window.addEventListener('online', window.processSyncQueue);
+        setInterval(window.processSyncQueue, 15000);
+
+        // ====== FUNCIONES AYUDANTES DE ESTADOS ======
+        window.normalizeEmpty = function(val) {
+            if (val === null || val === undefined) return '0';
+            const s = String(val).trim().toUpperCase();
+            if (s === '0' || s === 'NO' || s === 'N' || s === '' || s === 'N/A' || s === 'FALSE' || s === 'FALSO') return '0';
+            return String(val).trim();
+        };
+
+        window.isTrueValue = function(val) {
+            const s = window.normalizeEmpty(val);
+            return s === '1' || s === 'SI' || s === 'SÍ' || s === 'TRUE' || s === 'S';
+        };
+
+        window.checkDateStatus = function(dateString) {
+            if (!dateString) return false;
+            const parts = String(dateString).trim().split('-');
+            let end;
+            if (parts.length === 3) end = new Date(parseInt(parts.at(2)), parseInt(parts.at(1)) - 1, parseInt(parts.at(0)));
+            else end = new Date(dateString);
+            if (isNaN(end.getTime())) return false;
+            end.setHours(23, 59, 59, 999);
+            return end >= new Date();
+        };
+
+        window.isOfficialCds = function(p) { return window.isTrueValue(p.cds) || window.checkDateStatus(p.cds); };
+        window.isOfficialPermiso = function(p) { return window.isTrueValue(p.permiso) || window.checkDateStatus(p.permiso); };
+        window.isOfficialLicencia = function(p) { return window.isTrueValue(p.licenciaMedica) || window.checkDateStatus(p.licenciaMedica); };
+        window.isPersonSuspended = function(p) { return window.checkDateStatus(p.fechaSuspensionFin); };
+
+        window.isPersonCds = function(p) { return window.isOfficialCds(p) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'CDS'; };
+        window.isPersonPermiso = function(p) { return window.isOfficialPermiso(p) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'PERMISO'; };
+        window.isPersonLicencia = function(p) { return window.isOfficialLicencia(p) || String(p.estadoBase || p.estado).trim().toUpperCase() === 'LICENCIA'; };
+
+        window.formatShortName = function(fullName) {
+            if (!fullName) return "DESCONOCIDO";
+            const cleanName = String(fullName).replace(new RegExp(',', 'g'), ' ').trim();
+            const words = cleanName.split(new RegExp('\\s+'));
+            if (words.length >= 3) {
+                return words.at(0) + ' ' + words.at(words.length - 2);
+            } else if (words.length === 2) {
+                return words.at(0) + ' ' + words.at(1);
+            }
+            return words.at(0) || cleanName;
+        };
+
+        window.getOriginalStateColor = function(state) {
+            if (state === '0-9') return 'bg-green-100 text-green-700 border border-green-200';
+            if (state === '0-8') return 'bg-red-100 text-red-700 border border-red-200';
+            if (state === 'CDS') return 'bg-yellow-100 text-yellow-800 border border-yellow-300';
+            if (state === 'PERMISO') return 'bg-orange-100 text-orange-700 border border-orange-200';
+            if (state === 'LICENCIA') return 'bg-cyan-100 text-cyan-800 border border-cyan-200';
+            if (state === 'SUSPENDIDO') return 'bg-purple-100 text-purple-700 border border-purple-200';
+            if (state === 'OPERADOR') return 'bg-slate-800 text-white border border-slate-700';
+            return 'bg-slate-100 text-slate-600 border border-slate-200';
+        };
+
+        window.initFirebase = async function() {
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.fbDb) {
+                        window.fbDb = parent.fbDb;
+                        window.fbDoc = parent.fbDoc;
+                        window.fbSetDoc = parent.fbSetDoc;
+                        window.fbUpdateDoc = parent.fbUpdateDoc;
+                        window.fbCollection = parent.fbCollection;
+                        window.fbGetDocs = parent.fbGetDocs;
+                        window.fbOnSnapshot = parent.fbOnSnapshot;
+                        console.log("Firebase inherited from parent in 11-5");
+                        window.processSyncQueue();
+                        return true;
+                    }
+                } catch (e) {
+                    console.warn("Error accessing parent Firebase in 11-5:", e);
+                }
+            }
+            try {
+                let configToUse = null;
+                try {
+                    const dynamicConfigStr = localStorage.getItem('saas_firebase_config') || localStorage.getItem('firebaseConfig');
+                    if (dynamicConfigStr) {
+                        configToUse = JSON.parse(dynamicConfigStr);
+                    }
+                } catch (e) {
+                    console.error("Error parsing saas_firebase_config in 11-5:", e);
+                }
+                if (!configToUse) {
+                    console.error("No se encontró configuración de Firebase en 11-5.");
+                    return false;
+                }
+                const app = initializeApp(configToUse);
+                const auth = getAuth(app);
+                window.fbDb = getFirestore(app);
+                
+                const storedUser = localStorage.getItem('authUserId');
+                const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                if (storedUser && storedPassSecure) {
+                    const email = storedUser + "@sisbom.com";
+                    await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                    console.log("Firebase conectado con credenciales en 11-5");
+                } else {
+                    await signInAnonymously(auth);
+                    console.log("Firebase conectado de forma anónima en 11-5");
+                }
+                window.processSyncQueue();
+                return true;
+            } catch(e) {
+                console.warn("Modo Offline", e);
+                return false;
+            }
+        };
+
+        let unsubPersonal = null;
+
+        window.onFirebaseParentLogout = function() {
+            console.log("Firebase Parent Logout event received in 11-5.");
+            if (unsubPersonal) {
+                try { unsubPersonal(); } catch(e) {}
+                unsubPersonal = null;
+            }
+        };
+
+        window.setupRealtimeListeners = function() {
+            if (window.self !== window.top) {
+                console.log("Bloqueando setupRealtimeListeners: Estamos en un Iframe (Central de Alarmas).");
+                return;
+            }
+            if (window.fbDb && window.fbOnSnapshot && window.fbCollection) {
+                if (unsubPersonal) {
+                    try { unsubPersonal(); } catch(e) {}
+                    unsubPersonal = null;
+                }
+                unsubPersonal = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'personal'), (snapshot) => {
+                    personnelData = new Array();
+                    snapshot.forEach(d => {
+                        const p = d.data();
+                        p.idRegistro = d.id; 
+                        personnelData.push(p);
+                    });
+                    localStorage.setItem('db_personal', JSON.stringify(personnelData));
+                    window.loadPersonnelUI();
+                }, (error) => {
+                    console.warn("Personal listener error in 11-5:", error);
+                    unsubPersonal = null;
+                    if (error.code === 'permission-denied' && localStorage.getItem('adminUser')) {
+                        setTimeout(() => {
+                            if (window.parent && window.parent.authenticateFirebase) {
+                                window.parent.authenticateFirebase();
+                            }
+                            window.setupRealtimeListeners();
+                        }, 5000);
+                    }
+                });
+            }
+        };
+
+        function checkIsNative() {
+            return !!(window.pywebview && window.pywebview.api) || !!(window.parent && window.parent.isNativeApp);
+        }
+
+        window.loadFromLocalStorage = async function() {
+            let cached = localStorage.getItem('db_personal');
+            if (cached) {
+                try {
+                    personnelData = JSON.parse(cached);
+                    await window.loadPersonnelUI();
+                } catch(e) {}
+            }
+        };
+
+        window.onload = async function() { 
+            // Wait up to 1000ms for pywebview to be defined
+            if (!window.pywebview || !window.pywebview.api) {
+                await new Promise(resolve => {
+                    let resolved = false;
+                    const handleReady = () => {
+                        if (!resolved) {
+                            resolved = true;
+                            window.removeEventListener('pywebviewready', handleReady);
+                            resolve();
+                        }
+                    };
+                    window.addEventListener('pywebviewready', handleReady);
+                    
+                    let elapsed = 0;
+                    const interval = setInterval(() => {
+                        elapsed += 30;
+                        if (checkIsNative() || elapsed >= 1000) {
+                            clearInterval(interval);
+                            if (!resolved) {
+                                resolved = true;
+                                window.removeEventListener('pywebviewready', handleReady);
+                                resolve();
+                            }
+                        }
+                    }, 30);
+                });
+            }
+            await window.loadFromLocalStorage(); 
+            let success = await window.initFirebase();
+            if (success && window.self !== window.top && parent) {
+                if (parent.isFirebaseActiveCentral) {
+                    window.setupRealtimeListeners();
+                } else {
+                    window.onFirebaseParentReady = function() {
+                        window.setupRealtimeListeners();
+                    };
+                }
+            } else {
+                window.setupRealtimeListeners();
+            }
+
+            window.addEventListener("storage", function(e) {
+                if (e.key === 'db_personal' || e.key === null || e.key === undefined) {
+                    window.loadFromLocalStorage();
+                }
+            });
+        };
+
+        // --- SOLUCIÓN DE ID CONSECUTIVO Y OFFLINE ---
+        window.getNextReportId = async function() {
+            let maxId = 0;
+            if (navigator.onLine && window.fbDb && window.fbGetDocs) {
+                try {
+                    const snap = await window.fbGetDocs(window.fbCollection(window.fbDb, 'prueba_radial'));
+                    snap.forEach(d => {
+                        const data = d.data() || new Object();
+                        const val = parseInt(data.id115) || parseInt(d.id) || 0;
+                        if (!isNaN(val) && val > maxId) maxId = val;
+                    });
+                } catch(e) {
+                    console.warn("No se pudo obtener el último ID de Firebase", e);
+                }
+            }
+            
+            const localMax = parseInt(localStorage.getItem('sisbom_max_115_id')) || 0;
+            if (localMax > maxId) {
+                maxId = localMax;
+            }
+            
+            const nextId = maxId + 1;
+            localStorage.setItem('sisbom_max_115_id', String(nextId));
+            return nextId;
+        };
+
+        window.loadPersonnelUI = async function() {
+            let data = personnelData;
+            if (data.length === 0) {
+                let cached = localStorage.getItem('db_personal');
+                if (!cached && !checkIsNative()) {
+                    try {
+                        const res = await fetch('./db_personal.json');
+                        if (res.ok) {
+                            const parsedData = await res.json();
+                            localStorage.setItem('db_personal', JSON.stringify(parsedData));
+                            cached = localStorage.getItem('db_personal');
+                        }
+                    } catch(e) {}
+                }
+                if (cached) { try { data = JSON.parse(cached); } catch(e) { data = new Array(); } }
+            }
+
+            const filtered = data.filter(p => window.isTrueValue(p.activo !== undefined ? p.activo : '1') && p.radio && String(p.radio).trim() !== "" && String(p.idRadial).trim().toUpperCase() !== "C1");
+            filtered.sort((a, b) => window.naturalSort(a.idRadial, b.idRadial));
+
+            const saved = window.restoreLocalSession();
+            const savedMap = saved ? new Map(saved.map(r => new Array(r.id, r))) : null;
+
+            // Extraer el ID del operador actual para marcarlo automáticamente
+            const sessionStr = localStorage.getItem('adminUser');
+            let currentUserId = null;
+            if(sessionStr) {
+                try { currentUserId = String(JSON.parse(sessionStr).idRegistro); } catch(e){}
+            }
+
+            radiosList = filtered.map(p => {
+                const id = String(p.idRadial);
+
+                // Determinar el estado visual original que tenía
+                let origState = '0-9';
+                const rawState = String(p.estadoBase || p.estado).trim().toUpperCase();
+
+                if (currentUserId && String(p.idRegistro) === currentUserId) origState = 'OPERADOR';
+                else if (rawState === 'OPERADOR') origState = 'OPERADOR';
+                else if (window.isPersonSuspended(p)) origState = 'SUSPENDIDO';
+                else if (window.isPersonLicencia(p)) origState = 'LICENCIA';
+                else if (window.isPersonPermiso(p)) origState = 'PERMISO';
+                else if (window.isPersonCds(p)) origState = 'CDS';
+                else if (rawState === '0-8') origState = '0-8';
+                else if (rawState === '0-9') origState = '0-9';
+                else origState = rawState || '0-9';
+
+                // Si está castigado, en licencia, con permiso oficial o 0-8 manual, arranca en 0-8 para la prueba
+                let is08Base = (origState === '0-8' || origState === 'SUSPENDIDO' || origState === 'LICENCIA' || origState === 'PERMISO');
+                let initialServiceState = is08Base ? '0-8' : '0-9';
+
+                if (savedMap && savedMap.has(id)) {
+                    const s = savedMap.get(id);
+                    s.name = window.formatShortName(p.nombreBombero);
+                    s.idRegistro = p.idRegistro;
+                    s.originalState = origState;
+                    if (!s.serviceState) s.serviceState = initialServiceState;
+                    return s;
+                }
+
+                return new Object({ 
+                    id: id, 
+                    idRegistro: p.idRegistro, 
+                    name: window.formatShortName(p.nombreBombero), 
+                    status: 0, 
+                    place: '', 
+                    custom: '', 
+                    syncStatus: 'idle', 
+                    serviceState: initialServiceState,
+                    originalState: origState
+                });
+            });
+            updateUI();
+        }
+
+        function updateUI() {
+            const startPanel = document.getElementById('start-panel');
+            const grid = document.getElementById('radios-grid');
+            const sessionToolbar = document.getElementById('session-toolbar');
+            
+            if (isStarted) {
+                startPanel.style.display = 'none'; 
+                grid.style.display = 'flex';
+                sessionToolbar.style.display = 'flex'; 
+                sessionToolbar.classList.remove('hidden');
+                document.getElementById('session-id-display').innerText = currentReportId; 
+                document.getElementById('session-time-display').innerText = fixedTimeStr; 
+                renderGrid();
+            } else {
+                startPanel.style.display = 'flex'; 
+                grid.style.display = 'none'; 
+                sessionToolbar.style.display = 'none'; 
+                sessionToolbar.classList.add('hidden');
+            }
+        }
+
+        window.startTest = async function() {
+            const wrapper = document.getElementById('start-btn-wrapper');
+            wrapper.classList.add('loading'); 
+            try {
+                if(!window.fbDb) await initFirebaseAndLoadData();
+                currentReportId = await window.getNextReportId();
+                const now = new Date();
+                fixedDateStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                fixedTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                isStarted = true; 
+                window.saveLocalSession(); 
+                updateUI(); 
+            } catch(e) {
+                window.showToast("Error iniciando la prueba"); 
+                wrapper.classList.remove('loading'); 
+            }
+        };
+
+        window.finalizeReport = async function() {
+            const loader = document.getElementById('loading-overlay');
+            const status = document.getElementById('loader-status');
+            const title = document.getElementById('loader-title');
+            
+            title.innerText = "GUARDANDO REGISTRO";
+            loader.classList.add('active'); 
+            status.innerText = "Sincronizando en segundo plano..."; 
+            
+            if (radiosList.length > 0) {
+                // SE ACTUALIZÓ 'P' A 'CALLES DEL PUEBLO'
+                const placeMap = new Object({ 'C': 'CUARTEL', 'D': 'DOMICILIO', 'L': 'LABORAL', 'P': 'CALLES DEL PUEBLO', 'S': 'SAN FERNANDO' });
+
+                const docId = String(currentReportId);
+
+                // Queue Main Doc
+                window.queueFirebaseWrite('set', 'prueba_radial', docId, new Object({
+                    id115: docId,
+                    fecha115: fixedDateStr,
+                    hora115: fixedTimeStr,
+                    totalPersonal: radiosList.length,
+                    timestamp: Date.now()
+                }));
+
+                // Queue Subdocs and Update Personal
+                radiosList.forEach(r => {
+                    let calidad = r.serviceState === '0-8' ? "0-8" : (r.status === 1 ? "11-1" : (r.status === 2 ? "11-2" : "X"));
+                    let lugarTexto = r.place === 'O' ? (r.custom ? r.custom.toUpperCase() : "") : (Reflect.get(placeMap, r.place) || "");
+                    let respondio = (calidad === '11-1' || calidad === '11-2') ? 'SI' : 'NO';
+
+                    // --- NUEVA LÓGICA: PRESERVAR ESTADOS ESPECIALES ---
+                    // Si el bombero no responde (termina en 0-8), revisamos si originalmente tenía un estado especial.
+                    // Si es así, mantenemos ese estado especial en la base de datos en lugar de forzar un 0-8 puro.
+                    let finalStateToSave = r.serviceState;
+                    if (r.serviceState === '0-8') {
+                        const specialStates = ['CDS', 'PERMISO', 'LICENCIA', 'SUSPENDIDO', 'OPERADOR'];
+                        if (specialStates.includes(r.originalState)) {
+                            finalStateToSave = r.originalState;
+                        }
+                    }
+
+                    const safeDocId = String(r.idRegistro || r.id);
+
+                    window.queueFirebaseWrite('set', `prueba_radial/${docId}/bomberos`, safeDocId, new Object({
+                        idRadial: r.id,
+                        idRegistro: r.idRegistro || "",
+                        nombreBombero: r.name,
+                        calidad: calidad,
+                        lugar: lugarTexto,
+                        estado: finalStateToSave,
+                        respondio: respondio
+                    }));
+
+                    if (r.idRegistro) {
+                        const pIdx = personnelData.findIndex(p => String(p.idRegistro) === String(r.idRegistro));
+                        if (pIdx !== -1) {
+                            const originalStateInDb = String(personnelData.at(pIdx).estado || "").trim();
+                            if (originalStateInDb !== finalStateToSave) {
+                                // EL ESTADO CAMBIÓ DURANTE LA PRUEBA, REGISTRAR EN EL HISTORIAL DEL BOMBERO
+                                const now = new Date();
+                                const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                                const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                                const nextIdStr = String(Date.now() + Math.floor(Math.random() * 1000));
+
+                                window.queueFirebaseWrite('set', `personal/${r.idRegistro}/estados`, nextIdStr, new Object({
+                                    estado: finalStateToSave,
+                                    fecha: dStr,
+                                    hora: tStr,
+                                    idEstado: nextIdStr,
+                                    timestamp: Date.now()
+                                }));
+                            }
+                            personnelData.at(pIdx).estado = finalStateToSave;
+                        }
+
+                        // Guardar el estado validado (con permisos mantenidos)
+                        window.queueFirebaseWrite('update', 'personal', String(r.idRegistro), new Object({ estado: finalStateToSave }));
+                    }
+                });
+
+                localStorage.setItem('db_personal', JSON.stringify(personnelData));
+                
+                try {
+                    const keys = Object.keys(new Object({ 'despacho': '', 'personal': '' }));
+                    keys.forEach(key => {
+                        const iframe = parent.document.getElementById('frame-' + key);
+                        if (iframe && iframe.contentWindow) {
+                            iframe.contentWindow.dispatchEvent(new Event('storage'));
+                        }
+                    });
+                } catch(e){}
+
+                status.innerText = "¡Finalizado con Éxito!";
+            }
+            
+            await new Promise(r => setTimeout(r, 1200)); 
+            window.clearLocalSession(); 
+            location.reload();
+        };
+
+        function getCardHtml(r, index) {
+            const is08 = r.serviceState === '0-8';
+            const is09 = r.serviceState === '0-9';
+            const c11_1 = r.status === 1 ? 'chip-ok active-ok' : 'chip-ok';
+            const c11_2 = r.status === 2 ? 'chip-bad active-bad' : 'chip-bad';
+            const c09 = r.serviceState === '0-9' ? 'chip-ok active-ok' : 'chip-ok'; 
+            const c08 = r.serviceState === '0-8' ? 'chip-bad active-bad' : 'chip-bad';
+
+            const getPlaceClass = (code) => r.place === code ? 'chip-blue active-blue' : 'chip-blue';
+            const customClass = r.place === 'O' ? 'active' : '';
+
+            return `
+            <div id="card-${index}" class="card ${is08?'is-08':is09?'is-09':''}">
+                <div class="card-left">
+                    <span class="card-id">${r.id}</span>
+                    <span class="card-name" style="margin-bottom: 4px;">${r.name}</span>
+                    <span class="mb-3 px-2 py-0.5 rounded text-[10px] font-bold tracking-wider ${window.getOriginalStateColor(r.originalState)}">${r.originalState}</span>
+                    <div class="btn-group" style="width: 100%; margin-top: auto;">
+                        <button id="btn-09-${index}" onclick="window.toggleService(${index}, '0-9')" class="btn-chip ${c09} focus:outline-none">0-9</button>
+                        <button id="btn-08-${index}" onclick="window.toggleService(${index}, '0-8')" class="btn-chip ${c08} focus:outline-none">0-8</button>
+                    </div>
+                </div>
+                <div class="card-right">
+                    <div class="control-row">
+                        <div class="btn-group" style="width: 100%;">
+                            <button id="btn-11-1-${index}" onclick="window.setStatus(${index}, 1)" class="btn-chip ${c11_1} focus:outline-none">11-1</button>
+                            <button id="btn-11-2-${index}" onclick="window.setStatus(${index}, 2)" class="btn-chip ${c11_2} focus:outline-none">11-2</button>
+                        </div>
+                    </div>
+                    <div class="control-row">
+                        <div class="btn-group" style="flex-wrap: wrap;">
+                            <button id="btn-C-${index}" onclick="window.setRowPlace(${index}, 'C')" class="btn-chip ${getPlaceClass('C')} focus:outline-none" ${is08?'disabled':''}>CUARTEL</button>
+                            <button id="btn-D-${index}" onclick="window.setRowPlace(${index}, 'D')" class="btn-chip ${getPlaceClass('D')} focus:outline-none" ${is08?'disabled':''}>DOMICILIO</button>
+                            <button id="btn-L-${index}" onclick="window.setRowPlace(${index}, 'L')" class="btn-chip ${getPlaceClass('L')} focus:outline-none" ${is08?'disabled':''}>LABORAL</button>
+                            <button id="btn-P-${index}" onclick="window.setRowPlace(${index}, 'P')" class="btn-chip ${getPlaceClass('P')} focus:outline-none" ${is08?'disabled':''}>CALLES DEL PUEBLO</button>
+                            <button id="btn-S-${index}" onclick="window.setRowPlace(${index}, 'S')" class="btn-chip ${getPlaceClass('S')} focus:outline-none" ${is08?'disabled':''}>SAN FDNO</button>
+                        </div>
+                        <input type="text" id="input-${index}" class="input-pill ${customClass}" placeholder="OTRO" 
+                            value="${r.custom || ''}" onfocus="window.activateCustom(${index})" ${is08?'disabled':''}
+                            oninput="window.updateCustomText(${index}, this.value)">
+                    </div>
+                </div>
+            </div>`;
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('radios-grid');
+            if (radiosList.length === 0) return;
+
+            let container = document.getElementById('cards-container');
+            if (!container) {
+                const headerHtml = `
+                    <div id="announcement-header" style="text-align: center; color: var(--primary-red); font-weight: 700; font-size: 0.85rem; margin-bottom: 25px; padding: 10px; border-bottom: 1px solid #f3f4f6;" class="animate-enter">
+                        "LA CENTRAL DE ALARMAS DEL CUERPO DE BOMBEROS, INICIA 11-5 CON PORTÁTILES"
+                    </div>`;
+                const footerHtml = `
+                    <div id="grid-footer" style="margin-top: 40px; text-align: center; padding-bottom: 40px;" class="animate-enter">
+                        <div style="color: var(--primary-red); font-weight: 700; font-size: 0.85rem; margin-bottom: 25px;">
+                            "LA CENTRAL DE ALARMAS FINALIZA 11-5 CON PORTÁTILES"
+                        </div>
+                        <button onclick="window.saveTest()" class="btn-finalize uppercase focus:outline-none">
+                            <i class="fas fa-check-circle" style="color: white;"></i> FINALIZAR 11-5
+                        </button>
+                    </div>`;
+                
+                grid.innerHTML = headerHtml + '<div id="cards-container" class="flex flex-col gap-4"></div>' + footerHtml;
+                const announceEl = document.getElementById('announcement-header');
+                if (announceEl) {
+                    const clientName = localStorage.getItem('saas_client_name') || 'CUERPO DE BOMBEROS';
+                    announceEl.innerText = `"LA CENTRAL DE ALARMAS DEL ${clientName.toUpperCase()}, INICIA 11-5 CON PORTÁTILES"`;
+                }
+                container = document.getElementById('cards-container');
+            }
+
+            radiosList.forEach((r, index) => {
+                let card = document.getElementById(`card-${index}`);
+                if (card) {
+                    const idEl = card.querySelector('.card-id');
+                    const nameEl = card.querySelector('.card-name');
+                    if(idEl && idEl.innerText !== r.id) idEl.innerText = r.id;
+                    if(nameEl && nameEl.innerText !== r.name) nameEl.innerText = r.name;
+                    window.updateCardVisuals(index);
+                } else {
+                    const temp = document.createElement('div');
+                    temp.innerHTML = getCardHtml(r, index);
+                    container.appendChild(temp.firstElementChild);
+                }
+            });
+            
+            const currentCards = container.children;
+            if (currentCards.length > radiosList.length) {
+                for (let i = currentCards.length - 1; i >= radiosList.length; i--) {
+                    currentCards.item(i).remove();
+                }
+            }
+        }
+
+        window.updateCardVisuals = function(idx) {
+            const r = radiosList.at(idx);
+            const card = document.getElementById(`card-${idx}`);
+            if (!card) return;
+
+            if (r.serviceState === '0-8') { card.classList.add('is-08'); card.classList.remove('is-09'); } 
+            else if (r.serviceState === '0-9') { card.classList.add('is-09'); card.classList.remove('is-08'); }
+            else { card.classList.remove('is-08', 'is-09'); }
+
+            const is08 = r.serviceState === '0-8';
+
+            const updateBtn = (id, cls, isActive, disable) => {
+                const btn = document.getElementById(id);
+                if (btn) {
+                    btn.classList.remove('active-ok', 'active-bad', 'active-blue');
+                    if (isActive) btn.classList.add(cls);
+                    btn.disabled = disable;
+                }
+            };
+            
+            // Los botones 11-1 y 11-2 ahora no se bloquean, porque al apretarlos el usuario pasará a 0-9 automático
+            updateBtn(`btn-11-1-${idx}`, 'active-ok', r.status === 1, false);
+            updateBtn(`btn-11-2-${idx}`, 'active-bad', r.status === 2, false);
+            
+            updateBtn(`btn-09-${idx}`, 'active-ok', r.serviceState === '0-9', false);
+            updateBtn(`btn-08-${idx}`, 'active-bad', r.serviceState === '0-8', false);
+            
+            // AGREGADA LA 'C' DE CUARTEL
+            new Array('C','D','L','P','S').forEach(c => updateBtn(`btn-${c}-${idx}`, 'active-blue', r.place === c, is08));
+            
+            const inp = document.getElementById(`input-${idx}`);
+            if (inp) { 
+                inp.classList.toggle('active', r.place === 'O'); 
+                if (inp.value !== (r.custom || '')) inp.value = r.custom || '';
+                inp.disabled = is08; 
+            }
+        };
+
+        window.updateCustomText = function(idx, val) {
+            const r = radiosList.at(idx);
+            r.custom = val;
+            window.saveLocalSession();
+        };
+
+        window.toggleService = function(idx, state) {
+            const r = radiosList.at(idx);
+            r.serviceState = state;
+            if (state === '0-8') { r.status = 0; r.place = ''; r.custom = ''; }
+            window.saveLocalSession(); window.updateCardVisuals(idx);
+        };
+        
+        // AUTO-CAMBIOS A 0-9 SI SE PRESIONAN RESPUESTAS EN LA RADIO
+        window.setStatus = function(idx, val) {
+            const r = radiosList.at(idx);
+            // Si estaba en 0-8 o algún estado bloqueado, lo pasamos automáticamente a 0-9 por contestar
+            if (r.serviceState === '0-8') {
+                r.serviceState = '0-9';
+            }
+            r.status = val; 
+            window.saveLocalSession(); 
+            window.updateCardVisuals(idx);
+        };
+        
+        window.setRowPlace = function(idx, code) {
+            const r = radiosList.at(idx);
+            if (r.serviceState === '0-8') r.serviceState = '0-9'; // Auto 0-9
+            if (r.status === 0) r.status = 1; // Si asigna lugar, asume que es 11-1
+            r.place = code; 
+            window.saveLocalSession(); 
+            window.updateCardVisuals(idx);
+        };
+        
+        window.activateCustom = function(idx) {
+            const r = radiosList.at(idx);
+            if (r.serviceState === '0-8') r.serviceState = '0-9'; // Auto 0-9
+            if (r.status === 0) r.status = 1; // Si asigna lugar, asume que es 11-1
+            r.place = 'O'; 
+            window.saveLocalSession(); 
+            window.updateCardVisuals(idx);
+        };
+
+        window.saveLocalSession = function() { 
+            if (isStarted) localStorage.setItem('active_11_5_session', JSON.stringify(new Object({ isStarted, currentReportId, fixedDateStr, fixedTimeStr, radiosList }))); 
+        };
+        
+        window.restoreLocalSession = function() { 
+            const saved = localStorage.getItem('active_11_5_session'); 
+            if (saved) { 
+                try { 
+                    const d = JSON.parse(saved); 
+                    if (d.isStarted) { 
+                        isStarted = true; currentReportId = d.currentReportId; fixedDateStr = d.fixedDateStr; fixedTimeStr = d.fixedTimeStr; return d.radiosList; 
+                    } 
+                } catch(e){} 
+            } 
+            return null; 
+        };
+        
+        window.clearLocalSession = function() { localStorage.removeItem('active_11_5_session'); };
+        
+        window.naturalSort = function(a, b) { return String(a).localeCompare(String(b), undefined, new Object({numeric: true})); };
+        
+        window.confirmCancel = function() { 
+            if(modalTimer) clearInterval(modalTimer); 
+            const btn = document.getElementById('modal-btn-confirm');
+            btn.disabled = false;
+            btn.innerText = "ACEPTAR";
+            
+            document.getElementById('confirm-msg').innerText = "¿CANCELAR PRUEBA ACTUAL? SE PERDERÁN LOS CAMBIOS."; 
+            document.getElementById('confirm-modal').classList.add('active'); 
+            
+            pendingCallback = async () => { 
+                const loader = document.getElementById('loading-overlay'); 
+                document.getElementById('loader-title').innerText = "CANCELANDO"; 
+                document.getElementById('loader-status').innerText = "";
+                loader.classList.add('active');
+                await new Promise(r => setTimeout(r, 600)); 
+                window.clearLocalSession(); 
+                location.reload(); 
+            }; 
+        };
+        
+        window.saveTest = function() { 
+            const btn = document.getElementById('modal-btn-confirm');
+            document.getElementById('confirm-msg').innerText = "¿FINALIZAR 11-5? ESPERA UN MOMENTO."; 
+            document.getElementById('confirm-modal').classList.add('active'); 
+            
+            pendingCallback = window.finalizeReport;
+            
+            let count = 5;
+            btn.disabled = true;
+            btn.innerText = `ACEPTAR (${count})`;
+            
+            if(modalTimer) clearInterval(modalTimer);
+            
+            modalTimer = setInterval(() => {
+                count--;
+                if(count > 0) {
+                    btn.innerText = `ACEPTAR (${count})`;
+                } else {
+                    clearInterval(modalTimer);
+                    btn.innerText = "ACEPTAR";
+                    btn.disabled = false;
+                }
+            }, 1000);
+        };
+        
+        window.closeModal = function(confirm) { 
+            if(modalTimer) clearInterval(modalTimer);
+            const btn = document.getElementById('modal-btn-confirm');
+            if(btn) {
+                btn.innerText = "ACEPTAR"; 
+                btn.disabled = false; 
+            }
+            
+            document.getElementById('confirm-modal').classList.remove('active'); 
+            if (confirm && pendingCallback) pendingCallback(); 
+            pendingCallback = null; 
+        };
+        
+        window.showToast = function(msg) { const t = document.getElementById('toast'); t.innerText = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); };
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

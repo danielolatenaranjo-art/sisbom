@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Historial de Accesos - SisBom</title>
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <style>
+        html { font-size: 14px; }
+        body { font-family: 'Segoe UI', sans-serif; min-font-size: 12px; background-color: #F8FAFC; color: #334155; -webkit-font-smoothing: antialiased; }
+        
+        /* Spinner Global Elegante */
+        .spinner {
+            border: 5px solid transparent;
+            border-radius: 50%;
+            border-top: 5px solid #B91C1C;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder { text-transform: uppercase !important; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <!-- FORZAR MAYÚSCULAS EN LOS INPUTS (EXCEPTO CHAT) -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('input', e => {
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (e.target.type !== 'password' && !e.target.classList.contains('chat-input') && e.target.id !== 'chat-message') {
+                        const start = e.target.selectionStart, end = e.target.selectionEnd;
+                        e.target.value = e.target.value.toUpperCase();
+                        e.target.setSelectionRange(start, end);
+                    }
+                }
+            });
+        });
+    </script>
+
+    <!-- MAIN APP CONTENEDOR -->
+    <main class="flex-1 overflow-auto max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
+        <div class="flex flex-col gap-6">
+
+            <!-- HEADER CON TITULO Y FILTROS -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+                <div>
+                    <h1 class="text-3xl font-black text-slate-800 tracking-tight uppercase">Historial de Accesos</h1>
+                    <p class="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Monitoreo en tiempo real de inicios y cierres de sesión</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="relative flex-1 md:flex-none">
+                        <input type="text" id="searchInput" class="f-input pl-10 pr-4 py-2 font-medium text-slate-700" placeholder="Buscar ingreso...">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><i class="fas fa-search text-sm"></i></div>
+                    </div>
+                    <div class="hidden">
+                        <select id="yearFilter" class="f-input font-bold text-slate-700 pr-10">
+                            <!-- JS Inject -->
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TARJETAS KPI (Métricas de Accesos y Filtros) -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div id="card-tot-activas" onclick="App.setFilter('ACTIVAS')" class="bg-white p-5 border border-green-200 border-t-[8px] border-t-green-400 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all ring-2 ring-offset-2 ring-green-500 group" style="border-radius: 1.5rem;">
+                    <div>
+                        <p class="font-bold text-green-600 uppercase tracking-widest mb-1" style="font-size: 11px;">Sesiones Activas</p>
+                        <p class="text-3xl font-black text-green-700 leading-none animate-pulse" id="kpi-activas">0</p>
+                    </div>
+                    <div class="w-14 h-14 bg-green-50 flex items-center justify-center text-green-600 text-2xl group-hover:scale-110 transition-transform" style="border-radius: 9999px;"><i class="fas fa-user-check"></i></div>
+                </div>
+                <div id="card-tot-admin" onclick="App.setFilter('ADMIN')" class="bg-white p-5 border border-indigo-200 border-t-[8px] border-t-indigo-400 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all group" style="border-radius: 1.5rem;">
+                    <div>
+                        <p class="font-bold text-indigo-600 uppercase tracking-widest mb-1" style="font-size: 11px;">Comandancia</p>
+                        <p class="text-3xl font-black text-indigo-700 leading-none" id="kpi-admin">0</p>
+                    </div>
+                    <div class="w-14 h-14 bg-indigo-50 flex items-center justify-center text-indigo-600 text-2xl group-hover:scale-110 transition-transform" style="border-radius: 9999px;"><i class="fas fa-laptop-code"></i></div>
+                </div>
+                <div id="card-tot-central" onclick="App.setFilter('CENTRAL')" class="bg-white p-5 border border-orange-200 border-t-[8px] border-t-orange-400 shadow-sm flex items-center justify-between cursor-pointer hover:shadow-md transition-all group" style="border-radius: 1.5rem;">
+                    <div>
+                        <p class="font-bold text-orange-600 uppercase tracking-widest mb-1" style="font-size: 11px;">Central Alarmas</p>
+                        <p class="text-3xl font-black text-orange-700 leading-none" id="kpi-central">0</p>
+                    </div>
+                    <div class="w-14 h-14 bg-orange-50 flex items-center justify-center text-orange-600 text-2xl group-hover:scale-110 transition-transform" style="border-radius: 9999px;"><i class="fas fa-headset"></i></div>
+                </div>
+            </div>
+
+            <!-- TABLA PRINCIPAL DE ACCESOS -->
+            <div class="bg-white shadow-sm border border-slate-200 overflow-hidden flex flex-col" style="border-radius: 1.5rem;">
+                <div class="overflow-x-auto">
+                    <table class="w-full divide-y divide-slate-200 table-fixed" style="min-width: 900px;">
+                        <thead class="bg-slate-50 border-b border-slate-200 shadow-sm relative z-10">
+                            <tr>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-widest" style="width: 10%;">ID Ingreso</th>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-widest" style="width: 15%;">Plataforma</th>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-widest" style="width: 30%;">Personal</th>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-widest" style="width: 15%;">INICIO SESIÓN</th>
+                                <th class="px-6 py-4 text-left text-xs font-bold text-slate-500 uppercase tracking-widest" style="width: 15%;">CIERRE SESIÓN</th>
+                                <th class="px-6 py-4 text-center text-xs font-bold text-slate-500 uppercase tracking-widest" style="width: 15%;">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="bg-white divide-y divide-slate-100">
+                            <!-- JS Inject -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Estado Vacío -->
+                <div id="empty-state" class="hidden text-center py-16 border-t border-slate-100 bg-slate-50/50">
+                    <div class="w-20 h-20 bg-slate-200 text-slate-400 flex items-center justify-center text-4xl mx-auto mb-5" style="border-radius: 9999px;"><i class="fas fa-history"></i></div>
+                    <p class="text-slate-600 font-black text-lg uppercase tracking-wide">No se encontraron registros</p>
+                    <p class="text-sm font-semibold text-slate-400 mt-1.5 uppercase">Intente cambiar el término de búsqueda o el filtro.</p>
+                </div>
+
+                <!-- Paginación -->
+                <div id="pagination-controls" class="hidden flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50">
+                    <p class="text-xs text-slate-500 font-bold uppercase tracking-widest"><span id="page-info">Página 1</span></p>
+                    <div class="flex gap-3">
+                        <button onclick="App.prevPage()" id="btn-prev" class="bg-white border border-slate-300 text-slate-600 px-4 py-2 shadow-sm hover:bg-slate-100 disabled:opacity-50 transition-colors" style="border-radius: 0.75rem;"><i class="fas fa-chevron-left text-sm"></i></button>
+                        <button onclick="App.nextPage()" id="btn-next" class="bg-white border border-slate-300 text-slate-600 px-4 py-2 shadow-sm hover:bg-slate-100 disabled:opacity-50 transition-colors" style="border-radius: 0.75rem;"><i class="fas fa-chevron-right text-sm"></i></button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- MODAL CONFIRMACIÓN PARA CIERRE DE SESIÓN -->
+    <div id="confirm-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-200" style="z-index: 8000;">
+        <div class="bg-white shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-100" style="border-radius: 1.5rem;">
+            <div class="p-8 text-center">
+                <div class="w-16 h-16 bg-red-50 text-red-600 flex items-center justify-center text-3xl mx-auto mb-5 border border-red-100" style="border-radius: 9999px;">
+                    <i class="fas fa-power-off"></i>
+                </div>
+                <h3 class="font-black text-xl text-slate-800 mb-3 uppercase tracking-tight">Forzar Cierre</h3>
+                <p class="text-sm text-slate-600 font-semibold uppercase leading-relaxed" id="confirm-msg">¿Estás seguro de cerrar esta sesión?</p>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-3 gap-3">
+                <button onclick="App.closeConfirmModal()" class="flex-1 py-3 text-sm font-bold text-slate-600 bg-white border border-slate-200 hover:bg-slate-100 shadow-sm transition-colors uppercase focus:outline-none" style="border-radius: 1rem;">Cancelar</button>
+                <button onclick="App.executeCloseSession()" class="flex-1 py-3 text-sm font-bold text-white bg-red-600 hover:bg-red-700 shadow-md transition-colors uppercase focus:outline-none" style="border-radius: 1rem;">Sí, Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- OVERLAY DE CARGA -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm hidden flex-col items-center justify-center transition-opacity duration-300" style="z-index: 9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
+
+    <script type="module">
+        import { initializeApp } from "./libs/firebase-app.js";
+        import { getAuth, signInAnonymously } from "./libs/firebase-auth.js";
+        import { getFirestore, doc, updateDoc, collection, getDocs } from "./libs/firebase-firestore.js";
+
+        // CONFIGURACIÓN FIREBASE
+        const firebaseConfig = new Object({
+            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+            authDomain: "sisbom-de5f8.firebaseapp.com",
+            projectId: "sisbom-de5f8",
+            storageBucket: "sisbom-de5f8.firebasestorage.app",
+            messagingSenderId: "39449538456",
+            appId: "1:39449538456:web:64f767264356ae587485ed"
+        });
+
+        const CACHE_KEY = "sisbom_accesos_cache_v4";
+        let fbDb = null;
+
+        window.App = new Object({
+            data: new Array(),
+            filteredData: new Array(),
+            personalData: new Array(),
+            searchTerm: '',
+            currentFilter: 'ACTIVAS',
+            currentYearFilter: new Date().getFullYear().toString(),
+            currentPage: 1,
+            itemsPerPage: 10,
+            sessionToClose: null,
+
+            async init() {
+                if (window.stopLoadingData) return;
+
+                this.setupYearFilter();
+                this.setupSearch();
+
+                // ESTRATEGIA CACHÉ-FIRST
+                try {
+                    const cachedData = localStorage.getItem(CACHE_KEY);
+                    const cachedPersonal = localStorage.getItem('db_personal');
+                    
+                    if (cachedData && cachedPersonal) {
+                        this.data = JSON.parse(cachedData);
+                        this.personalData = JSON.parse(cachedPersonal);
+                        this.updateYearFilterOptions();
+                        this.applyFilters();
+                        this.updateLastSyncText();
+                    }
+                } catch(e) {}
+
+                this.loadData(false); // No fuerza descarga de internet si ya existe en caché local
+                this.scheduleMidnightSync();
+            },
+
+            updateLastSyncText() {
+                const lastUpdate = localStorage.getItem('sisbom_accesos_last_sync');
+                const el = document.getElementById('last-update-text');
+                if(lastUpdate && el) {
+                    const d = new Date(parseInt(lastUpdate, 10));
+                    const hoy = new Date();
+                    const ayer = new Date();
+                    ayer.setDate(hoy.getDate() - 1);
+                    
+                    const timeFmt = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                    
+                    if(d.getDate() === hoy.getDate() && d.getMonth() === hoy.getMonth() && d.getFullYear() === hoy.getFullYear()) {
+                        el.innerText = `HOY ${timeFmt} hrs`;
+                        el.classList.add('text-green-500');
+                        el.classList.remove('text-slate-400');
+                    } else if(d.getDate() === ayer.getDate() && d.getMonth() === ayer.getMonth() && d.getFullYear() === ayer.getFullYear()) {
+                        el.innerText = `AYER ${timeFmt} hrs`;
+                        el.classList.remove('text-green-500');
+                        el.classList.add('text-slate-400');
+                    } else {
+                        const meses = new Array('ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SEP', 'OCT', 'NOV', 'DIC');
+                        el.innerText = `${String(d.getDate()).padStart(2,'0')} ${meses.at(d.getMonth())} ${timeFmt}`;
+                        el.classList.remove('text-green-500');
+                        el.classList.add('text-slate-400');
+                    }
+                } else if (el) {
+                    el.innerText = 'SIN DATOS';
+                }
+            },
+
+            scheduleMidnightSync() {
+                const now = new Date();
+                const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 1, 0); 
+                const msUntilMidnight = tomorrow - now;
+                
+                setTimeout(() => {
+                    this.loadData(true);
+                    this.scheduleMidnightSync();
+                }, msUntilMidnight);
+            },
+
+            setupYearFilter() {
+                const select = document.getElementById('yearFilter');
+                select.addEventListener('change', (e) => {
+                    this.currentYearFilter = e.target.value;
+                    this.currentPage = 1;
+                    this.applyFilters();
+                });
+            },
+
+            updateYearFilterOptions() {
+                const select = document.getElementById('yearFilter');
+                const savedYear = localStorage.getItem('selectedCycleYear');
+                const currentSelection = savedYear || select.value || this.currentYearFilter;
+                
+                let currentYear = new Date().getFullYear().toString();
+                const uniqueYears = new Set();
+                uniqueYears.add(currentYear); 
+                if (savedYear) {
+                    uniqueYears.add(savedYear);
+                }
+
+                this.data.forEach(row => {
+                    if (row.fechaIngreso) {
+                        const cleanD = this.cleanDate(row.fechaIngreso);
+                        let yStr = "";
+                        if (cleanD.includes('-')) {
+                            const parts = cleanD.split('-');
+                            yStr = parts.length === 4 ? parts.at(3) : parts.at(2);
+                        } else if (cleanD.includes('/')) {
+                            const parts = cleanD.split('/');
+                            yStr = parts.at(2);
+                        }
+                        const y = parseInt(yStr, 10);
+                        if (!isNaN(y) && y >= 2000) {
+                            uniqueYears.add(y.toString());
+                        }
+                    }
+                });
+
+                const sortedYears = Array.from(uniqueYears).sort((a, b) => parseInt(b) - parseInt(a));
+
+                select.innerHTML = '';
+                
+                sortedYears.forEach(y => {
+                    const option = document.createElement('option');
+                    option.value = y;
+                    option.textContent = `AÑO ${y}`;
+                    select.appendChild(option);
+                });
+
+                if (sortedYears.includes(currentSelection)) {
+                    select.value = currentSelection;
+                    this.currentYearFilter = currentSelection;
+                } else {
+                    select.value = currentYear;
+                    this.currentYearFilter = currentYear;
+                }
+            },
+
+            async initFirebase() {
+                if (parent) {
+                try {
+                    if (parent.fbDb) {
+                        fbDb = parent.fbDb;
+                    window.fbDoc = parent.fbDoc;
+                    window.fbUpdateDoc = parent.fbUpdateDoc;
+                    window.fbCollection = parent.fbCollection;
+                    window.fbGetDocs = parent.fbGetDocs;
+                    console.log("Firebase inherited from parent in Accesos");
+                    return;
+                    }
+                } catch (e) {
+                    console.warn("Error inheriting parent Firebase:", e);
+                }
+            }
+                try {
+                    window.fbDoc = doc;
+                    window.fbUpdateDoc = updateDoc;
+                    window.fbCollection = collection;
+                    window.fbGetDocs = getDocs;
+
+                    const app = initializeApp(firebaseConfig);
+                    const auth = getAuth(app);
+                    fbDb = getFirestore(app);
+                    try {
+                        const storedUser = localStorage.getItem('authUserId');
+                        const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                        if (storedUser && storedPassSecure) {
+                            const email = storedUser + "@sisbom.com";
+                            const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                            await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                            console.log("Firebase conectado con credenciales en fallback.");
+                        } else {
+                            await signInAnonymously(auth);
+                            console.log("Firebase conectado de forma anónima en fallback.");
+                        }
+                    } catch(authErr) {
+                        console.warn("Error authenticating fallback Firebase:", authErr);
+                        try { await signInAnonymously(auth); } catch(ex){}
+                    }
+                } catch(e) {
+                    console.error("Error inicializando Firebase", e);
+                }
+            },
+
+            setupSearch() {
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    this.searchTerm = e.target.value.toLowerCase().trim();
+                    this.currentPage = 1;
+                    this.applyFilters();
+                });
+            },
+
+            async loadData(force = false) {
+                if (force && parent && typeof parent.refreshAllDatabaseData === 'function') {
+                    parent.refreshAllDatabaseData(true);
+                    return;
+                }
+                const syncIcon = document.getElementById('sync-icon');
+                if (syncIcon && force) syncIcon.classList.add('fa-spin');
+                
+                if (!force) {
+                    const cachedAccesos = localStorage.getItem(CACHE_KEY);
+                    const cachedPersonal = localStorage.getItem('db_personal');
+                    
+                    if (cachedAccesos && cachedPersonal) {
+                        this.data = JSON.parse(cachedAccesos);
+                        this.personalData = JSON.parse(cachedPersonal);
+                        if (!document.getElementById('yearFilter').options.length) this.updateYearFilterOptions();
+                        this.applyFilters();
+                        return; // NO DESCARGA DE INTERNET SI NO ES FORZADO
+                    }
+                }
+
+                this.showLoader();
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    const results = await Promise.all(new Array(
+                        window.fbGetDocs(window.fbCollection(fbDb, 'accesos/comandancia/registros')),
+                        window.fbGetDocs(window.fbCollection(fbDb, 'accesos/central/registros')),
+                        window.fbGetDocs(window.fbCollection(fbDb, 'personal'))
+                    ));
+
+                    const snapAdmin = results.at(0);
+                    const snapCentral = results.at(1);
+                    const snapPersonal = results.at(2);
+
+                    this.personalData = new Array();
+                    snapPersonal.forEach(d => {
+                        let p = d.data();
+                        p.idRegistro = d.id;
+                        this.personalData.push(p);
+                    });
+
+                    let combinedData = new Array();
+
+                    snapAdmin.forEach(docSnap => {
+                        combinedData.push(Object.assign(new Object(), docSnap.data(), new Object({
+                            idIngreso: docSnap.id,
+                            _plataforma: 'ADMIN',
+                            _dbPath: 'accesos/comandancia/registros'
+                        })));
+                    });
+
+                    snapCentral.forEach(docSnap => {
+                        combinedData.push(Object.assign(new Object(), docSnap.data(), new Object({
+                            idIngreso: docSnap.id,
+                            _plataforma: 'CENTRAL',
+                            _dbPath: 'accesos/central/registros'
+                        })));
+                    });
+
+                    // ORDEN MATEMÁTICO REAL Y PRIORIDAD ACTIVAS
+                    combinedData.sort((a, b) => {
+                        const aActivo = String(a.estado).toLowerCase() === 'activo' ? 1 : 0;
+                        const bActivo = String(b.estado).toLowerCase() === 'activo' ? 1 : 0;
+                        
+                        if (aActivo !== bActivo) return bActivo - aActivo;
+                        
+                        return (parseInt(b.idInicio, 10) || 0) - (parseInt(a.idInicio, 10) || 0);
+                    });
+
+                    this.data = combinedData;
+                    
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(this.data));
+                    localStorage.setItem('db_personal', JSON.stringify(this.personalData));
+                    localStorage.setItem('sisbom_accesos_last_sync', Date.now().toString());
+
+                    this.updateYearFilterOptions();
+                    this.applyFilters();
+                    this.updateLastSyncText();
+                    
+                    if (force) this.showToast("BASE DE DATOS ACTUALIZADA.", "success");
+
+                } catch (e) {
+                    console.error(e);
+                    this.showToast("FALLO DE CONEXIÓN A FIREBASE.", "error");
+                } finally {
+                    this.hideLoader();
+                    if (syncIcon) syncIcon.classList.remove('fa-spin');
+                }
+            },
+
+            formatShortName(fullName) {
+                if (!fullName) return "DESCONOCIDO";
+                let n = String(fullName).replace(new RegExp(',', 'g'), ' ').trim(); 
+                if (n.includes(' • ')) n = n.split(' • ').at(1).trim();
+                if (n.includes(' - ')) n = n.split(' - ').at(1).trim();
+                const words = n.split(new RegExp('\\s+'));
+                
+                if (words.length >= 3) return `${words.at(0)} ${words.at(words.length - 2)}`;
+                if (words.length === 2) return `${words.at(0)} ${words.at(1)}`;
+                
+                return words.at(0) || n;
+            },
+
+            formatName(idReg, rawName) {
+                if (!idReg || idReg === '0') return rawName ? this.formatShortName(rawName) : '---';
+                const cleanId = String(idReg).trim().toUpperCase();
+                
+                let found = this.personalData.find(p => String(p.idRegistro).trim().toUpperCase() === cleanId);
+                
+                if (found) {
+                    const shortName = this.formatShortName(found.nombreBombero);
+                    return `${found.idRadial || 'S/R'} • ${shortName}`;
+                }
+                return rawName ? this.formatShortName(rawName) : cleanId;
+            },
+
+            cleanDate(dateStr) {
+                if(!dateStr) return '';
+                const d = String(dateStr).replace(new RegExp('[\'"]', 'g'), '').trim();
+                if(d.includes('T')) {
+                    const p = d.split('T').at(0).split('-');
+                    return `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                }
+                return d;
+            },
+            
+            cleanTime(timeStr) {
+                if(!timeStr) return '';
+                return String(timeStr).replace(new RegExp('[\'"]', 'g'), '').trim();
+            },
+
+            setFilter(filter) {
+                this.currentFilter = filter;
+                this.currentPage = 1;
+
+                const cards = new Array('card-tot-admin', 'card-tot-central', 'card-tot-activas');
+                cards.forEach(c => {
+                    const el = document.getElementById(c);
+                    if(el) el.classList.remove('ring-2', 'ring-offset-2', 'ring-indigo-500', 'ring-orange-500', 'ring-green-500');
+                });
+
+                if (filter === 'ADMIN') document.getElementById('card-tot-admin').classList.add('ring-2', 'ring-offset-2', 'ring-indigo-500');
+                if (filter === 'CENTRAL') document.getElementById('card-tot-central').classList.add('ring-2', 'ring-offset-2', 'ring-orange-500');
+                if (filter === 'ACTIVAS') document.getElementById('card-tot-activas').classList.add('ring-2', 'ring-offset-2', 'ring-green-500');
+
+                this.applyFilters();
+            },
+
+            applyFilters() {
+                let textFiltered = this.data;
+
+                // 1. Filtro por Año Dinámico (Las activas SIEMPRE saltan este filtro para quedar a la vista)
+                if (this.currentYearFilter !== 'ALL') {
+                    textFiltered = textFiltered.filter(row => {
+                        const isActivo = String(row.estado).toLowerCase() === 'activo';
+                        if (isActivo) return true; // Siempre mostrar sesiones activas en pantalla
+                        
+                        return row.fechaIngreso && String(row.fechaIngreso).includes(this.currentYearFilter);
+                    });
+                }
+
+                // 2. Filtro por Texto Libre (Buscador)
+                if (this.searchTerm !== '') {
+                    textFiltered = textFiltered.filter(row => {
+                        const nameUI = this.formatName(row.idRegistro, row.nombreBombero).toLowerCase();
+                        const s = `${nameUI} ${row.nombreBombero} ${row.idRegistro} ${row.cargo} ${row._plataforma} ${row.fechaIngreso}`.toLowerCase();
+                        return s.includes(this.searchTerm);
+                    });
+                }
+
+                // 3. Cálculo de KPIs
+                let kpiAdmin = 0;
+                let kpiCentral = 0;
+                let kpiActivas = 0;
+
+                textFiltered.forEach(row => {
+                    if (row._plataforma === 'ADMIN') kpiAdmin++;
+                    if (row._plataforma === 'CENTRAL') kpiCentral++;
+                    if (String(row.estado).toLowerCase() === 'activo') kpiActivas++;
+                });
+
+                document.getElementById('kpi-admin').innerText = kpiAdmin;
+                document.getElementById('kpi-central').innerText = kpiCentral;
+                document.getElementById('kpi-activas').innerText = kpiActivas;
+
+                // 4. Filtro por Pestaña
+                let finalFiltered = textFiltered;
+                if (this.currentFilter === 'ADMIN') {
+                    finalFiltered = textFiltered.filter(row => row._plataforma === 'ADMIN');
+                } else if (this.currentFilter === 'CENTRAL') {
+                    finalFiltered = textFiltered.filter(row => row._plataforma === 'CENTRAL');
+                } else if (this.currentFilter === 'ACTIVAS') {
+                    finalFiltered = textFiltered.filter(row => String(row.estado).toLowerCase() === 'activo');
+                }
+                
+                // Forzar orden: primero activas, luego numérico final
+                finalFiltered.sort((a, b) => {
+                    const aActivo = String(a.estado).toLowerCase() === 'activo' ? 1 : 0;
+                    const bActivo = String(b.estado).toLowerCase() === 'activo' ? 1 : 0;
+                    
+                    if (aActivo !== bActivo) return bActivo - aActivo;
+                    
+                    return (parseInt(b.idInicio, 10) || 0) - (parseInt(a.idInicio, 10) || 0);
+                });
+
+                this.filteredData = finalFiltered;
+                this.renderTable();
+            },
+
+            renderTable() {
+                const tbody = document.getElementById('table-body');
+                const empty = document.getElementById('empty-state');
+                const pagination = document.getElementById('pagination-controls');
+
+                if (this.filteredData.length === 0) {
+                    tbody.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    pagination.classList.add('hidden');
+                    return;
+                }
+
+                empty.classList.add('hidden');
+                
+                // LÍMITE DE 10 REGISTROS POR PÁGINA
+                const totalPages = Math.ceil(this.filteredData.length / this.itemsPerPage);
+                if (this.currentPage > totalPages) this.currentPage = totalPages;
+                if (this.currentPage < 1) this.currentPage = 1;
+
+                const start = (this.currentPage - 1) * this.itemsPerPage;
+                const pageData = this.filteredData.slice(start, start + this.itemsPerPage);
+
+                tbody.innerHTML = pageData.map(row => {
+                    const idIngreso = row.idIngreso || '-';
+                    const idInicioDisplay = row.idInicio || '-';
+                    const tipo = row._plataforma;
+                    const dbPath = row._dbPath;
+                    const estado = String(row.estado).toLowerCase();
+                    
+                    const nameUI = this.formatName(row.idRegistro, row.nombreBombero);
+                    
+                    let platBadge = '';
+                    if (tipo === 'ADMIN') {
+                        platBadge = `<span class="bg-indigo-50 text-indigo-700 px-2.5 py-1 font-black tracking-widest uppercase border border-indigo-200 shadow-sm" style="font-size: 10px; border-radius: 0.375rem;"><i class="fas fa-laptop-code mr-1"></i> COMANDANCIA</span>`;
+                    } else {
+                        platBadge = `<span class="bg-orange-50 text-orange-700 px-2.5 py-1 font-black tracking-widest uppercase border border-orange-200 shadow-sm" style="font-size: 10px; border-radius: 0.375rem;"><i class="fas fa-headset mr-1"></i> CENTRAL</span>`;
+                    }
+
+                    const fIngreso = this.cleanDate(row.fechaIngreso);
+                    const hIngreso = this.cleanTime(row.horaIngreso);
+                    const fCierre = this.cleanDate(row.fechaCierre);
+                    const hCierre = this.cleanTime(row.horaCierre);
+
+                    let statusUI = '';
+                    if (estado === 'activo') {
+                        statusUI = `
+                            <div class="flex flex-col items-center gap-2">
+                                <span class="bg-green-50 text-green-600 px-3 py-1 font-black tracking-widest uppercase border border-green-200 shadow-sm animate-pulse w-full justify-center flex items-center" style="font-size: 10px; border-radius: 9999px;"><i class="fas fa-circle mr-1" style="font-size: 8px;"></i> EN LÍNEA</span>
+                                <button onclick="App.confirmCloseSession('${idIngreso}', '${dbPath}', '${nameUI}')" class="bg-white border border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 px-3 py-1.5 font-bold uppercase transition-colors shadow-sm w-full focus:outline-none" style="font-size: 9px; border-radius: 0.5rem;" title="Forzar el cierre de esta sesión"><i class="fas fa-sign-out-alt mr-1"></i> CERRAR</button>
+                            </div>
+                        `;
+                    } else {
+                        statusUI = `<span class="bg-slate-100 text-slate-500 px-3 py-1 font-black tracking-widest uppercase border border-slate-200 shadow-sm" style="font-size: 10px; border-radius: 9999px;"><i class="fas fa-power-off mr-1"></i> CERRADA</span>`;
+                    }
+
+                    return `
+                    <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100">
+                        <td class="px-6 py-4 align-middle">
+                            <div class="font-black text-slate-400 text-sm truncate" title="${idIngreso}">#${idInicioDisplay}</div>
+                        </td>
+                        <td class="px-6 py-4 align-middle">
+                            ${platBadge}
+                        </td>
+                        <td class="px-6 py-4 align-middle">
+                            <div class="font-bold text-slate-800 text-sm truncate uppercase" title="${row.nombreBombero}">${nameUI}</div>
+                            <div class="font-bold text-slate-500 mt-1 tracking-wider truncate uppercase" style="font-size: 10px;">REG: ${row.idRegistro || '-'} <span class="mx-1 text-slate-300">&bull;</span> <span class="text-bomberos-red uppercase">${row.cargo || 'BOMBERO'}</span></div>
+                        </td>
+                        <td class="px-6 py-4 align-middle">
+                            <div class="font-bold text-slate-700 text-sm"><i class="far fa-clock text-slate-400 mr-1.5"></i>${hIngreso || '--:--'}</div>
+                            <div class="font-semibold text-slate-400 uppercase tracking-widest mt-1" style="font-size: 10px;">${fIngreso || '--/--/----'}</div>
+                        </td>
+                        <td class="px-6 py-4 align-middle">
+                            <div class="font-bold ${hCierre ? 'text-slate-700' : 'text-slate-400'} text-sm"><i class="far fa-clock text-slate-300 mr-1.5"></i>${hCierre || '--:--'}</div>
+                            <div class="font-semibold text-slate-400 uppercase tracking-widest mt-1" style="font-size: 10px;">${fCierre || '---'}</div>
+                        </td>
+                        <td class="px-6 py-4 text-center align-middle">
+                            ${statusUI}
+                        </td>
+                    </tr>`;
+                }).join('');
+
+                if (totalPages > 1) {
+                    pagination.classList.remove('hidden');
+                    pagination.classList.add('flex');
+                    document.getElementById('page-info').innerText = `PÁGINA ${this.currentPage} DE ${totalPages} (${this.filteredData.length} REGISTROS)`;
+                    document.getElementById('btn-prev').disabled = this.currentPage === 1;
+                    document.getElementById('btn-next').disabled = this.currentPage === totalPages;
+                } else {
+                    pagination.classList.add('hidden');
+                    pagination.classList.remove('flex');
+                }
+            },
+
+            prevPage() { if (this.currentPage > 1) { this.currentPage--; this.renderTable(); } },
+            nextPage() { const t = Math.ceil(this.filteredData.length / this.itemsPerPage); if (this.currentPage < t) { this.currentPage++; this.renderTable(); } },
+
+            // --- LÓGICA DE CIERRE DE SESIÓN FORZADO FIRESTORE ---
+            confirmCloseSession(idIngreso, dbPath, nombre) {
+                document.getElementById('confirm-msg').innerHTML = `VAS A REGISTRAR EL CIERRE DE SESIÓN PARA <b class="text-bomberos-red">${nombre}</b> CON LA FECHA Y HORA ACTUALES.<br><br>¿DESEAS CONTINUAR?`;
+                document.getElementById('confirm-modal').classList.remove('hidden');
+                this.sessionToClose = new Object({ idIngreso, dbPath });
+            },
+
+            closeConfirmModal() {
+                document.getElementById('confirm-modal').classList.add('hidden');
+                this.sessionToClose = null;
+            },
+
+            async executeCloseSession() {
+                if (!this.sessionToClose) return;
+                
+                const { idIngreso, dbPath } = this.sessionToClose;
+                this.closeConfirmModal();
+                this.showLoader();
+                
+                const d = new Date();
+                const fechaStr = `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+                const horaStr = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, dbPath, idIngreso);
+                    
+                    await window.fbUpdateDoc(docRef, new Object({ 
+                        estado: 'cerrado',
+                        fechaCierre: fechaStr,
+                        horaCierre: horaStr
+                    }));
+                    
+                    // Actualización local sin redescargar toda la base de datos
+                    const index = this.data.findIndex(r => r.idIngreso === idIngreso && r._dbPath === dbPath);
+                    if(index !== -1) {
+                        this.data.at(index).estado = 'cerrado';
+                        this.data.at(index).fechaCierre = fechaStr;
+                        this.data.at(index).horaCierre = horaStr;
+                        localStorage.setItem(CACHE_KEY, JSON.stringify(this.data));
+                        this.applyFilters();
+                    }
+                    
+                    this.showToast("SESIÓN CERRADA EXITOSAMENTE.");
+                } catch (e) {
+                    console.error(e);
+                    this.showToast("ERROR AL CERRAR LA SESIÓN.", "error");
+                } finally {
+                    this.hideLoader();
+                }
+            },
+
+            showLoader() {
+                const el = document.getElementById('loading-overlay');
+                if(el) { el.classList.remove('hidden'); el.classList.add('flex'); }
+            },
+            
+            hideLoader() {
+                const el = document.getElementById('loading-overlay');
+                if(el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+            },
+            
+            showToast(message, type = 'success') {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+                toast.className = `transform transition-all duration-300 translate-y-full opacity-0 max-w-sm w-full shadow-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 ${bg} text-white uppercase`;
+                toast.style.borderRadius = "1rem";
+                toast.innerHTML = `<div class="p-4 w-full flex items-center gap-3">
+                    ${type === 'success' ? '<i class="fas fa-check-circle text-xl"></i>' : '<i class="fas fa-times-circle text-xl"></i>'}
+                    <p class="text-sm font-bold tracking-wide">${message}</p>
+                </div>`;
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 10);
+                setTimeout(() => {
+                    toast.classList.add('translate-y-full', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3500);
+            }
+        });
+
+        window.handleCycleChange = function(year) {
+            const select = document.getElementById('yearFilter');
+            if (select) {
+                select.value = year;
+                App.currentYearFilter = year;
+                App.currentPage = 1;
+                App.applyFilters();
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => App.init());
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

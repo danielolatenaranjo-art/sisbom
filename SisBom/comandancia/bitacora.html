@@ -1,0 +1,1036 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitácora Material Mayor - SisBom</title>
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <style>
+        html { font-size: 14px; }
+        body { font-family: 'Segoe UI', sans-serif; min-font-size: 12px; background-color: #F8FAFC; color: #334155; -webkit-font-smoothing: antialiased; }
+        
+        /* Spinner Global Minimalista */
+        .spinner {
+            border: 3px solid transparent;
+            border-radius: 50%;
+            border-top: 3px solid #B91C1C;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Componentes Comunes */
+        .f-label { display: block; font-size: 0.75rem; font-weight: 700; color: #94a3b8; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .f-value { display: block; font-size: 0.9rem; font-weight: 600; color: #1e293b; }
+        
+        .box-info { background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1rem; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); }
+
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder { text-transform: uppercase !important; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- FORZAR MAYÚSCULAS EN LOS INPUTS (EXCEPTO CHAT) -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('input', e => {
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (e.target.type !== 'password' && !e.target.classList.contains('chat-input') && e.target.id !== 'chat-message') {
+                        const start = e.target.selectionStart, end = e.target.selectionEnd;
+                        e.target.value = e.target.value.toUpperCase();
+                        e.target.setSelectionRange(start, end);
+                    }
+                }
+            });
+        });
+    </script>
+
+    <!-- MAIN APP CONTENEDOR -->
+    <main class="flex-1 overflow-auto max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
+        
+        <!-- ==============================
+             VISTA 1: DASHBOARD DE BITÁCORA 
+             ============================== -->
+        <div id="view-dashboard" class="space-y-6 transition-all duration-300">
+            
+            <!-- TOOLBAR SUPERIOR -->
+            <div class="flex flex-wrap items-center justify-between gap-4 w-full bg-white p-4 border border-slate-200 shadow-sm" style="border-radius: 1.5rem;">
+                <!-- Buscador y Filtro -->
+                <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 w-full lg:w-auto">
+                    <!-- Buscador -->
+                    <div class="relative w-full sm:w-80">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-slate-400"></i>
+                        </div>
+                        <input type="text" id="searchInput" placeholder="Buscar por Unidad, ID, o Lugar..." class="block w-full pl-10 pr-3 py-2.5 border border-slate-300 rounded-lg leading-5 bg-slate-50 placeholder-slate-400 focus:outline-none focus:bg-white focus:ring-2 focus:ring-bomberos-red focus:border-bomberos-red sm:text-sm font-medium transition-colors uppercase">
+                    </div>
+                    
+                    <!-- Filtro de Año -->
+                    <div class="relative w-full sm:w-40 hidden">
+                        <select id="yearFilter" class="block w-full pl-3 pr-8 py-2.5 border border-slate-300 rounded-lg leading-5 bg-slate-50 text-slate-700 font-semibold focus:outline-none focus:bg-white focus:ring-2 focus:ring-bomberos-red focus:border-bomberos-red sm:text-sm transition-colors cursor-pointer appearance-none uppercase">
+                            <!-- Opciones generadas por JS -->
+                        </select>
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                            <i class="fas fa-chevron-down text-xs"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TARJETAS FILTRO ESTADO -->
+            <div class="grid grid-cols-3 gap-4">
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-slate-400 uppercase tracking-widest mb-0.5" style="font-size: 10px;">Total Salidas</p>
+                        <p class="text-2xl font-black text-slate-800 leading-none" id="kpi-total">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-500 text-lg"><i class="fas fa-truck-fast"></i></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-slate-500 uppercase tracking-widest mb-0.5" style="font-size: 10px;">Este Mes</p>
+                        <p class="text-2xl font-black text-slate-700 leading-none" id="kpi-month">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center text-slate-600 text-lg"><i class="fas fa-calendar-alt"></i></div>
+                </div>
+                <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between cursor-default">
+                    <div>
+                        <p class="font-bold text-red-500 uppercase tracking-widest mb-0.5" style="font-size: 10px;">Hoy</p>
+                        <p class="text-2xl font-black text-red-600 leading-none" id="kpi-day">0</p>
+                    </div>
+                    <div class="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center text-red-500 text-lg"><i class="fas fa-route"></i></div>
+                </div>
+            </div>
+
+            <!-- TABLA PRINCIPAL DE BITÁCORA -->
+            <div class="bg-white shadow-sm border border-slate-200 overflow-hidden flex flex-col" style="border-radius: 1.5rem;">
+                <div class="overflow-x-auto">
+                    <table class="w-full divide-y divide-slate-200 table-fixed" style="min-width: 900px;">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider" style="width: 10%;">ID Salida</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider" style="width: 10%;">Unidad</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider" style="width: 15%;">Salida (6-0)</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider" style="width: 28%;">Clave / Lugar</th>
+                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider" style="width: 25%;">OBAC / Conductor</th>
+                                <th class="px-4 py-3 text-center text-xs font-semibold text-slate-500 uppercase tracking-wider" style="width: 12%;">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody id="table-body" class="bg-white divide-y divide-slate-100">
+                            <!-- JS Inject -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Estado Vacío -->
+                <div id="empty-state" class="hidden text-center py-12 border-t border-slate-100 bg-slate-50">
+                    <div class="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center text-slate-400 text-3xl mb-4 mx-auto"><i class="fas fa-folder-open"></i></div>
+                    <p class="text-slate-600 font-bold uppercase">No se encontraron registros de bitácora</p>
+                    <p class="text-xs text-slate-400 mt-1 uppercase">Intente cambiar el filtro o el término de búsqueda.</p>
+                </div>
+
+                <!-- Paginación -->
+                <div id="pagination-controls" class="hidden flex items-center justify-between px-6 py-3 border-t border-slate-200 bg-slate-50">
+                    <p class="text-xs text-slate-500 font-bold uppercase tracking-widest"><span id="page-info">Página 1</span></p>
+                    <div class="flex gap-2">
+                        <button onclick="App.prevPage()" id="btn-prev" class="bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded shadow-sm hover:bg-slate-50 disabled:opacity-50 transition-colors"><i class="fas fa-chevron-left text-xs"></i></button>
+                        <button onclick="App.nextPage()" id="btn-next" class="bg-white border border-slate-300 text-slate-600 px-3 py-1.5 rounded shadow-sm hover:bg-slate-50 disabled:opacity-50 transition-colors"><i class="fas fa-chevron-right text-xs"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==============================
+             VISTA 2: DETALLE DE BITÁCORA 
+             ============================== -->
+        <div id="view-detail" class="hidden space-y-6 transition-all duration-300">
+            
+            <button onclick="App.closeDetail()" class="text-sm text-bomberos-red hover:text-bomberos-dark font-bold flex items-center gap-2 transition-colors bg-white px-4 py-2 rounded-lg border border-red-100 shadow-sm w-fit hover:shadow uppercase">
+                <i class="fas fa-arrow-left"></i> Volver a Bitácora
+            </button>
+
+            <!-- ENCABEZADO DEL DETALLE -->
+            <div class="bg-white shadow-sm rounded-xl border border-slate-200 overflow-hidden relative">
+                <!-- Barra superior de estado -->
+                <div id="det-header-bar" class="h-2 w-full bg-slate-400"></div>
+                
+                <div class="p-6">
+                    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6 border-b border-slate-100 pb-4">
+                        <div class="flex items-center gap-4">
+                            <div id="det-icon-bg" class="w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-sm border">
+                                <i class="fas fa-truck"></i>
+                            </div>
+                            <div>
+                                <h2 class="text-3xl font-black text-slate-800 tracking-tight leading-none uppercase" id="det-carro-clave">--</h2>
+                                <p class="text-sm font-bold text-slate-500 uppercase tracking-widest mt-1">Salida #<span id="det-id">--</span> <span id="det-id-servicio" class="ml-2 text-blue-600 hidden"></span></p>
+                            </div>
+                        </div>
+                        <div class="text-left md:text-right">
+                            <span id="det-badge" class="px-4 py-1.5 rounded-full text-xs font-black tracking-widest uppercase border">--</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        
+                        <!-- Columna 1: Registro de Comunicaciones -->
+                        <div class="box-info flex flex-col gap-4">
+                            <h4 class="text-xs font-black text-bomberos-red uppercase tracking-widest border-b border-slate-200 pb-2"><i class="fas fa-satellite-dish mr-1"></i> Comunicaciones Radiales</h4>
+                            
+                            <div class="flex justify-between items-center">
+                                <div>
+                                    <span class="f-label text-red-600" style="font-size: 10px;">6-0 (Sale al lugar)</span>
+                                    <span class="f-value text-slate-800" id="det-hora60">--:--</span>
+                                </div>
+                                <span class="text-xs font-bold text-slate-400 uppercase" id="det-fecha60">--/--/----</span>
+                            </div>
+                            
+                            <div class="flex justify-between items-center border-t border-slate-200 pt-3">
+                                <div>
+                                    <span class="f-label text-yellow-600" style="font-size: 10px;">6-3 (Llega al lugar)</span>
+                                    <span class="f-value text-slate-800" id="det-hora63">--:--</span>
+                                </div>
+                                <span class="text-xs font-bold text-slate-400 uppercase" id="det-fecha63">--/--/----</span>
+                            </div>
+
+                            <div class="flex justify-between items-center border-t border-slate-200 pt-3">
+                                <div>
+                                    <span class="f-label text-blue-600" style="font-size: 10px;">6-9 (Retira del lugar)</span>
+                                    <span class="f-value text-slate-800" id="det-hora69">--:--</span>
+                                </div>
+                                <span class="text-xs font-bold text-slate-400 uppercase" id="det-fecha69">--/--/----</span>
+                            </div>
+
+                            <div class="flex justify-between items-center border-t border-slate-200 pt-3">
+                                <div>
+                                    <span class="f-label text-slate-600" style="font-size: 10px;">6-10 (Llega a cuartel)</span>
+                                    <span class="f-value text-slate-800" id="det-hora610">--:--</span>
+                                </div>
+                                <span class="text-xs font-bold text-slate-400 uppercase" id="det-fecha610">--/--/----</span>
+                            </div>
+
+                            <div class="flex justify-between items-center border-t border-slate-200 pt-3">
+                                <div>
+                                    <span class="f-label text-emerald-600" style="font-size: 10px;">6-8 (Personal disp.)</span>
+                                    <span class="f-value text-slate-800" id="det-hora68">--:--</span>
+                                </div>
+                                <span class="text-xs font-bold text-slate-400 uppercase" id="det-fecha68">--/--/----</span>
+                            </div>
+                        </div>
+
+                        <!-- Columna 2: Ubicación y Dotación -->
+                        <div class="box-info lg:col-span-2 flex flex-col gap-5">
+                            <h4 class="text-xs font-black text-bomberos-red uppercase tracking-widest border-b border-slate-200 pb-2"><i class="fas fa-map-marked-alt mr-1"></i> Ubicación y Dotación</h4>
+                            
+                            <div>
+                                <span class="f-label">Dirección / Sector</span>
+                                <span class="f-value text-lg mt-1 uppercase" id="det-lugar">--</span>
+                            </div>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white p-3 rounded-lg border border-slate-100 shadow-sm mt-2">
+                                <div>
+                                    <span class="f-label" style="font-size: 10px;">A Cargo de la Unidad (OBAC)</span>
+                                    <span class="f-value text-bomberos-red uppercase" id="det-obac"><i class="fas fa-user-shield mr-1"></i> --</span>
+                                </div>
+                                <div>
+                                    <span class="f-label" style="font-size: 10px;">Conductor (Maquinista)</span>
+                                    <span class="f-value text-slate-600 uppercase" id="det-conductor"><i class="fas fa-user-cog mr-1"></i> --</span>
+                                </div>
+                            </div>
+                            
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div class="bg-blue-50 border border-blue-100 p-3 rounded-lg flex justify-between items-center shadow-sm">
+                                    <span class="f-label text-blue-700 !mb-0">Bomberos Tripulantes</span>
+                                    <span class="font-black text-xl text-blue-800 uppercase" id="det-personal">0</span>
+                                </div>
+                                <div class="bg-slate-100 border border-slate-200 p-3 rounded-lg flex justify-between items-center shadow-sm">
+                                    <span class="f-label text-slate-600 !mb-0">Kilometraje (Odómetro)</span>
+                                    <span class="font-black text-xl text-slate-800 uppercase" id="det-km">0 KM</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Informes -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+                        <div class="box-info bg-amber-50/30 border-amber-100">
+                            <span class="f-label text-amber-700 mb-2"><i class="fas fa-walkie-talkie mr-1"></i> Pre-Informe (6-0)</span>
+                            <div class="bg-white p-3 rounded-lg border border-amber-200 shadow-inner text-sm font-medium text-slate-700 whitespace-pre-wrap uppercase" style="min-height: 80px;" id="det-preinforme">--</div>
+                        </div>
+                        <div class="box-info bg-yellow-50/30 border-yellow-100">
+                            <span class="f-label text-yellow-700 mb-2"><i class="fas fa-clipboard-list mr-1"></i> Informe de Llegada (6-3)</span>
+                            <div class="bg-white p-3 rounded-lg border border-yellow-200 shadow-inner text-sm font-medium text-slate-700 whitespace-pre-wrap uppercase" style="min-height: 80px;" id="det-informe63">--</div>
+                        </div>
+                        <div class="box-info bg-slate-50/30 border-slate-200">
+                            <span class="f-label text-slate-600 mb-2"><i class="fas fa-comment-dots mr-1"></i> Observaciones Adicionales</span>
+                            <div class="bg-white p-3 rounded-lg border border-slate-200 shadow-inner text-sm font-medium text-slate-600 whitespace-pre-wrap italic uppercase" style="min-height: 80px;" id="det-obs">--</div>
+                        </div>
+                    </div>
+                    
+                    <!-- BOTÓN IMPRIMIR -->
+                    <div class="mt-8 flex justify-end border-t border-slate-100 pt-6">
+                        <button onclick="App.printReport()" class="bg-slate-800 hover:bg-slate-900 text-white px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors shadow-md focus:outline-none uppercase">
+                            <i class="fas fa-print"></i> Generar Reporte de Unidad
+                        </button>
+                        <button onclick="App.saveAsPDF()" class="bg-red-700 hover:bg-red-800 text-white px-6 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-colors shadow-md focus:outline-none uppercase ml-2">
+                            <i class="fas fa-file-pdf"></i> Guardar PDF
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- OVERLAY DE CARGA -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm hidden flex-col items-center justify-center transition-opacity duration-300" style="z-index: 9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
+
+    <script type="module">
+        import { initializeApp } from "./libs/firebase-app.js";
+        import { getAuth, signInAnonymously } from "./libs/firebase-auth.js";
+        import { getFirestore, doc, collection, getDocs } from "./libs/firebase-firestore.js";
+
+        // CONFIGURACIÓN CENTRAL
+        const CACHE_KEY = "sisbom_bitacora_cache_v3"; // SE FORZA EL LIMPIADO DEL CACHÉ VIEJO
+        
+        // CONFIGURACIÓN FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+            authDomain: "sisbom-de5f8.firebaseapp.com",
+            projectId: "sisbom-de5f8",
+            storageBucket: "sisbom-de5f8.firebasestorage.app",
+            messagingSenderId: "39449538456",
+            appId: "1:39449538456:web:64f767264356ae587485ed"
+        };
+        
+        let fbDb = null;
+
+        window.App = {
+            data: [],
+            filteredData: [],
+            personalData: [],
+            currentFilter: 'ALL',
+            searchTerm: '',
+            currentPage: 1,
+            itemsPerPage: 10, // OPTIMIZACIÓN: 10 filas por pestaña
+            selectedSalida: null,
+            despachosData: [],
+
+            async init() {
+                if (window.stopLoadingData) return;
+
+                this.setupSearch();
+                this.loadData(false); // Estrategia "Cache-First", no descargará nada si ya existe memoria local
+            },
+
+            async initFirebase() {
+                if (parent) {
+                try {
+                    if (parent.fbDb) {
+                        fbDb = parent.fbDb;
+                    window.fbCollection = parent.fbCollection;
+                    window.fbGetDocs = parent.fbGetDocs;
+                    console.log("Firebase inherited from parent in Bitacora");
+                    return;
+                    }
+                } catch (e) {
+                    console.warn("Error inheriting parent Firebase:", e);
+                }
+            }
+                try {
+                    window.fbCollection = collection;
+                    window.fbGetDocs = getDocs;
+
+                    const app = initializeApp(firebaseConfig);
+                    const auth = getAuth(app);
+                    fbDb = getFirestore(app);
+                    try {
+                        const storedUser = localStorage.getItem('authUserId');
+                        const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                        if (storedUser && storedPassSecure) {
+                            const email = storedUser + "@sisbom.com";
+                            const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                            await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                            console.log("Firebase conectado con credenciales en fallback.");
+                        } else {
+                            await signInAnonymously(auth);
+                            console.log("Firebase conectado de forma anónima en fallback.");
+                        }
+                    } catch(authErr) {
+                        console.warn("Error authenticating fallback Firebase:", authErr);
+                        try { await signInAnonymously(auth); } catch(ex){}
+                    }
+                } catch(e) {
+                    console.error("Error inicializando Firebase", e);
+                }
+            },
+
+            setupSearch() {
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    this.searchTerm = e.target.value.toUpperCase().trim();
+                    this.currentPage = 1;
+                    this.applyFilters();
+                });
+            },
+
+            setupYearFilter() {
+                const sel = document.getElementById('yearFilter');
+                if (!sel) return;
+                
+                const current = new Date().getFullYear();
+                sel.innerHTML = '<option value="ALL">HISTÓRICO</option>';
+                for(let y = current + 1; y >= 1963; y--) {
+                    const opt = document.createElement('option');
+                    opt.value = y;
+                    opt.innerText = `AÑO ${y}`;
+                    sel.appendChild(opt);
+                }
+                
+                const savedYear = localStorage.getItem('selectedCycleYear') || String(current);
+                sel.value = savedYear;
+
+                sel.addEventListener('change', () => {
+                    this.currentPage = 1;
+                    this.applyFilters();
+                });
+            },
+
+            async loadData(force = false) {
+                if (force && parent && typeof parent.refreshAllDatabaseData === 'function') {
+                    parent.refreshAllDatabaseData(true);
+                    return;
+                }
+                const syncIcon = document.getElementById('sync-icon');
+                if (syncIcon && force) syncIcon.classList.add('fa-spin');
+                
+                // --- ESTRATEGIA CACHÉ PRIMERO (Lazy Loading) ---
+                if (!force) {
+                    const cachedBitacoraMain = localStorage.getItem(CACHE_KEY);
+                    const cachedBitacoraAll = localStorage.getItem('db_bitacora');
+                    const cachedPersonal = localStorage.getItem('db_personal');
+                    const cachedDespachos = localStorage.getItem('db_despachos') || localStorage.getItem('sisbom_despachos_cache_v3');
+                    
+                    if (cachedBitacoraMain && cachedBitacoraAll && cachedPersonal) {
+                        this.data = JSON.parse(cachedBitacoraMain);
+                        this.bitacoraData = JSON.parse(cachedBitacoraAll);
+                        this.personalData = JSON.parse(cachedPersonal);
+                        this.despachosData = cachedDespachos ? JSON.parse(cachedDespachos) : [];
+                        
+                        if (!document.getElementById('yearFilter').options.length) this.setupYearFilter();
+                        this.applyFilters();
+                        return; // IMPORTANTE: Fin de ejecución. NO descarga de internet.
+                    }
+                }
+
+                this.showLoader();
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    // --- DESCARGA ÚNICA OPTIMIZADA ---
+                    const [resPersonal, resBitacora, resDespachos] = await Promise.all([
+                        window.fbGetDocs(window.fbCollection(fbDb, 'personal')),
+                        window.fbGetDocs(window.fbCollection(fbDb, 'bitacora')),
+                        window.fbGetDocs(window.fbCollection(fbDb, 'despachos'))
+                    ]);
+                    
+                    this.personalData = []; 
+                    resPersonal.forEach(d => { let p = d.data(); p.idRegistro = d.id; this.personalData.push(p); });
+                    
+                    this.despachosData = [];
+                    resDespachos.forEach(d => {
+                        let row = d.data();
+                        row.id = d.id;
+                        this.despachosData.push(row);
+                    });
+                    localStorage.setItem('db_despachos', JSON.stringify(this.despachosData));
+                    
+                    this.bitacoraData = []; 
+                    let fbBitacoraMain = [];
+
+                    resBitacora.forEach(d => {
+                        let row = d.data();
+                        row.idSalida = row.idSalida || d.id;
+                        this.bitacoraData.push(row);
+                        
+                        // FILTRO: Mostrar solo historial con Kilometraje registrado (Salidas concluidas)
+                        if (row.km && String(row.km).trim() !== '') {
+                            fbBitacoraMain.push(row);
+                        }
+                    });
+
+                    // ORDEN NUMÉRICO DESCENDENTE EN LA CARGA
+                    fbBitacoraMain.sort((a, b) => (parseInt(b.idSalida, 10) || 0) - (parseInt(a.idSalida, 10) || 0));
+
+                    this.data = fbBitacoraMain;
+
+                    // GUARDADO EN MEMORIA (No se volverá a descargar hasta forzar)
+                    localStorage.setItem(CACHE_KEY, JSON.stringify(this.data));
+                    localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
+                    localStorage.setItem('db_personal', JSON.stringify(this.personalData));
+                    
+                    if (!document.getElementById('yearFilter').options.length) this.setupYearFilter();
+                    this.applyFilters();
+                    
+                    if(this.selectedSalida) {
+                        const updated = this.data.find(d => String(d.idSalida) === String(this.selectedSalida.idSalida));
+                        if(updated) {
+                            this.selectedSalida = updated;
+                            this.openDetail(updated.idSalida, true);
+                        }
+                    }
+
+                    if(force) this.showToast("BASE DE DATOS ACTUALIZADA.", "success");
+
+                } catch (e) {
+                    console.error(e);
+                    this.showToast("FALLO DE CONEXIÓN A FIREBASE.", "error");
+                } finally {
+                    this.hideLoader();
+                    if (syncIcon) syncIcon.classList.remove('fa-spin');
+                }
+            },
+
+            getYearFromDate(dateStr) {
+                if(!dateStr) return null;
+                const d = String(dateStr).replace(/['"]/g, '').trim();
+                if(d.includes('-') && d.split('-').at(0).length === 2) {
+                    const parts = d.split('-');
+                    return parseInt(parts.at(2), 10);
+                }
+                if(d.includes('T')) return parseInt(d.split('T').at(0).split('-').at(0), 10);
+                return null;
+            },
+
+            cleanDate(dateStr) {
+                if(!dateStr) return '';
+                const d = String(dateStr).replace(/['"]/g, '').trim();
+                if(d.includes('T')) {
+                    const p = d.split('T').at(0).split('-');
+                    return `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                }
+                return d;
+            },
+
+            formatShortName(fullName) {
+                if (!fullName) return "";
+                let n = String(fullName).trim();
+                if (n.includes(' • ')) n = n.split(' • ').at(1).trim();
+                if (n.includes(' - ')) n = n.split(' - ').at(1).trim();
+                const words = n.split(/\s+/);
+                if (words.length >= 3) return `${words.at(0)} ${words.at(words.length - 2)}`;
+                return n;
+            },
+
+            formatName(input) {
+                if (!input || input === '0') return '---';
+                const cleanId = String(input).trim().toUpperCase();
+                if (cleanId === 'S/I') return 'S/I';
+                if (cleanId === 'GESTION' || cleanId === 'GESTIÓN') return 'GESTIÓN';
+                
+                // Prioridad 1: Buscar por ID Radial exacto
+                let found = this.personalData.find(p => String(p.idRadial).trim().toUpperCase() === cleanId);
+                
+                // Prioridad 2: Buscar por ID Registro exacto
+                if (!found) {
+                    found = this.personalData.find(p => String(p.idRegistro).trim().toUpperCase() === cleanId);
+                }
+                
+                // Prioridad 3: Buscar por coincidencia de nombre
+                if (!found) {
+                    found = this.personalData.find(p => String(p.nombreBombero).trim().toUpperCase().includes(cleanId));
+                }
+                
+                if (found) {
+                    const shortName = this.formatShortName(found.nombreBombero);
+                    return `${found.idRadial} • ${shortName}`; // Obliga a mostrar ID Radial
+                }
+                return this.formatShortName(cleanId);
+            },
+
+            getClaveForTrip(row) {
+                if (!row) return 'S/C';
+                let rawClave = String(row.clave || '').trim();
+                if (rawClave && !/^\d+$/.test(rawClave) && rawClave !== 'S/C') {
+                    return rawClave;
+                }
+                if (row.idServicio && String(row.idServicio).trim() !== '') {
+                    const match = (this.despachosData || []).find(d => String(d.idServicio || d.id).trim() === String(row.idServicio).trim());
+                    if (match && (match.clave || match.key)) {
+                        return match.clave || match.key;
+                    }
+                }
+                return rawClave || 'S/C';
+            },
+
+            getTodayStr() {
+                const d = new Date();
+                return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+            },
+
+            applyFilters() {
+                const yearSelect = document.getElementById('yearFilter');
+                const year = yearSelect ? yearSelect.value : 'ALL';
+                
+                let filtered = this.data;
+
+                // 1. Filtro por Año
+                if (year !== 'ALL') {
+                    const yNum = parseInt(year, 10);
+                    filtered = filtered.filter(row => this.getYearFromDate(row.fecha60) === yNum);
+                }
+
+                // 2. Cálculo de KPIs
+                const now = new Date();
+                const currentMonth = now.getMonth() + 1;
+                const currentYear = now.getFullYear();
+                const todayStr = this.getTodayStr();
+                
+                let monthCount = 0;
+                let todayCount = 0;
+                
+                filtered.forEach(row => {
+                    const d = this.cleanDate(row.fecha60);
+                    if(d) {
+                        const parts = d.split('-');
+                        if(parts.length === 3) {
+                            if (parseInt(parts.at(1)) === currentMonth && parseInt(parts.at(2)) === currentYear) monthCount++;
+                        }
+                        if (d === todayStr) todayCount++;
+                    }
+                });
+
+                document.getElementById('kpi-total').innerText = filtered.length;
+                document.getElementById('kpi-month').innerText = monthCount;
+                document.getElementById('kpi-day').innerText = todayCount;
+
+                // 3. Filtro por Texto Libre
+                if (this.searchTerm !== '') {
+                    filtered = filtered.filter(row => {
+                        const s = `${row.idSalida} ${row.carro} ${row.clave} ${row.lugar} ${row.obac} ${row.conductor}`.toUpperCase();
+                        return s.includes(this.searchTerm);
+                    });
+                }
+
+                // 4. FORZAR ORDEN NUMÉRICO DESCENDENTE SIEMPRE (Ignora strings viejos en caché)
+                filtered.sort((a, b) => (parseInt(b.idSalida, 10) || 0) - (parseInt(a.idSalida, 10) || 0));
+
+                this.filteredData = filtered;
+                this.renderTable();
+            },
+
+            renderTable() {
+                const tbody = document.getElementById('table-body');
+                const empty = document.getElementById('empty-state');
+                const pagination = document.getElementById('pagination-controls');
+
+                if (this.filteredData.length === 0) {
+                    tbody.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    pagination.classList.add('hidden');
+                    return;
+                }
+
+                empty.classList.add('hidden');
+                
+                // LÓGICA DE PAGINACIÓN LIMITADA
+                const totalPages = Math.ceil(this.filteredData.length / this.itemsPerPage);
+                if (this.currentPage > totalPages) this.currentPage = totalPages;
+                if (this.currentPage < 1) this.currentPage = 1;
+
+                const start = (this.currentPage - 1) * this.itemsPerPage;
+                const pageData = this.filteredData.slice(start, start + this.itemsPerPage); // Solo renderea 10 items en el DOM
+
+                tbody.innerHTML = pageData.map(row => {
+                    
+                    // Determinar Estado (Solo muestra concluidos con KM)
+                    const statusUI = `<span class="bg-slate-100 text-slate-600 px-2 py-1 rounded font-black tracking-widest uppercase border border-slate-200" style="font-size: 10px;"><i class="fas fa-check-double mr-1"></i> CONCLUIDO</span>`;
+
+                    const dateUI = this.cleanDate(row.fecha60);
+                    const obacUI = this.formatName(row.obac);
+                    const condUI = this.formatName(row.conductor);
+
+                    return `
+                    <tr class="hover:bg-slate-50 transition-colors cursor-pointer group" onclick="App.openDetail('${row.idSalida}')">
+                        <td class="px-4 py-3 align-middle border-b border-slate-100">
+                            <div class="font-black text-slate-800 text-sm">#${row.idSalida}</div>
+                        </td>
+                        <td class="px-4 py-3 align-middle border-b border-slate-100">
+                            <div class="font-bold text-bomberos-red text-base uppercase">${row.carro || 'S/N'}</div>
+                        </td>
+                        <td class="px-4 py-3 align-middle border-b border-slate-100">
+                            <div class="font-bold text-slate-700 text-sm">${row.hora60 || '--:--'}</div>
+                            <div class="font-bold text-slate-400 uppercase tracking-widest mt-0.5" style="font-size: 10px;">${dateUI}</div>
+                        </td>
+                        <td class="px-4 py-3 align-middle border-b border-slate-100">
+                            <div class="text-sm font-bold text-slate-800 truncate uppercase" title="${this.getClaveForTrip(row)}">${this.getClaveForTrip(row)}</div>
+                            <div class="font-semibold text-slate-500 truncate mt-0.5 uppercase" style="font-size: 11px;" title="${row.lugar}">${row.lugar || 'LUGAR NO ESPECIFICADO'}</div>
+                        </td>
+                        <td class="px-4 py-3 align-middle border-b border-slate-100">
+                            <div class="font-bold text-slate-700 truncate uppercase flex items-center" style="font-size: 11px;" title="OBAC: ${obacUI}">
+                                <i class="fas fa-user-shield text-slate-400 mr-1.5 w-3 text-center"></i> <span class="truncate">${obacUI}</span>
+                            </div>
+                            <div class="font-bold text-slate-700 truncate uppercase mt-1 flex items-center" style="font-size: 11px;" title="Cond: ${condUI}">
+                                <i class="fas fa-user-cog text-slate-400 mr-1.5 w-3 text-center"></i> <span class="truncate">${condUI}</span>
+                            </div>
+                        </td>
+                        <td class="px-4 py-3 text-center align-middle border-b border-slate-100">
+                            ${statusUI}
+                        </td>
+                    </tr>`;
+                }).join('');
+
+                // Update Pagination UI
+                if (totalPages > 1) {
+                    pagination.classList.remove('hidden');
+                    pagination.classList.add('flex');
+                    document.getElementById('page-info').innerText = `PÁGINA ${this.currentPage} DE ${totalPages} (${this.filteredData.length} REGISTROS)`;
+                    document.getElementById('btn-prev').disabled = this.currentPage === 1;
+                    document.getElementById('btn-next').disabled = this.currentPage === totalPages;
+                } else {
+                    pagination.classList.add('hidden');
+                    pagination.classList.remove('flex');
+                }
+            },
+
+            prevPage() { if (this.currentPage > 1) { this.currentPage--; this.renderTable(); } },
+            nextPage() { const t = Math.ceil(this.filteredData.length / this.itemsPerPage); if (this.currentPage < t) { this.currentPage++; this.renderTable(); } },
+
+            openDetail(id, silentUpdate = false) {
+                const row = this.data.find(r => String(r.idSalida) === String(id));
+                if(!row) return;
+                this.selectedSalida = row;
+                
+                // Color UI
+                const headerBar = document.getElementById('det-header-bar');
+                const iconBg = document.getElementById('det-icon-bg');
+                const badge = document.getElementById('det-badge');
+
+                // Como solo cargamos registros con KM, el estado siempre es Concluido
+                headerBar.className = "h-2 w-full bg-slate-600";
+                iconBg.className = "w-16 h-16 rounded-2xl flex items-center justify-center text-3xl shadow-sm border bg-slate-50 text-slate-600 border-slate-200";
+                badge.className = "px-4 py-1.5 rounded-full font-black tracking-widest uppercase border bg-slate-100 text-slate-700 border-slate-200";
+                badge.style.fontSize = "10px";
+                badge.innerHTML = '<i class="fas fa-check-double mr-1"></i> REGISTRO CONCLUIDO';
+
+                // Datos Básicos
+                document.getElementById('det-carro-clave').innerText = `${row.carro || 'S/N'} | ${this.getClaveForTrip(row)}`;
+                document.getElementById('det-id').innerText = row.idSalida;
+                
+                const idServicioEl = document.getElementById('det-id-servicio');
+                if(row.idServicio && String(row.idServicio).trim() !== '') {
+                    idServicioEl.innerHTML = `<i class="fas fa-link"></i> DESPACHO #${row.idServicio}`;
+                    idServicioEl.classList.remove('hidden');
+                } else {
+                    idServicioEl.classList.add('hidden');
+                }
+
+                document.getElementById('det-lugar').innerText = row.lugar || 'UBICACIÓN NO REGISTRADA';
+                
+                document.getElementById('det-obac').innerHTML = `<i class="fas fa-user-shield mr-1"></i> ${this.formatName(row.obac)}`;
+                document.getElementById('det-conductor').innerHTML = `<i class="fas fa-user-cog mr-1"></i> ${this.formatName(row.conductor)}`;
+
+                // Mostrar solo cantidad de bomberos (sin sumar OBAC ni conductor)
+                document.getElementById('det-personal').innerText = row.cuantosBomberos || '0';
+                
+                const finalKmVal = parseInt(row.km) || 0;
+                const startKmVal = parseInt(row.kmSalida) || 0;
+                const deltaKmVal = Math.max(0, finalKmVal - startKmVal);
+                document.getElementById('det-km').innerText = row.km ? `${row.km} KM (RECORRIDO: ${deltaKmVal} KM)` : '0 KM';
+
+                // Tiempos
+                document.getElementById('det-hora60').innerText = row.hora60 || '--:--';
+                document.getElementById('det-fecha60').innerText = this.cleanDate(row.fecha60) || '-';
+                
+                document.getElementById('det-hora63').innerText = row.hora63 || '--:--';
+                document.getElementById('det-fecha63').innerText = this.cleanDate(row.fecha63) || '-';
+                
+                document.getElementById('det-hora69').innerText = row.hora69 || '--:--';
+                document.getElementById('det-fecha69').innerText = this.cleanDate(row.fecha69) || '-';
+
+                document.getElementById('det-hora610').innerText = row.hora610 || '--:--';
+                document.getElementById('det-fecha610').innerText = this.cleanDate(row.fecha610) || '-';
+
+                document.getElementById('det-hora68').innerText = row.hora68 || '--:--';
+                document.getElementById('det-fecha68').innerText = this.cleanDate(row.fecha68) || '-';
+
+                // Informes
+                document.getElementById('det-preinforme').innerText = row.preInforme || 'SIN REGISTRO EN BASE DE DATOS.';
+                document.getElementById('det-informe63').innerText = row.informe63 || 'SIN REGISTRO EN BASE DE DATOS.';
+                document.getElementById('det-obs').innerText = row.observacion || 'SIN OBSERVACIONES ADICIONALES.';
+
+                // Mostrar Vistas
+                if (!silentUpdate) {
+                    document.getElementById('view-dashboard').classList.add('hidden');
+                    document.getElementById('view-detail').classList.remove('hidden');
+                    window.scrollTo({top: 0, behavior: 'smooth'});
+                }
+            },
+
+            closeDetail() {
+                this.selectedSalida = null;
+                document.getElementById('view-detail').classList.add('hidden');
+                document.getElementById('view-dashboard').classList.remove('hidden');
+            },
+
+            saveAsPDF() {
+                this.showToast("SELECCIONE 'GUARDAR COMO PDF' EN LA VENTANA DE IMPRESIÓN PARA ELEGIR DÓNDE GUARDAR.", "success");
+                setTimeout(() => {
+                    this.printReport();
+                }, 1000);
+            },
+
+            printReport() {
+                const s = this.selectedSalida;
+                if(!s) return;
+
+                let printedBy = 'OPERADOR / OFICIAL DE TURNO';
+                try { const sessionStr = localStorage.getItem('adminUser'); if (sessionStr) printedBy = JSON.parse(sessionStr).nombreBombero; } catch(e) {}
+                const now = new Date();
+                const printedDate = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth()+1).padStart(2, '0')}-${now.getFullYear()} A LAS ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')} HRS`;
+
+                let docStatus = "REGISTRO CONCLUIDO";
+                let docColor = "#475569";
+
+                // Tiempos Formateados
+                const formatTime = (time, date) => {
+                    if (!time || String(time).trim() === '') return '--:--';
+                    return `${time} <br><span style="font-size:9px; color:#64748b; font-weight:normal;">${this.cleanDate(date)}</span>`;
+                };
+
+                const h60 = formatTime(s.hora60, s.fecha60);
+                const h63 = formatTime(s.hora63, s.fecha63);
+                const h69 = formatTime(s.hora69, s.fecha69);
+                const h610 = formatTime(s.hora610, s.fecha610);
+                const h68 = formatTime(s.hora68, s.fecha68);
+
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'fixed';
+                iframe.style.right = '0';
+                iframe.style.bottom = '0';
+                iframe.style.width = '0';
+                iframe.style.height = '0';
+                iframe.style.border = '0';
+                document.body.appendChild(iframe);
+
+                const doc = iframe.contentWindow.document;
+                doc.open();
+                doc.write(`
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <title>Bitacora_${s.carro}_Salida${s.idSalida}</title>
+                        <style>
+                            @page { size: letter portrait; margin: 12mm; }
+                            body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; padding: 0; margin: 0; color: #1e293b; font-size: 11px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff;}
+                            
+                            /* Encabezado */
+                            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #b91c1c; padding-bottom: 10px; margin-bottom: 15px; }
+                            .header-left { display: flex; align-items: center; gap: 15px; }
+                            .logo { width: 60px; height: 60px; object-fit: contain; }
+                            .title-container h1 { font-size: 18px; font-weight: 900; color: #1e293b; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+                            .title-container p { font-size: 10px; font-weight: bold; color: #64748b; margin: 2px 0 0 0; text-transform: uppercase; letter-spacing: 1px; }
+                            .status-badge { border: 2px solid ${docColor}; color: ${docColor}; padding: 4px 12px; border-radius: 6px; font-weight: 900; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; text-align: center; }
+
+                            /* Títulos de Sección */
+                            .section-title { font-size: 11px; font-weight: 900; color: #fff; background-color: #1e293b; padding: 5px 10px; text-transform: uppercase; letter-spacing: 1px; margin: 15px 0 10px 0; border-radius: 4px; }
+                            
+                            /* Tablas Estructuradas */
+                            .form-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; border: 1px solid #cbd5e1; }
+                            .form-table th, .form-table td { border: 1px solid #cbd5e1; padding: 6px 10px; vertical-align: middle; }
+                            .form-table th { background-color: #f8fafc; font-size: 9px; color: #475569; text-transform: uppercase; width: 18%; text-align: left; letter-spacing: 0.5px; }
+                            .form-table td { font-size: 12px; font-weight: bold; color: #0f172a; text-transform: uppercase; }
+                            .val-highlight { color: #b91c1c; font-size: 15px; font-weight: 900; }
+                            
+                            /* Tablas de Datos (Tiempos) */
+                            .data-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; text-align: center; border: 1px solid #cbd5e1; }
+                            .data-table th { background-color: #f1f5f9; font-size: 9px; color: #475569; text-transform: uppercase; padding: 6px; border: 1px solid #cbd5e1; }
+                            .data-table td { font-size: 14px; font-weight: 900; padding: 10px; border: 1px solid #cbd5e1; text-transform: uppercase; }
+                            
+                            /* Cajas de Texto */
+                            .text-box { background-color: #f8fafc; border: 1px solid #cbd5e1; padding: 10px; border-radius: 4px; font-size: 11px; color: #334155; white-space: pre-wrap; font-family: inherit; min-height: 40px; margin-bottom: 10px; font-weight: 500; text-transform: uppercase; }
+                            .text-label { font-size: 10px; font-weight: bold; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+                            /* Utilidades */
+                            .page-break { page-break-inside: avoid; }
+                            .footer { margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; font-size: 9px; color: #94a3b8; text-align: center; font-family: monospace; font-weight: bold; text-transform: uppercase; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="header">
+                            <div class="header-left">
+                                <img src="./Logo.png" class="logo" alt="Logo">
+                                <div class="title-container">
+                                    <h1 class="dynamic-print-name">CUERPO DE BOMBEROS</h1>
+                                    <p>Bitácora Oficial de Material Mayor</p>
+                                </div>
+                            </div>
+                            <div>
+                                <div class="status-badge">${docStatus}</div>
+                            </div>
+                        </div>
+
+                        <div class="section-title">Información de la Salida</div>
+                        <table class="form-table">
+                            <tr>
+                                <th>Unidad (Carro)</th>
+                                <td style="width: 32%;"><span class="val-highlight">${s.carro || 'S/N'}</span></td>
+                                <th>Código Bitácora</th>
+                                <td style="width: 32%;"><span class="val-highlight">#${s.idSalida}</span></td>
+                            </tr>
+                            <tr>
+                                <th>Clave / Evento</th>
+                                <td>${this.getClaveForTrip(s)}</td>
+                                <th>Despacho Asoc.</th>
+                                <td>${(s.idServicio && String(s.idServicio).trim() !== '') ? '#' + s.idServicio : 'SIN ASOCIACIÓN'}</td>
+                            </tr>
+                            <tr>
+                                <th>Ubicación / Sector</th>
+                                <td colspan="3">${s.lugar || 'NO REGISTRADA'}</td>
+                            </tr>
+                            <tr>
+                                <th>Oficial a Cargo (OBAC)</th>
+                                <td>${this.formatName(s.obac)}</td>
+                                <th>Conductor</th>
+                                <td>${this.formatName(s.conductor)}</td>
+                            </tr>
+                            <tr>
+                                <th>Bomberos Tripulantes</th>
+                                <td><span style="color:#1d4ed8; font-size: 14px; font-weight: bold;">${s.cuantosBomberos || '0'}</span></td>
+                                <th>Odómetro Final</th>
+                                <td>${s.km ? s.km + ' KM' : '0 KM'} ${(s.km && s.kmSalida) ? ' (RECORRIDO: ' + Math.max(0, parseInt(s.km) - parseInt(s.kmSalida)) + ' KM)' : ''}</td>
+                            </tr>
+                        </table>
+
+                        <div class="section-title">Registro Cronológico (Comunicaciones Radiales)</div>
+                        <table class="data-table">
+                            <tr>
+                                <th style="width: 20%; color: #dc2626;">6-0 (SALE)</th>
+                                <th style="width: 20%; color: #ca8a04;">6-3 (LLEGA)</th>
+                                <th style="width: 20%; color: #2563eb;">6-9 (RETIRA)</th>
+                                <th style="width: 20%; color: #475569;">6-10 (CUARTEL)</th>
+                                <th style="width: 20%; color: #059669;">6-8 (LISTA)</th>
+                            </tr>
+                            <tr>
+                                <td>${h60}</td>
+                                <td>${h63}</td>
+                                <td>${h69}</td>
+                                <td>${h610}</td>
+                                <td>${h68}</td>
+                            </tr>
+                        </table>
+
+                        <div class="section-title page-break">Informes de la Unidad</div>
+                        
+                        <div class="page-break">
+                            <div class="text-label" style="color:#b91c1c;">Pre-Informe Radial de Salida (6-0)</div>
+                            <div class="text-box">${s.preInforme || 'SIN REGISTRO.'}</div>
+                        </div>
+
+                        <div class="page-break">
+                            <div class="text-label" style="color:#ca8a04;">Informe de Llegada al Lugar (6-3)</div>
+                            <div class="text-box">${s.informe63 || 'SIN REGISTRO.'}</div>
+                        </div>
+
+                        <div class="page-break">
+                            <div class="text-label" style="color:#475569;">Observaciones Adicionales / Novedades de la Unidad</div>
+                            <div class="text-box" style="border-style: dashed;">${s.observacion || 'SIN OBSERVACIONES.'}</div>
+                        </div>
+
+                        <div class="footer">
+                            Documento Impreso por: <strong>${printedBy}</strong> &nbsp;|&nbsp; Fecha y Hora Emisión: <strong>${printedDate}</strong> &nbsp;|&nbsp; SisBom Administrativo
+                        </div>
+
+                        <script>
+                            window.onload = () => { 
+                                const clientName = parent.localStorage.getItem('saas_client_name') || 'CUERPO DE BOMBEROS';
+                                document.querySelectorAll('.dynamic-print-name').forEach(el => {
+                                    el.innerText = clientName.toUpperCase();
+                                });
+                                const printLogo = document.querySelector('.logo');
+                                if (printLogo) {
+                                    printLogo.src = './Logo.png';
+                                }
+                                setTimeout(() => { window.print(); }, 800); 
+                            };
+                            window.onafterprint = () => {
+                                parent.document.body.removeChild(window.frameElement);
+                            };
+                        <\/script>
+    
+</body>
+                    </html>
+                `);
+                doc.close();
+                iframe.contentWindow.focus();
+            },
+
+            showLoader() {
+                const el = document.getElementById('loading-overlay');
+                if(el) { el.classList.remove('hidden'); el.classList.add('flex'); }
+            },
+            hideLoader() {
+                const el = document.getElementById('loading-overlay');
+                if(el) { el.classList.add('hidden'); el.classList.remove('flex'); }
+            },
+            showToast(message, type = 'success') {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+                toast.className = `transform transition-all duration-300 translate-y-full opacity-0 max-w-sm w-full shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 ${bg} text-white uppercase`;
+                toast.innerHTML = `<div class="p-4 w-full flex items-center gap-3">
+                    ${type === 'success' ? '<i class="fas fa-check-circle text-lg"></i>' : '<i class="fas fa-times-circle text-lg"></i>'}
+                    <p class="text-sm font-medium tracking-wide">${message}</p>
+                </div>`;
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 10);
+                setTimeout(() => {
+                    toast.classList.add('translate-y-full', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3500);
+            }
+        };
+
+        window.handleCycleChange = function(year) {
+            const select = document.getElementById('yearFilter');
+            if (select) {
+                select.value = year;
+                App.currentPage = 1;
+                App.applyFilters();
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => App.init());
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

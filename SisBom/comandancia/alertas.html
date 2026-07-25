@@ -1,0 +1,2066 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Central de Alertas - SisBom</title>
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <style>
+        html { font-size: 14px; }
+        body { font-family: 'Segoe UI', sans-serif; min-font-size: 12px; background-color: #F8FAFC; color: #334155; -webkit-font-smoothing: antialiased; }
+        
+        /* Spinner Global Minimalista (Pequeño y sin fondo gris) */
+        .spinner {
+            border: 3px solid transparent;
+            border-radius: 50%;
+            border-top: 3px solid #B91C1C;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .chat-scroll::-webkit-scrollbar { width: 6px; }
+        .chat-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
+        /* Estilos de Inputs estandarizados */
+        .f-input { 
+            width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; 
+            line-height: 1.25rem; background-color: #fff; color: #0f172a; outline: none; transition: all 0.2s; 
+        }
+        .f-input:focus { border-color: #B91C1C; box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.1); }
+        .f-label { display: block; font-size: 0.75rem; font-weight: 600; color: #64748b; margin-bottom: 0.25rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .f-label.required::after { content: " *"; color: #B91C1C; margin-left: 2px; }
+
+        /* Resultados del Autocompletado */
+        .autocomplete-results {
+            position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px;
+            background: white; border: 1px solid #e2e8f0; border-radius: 0.5rem; 
+            max-height: 180px; overflow-y: auto; z-index: 50;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        .autocomplete-item { 
+            padding: 8px 12px; cursor: pointer; border-bottom: 1px solid #f1f5f9; 
+            font-size: 13px; color: #334155; transition: background-color 0.1s; 
+        }
+        .autocomplete-item:last-child { border-bottom: none; }
+        .autocomplete-item:hover, .autocomplete-item.active { background-color: #FEF2F2; color: #B91C1C; }
+
+        /* Estilos de Tarjetas de Alerta */
+        .alert-card { transition: all 0.3s ease; }
+        .alert-card:hover { transform: translateY(-2px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        
+        .alert-g1 { border-top: 4px solid #3b82f6; } /* Azul - Info */
+        .alert-g2 { border-top: 4px solid #f59e0b; } /* Amarillo - Warning */
+        .alert-g3 { border-top: 4px solid #ef4444; } /* Rojo - Crítico */
+        .alert-gc { border-top: 4px solid #B91C1C; } /* Rojo Bomberos - Conversación */
+        .alert-orden { border-top: 4px solid #1e293b; } /* Slate 800 - Orden del Día */
+
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder { text-transform: uppercase !important; }
+
+        /* Estilos Modo Lectura SaaS */
+        body.saas-read-only-active .btn-red,
+        body.saas-read-only-active .btn-blue,
+        body.saas-read-only-active .btn-green,
+        body.saas-read-only-active button[type="submit"],
+        body.saas-read-only-active input[type="submit"],
+        body.saas-read-only-active .button-10:not(.btn-white),
+        body.saas-read-only-active .bg-bomberos-red,
+        body.saas-read-only-active .bg-slate-800 {
+            opacity: 0.5;
+            pointer-events: none !important;
+            cursor: not-allowed;
+        }
+        body.saas-read-only-active textarea,
+        body.saas-read-only-active input:not([type="search"]):not(#searchInput):not(#tableSearch) {
+            pointer-events: none !important;
+            background-color: #f1f5f9 !important;
+            color: #94a3b8 !important;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <!-- FORZAR MAYÚSCULAS EN LOS INPUTS (EXCEPTO CHAT) -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('input', e => {
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (e.target.type !== 'password' && !e.target.classList.contains('chat-input') && e.target.id !== 'chat-message') {
+                        const start = e.target.selectionStart, end = e.target.selectionEnd;
+                        e.target.value = e.target.value.toUpperCase();
+                        e.target.setSelectionRange(start, end);
+                    }
+                }
+            });
+        });
+    </script>
+
+    <!-- MAIN APP CONTENEDOR -->
+    <main class="flex-1 overflow-auto max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 relative">
+        <div class="flex flex-col gap-6">
+
+            <!-- HEADER CON TITULO Y FILTROS -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 pb-5">
+                <div>
+                    <h1 class="text-3xl font-black text-slate-800 tracking-tight uppercase">Central de Alertas</h1>
+                    <p class="text-xs font-bold text-slate-400 mt-1 uppercase tracking-widest">Muro de comunicaciones oficiales y chats operativos</p>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="relative flex-1 md:flex-none">
+                        <input type="text" id="searchInput" class="f-input pl-10 pr-4 py-2 font-medium text-slate-700" placeholder="Buscar alerta...">
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400"><i class="fas fa-search text-sm"></i></div>
+                    </div>
+                    <div>
+                        <select id="statusFilter" class="f-input font-bold text-slate-700">
+                            <option value="activas">Alertas Activas</option>
+                            <option value="ocultas">Alertas Ocultas</option>
+                            <option value="todas">Todas las Alertas</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Acciones Rápidas -->
+                <div class="flex items-center gap-2 w-full lg:w-auto justify-start lg:justify-end">
+                    <!-- BOTÓN ORDEN DEL DÍA -->
+                    <button onclick="App.openOrdenModal()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all shadow-sm">
+                        <i class="fas fa-file-signature"></i> <span class="hidden sm:inline">Orden del Día</span>
+                    </button>
+                    <button onclick="App.openNewAlertModal()" class="bg-bomberos-red hover:bg-bomberos-dark text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all shadow-sm">
+                        <i class="fas fa-bullhorn"></i> <span class="hidden sm:inline">Redactar Alerta</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- PIZARRA DE ALERTAS -->
+            <div id="alertas-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <!-- JS Inject -->
+            </div>
+
+            <!-- Estado Vacío -->
+            <div id="empty-state" class="hidden text-center py-16 bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div class="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center text-slate-400 text-3xl mb-4 mx-auto"><i class="far fa-bell-slash"></i></div>
+                <p class="text-slate-600 font-bold text-lg">No hay alertas para mostrar</p>
+                <p class="text-sm text-slate-400 mt-1">El muro de comunicaciones está despejado.</p>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- MODAL NUEVA ALERTA -->
+    <div id="new-alert-modal" class="fixed inset-0 bg-slate-900 bg-opacity-60 hidden items-center justify-center transition-opacity duration-200 opacity-0 backdrop-blur-sm p-4" style="z-index: 9000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl transition-transform duration-200 transform scale-95 flex flex-col" style="max-height: 95vh;" id="new-alert-modal-content">
+            
+            <div class="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center flex-shrink-0 rounded-t-2xl">
+                <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                    <i class="fas fa-bullhorn text-bomberos-red"></i>
+                    Emitir Orden o Alerta
+                </h3>
+                <button type="button" onclick="App.closeNewAlertModal()" class="text-slate-400 hover:text-red-600 transition-colors p-1"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            
+            <form id="newAlertForm" onsubmit="App.saveNewAlert(event)" class="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div class="md:col-span-2">
+                        <label class="f-label required">Motivo / Título de la Alerta</label>
+                        <input type="text" id="na-razon" required class="f-input font-bold text-slate-800 text-lg" placeholder="Ej: Citación a Academia, Material Fuera de Servicio...">
+                    </div>
+
+                    <div class="md:col-span-2">
+                        <label class="f-label required">Cuerpo del Mensaje Inicial</label>
+                        <textarea id="na-mensaje" required class="f-input resize-y font-medium text-slate-700" style="min-height: 120px;" placeholder="Describa los detalles de la orden o el primer mensaje del chat..."></textarea>
+                    </div>
+
+                    <div>
+                        <label class="f-label required">Grado de Importancia</label>
+                        <select id="na-grado" required class="f-input font-bold">
+                            <option value="1">Grado 1 - Informativo</option>
+                            <option value="2">Grado 2 - Advertencia / Citación</option>
+                            <option value="3">Grado 3 - CRÍTICO / URGENTE</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="f-label required">Vigencia / Modalidad</label>
+                        <select id="na-duracion-tipo" class="f-input font-bold text-slate-700" onchange="App.toggleDateInput()">
+                            <option value="i">Indefinida (Hasta ocultar manualmente)</option>
+                            <option value="c">Conversación (Chat Grupal)</option>
+                            <option value="fecha">Hasta una fecha límite</option>
+                            <option value="hora">Por Tiempo (Caduca hoy a una hora)</option>
+                        </select>
+                        <input type="date" id="na-duracion-fecha" class="f-input mt-2 hidden text-slate-700" min="">
+                        <!-- Entrada de Hora con Validaciones -->
+                        <input type="time" id="na-duracion-hora" class="f-input mt-2 hidden text-slate-700 font-bold" onfocus="App.updateTimeMin(this)" onchange="App.updateTimeMin(this)" onclick="App.updateTimeMin(this)">
+                    </div>
+
+                    <div class="md:col-span-2 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                        <label class="f-label required mb-3">Destinatario de la Alerta / Chat</label>
+                        <div class="flex gap-4 mb-3">
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="na-destinatario-tipo" value="TC" checked onchange="App.toggleRecipientInput()" class="text-bomberos-red focus:ring-bomberos-red w-4 h-4">
+                                <span class="text-sm font-bold text-slate-700">Toda la Compañía</span>
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" name="na-destinatario-tipo" value="especifico" onchange="App.toggleRecipientInput()" class="text-bomberos-red focus:ring-bomberos-red w-4 h-4">
+                                <span class="text-sm font-bold text-slate-700">Personal Específico</span>
+                            </label>
+                        </div>
+                        
+                        <div id="na-destinatario-container" class="relative hidden">
+                            <input type="text" id="na-destinatario" class="f-input font-medium" placeholder="Ej: 10-1, 10-2, 10-5 o Buscar..." onkeydown="App.handleAutocompleteKey(event, 'results-destinatario')" oninput="App.filterPersonnel(this, 'results-destinatario'); App.updateRecipientNames();" autocomplete="off">
+                            <div id="results-destinatario" class="autocomplete-results hidden"></div>
+                            <p class="text-slate-500 mt-1 italic" style="font-size: 10px;" id="na-destinatario-names">Puedes buscar un nombre o escribir múltiples IDs separados por coma (,).</p>
+                        </div>
+                    </div>
+                </div>
+
+            </form>
+
+            <div class="bg-slate-50 px-6 py-4 flex justify-between items-center border-t border-slate-200 flex-shrink-0 rounded-b-2xl">
+                <span class="text-xs text-slate-500 font-semibold" id="na-author-display">Emitiendo como: --</span>
+                <div class="flex gap-3">
+                    <button type="button" onclick="App.closeNewAlertModal()" class="px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                    <button type="button" onclick="document.getElementById('newAlertForm').requestSubmit()" id="btn-save-alert" class="px-6 py-2 text-sm font-bold text-white bg-bomberos-red hover:bg-bomberos-dark rounded-xl transition-colors shadow-sm flex items-center gap-2">
+                        <i class="fas fa-paper-plane"></i> Publicar Alerta
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- MODAL ORDEN DEL DÍA -->
+    <div id="orden-modal" class="fixed inset-0 bg-slate-900 bg-opacity-60 hidden items-center justify-center transition-opacity duration-200 opacity-0 backdrop-blur-sm p-4" style="z-index: 9000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-3xl transition-transform duration-200 transform scale-95 flex flex-col" style="max-height: 95vh;" id="orden-modal-content">
+            
+            <div class="px-6 py-4 border-b border-slate-200 bg-slate-800 flex justify-between items-center flex-shrink-0 rounded-t-2xl">
+                <h3 class="text-lg font-bold text-white flex items-center gap-2">
+                    <i class="fas fa-file-signature text-slate-300"></i>
+                    Redactar Orden del Día
+                </h3>
+                <button type="button" onclick="App.closeOrdenModal()" class="text-slate-400 hover:text-white transition-colors p-1"><i class="fas fa-times text-xl"></i></button>
+            </div>
+            
+            <form id="ordenForm" onsubmit="App.saveOrden(event)" class="p-6 space-y-5 overflow-y-auto flex-1 custom-scrollbar">
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-2">
+                    <p class="text-xs text-slate-500 font-semibold italic"><i class="fas fa-info-circle mr-1"></i> Las Órdenes del Día tienen un formato formal preestablecido y generan un documento imprimible con formato oficial del Cuerpo de Bomberos.</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label class="f-label required">Número de Orden</label>
+                        <input type="text" id="od-numero" required class="f-input font-bold text-slate-800 uppercase" placeholder="Ej: 08/2026">
+                    </div>
+                    <div>
+                        <label class="f-label required">Fecha de Emisión</label>
+                        <input type="date" id="od-fecha" required class="f-input font-bold text-slate-700">
+                    </div>
+
+                    <div class="md:col-span-2">
+                        <label class="f-label required">Cuerpo de la Orden (Resoluciones)</label>
+                        <textarea id="od-cuerpo" required class="f-input resize-y font-medium text-slate-700" style="min-height: 150px;" placeholder="I.- Citase a academia general...&#10;II.- El personal tendrá para excusarse..."></textarea>
+                    </div>
+
+                    <div>
+                        <label class="f-label required">Nombre Firmante</label>
+                        <input type="text" id="od-firma-nombre" required readonly class="f-input font-bold text-slate-500 bg-slate-100 cursor-not-allowed uppercase" placeholder="Autocompletado por sesión">
+                    </div>
+                    <div>
+                        <label class="f-label required">Cargo Firmante</label>
+                        <input type="text" id="od-firma-cargo" required readonly class="f-input font-bold text-slate-500 bg-slate-100 cursor-not-allowed uppercase" placeholder="Autocompletado por sesión">
+                    </div>
+                </div>
+            </form>
+
+            <div class="bg-slate-100 px-6 py-4 flex justify-between items-center border-t border-slate-200 flex-shrink-0 rounded-b-2xl">
+                <span class="text-xs text-slate-500 font-semibold" id="od-author-display">Emitiendo como: --</span>
+                <div class="flex gap-3">
+                    <button type="button" onclick="App.closeOrdenModal()" class="px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                    <button type="button" onclick="document.getElementById('ordenForm').requestSubmit()" id="btn-save-orden" class="px-6 py-2 text-sm font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-xl transition-colors shadow-sm flex items-center gap-2">
+                        <i class="fas fa-save"></i> Guardar Orden
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- MODAL LISTA DE CONFORMES -->
+    <div id="conformes-modal" class="fixed inset-0 bg-slate-900 bg-opacity-60 hidden items-center justify-center transition-opacity duration-200 opacity-0 backdrop-blur-sm p-4" style="z-index: 9100;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col" style="max-height: 80vh;" id="conformes-modal-content">
+            <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                <h3 class="font-bold text-slate-800 flex items-center gap-2"><i class="fas fa-check-double text-green-600"></i> Personal Enterado</h3>
+                <button onclick="App.closeConformesModal()" class="text-slate-400 hover:text-red-600 transition-colors p-1"><i class="fas fa-times text-lg"></i></button>
+            </div>
+            <div class="p-0 overflow-y-auto flex-1 custom-scrollbar bg-white">
+                <ul id="conformes-list" class="divide-y divide-slate-100">
+                    <!-- JS Injects list -->
+                </ul>
+            </div>
+            <div class="p-3 bg-slate-50 border-t border-slate-200 text-center shrink-0">
+                <span class="text-xs font-bold text-slate-500" id="conformes-total-count">0 Confirmaciones</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CHAT DE CONVERSACIÓN -->
+    <div id="chat-modal" onclick="App.closeChatModal()" class="fixed inset-0 bg-slate-900 bg-opacity-60 hidden items-center justify-center transition-opacity duration-200 opacity-0 backdrop-blur-sm p-2 sm:p-4" style="z-index: 9200;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col sm:h-[85vh]" style="height: 90vh;" id="chat-modal-content" onclick="event.stopPropagation()">
+            <!-- Header Chat -->
+            <div class="px-5 py-4 border-b border-red-200 bg-red-50 flex justify-between items-center shrink-0 shadow-sm z-10">
+                <div class="flex flex-col min-w-0">
+                    <h3 class="font-bold text-bomberos-dark flex items-center gap-2 text-lg leading-tight truncate" id="chat-modal-title"></h3>
+                    <span class="font-bold text-bomberos-red uppercase tracking-widest mt-0.5 truncate" style="font-size: 10px;" id="chat-modal-subtitle"></span>
+                </div>
+                <button onclick="App.closeChatModal()" class="text-red-400 hover:text-red-700 transition-colors p-2 bg-red-100 hover:bg-red-200 rounded-full ml-3 shrink-0" style="background-color: rgba(254, 226, 226, 0.5);"><i class="fas fa-times text-lg"></i></button>
+            </div>
+            
+            <!-- Cuerpo Mensajes con Fondo de Escudo -->
+            <div class="flex-1 relative bg-[#F0F2F5] overflow-hidden flex flex-col z-0">
+                <!-- Marca de Agua (Escudo Bomberos) -->
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none z-0" style="opacity: 0.04;">
+                    <img src="./Logo.png" class="w-64 h-64 sm:w-80 sm:h-80 object-contain filter grayscale" alt="Escudo Bomberos Fondo">
+                </div>
+                
+                <!-- Contenedor Scroll de Mensajes -->
+                <div id="chat-messages-container" class="p-4 overflow-y-auto flex-1 flex flex-col chat-scroll gap-3 relative z-10">
+                    <!-- JS Injects messages -->
+                </div>
+            </div>
+            
+            <!-- Footer Input -->
+            <div class="p-3 sm:p-4 bg-white border-t border-slate-200 flex gap-3 shrink-0 items-end z-10 relative">
+                <div class="flex-1 bg-slate-100 rounded-xl border border-slate-200 focus-within:border-bomberos-red focus-within:ring-2 focus-within:ring-red-100 transition-all overflow-hidden flex">
+                    <textarea id="chat-input" rows="1" class="w-full bg-transparent border-none focus:ring-0 resize-none py-3 px-4 text-slate-700 font-medium placeholder-slate-400 max-h-32" placeholder="Escribe un mensaje..." onkeydown="App.handleChatKey(event)"></textarea>
+                </div>
+                <button id="chat-send-btn" onclick="App.sendChatMessage()" class="bg-bomberos-red hover:bg-bomberos-dark text-white w-12 h-12 rounded-xl flex items-center justify-center transition-all shadow-md shrink-0 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMACIÓN GENÉRICO (ELIMINAR/RESTAURAR) -->
+    <div id="confirm-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm flex items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 9300;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-95" id="confirm-modal-content">
+            <div class="p-6 text-center">
+                <div id="confirm-modal-icon-container" class="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center text-2xl mx-auto mb-4 border border-red-100">
+                    <i id="confirm-modal-icon" class="fas fa-trash-alt"></i>
+                </div>
+                <h3 id="confirm-modal-title" class="font-bold text-lg text-slate-800 mb-2 uppercase tracking-tight">Ocultar Alerta</h3>
+                <p id="confirm-modal-msg" class="text-sm text-slate-600 font-medium">¿Estás seguro de eliminar esta alerta?</p>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-2 gap-2">
+                <button onclick="App.closeConfirmModal()" class="flex-1 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                <button id="confirm-modal-btn" onclick="App.executeConfirmAction()" class="flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 shadow-sm rounded-xl transition-colors">Sí, Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- OVERLAY DE CARGA -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm hidden flex-col items-center justify-center transition-opacity duration-300" style="z-index: 9999;">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
+
+    <script>
+        // Cierra los desplegables de autocompletado si el usuario hace clic afuera
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.relative')) {
+                document.querySelectorAll('.autocomplete-results').forEach(el => el.classList.add('hidden'));
+            }
+        });
+
+        // Autoresize del textarea del chat
+        const tx = document.getElementById("chat-input");
+        tx.addEventListener("input", function() {
+            this.style.height = "auto";
+            this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + "px";
+        }, false);
+
+        // CONFIGURACIÓN FIREBASE
+        const firebaseConfig = {
+            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+            authDomain: "sisbom-de5f8.firebaseapp.com",
+            projectId: "sisbom-de5f8",
+            storageBucket: "sisbom-de5f8.firebasestorage.app",
+            messagingSenderId: "39449538456",
+            appId: "1:39449538456:web:64f767264356ae587485ed"
+        };
+
+        const CACHE_KEY = "sisbom_alertas_cache_v2";
+        let fbDb = null;
+
+        const App = {
+            data: [],
+            personalData: [],
+            filteredData: [],
+            searchTerm: '',
+            currentUser: null,
+            myRadialId: '',
+            myIdRegistro: '',
+            myCargo: '',
+            isAdmin: false, 
+            autocompleteFocus: -1,
+            editingFila: null, 
+            
+            confirmTargetFila: null, 
+            confirmActionType: '',
+
+            currentChatFila: null,
+            lastChatRawText: null,
+            readStatus: {}, 
+            
+            unsubAlertas: null,
+
+            async init() {
+                if (window.stopLoadingData) return;
+
+                if (localStorage.getItem('saas_read_only') === '1') {
+                    document.body.classList.add('saas-read-only-active');
+                }
+
+                try {
+                    const savedReads = localStorage.getItem('sisbom_alertas_reads');
+                    if (savedReads) this.readStatus = JSON.parse(savedReads);
+                } catch(e) {}
+
+                try {
+                    const sessionStr = localStorage.getItem('adminUser');
+                    if(sessionStr) {
+                        this.currentUser = JSON.parse(sessionStr);
+                    }
+                } catch(e) {}
+
+                this.setupSearch();
+
+                try {
+                    const cachedData = localStorage.getItem(CACHE_KEY);
+                    if (cachedData) {
+                        const parsed = JSON.parse(cachedData);
+                        this.data = parsed.alertas || [];
+                        this.personalData = parsed.personal || [];
+                        this.identifyUserRadial();
+                        this.applyFilters();
+                    }
+                } catch(e) {}
+
+                await this.initFirebase();
+                if (window.self !== window.top && parent && !parent.fbDb) {
+                    window.onFirebaseParentReady = () => {
+                        this.loadData(false);
+                    };
+                } else {
+                    this.loadData(false);
+                }
+            },
+
+            async initFirebase() {
+                if (parent) {
+                try {
+                    if (parent.fbDb) {
+                        fbDb = parent.fbDb;
+                    window.fbDoc = parent.fbDoc;
+                    window.fbSetDoc = parent.fbSetDoc;
+                    window.fbUpdateDoc = parent.fbUpdateDoc;
+                    window.fbCollection = parent.fbCollection;
+                    window.fbGetDocs = parent.fbGetDocs;
+                    window.fbOnSnapshot = parent.fbOnSnapshot;
+                    console.log("Firebase inherited from parent in Alertas");
+                    return;
+                    }
+                } catch (e) {
+                    console.warn("Error inheriting parent Firebase:", e);
+                }
+            }
+                try {
+                    const { initializeApp } = await import("./libs/firebase-app.js");
+                    const { getAuth, signInAnonymously } = await import("./libs/firebase-auth.js");
+                    const { getFirestore, doc, setDoc, updateDoc, collection, getDocs, onSnapshot } = await import("./libs/firebase-firestore.js");
+
+                    window.fbDoc = doc;
+                    window.fbSetDoc = (reference, data, options) => {
+                        if (localStorage.getItem('saas_read_only') === '1') {
+                            console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbSetDoc (iframe).");
+                            return Promise.resolve();
+                        }
+                        return setDoc(reference, data, options);
+                    };
+                    window.fbUpdateDoc = (reference, data) => {
+                        if (localStorage.getItem('saas_read_only') === '1') {
+                            console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbUpdateDoc (iframe).");
+                            return Promise.resolve();
+                        }
+                        return updateDoc(reference, data);
+                    };
+                    window.fbCollection = collection;
+                    window.fbGetDocs = getDocs;
+                    window.fbOnSnapshot = onSnapshot;
+
+                    let configToUse = firebaseConfig;
+                    try {
+                        const dynamicConfigStr = localStorage.getItem('saas_firebase_config');
+                        if (dynamicConfigStr) {
+                            configToUse = JSON.parse(dynamicConfigStr);
+                        }
+                    } catch (e) {
+                        console.error("Error parsing saas_firebase_config in Alertas:", e);
+                    }
+                    const app = initializeApp(configToUse);
+                    const auth = getAuth(app);
+                    fbDb = getFirestore(app);
+                    try {
+                        const storedUser = localStorage.getItem('authUserId');
+                        const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                        if (storedUser && storedPassSecure) {
+                            const email = storedUser + "@sisbom.com";
+                            const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                            await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                            console.log("Firebase conectado con credenciales en fallback.");
+                        } else {
+                            await signInAnonymously(auth);
+                            console.log("Firebase conectado de forma anónima en fallback.");
+                        }
+                    } catch(authErr) {
+                        console.warn("Error authenticating fallback Firebase:", authErr);
+                        try { await signInAnonymously(auth); } catch(ex){}
+                    }
+                } catch(e) {
+                    console.error("Error inicializando Firebase", e);
+                }
+            },
+
+            setupSearch() {
+                document.getElementById('searchInput').addEventListener('input', (e) => {
+                    this.searchTerm = e.target.value.toLowerCase().trim();
+                    this.applyFilters();
+                });
+
+                document.getElementById('statusFilter').addEventListener('change', () => {
+                    this.applyFilters();
+                });
+            },
+
+            identifyUserRadial() {
+                this.isAdmin = true;
+                if (!this.currentUser) return;
+                const match = this.personalData.find(p => p.nombreBombero.toUpperCase() === this.currentUser.nombreBombero.toUpperCase());
+                
+                if (match) {
+                    this.myIdRegistro = match.idRegistro ? String(match.idRegistro).trim() : '';
+                    this.myCargo = match.cargo ? String(match.cargo).trim() : 'Oficial';
+                    if (match.idRadial) {
+                        this.myRadialId = String(match.idRadial).trim();
+                    } else if (match.idRegistro) {
+                        this.myRadialId = String(match.idRegistro).trim();
+                    }
+                } else {
+                    this.myRadialId = this.currentUser.nombreBombero;
+                    this.myIdRegistro = this.currentUser.idRegistro ? String(this.currentUser.idRegistro).trim() : '';
+                    this.myCargo = this.currentUser.cargo ? String(this.currentUser.cargo).trim() : 'Oficial';
+                    
+                    if (this.currentUser.nombreBombero === "Admin Test Canvas") {
+                        this.myRadialId = "00-TEST";
+                        this.myCargo = "Administrador";
+                    }
+                }
+            },
+
+            async loadData(force = false) {
+                if (force && parent && typeof parent.refreshAllDatabaseData === 'function') {
+                    parent.refreshAllDatabaseData(true);
+                    return;
+                }
+                const syncIcon = document.getElementById('sync-icon');
+                if (syncIcon) syncIcon.classList.add('fa-spin');
+                
+                if (this.unsubAlertas && force) {
+                    try {
+                        if (!fbDb) await this.initFirebase();
+                        const snapPersonal = await window.fbGetDocs(window.fbCollection(fbDb, 'personal'));
+                        this.personalData = [];
+                        snapPersonal.forEach(doc => this.personalData.push(doc.data()));
+                        this.identifyUserRadial();
+                        
+                        setTimeout(() => {
+                            if (syncIcon) syncIcon.classList.remove('fa-spin');
+                            this.showToast("Datos sincronizados en tiempo real.", "success");
+                        }, 500);
+                    } catch(e) {
+                        this.showToast("Error al sincronizar datos anexos.", "error");
+                        if (syncIcon) syncIcon.classList.remove('fa-spin');
+                    }
+                    return;
+                }
+
+                const loadedOnce = sessionStorage.getItem('sisbom_alertas_loaded');
+                if (!loadedOnce || (!this.unsubAlertas && force)) this.showLoader();
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    if (!this.unsubAlertas) {
+                        const snapPersonal = await window.fbGetDocs(window.fbCollection(fbDb, 'personal'));
+                        this.personalData = [];
+                        snapPersonal.forEach(doc => this.personalData.push(doc.data()));
+                        this.identifyUserRadial();
+
+                        this.unsubAlertas = window.fbOnSnapshot(window.fbCollection(fbDb, 'alertas'), (snap) => {
+                            let fbAlertas = [];
+                            snap.forEach(doc => {
+                                let data = doc.data();
+                                data.idAlerta = doc.id;
+                                fbAlertas.push(data);
+                            });
+                            this.data = fbAlertas;
+                            
+                            localStorage.setItem(CACHE_KEY, JSON.stringify({
+                                alertas: this.data,
+                                personal: this.personalData
+                            }));
+                            sessionStorage.setItem('sisbom_alertas_loaded', 'true');
+                            
+                            this.applyFilters();
+                            
+                            if (this.currentChatFila && !document.getElementById('chat-modal').classList.contains('hidden')) {
+                                this.renderChatMessages();
+                            }
+                            this.hideLoader();
+                        }, (error) => {
+                            console.error(error);
+                            this.showToast("Error de conexión en vivo.", "error");
+                            this.hideLoader();
+                        });
+                    }
+
+                } catch (e) {
+                    console.error(e);
+                    this.showToast("Fallo de conexión a Firebase.", "error");
+                    this.hideLoader();
+                } finally {
+                    if (syncIcon) syncIcon.classList.remove('fa-spin');
+                }
+            },
+
+            cleanDate(dateStr) {
+                if(!dateStr) return '';
+                const d = String(dateStr).replace(/['"]/g, '').trim();
+                if(d.includes('T')) {
+                    const p = d.split('T').at(0).split('-');
+                    return `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                }
+                return d;
+            },
+
+            isAlertActive(duracionStr) {
+                const durStr = String(duracionStr).replace(/['"]/g, '').trim().toLowerCase();
+                
+                if (durStr === 'i' || durStr === 'c') return true; 
+                if (durStr === '') return false; 
+                
+                // Parsing de Tiempo: DD-MM-YYYY HH:MM o DD-MM-YYYY
+                let limitDate;
+                let dPart = durStr, tPart = "23:59:59";
+                
+                if (durStr.includes(' ')) {
+                    const parts = durStr.split(' ');
+                    dPart = parts.at(0);
+                    tPart = parts.at(1) + ":00"; 
+                }
+
+                if (dPart.includes('-') && dPart.split('-').at(0).length === 2) {
+                    const parts = dPart.split('-');
+                    const tParts = tPart.split(':');
+                    limitDate = new Date(parts.at(2), parseInt(parts.at(1)) - 1, parts.at(0), tParts.at(0), tParts.at(1), tParts.at(2) || 0);
+                } else {
+                    limitDate = new Date(durStr);
+                    if (!durStr.includes(' ')) limitDate.setHours(23, 59, 59, 999);
+                }
+                
+                if (isNaN(limitDate.getTime())) return true; 
+                
+                const now = new Date();
+                return now <= limitDate;
+            },
+
+            applyFilters() {
+                let filtered = [...this.data];
+                const statusFilter = document.getElementById('statusFilter').value;
+                const isAdmin = this.isAdmin;
+
+                filtered = filtered.filter(row => {
+                    const isDeleted = String(row.duracion).trim() === ''; 
+                    if (isDeleted && !isAdmin) return false;
+
+                    const fijados = String(row.fijar || '').split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+                    const isPinned = this.myRadialId && fijados.includes(this.myRadialId.toUpperCase());
+                    
+                    const isActive = isPinned ? true : this.isAlertActive(row.duracion);
+
+                    if (statusFilter === 'activas') return isActive && !isDeleted;
+                    if (statusFilter === 'ocultas') return !isActive || isDeleted;
+                    return true;
+                });
+
+                // Removed recipient check block to keep all chats/alerts visible to everyone
+
+                if (this.searchTerm !== '') {
+                    filtered = filtered.filter(row => {
+                        const s = `${row.razonAlerta} ${row.mensajeAlerta} ${row.quienAlerta}`.toLowerCase();
+                        return s.includes(this.searchTerm);
+                    });
+                }
+
+                filtered.sort((a, b) => {
+                    const aFijados = String(a.fijar || '').split(',').map(s => s.trim().toUpperCase());
+                    const bFijados = String(b.fijar || '').split(',').map(s => s.trim().toUpperCase());
+                    
+                    const aIsPinned = this.myRadialId && aFijados.includes(this.myRadialId.toUpperCase());
+                    const bIsPinned = this.myRadialId && bFijados.includes(this.myRadialId.toUpperCase());
+
+                    if (aIsPinned && !bIsPinned) return -1;
+                    if (!aIsPinned && bIsPinned) return 1;
+
+                    return (parseInt(b.idAlerta) || 0) - (parseInt(a.idAlerta) || 0);
+                });
+
+                this.filteredData = filtered;
+                this.renderGrid();
+            },
+
+            getNamesFromTarget(aQuienStr) {
+                if (aQuienStr === 'TC' || aQuienStr === '1') return "Toda la Compañía";
+                return aQuienStr.split(',').map(id => {
+                    const cleanId = id.trim().toUpperCase();
+                    let p = this.personalData.find(x => x.idRegistro && String(x.idRegistro).toUpperCase() === cleanId);
+                    if (!p) {
+                        p = this.personalData.find(x => x.idRadial && String(x.idRadial).toUpperCase() === cleanId);
+                    }
+                    return p ? p.nombreBombero : cleanId;
+                }).join(', ');
+            },
+
+            renderGrid() {
+                const grid = document.getElementById('alertas-grid');
+                const empty = document.getElementById('empty-state');
+                const isAdmin = this.isAdmin;
+
+                if (this.filteredData.length === 0) {
+                    grid.innerHTML = '';
+                    empty.classList.remove('hidden');
+                    return;
+                }
+
+                empty.classList.add('hidden');
+
+                grid.innerHTML = this.filteredData.map(row => {
+                    const id = row.idAlerta || '-';
+                    const fecha = this.cleanDate(row.fechaAlerta);
+                    const hora = row.horaAlerta || '--:--';
+                    const grado = String(row.gradoAlerta).trim();
+                    const tipo = String(row.tipo).trim(); // Identifica 'orden'
+                    const isActive = this.isAlertActive(row.duracion);
+                    
+                    const conformes = String(row.conforme || '').split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+                    const fijados = String(row.fijar || '').split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+                    
+                    const iAmConforme = this.myRadialId && conformes.includes(this.myRadialId.toUpperCase());
+                    const iPinnedIt = this.myRadialId && fijados.includes(this.myRadialId.toUpperCase());
+                    const isAuthor = this.myRadialId && String(row.quienAlerta).toUpperCase().includes(this.myRadialId.toUpperCase());
+                    
+                    const isDeleted = String(row.duracion).trim() === '';
+                    const isConversation = String(row.duracion).trim().toUpperCase() === 'C';
+                    const isOrden = tipo === 'orden';
+                    
+                    const aQuien = String(row.aQuienAlerta).trim();
+                    const namesStr = this.getNamesFromTarget(aQuien);
+
+                    let hasNewMessage = false;
+                    let msgCount = 0;
+                    if (isConversation && !isDeleted) {
+                        const rawText = row.mensajeAlerta || '';
+                        msgCount = rawText.split('|').filter(s => s.trim()).length;
+                        const lastReadCount = this.readStatus[id] || 0;
+                        if (msgCount > lastReadCount) {
+                            hasNewMessage = true;
+                        }
+                    }
+
+                    let notificationBadge = '';
+                    if (hasNewMessage) {
+                        notificationBadge = `
+                            <div class="absolute -top-2 -right-2 flex h-5 w-5" style="z-index: 40;" title="Tienes mensajes nuevos">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-5 w-5 bg-red-500 border-2 border-white shadow-sm flex items-center justify-center font-black text-white" style="font-size: 9px;">${msgCount - (this.readStatus[id] || 0)}</span>
+                            </div>
+                        `;
+                    }
+
+                    let destinatariosUI = '';
+                    if (aQuien === 'TC' || aQuien === '1') {
+                        destinatariosUI = `<span class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-black tracking-widest uppercase border border-indigo-200 shadow-sm" style="font-size: 9px;"><i class="fas fa-users mr-1"></i> ${namesStr}</span>`;
+                    } else {
+                        destinatariosUI = `<span class="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-bold border border-slate-200 shadow-sm truncate inline-block" style="font-size: 9px; max-width: 200px;" title="Para: ${namesStr}"><i class="fas fa-user mr-1"></i> ${namesStr}</span>`;
+                    }
+
+                    let cardBorder = 'alert-g1';
+                    let badgeBg = 'bg-blue-100 text-blue-800';
+                    let badgeIcon = 'fa-info-circle';
+                    let badgeText = 'INFO';
+                    
+                    if (isDeleted) {
+                        cardBorder = 'border-t-4 border-slate-400';
+                        badgeBg = 'bg-slate-200 text-slate-600';
+                        badgeIcon = 'fa-ban';
+                        badgeText = 'ELIMINADA / OCULTA';
+                    } else if (isOrden) {
+                        cardBorder = 'alert-orden';
+                        badgeBg = 'bg-slate-800 text-white shadow-sm';
+                        badgeIcon = 'fa-file-signature';
+                        badgeText = 'ORDEN OFICIAL';
+                    } else if (isConversation) {
+                        cardBorder = 'alert-gc';
+                        badgeBg = 'bg-red-50 text-bomberos-red border border-red-200';
+                        badgeIcon = 'fa-comments';
+                        badgeText = 'CONVERSACIÓN';
+                    } else if (grado === '2') {
+                        cardBorder = 'alert-g2';
+                        badgeBg = 'bg-yellow-100 text-yellow-800';
+                        badgeIcon = 'fa-exclamation-triangle';
+                        badgeText = 'ATENCIÓN';
+                    } else if (grado === '3') {
+                        cardBorder = 'alert-g3';
+                        badgeBg = 'bg-red-100 text-red-800';
+                        badgeIcon = 'fa-radiation';
+                        badgeText = 'CRÍTICO';
+                    }
+
+                    const opacityClass = (isActive && !isDeleted) ? '' : 'opacity-70';
+                    const grayscaleClass = (isActive && !isDeleted) ? '' : 'style="filter: grayscale(30%);"';
+
+                    let actionBtns = '';
+                    let editBtn = isAdmin ? `<button onclick="${isOrden ? `App.editOrden('${row.idAlerta}')` : `App.editAlert('${row.idAlerta}')`}" class="w-8 h-8 rounded-lg bg-white/80 backdrop-blur text-blue-600 hover:bg-blue-50 border border-slate-200 shadow-sm flex items-center justify-center transition-all" title="Editar Documento"><i class="fas fa-edit text-xs"></i></button>` : '';
+                    let delBtn = !isDeleted ? `<button onclick="App.openConfirmModal('delete', '${row.idAlerta}')" class="w-8 h-8 rounded-lg bg-white/80 backdrop-blur text-red-600 hover:bg-red-50 border border-slate-200 shadow-sm flex items-center justify-center transition-all" title="Eliminar / Ocultar"><i class="fas fa-trash-alt text-xs"></i></button>` : '';
+                    let restoreBtn = isDeleted ? `<button onclick="App.openConfirmModal('restore', '${row.idAlerta}')" class="w-8 h-8 rounded-lg bg-white/80 backdrop-blur text-green-600 hover:bg-green-50 border border-slate-200 shadow-sm flex items-center justify-center transition-all" title="Restaurar Documento"><i class="fas fa-undo text-xs"></i></button>` : '';
+                    let chatEnableBtn = (!isDeleted && !isConversation && !isOrden) ? `<button onclick="App.enableConversation('${row.idAlerta}')" class="w-8 h-8 rounded-lg bg-white/80 backdrop-blur text-bomberos-red hover:bg-red-50 border border-slate-200 shadow-sm flex items-center justify-center transition-all" title="Convertir en Conversación"><i class="fas fa-comments text-xs"></i></button>` : '';
+                    let printBtn = isOrden ? `<button onclick="App.printOrden('${row.idAlerta}')" class="w-8 h-8 rounded-lg bg-white/80 backdrop-blur text-slate-700 hover:bg-slate-100 border border-slate-200 shadow-sm flex items-center justify-center transition-all" title="Imprimir Orden"><i class="fas fa-print text-xs"></i></button>` : '';
+                    let pdfBtn = isOrden ? `<button onclick="App.saveOrdenPDF('${row.idAlerta}')" class="w-8 h-8 rounded-lg bg-white/80 backdrop-blur text-red-600 hover:bg-red-50 border border-slate-200 shadow-sm flex items-center justify-center transition-all" title="Guardar PDF"><i class="fas fa-file-pdf text-xs"></i></button>` : '';
+
+                    if(isAdmin || isAuthor) {
+                        actionBtns = `
+                            <div class="absolute top-4 right-4 flex gap-1.5" style="z-index: 20;">
+                                ${printBtn}
+                                ${pdfBtn}
+                                ${chatEnableBtn}
+                                ${editBtn}
+                                ${restoreBtn}
+                                ${delBtn}
+                            </div>
+                        `;
+                    } else if (chatEnableBtn || printBtn) {
+                        actionBtns = `
+                            <div class="absolute top-4 right-4 flex gap-1.5" style="z-index: 20;">
+                                ${printBtn}
+                                ${pdfBtn}
+                                ${chatEnableBtn}
+                            </div>
+                        `;
+                    }
+
+                    let interactionArea = '';
+                    if (isConversation && !isDeleted) {
+                        interactionArea = `
+                            <button onclick="App.openChatModal('${row.idAlerta}')" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm flex-1 justify-center relative ${hasNewMessage ? 'bg-bomberos-red text-white border-bomberos-dark hover:bg-bomberos-dark animate-pulse' : 'bg-red-50 text-bomberos-red border-red-200 hover:bg-red-100'}">
+                                <i class="fas fa-comments text-base"></i> <span>Abrir Chat</span>
+                            </button>
+                        `;
+                    } else {
+                        interactionArea = `
+                            <button id="btn-conf-${id}" onclick="App.toggleConforme('${row.idAlerta}', ${iAmConforme})" class="px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border shadow-sm ${iAmConforme ? 'bg-green-50 text-green-700 border-green-200' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'}" title="${iAmConforme ? 'Ya marcaste enterado' : 'Marcar como enterado'}" ${isDeleted ? 'disabled' : ''}>
+                                <i class="fas ${iAmConforme ? 'fa-check-double' : 'fa-check'}"></i> <span>${iAmConforme ? 'Conforme' : 'Dar Conforme'}</span>
+                            </button>
+                            <button onclick="App.showConformes('${row.idAlerta}')" class="px-2 py-1.5 rounded-lg text-xs font-bold text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors flex items-center gap-1 border border-transparent hover:border-blue-100 shrink-0" title="Ver listado de confirmaciones">
+                                ${conformes.length} <i class="fas fa-users" style="font-size: 10px;"></i>
+                            </button>
+                        `;
+                    }
+
+                    let previewMessage = row.mensajeAlerta || '';
+                    if (isConversation && previewMessage.includes(':') && previewMessage.includes('|')) {
+                        previewMessage = `<i><i class="fas fa-history mr-1 text-bomberos-red"></i> ${msgCount} mensaje(s) en la conversación.</i>`;
+                    } else if (isOrden) {
+                        previewMessage = `<div class="bg-slate-50 p-3 rounded-lg border border-slate-100 font-serif italic text-slate-600 leading-relaxed text-xs"><i class="fas fa-quote-left text-slate-300 mr-1"></i>${previewMessage}</div>`;
+                    }
+
+                    return `
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col h-full alert-card relative ${cardBorder} ${opacityClass}" ${grayscaleClass}>
+                        ${notificationBadge}
+                        ${iPinnedIt ? `<div class="absolute -top-3 -left-3 w-8 h-8 bg-bomberos-red text-white rounded-full flex items-center justify-center shadow-md transform -rotate-45" style="z-index: 30;" title="Fijada en tu muro"><i class="fas fa-thumbtack text-sm"></i></div>` : ''}
+                        ${actionBtns}
+                        
+                        <div class="p-5 border-b border-slate-100 flex-1 flex flex-col relative z-0 mt-3">
+                            <div class="flex justify-between items-start mb-3 gap-2 pr-24">
+                                <div class="flex flex-col items-start gap-1.5">
+                                    <span class="px-2 py-1 rounded font-black uppercase tracking-widest ${badgeBg} flex items-center gap-1.5 shadow-sm" style="font-size: 9px;"><i class="fas ${badgeIcon}"></i> ${badgeText}</span>
+                                    ${destinatariosUI}
+                                </div>
+                            </div>
+                            
+                            <h4 class="text-lg font-black text-slate-800 leading-tight mb-2 pr-2">${row.razonAlerta}</h4>
+                            <div class="font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2" style="font-size: 10px;">
+                                <span><i class="far fa-calendar text-slate-300"></i> ${fecha}</span>
+                                <span><i class="far fa-clock text-slate-300"></i> ${hora} HRS</span>
+                            </div>
+
+                            <div class="text-sm font-medium text-slate-600 whitespace-pre-wrap leading-relaxed flex-1">${previewMessage}</div>
+                            
+                            <div class="mt-4 pt-4 border-t border-slate-100 flex items-center gap-3">
+                                <div class="w-8 h-8 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center shrink-0 border border-slate-200"><i class="fas fa-user-shield text-xs"></i></div>
+                                <div class="flex flex-col min-w-0">
+                                    <span class="font-bold text-slate-400 uppercase tracking-widest" style="font-size: 10px;">Creado por:</span>
+                                    <span class="text-xs font-bold text-slate-700 truncate" title="${row.quienAlerta}">${row.quienAlerta}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-slate-50 border-t border-slate-200 rounded-b-2xl flex justify-between items-center shrink-0 gap-2">
+                            <div class="flex items-center gap-2 flex-1">
+                                ${interactionArea}
+                            </div>
+                            
+                            <button id="btn-fij-${id}" onclick="App.toggleFijar('${row.idAlerta}', ${iPinnedIt})" class="w-8 h-8 rounded-lg flex items-center justify-center transition-all border shadow-sm shrink-0 ${iPinnedIt ? 'bg-red-50 text-bomberos-red border-red-200' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-100'}" title="${iPinnedIt ? 'Desfijar del muro' : 'Fijar al inicio'}">
+                                <i class="fas fa-thumbtack ${iPinnedIt ? 'transform -rotate-45' : ''}"></i>
+                            </button>
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+
+            // --- LÓGICAS DE FORMULARIO DE ALERTAS Y AUTOCOMPLETADO ---
+            showConformes(idAlerta) {
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                if (!row) return;
+                const conformes = String(row.conforme || '').split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+                const listContainer = document.getElementById('conformes-list');
+                
+                if (conformes.length === 0) {
+                    listContainer.innerHTML = '<li class="p-6 text-center text-slate-400 italic font-medium text-sm">Aún no hay interacciones de lectura.</li>';
+                } else {
+                    listContainer.innerHTML = conformes.map(id => {
+                        let person = this.personalData.find(p => p.idRadial && String(p.idRadial).trim().toUpperCase() === id);
+                        const foto = person && person.foto ? person.foto : './Logo.png';
+                        const nombre = person ? person.nombreBombero : 'Desconocido';
+                        const info = person ? `REG: ${person.idRegistro} • RADIAL: ${person.idRadial}` : `ID: ${id}`;
+                        
+                        return `
+                        <li class="p-3 flex items-center gap-3 hover:bg-slate-50 transition-colors">
+                            <img src="${foto}" class="w-8 h-8 rounded-full object-cover border border-slate-200 shadow-sm">
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-sm font-bold text-slate-800 truncate">${nombre}</span>
+                                <span class="font-bold text-slate-400 uppercase tracking-wider" style="font-size: 9px;">${info}</span>
+                            </div>
+                            <div class="ml-auto text-green-500"><i class="fas fa-check-circle"></i></div>
+                        </li>`;
+                    }).join('');
+                }
+                document.getElementById('conformes-total-count').innerText = `${conformes.length} Confirmaciones`;
+                
+                const modal = document.getElementById('conformes-modal');
+                const content = document.getElementById('conformes-modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            closeConformesModal() {
+                const modal = document.getElementById('conformes-modal');
+                const content = document.getElementById('conformes-modal-content');
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 200);
+            },
+
+            editAlert(idAlerta) {
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                if (!row) return;
+
+                this.editingFila = idAlerta; // Se usa el ID
+                document.getElementById('newAlertForm').reset();
+                document.getElementById('results-destinatario').classList.add('hidden');
+
+                document.querySelector('#new-alert-modal-content h3').innerHTML = '<i class="fas fa-edit text-blue-600"></i> Editar Alerta';
+                document.getElementById('btn-save-alert').innerHTML = '<i class="fas fa-save"></i> Guardar Cambios';
+                document.getElementById('na-author-display').innerText = `Editando ID: #${row.idAlerta}`;
+
+                document.getElementById('na-razon').value = row.razonAlerta;
+                document.getElementById('na-mensaje').value = row.mensajeAlerta;
+                document.getElementById('na-grado').value = row.gradoAlerta;
+
+                const durStr = String(row.duracion).trim().toLowerCase();
+                if (durStr === 'i' || durStr === '') document.getElementById('na-duracion-tipo').value = 'i';
+                else if (durStr === 'c') document.getElementById('na-duracion-tipo').value = 'c';
+                else {
+                    let dNorm = durStr.replace(/['"]/g, '');
+                    if (dNorm.includes(' ')) {
+                        // Formato Hora
+                        const pArr = dNorm.split(' ');
+                        const dPart = pArr.at(0);
+                        const tPart = pArr.at(1);
+                        document.getElementById('na-duracion-tipo').value = 'hora';
+                        document.getElementById('na-duracion-hora').value = tPart;
+                    } else if (dNorm.includes('-')) {
+                        // Formato Fecha
+                        const p = dNorm.split('-');
+                        if (p.at(0).length === 2) document.getElementById('na-duracion-fecha').value = `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                        else document.getElementById('na-duracion-fecha').value = dNorm; 
+                        document.getElementById('na-duracion-tipo').value = 'fecha';
+                    }
+                }
+                this.toggleDateInput();
+
+                const aQuien = String(row.aQuienAlerta).trim();
+                if (aQuien === 'TC' || aQuien === '1') {
+                    document.querySelector('input[name="na-destinatario-tipo"][value="TC"]').checked = true;
+                } else {
+                    document.querySelector('input[name="na-destinatario-tipo"][value="especifico"]').checked = true;
+                    const parts = aQuien.split(',').map(s => s.trim()).filter(s => s);
+                    const mappedParts = parts.map(id => {
+                        const cleanId = id.toUpperCase();
+                        const p = this.personalData.find(x => x.idRegistro && String(x.idRegistro).toUpperCase() === cleanId);
+                        return p && p.idRadial ? String(p.idRadial).trim() : id;
+                    });
+                    document.getElementById('na-destinatario').value = mappedParts.join(', ');
+                    this.updateRecipientNames(); 
+                }
+                this.toggleRecipientInput();
+
+                const modal = document.getElementById('new-alert-modal');
+                const content = document.getElementById('new-alert-modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            openNewAlertModal() {
+                this.editingFila = null; 
+                const modal = document.getElementById('new-alert-modal');
+                const content = document.getElementById('new-alert-modal-content');
+                document.getElementById('newAlertForm').reset();
+                this.toggleDateInput();
+                this.toggleRecipientInput();
+                document.getElementById('results-destinatario').classList.add('hidden');
+                document.getElementById('na-destinatario-names').innerHTML = 'Puedes buscar un nombre o escribir múltiples IDs separados por coma (,).';
+
+                document.querySelector('#new-alert-modal-content h3').innerHTML = '<i class="fas fa-bullhorn text-bomberos-red"></i> Emitir Orden o Alerta';
+                document.getElementById('btn-save-alert').innerHTML = '<i class="fas fa-paper-plane"></i> Publicar Alerta';
+
+                let oficial = this.myRadialId;
+                if(this.currentUser) oficial = `${this.myRadialId} - ${this.currentUser.nombreBombero}`;
+                document.getElementById('na-author-display').innerText = `Emitiendo como: ${oficial}`;
+
+                const today = new Date().toISOString().split('T').at(0);
+                document.getElementById('na-duracion-fecha').min = today;
+
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            closeNewAlertModal() {
+                const modal = document.getElementById('new-alert-modal');
+                const content = document.getElementById('new-alert-modal-content');
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 200);
+            },
+
+            updateTimeMin(el) {
+                const now = new Date();
+                const hh = String(now.getHours()).padStart(2, '0');
+                const mm = String(now.getMinutes()).padStart(2, '0');
+                const minTime = `${hh}:${mm}`;
+                el.min = minTime;
+                
+                if (el.value && el.value < minTime) {
+                    el.value = minTime;
+                }
+            },
+
+            toggleDateInput() {
+                const tipo = document.getElementById('na-duracion-tipo').value;
+                const inputFecha = document.getElementById('na-duracion-fecha');
+                const inputHora = document.getElementById('na-duracion-hora');
+                
+                inputFecha.classList.add('hidden');
+                inputFecha.removeAttribute('required');
+                inputHora.classList.add('hidden');
+                inputHora.removeAttribute('required');
+
+                if (tipo === 'fecha') {
+                    inputFecha.classList.remove('hidden');
+                    inputFecha.setAttribute('required', 'true');
+                } else if (tipo === 'hora') {
+                    inputHora.classList.remove('hidden');
+                    inputHora.setAttribute('required', 'true');
+                    this.updateTimeMin(inputHora);
+                    if (!inputHora.value) inputHora.value = inputHora.min;
+                }
+            },
+
+            toggleRecipientInput() {
+                const tipo = document.querySelector('input[name="na-destinatario-tipo"]:checked').value;
+                const container = document.getElementById('na-destinatario-container');
+                const input = document.getElementById('na-destinatario');
+                if (tipo === 'especifico') {
+                    container.classList.remove('hidden');
+                    input.setAttribute('required', 'true');
+                } else {
+                    container.classList.add('hidden');
+                    input.removeAttribute('required');
+                    input.value = '';
+                }
+            },
+
+            updateRecipientNames() {
+                const input = document.getElementById('na-destinatario');
+                const helper = document.getElementById('na-destinatario-names');
+                if (!input || !helper) return;
+
+                const val = input.value.trim();
+                if (!val) {
+                    helper.innerHTML = 'Puedes buscar un nombre o escribir múltiples IDs separados por coma (,).';
+                    return;
+                }
+
+                const parts = val.split(',').map(s => s.trim()).filter(s => s);
+                const names = parts.map(id => {
+                    const cleanId = id.toUpperCase();
+                    const p = this.personalData.find(x => (x.idRegistro && String(x.idRegistro).toUpperCase() === cleanId) || (x.idRadial && String(x.idRadial).toUpperCase() === cleanId));
+                    return p ? `<span class="text-bomberos-red font-bold">${p.nombreBombero}</span>` : `<span class="text-slate-400 line-through">${id}</span>`;
+                });
+
+                helper.innerHTML = `Guía Destinatarios: ${names.join(', ')}`;
+            },
+
+            handleAutocompleteKey(e, resultsId) {
+                const container = document.getElementById(resultsId);
+                if (!container || container.classList.contains('hidden')) return;
+                const items = container.getElementsByClassName('autocomplete-item');
+                if (items.length === 0) return;
+
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault(); 
+                    this.autocompleteFocus++;
+                    if (this.autocompleteFocus >= items.length) this.autocompleteFocus = 0;
+                    this.setActiveItem(items);
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault(); 
+                    this.autocompleteFocus--;
+                    if (this.autocompleteFocus < 0) this.autocompleteFocus = items.length - 1;
+                    this.setActiveItem(items);
+                } else if (e.key === 'Enter' || e.key === 'Tab') {
+                    if (this.autocompleteFocus > -1 && this.autocompleteFocus < items.length) {
+                        e.preventDefault();
+                        items[this.autocompleteFocus].click();
+                    }
+                } else if (e.key === 'Escape') {
+                    container.classList.add('hidden');
+                }
+            },
+
+            setActiveItem(items) {
+                Array.from(items).forEach(item => item.classList.remove('active'));
+                if (this.autocompleteFocus > -1 && items[this.autocompleteFocus]) {
+                    items[this.autocompleteFocus].classList.add('active');
+                    items[this.autocompleteFocus].scrollIntoView({ block: 'nearest' });
+                }
+            },
+
+            filterPersonnel(input, resultsId) {
+                this.autocompleteFocus = -1; 
+                const rawValue = input.value;
+                const parts = rawValue.split(',');
+                const term = parts.at(parts.length - 1).trim().toLowerCase();
+                const container = document.getElementById(resultsId);
+                container.innerHTML = '';
+                
+                if (term.length < 1) { container.classList.add('hidden'); return; }
+
+                let matches = this.personalData.filter(p => {
+                    const isActive = (String(p.activo) === '1' || p.activo === 1);
+                    const matchName = p.nombreBombero ? String(p.nombreBombero).toLowerCase().includes(term) : false;
+                    const matchRadial = p.idRadial ? String(p.idRadial).toLowerCase().includes(term) : false;
+                    return isActive && (matchName || matchRadial);
+                });
+                matches = matches.slice(0, 5); 
+
+                matches.forEach((p, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'autocomplete-item';
+                    const radioPart = p.idRadial ? `[${p.idRadial}] ` : '[S/R] ';
+                    const cargoPart = p.cargo ? ` - ${p.cargo.toUpperCase()}` : '';
+                    item.innerHTML = `<span class="font-bold text-bomberos-red">${radioPart}</span><span class="font-semibold text-slate-700">${p.nombreBombero}</span><span class="text-slate-400 text-xs">${cargoPart}</span>`;
+                    
+                    item.onmouseenter = () => {
+                        this.autocompleteFocus = index;
+                        this.setActiveItem(container.getElementsByClassName('autocomplete-item'));
+                    };
+
+                    item.onclick = () => {
+                        const isMultiple = parts.length > 1;
+                        const insertVal = String(p.idRegistro).trim(); 
+                        parts[parts.length - 1] = isMultiple ? ` ${insertVal}` : insertVal;
+                        input.value = parts.join(', '); 
+                        container.classList.add('hidden');
+                        input.focus();
+                        this.updateRecipientNames(); 
+                    };
+                    container.appendChild(item);
+                });
+                
+                if(matches.length > 0) container.classList.remove('hidden');
+                else container.classList.add('hidden');
+            },
+
+            async saveNewAlert(e) {
+                e.preventDefault();
+                const btn = document.getElementById('btn-save-alert');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+
+                const razon = document.getElementById('na-razon').value.trim();
+                let mensaje = document.getElementById('na-mensaje').value.trim();
+                const grado = document.getElementById('na-grado').value;
+
+                const durTipo = document.getElementById('na-duracion-tipo').value;
+                let duracionStr = 'i';
+                if (durTipo === 'fecha') {
+                    const fVal = document.getElementById('na-duracion-fecha').value;
+                    const fParts = fVal.split('-');
+                    duracionStr = `'${fParts.at(2)}-${fParts.at(1)}-${fParts.at(0)}`;
+                } else if (durTipo === 'hora') {
+                    const hVal = document.getElementById('na-duracion-hora').value; 
+                    if (!hVal) {
+                        this.showToast("Debe seleccionar una hora válida.", "error");
+                        btn.disabled = false;
+                        btn.innerHTML = this.editingFila ? '<i class="fas fa-save"></i> Guardar Cambios' : '<i class="fas fa-paper-plane"></i> Publicar Alerta';
+                        return;
+                    }
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                    duracionStr = `'${dStr} ${hVal}`;
+                } else if (durTipo === 'c') {
+                    duracionStr = 'C';
+                }
+
+                const destTipo = document.querySelector('input[name="na-destinatario-tipo"]:checked').value;
+                let destinatarioStr = 'TC';
+                if (destTipo === 'especifico') {
+                    const rawVal = document.getElementById('na-destinatario').value.trim();
+                    const parts = rawVal.split(',').map(s => s.trim()).filter(s => s);
+                    const resolvedParts = parts.map(id => {
+                        const cleanId = id.toUpperCase().trim();
+                        let p = this.personalData.find(x => x.idRadial && String(x.idRadial).toUpperCase().trim() === cleanId);
+                        if (!p) {
+                            p = this.personalData.find(x => x.idRegistro && String(x.idRegistro).toUpperCase().trim() === cleanId);
+                        }
+                        return p && p.idRegistro ? String(p.idRegistro).trim() : id;
+                    });
+                    destinatarioStr = resolvedParts.join(', ');
+                }
+
+                const now = new Date();
+                const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                if (duracionStr === 'C') {
+                    if (!/^\d{2}-\d{2}-\d{4}\/\d{2}:\d{2}\/.*?:/.test(mensaje)) {
+                        const senderId = this.myIdRegistro || this.myRadialId;
+                        mensaje = `${dStr}/${tStr}/${senderId}: ${mensaje} |`;
+                    }
+                }
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    if (this.editingFila) {
+                        const docRef = window.fbDoc(fbDb, 'alertas', String(this.editingFila));
+                        await window.fbUpdateDoc(docRef, {
+                            razonAlerta: razon,
+                            mensajeAlerta: mensaje,
+                            gradoAlerta: grado,
+                            duracion: duracionStr,
+                            aQuienAlerta: destinatarioStr
+                        });
+                        
+                        this.showToast("Alerta actualizada con éxito.");
+                        this.closeNewAlertModal();
+                    } else {
+                        let maxId = 0;
+                        this.data.forEach(r => {
+                            const idNum = parseInt(r.idAlerta);
+                            if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+                        });
+                        const newId = maxId + 1;
+
+                        let oficial = this.myCargo || "Oficial";
+                        if(this.currentUser) oficial = `${this.myCargo || "Oficial"} - ${this.currentUser.nombreBombero}`;
+
+                        const docRef = window.fbDoc(fbDb, 'alertas', String(newId));
+                        await window.fbSetDoc(docRef, {
+                            idAlerta: String(newId),
+                            fechaAlerta: `'${dStr}`,
+                            horaAlerta: `'${tStr}`,
+                            razonAlerta: razon,
+                            mensajeAlerta: mensaje,
+                            quienAlerta: oficial,
+                            gradoAlerta: grado,
+                            duracion: duracionStr,
+                            aQuienAlerta: destinatarioStr,
+                            conforme: "",
+                            fijar: ""
+                        });
+                        
+                        this.showToast("Alerta publicada con éxito.");
+                        this.closeNewAlertModal();
+                    }
+                } catch(err) {
+                    this.showToast("Fallo de red.", 'error');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = this.editingFila ? '<i class="fas fa-save"></i> Guardar Cambios' : '<i class="fas fa-paper-plane"></i> Publicar Alerta';
+                }
+            },
+
+            // --- LÓGICAS DE ORDEN DEL DÍA ---
+            openOrdenModal() {
+                this.editingFila = null;
+                document.getElementById('ordenForm').reset();
+                
+                let oficial = this.myRadialId;
+                if(this.currentUser) {
+                    oficial = `${this.myRadialId} - ${this.currentUser.nombreBombero}`;
+                    document.getElementById('od-firma-nombre').value = String(this.currentUser.nombreBombero).toUpperCase();
+                    document.getElementById('od-firma-cargo').value = String(this.currentUser.cargo || 'OFICIAL').toUpperCase();
+                }
+                
+                document.getElementById('od-author-display').innerText = `Emitiendo como: ${oficial}`;
+                document.getElementById('btn-save-orden').innerHTML = '<i class="fas fa-save"></i> Guardar Orden';
+                
+                const today = new Date().toISOString().split('T').at(0);
+                document.getElementById('od-fecha').value = today;
+
+                const modal = document.getElementById('orden-modal');
+                const content = document.getElementById('orden-modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            editOrden(idAlerta) {
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                if (!row) return;
+
+                this.editingFila = idAlerta;
+                document.getElementById('ordenForm').reset();
+
+                document.getElementById('od-author-display').innerText = `Editando ID: #${row.idAlerta}`;
+                document.getElementById('btn-save-orden').innerHTML = '<i class="fas fa-save"></i> Guardar Cambios';
+
+                document.getElementById('od-numero').value = row.numeroOrden || '';
+                
+                let fechaInput = '';
+                if(row.fechaOrden) {
+                    const fNorm = row.fechaOrden.replace(/['"]/g, '');
+                    if(fNorm.includes('-') && fNorm.split('-').at(0).length === 2) {
+                        const p = fNorm.split('-');
+                        fechaInput = `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                    } else {
+                        fechaInput = fNorm;
+                    }
+                }
+                document.getElementById('od-fecha').value = fechaInput;
+
+                document.getElementById('od-cuerpo').value = row.mensajeAlerta || '';
+                document.getElementById('od-firma-nombre').value = row.firmaNombre || '';
+                document.getElementById('od-firma-cargo').value = row.firmaCargo || '';
+
+                const modal = document.getElementById('orden-modal');
+                const content = document.getElementById('orden-modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            closeOrdenModal() {
+                const modal = document.getElementById('orden-modal');
+                const content = document.getElementById('orden-modal-content');
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 200);
+            },
+
+            async saveOrden(e) {
+                e.preventDefault();
+                const btn = document.getElementById('btn-save-orden');
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+
+                const numero = document.getElementById('od-numero').value.trim().toUpperCase();
+                const fecha = document.getElementById('od-fecha').value;
+                const cuerpo = document.getElementById('od-cuerpo').value.trim();
+                const fNombre = document.getElementById('od-firma-nombre').value.trim().toUpperCase();
+                const fCargo = document.getElementById('od-firma-cargo').value.trim().toUpperCase();
+
+                const fParts = fecha.split('-');
+                const fechaDb = `'${fParts.at(2)}-${fParts.at(1)}-${fParts.at(0)}`;
+                const razonAlerta = `ORDEN DEL DIA ${numero}`;
+                
+                const now = new Date();
+                const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+
+                    if (this.editingFila) {
+                        const docRef = window.fbDoc(fbDb, 'alertas', String(this.editingFila));
+                        await window.fbUpdateDoc(docRef, {
+                            numeroOrden: numero,
+                            fechaOrden: fechaDb,
+                            mensajeAlerta: cuerpo,
+                            firmaNombre: fNombre,
+                            firmaCargo: fCargo,
+                            razonAlerta: razonAlerta
+                        });
+                        this.showToast("Orden del Día actualizada.");
+                        this.closeOrdenModal();
+                    } else {
+                        let maxId = 0;
+                        this.data.forEach(r => {
+                            const idNum = parseInt(r.idAlerta);
+                            if (!isNaN(idNum) && idNum > maxId) maxId = idNum;
+                        });
+                        const newId = maxId + 1;
+
+                        const docRef = window.fbDoc(fbDb, 'alertas', String(newId));
+                        await window.fbSetDoc(docRef, {
+                            idAlerta: String(newId),
+                            tipo: 'orden',
+                            numeroOrden: numero,
+                            fechaOrden: fechaDb,
+                            mensajeAlerta: cuerpo,
+                            firmaNombre: fNombre,
+                            firmaCargo: fCargo,
+                            fechaAlerta: `'${dStr}`,
+                            horaAlerta: `'${tStr}`,
+                            razonAlerta: razonAlerta,
+                            quienAlerta: this.currentUser ? `${this.myCargo || "Oficial"} - ${this.currentUser.nombreBombero}` : (this.myCargo || "Oficial"),
+                            gradoAlerta: "1",
+                            duracion: "i",
+                            aQuienAlerta: "TC",
+                            conforme: "",
+                            fijar: ""
+                        });
+                        this.showToast("Orden del Día publicada.");
+                        this.closeOrdenModal();
+                    }
+                } catch(err) {
+                    this.showToast("Error al guardar la orden.", 'error');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = this.editingFila ? '<i class="fas fa-save"></i> Guardar Cambios' : '<i class="fas fa-save"></i> Guardar Orden';
+                }
+            },
+
+            saveOrdenPDF(idAlerta) {
+                if (typeof this.showToast === 'function') {
+                    this.showToast("SELECCIONE 'GUARDAR COMO PDF' EN LA VENTANA DE IMPRESIÓN PARA ELEGIR DÓNDE GUARDAR.", "success");
+                } else if (typeof showToast === 'function') {
+                    showToast("SELECCIONE 'GUARDAR COMO PDF' EN LA VENTANA DE IMPRESIÓN PARA ELEGIR DÓNDE GUARDAR.", "success");
+                } else {
+                    alert("SELECCIONE 'GUARDAR COMO PDF' EN LA VENTANA DE IMPRESIÓN PARA ELEGIR DÓNDE GUARDAR.");
+                }
+                setTimeout(() => {
+                    this.printOrden(idAlerta);
+                }, 500);
+            },
+
+            printOrden(idAlerta) {
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                if (!row) return;
+
+                const meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+                let fechaTexto = "-- de -- del ----";
+                
+                if (row.fechaOrden) {
+                    const fNorm = row.fechaOrden.replace(/['"]/g, '');
+                    const parts = fNorm.split('-');
+                    if(parts.length === 3) {
+                        const d = parts.at(0);
+                        const m = parseInt(parts.at(1), 10) - 1;
+                        const y = parts.at(2);
+                        fechaTexto = `${d} ${meses[m]} del ${y}`;
+                    }
+                }
+
+                // Transformar el cuerpo cambiando los saltos de línea por divs o brs
+                const cuerpoFormat = row.mensajeAlerta.replace(/\n/g, '<br>');
+
+                const iframe = document.createElement('iframe');
+                iframe.style.position = 'fixed';
+                iframe.style.right = '0';
+                iframe.style.bottom = '0';
+                iframe.style.width = '0';
+                iframe.style.height = '0';
+                iframe.style.border = '0';
+                document.body.appendChild(iframe);
+
+                const doc = iframe.contentWindow.document;
+                doc.open();
+                doc.write(`
+                    <!DOCTYPE html>
+                    <html lang="es">
+                    <head>
+                        <meta charset="UTF-8">
+                        <title>Orden del Día ${row.numeroOrden || ''}</title>
+                        <style>
+                            @page { size: letter portrait; margin: 15mm 20mm; }
+                            body { font-family: "Times New Roman", Times, serif; font-size: 12pt; padding: 0; margin: 0; color: #000; line-height: 1.4; background: #fff;}
+                            
+                            /* Contenedor flexible ajustado a 225mm para evitar el salto a una segunda hoja en tamaño carta */
+                            .print-container { display: flex; flex-direction: column; min-height: 225mm; padding-bottom: 0px; box-sizing: border-box; }
+                            
+                            /* Encabezado perfectamente centrado con logo independiente */
+                            .header-container { position: relative; width: 100%; text-align: center; margin-bottom: 10px; margin-top: 10px; }
+                            .logo { position: absolute; left: 0; top: 0; width: 90px; height: 90px; object-fit: contain; }
+                            .header-text { font-size: 11pt; line-height: 1.2; font-weight: bold; padding-top: 5px; }
+                            
+                            /* Margen inferior reducido para eliminar la fila en blanco extra */
+                            .fecha { text-align: right; margin-bottom: 10px; font-size: 12pt; }
+                            
+                            .titulo { text-align: center; font-weight: bold; font-size: 12pt; text-decoration: underline; margin-bottom: 30px; text-transform: uppercase; }
+
+                            /* Texto justificado y homogéneo */
+                            .cuerpo { text-align: justify; text-justify: inter-word; margin-bottom: 40px; font-size: 12pt; line-height: 1.6; }
+                            
+                            /* Cierre pegado al cuerpo */
+                            .cierre { text-align: center; font-weight: bold; margin-bottom: 20px; font-size: 12pt; text-transform: uppercase; line-height: 1.5; }
+                            
+                            /* Esta clase empuja la firma al fondo de la hoja */
+                            .bottom-section { margin-top: auto; padding-bottom: 0px; width: 100%; }
+
+                            .firma-box { text-align: center; page-break-inside: avoid; }
+                            .firma-linea { border-top: 1px solid #000; width: 280px; margin: 0 auto 5px auto; }
+                            .firma-nombre { font-weight: bold; font-size: 11pt; margin: 0; }
+                            .firma-cargo { font-weight: bold; font-size: 11pt; margin: 0; }
+
+                            .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 9pt; font-weight: bold; border-top: 3px solid #000; padding-top: 5px; }
+                        </style>
+                    </head>
+                    <body>
+                        <div class="print-container">
+                            <div class="header-container">
+                                <img src="./Logo.png" class="logo" alt="Logo">
+                                <div class="header-text">
+                                    CUERPO DE BOMBEROS<br>
+                                    "ABNEGACIÓN Y SACRIFICIO"<br>
+                                    FUNDADO 20-NOV-1963<br>
+                                    COMANDANCIA<br>
+                                    <span class="dynamic-print-name"></span>
+                                </div>
+                            </div>
+
+                            <div class="fecha">${fechaTexto}</div>
+
+                            <div class="titulo">${row.razonAlerta}</div>
+
+                            <div class="cuerpo">
+                                ${cuerpoFormat}
+                            </div>
+
+                            <div class="cierre">
+                                TODA MODIFICACION A LA PRESENTE SE HARA DE FORMA<br>
+                                ESCRITA O VERBAL<br><br>
+                                COMUNIQUESE Y CUMPLASE
+                            </div>
+
+                            <!-- Sección anclada al fondo gracias a Flexbox -->
+                            <div class="bottom-section">
+                                <div class="firma-box">
+                                    <div class="firma-linea"></div>
+                                    <p class="firma-nombre">${row.firmaNombre || ''}</p>
+                                    <p class="firma-cargo">${row.firmaCargo || ''}</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Pie de Página Fijo -->
+                        <div class="footer">
+                            Documento Oficial - Generado por SisBom
+                        </div>
+
+                        <script>
+                            window.onload = () => { 
+                                const clientName = parent.localStorage.getItem('saas_client_name') || 'CUERPO DE BOMBEROS';
+                                document.querySelectorAll('.dynamic-print-name').forEach(el => {
+                                    el.innerText = clientName.toUpperCase();
+                                });
+                                const printLogo = document.querySelector('.logo');
+                                if (printLogo) {
+                                    printLogo.src = './Logo.png';
+                                }
+                                setTimeout(() => { window.print(); }, 800); 
+                            };
+                            window.onafterprint = () => {
+                                parent.document.body.removeChild(window.frameElement);
+                            };
+                        <\/script>
+    
+</body>
+                    </html>
+                `);
+                doc.close();
+                iframe.contentWindow.focus();
+            },
+
+            // --- LÓGICAS DE ESTADO ---
+            async toggleConforme(idAlerta, currentlyConforme) {
+                if (!this.myRadialId) return;
+                const btn = document.getElementById(`btn-conf-${idAlerta}`);
+                if (btn) btn.disabled = true;
+
+                const localRow = this.data.find(r => r.idAlerta === idAlerta);
+                let newConformeStr = '';
+
+                if (localRow) {
+                    let list = String(localRow.conforme || '').split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+                    if (currentlyConforme) list = list.filter(id => id !== this.myRadialId.toUpperCase());
+                    else if(!list.includes(this.myRadialId.toUpperCase())) list.push(this.myRadialId.toUpperCase());
+                    
+                    newConformeStr = list.join(', ');
+                    localRow.conforme = newConformeStr;
+                    this.applyFilters(); // Render optimista
+                }
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, 'alertas', String(idAlerta));
+                    await window.fbUpdateDoc(docRef, { conforme: newConformeStr });
+                } catch(e) {
+                    this.showToast("Error al sincronizar.", "error");
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            },
+
+            async toggleFijar(idAlerta, currentlyPinned) {
+                if (!this.myRadialId) return;
+                const btn = document.getElementById(`btn-fij-${idAlerta}`);
+                if (btn) btn.disabled = true;
+
+                const localRow = this.data.find(r => r.idAlerta === idAlerta);
+                let newFijarStr = '';
+
+                if (localRow) {
+                    let list = String(localRow.fijar || '').split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+                    if (currentlyPinned) list = list.filter(id => id !== this.myRadialId.toUpperCase());
+                    else if(!list.includes(this.myRadialId.toUpperCase())) list.push(this.myRadialId.toUpperCase());
+                    
+                    newFijarStr = list.join(', ');
+                    localRow.fijar = newFijarStr;
+                    this.applyFilters(); // Render optimista
+                }
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, 'alertas', String(idAlerta));
+                    await window.fbUpdateDoc(docRef, { fijar: newFijarStr });
+                } catch(e) {
+                    this.showToast("Error al sincronizar.", "error");
+                } finally {
+                    if (btn) btn.disabled = false;
+                }
+            },
+
+            // --- LÓGICA DE CONVERSACIÓN (CHAT) ---
+            async enableConversation(idAlerta) {
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                if (row) {
+                    row.duracion = 'C';
+                    this.applyFilters();
+                }
+                
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, 'alertas', String(idAlerta));
+                    await window.fbUpdateDoc(docRef, { duracion: 'C' });
+                } catch(e) {
+                    this.showToast("Error de conexión al activar chat.", "error");
+                }
+            },
+
+            openChatModal(idAlerta) {
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                if(!row) return;
+
+                this.currentChatFila = idAlerta;
+                this.lastChatRawText = null; 
+                
+                const rawText = row.mensajeAlerta || '';
+                const msgsCount = rawText.split('|').filter(s => s.trim()).length;
+                this.readStatus[row.idAlerta] = msgsCount;
+                localStorage.setItem('sisbom_alertas_reads', JSON.stringify(this.readStatus));
+                this.applyFilters(); 
+
+                document.getElementById('chat-modal-title').innerHTML = `<i class="fas fa-comments"></i> ${row.razonAlerta}`;
+                const namesStr = this.getNamesFromTarget(String(row.aQuienAlerta).trim());
+                document.getElementById('chat-modal-subtitle').innerText = `Para: ${namesStr}`;
+                
+                this.renderChatMessages();
+
+                const input = document.getElementById('chat-input');
+                const btn = document.getElementById('chat-send-btn');
+                input.value = '';
+                input.style.height = 'auto';
+                input.disabled = false;
+                btn.disabled = false;
+
+                const modal = document.getElementById('chat-modal');
+                const content = document.getElementById('chat-modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    content.classList.remove('scale-95');
+                    input.focus();
+                }, 10);
+            },
+
+            closeChatModal() {
+                this.currentChatFila = null;
+                const modal = document.getElementById('chat-modal');
+                const content = document.getElementById('chat-modal-content');
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                }, 200);
+            },
+
+            formatChatTime(dateStr, timeStr) {
+                if (!dateStr || !timeStr) return '';
+                
+                dateStr = String(dateStr).replace(/['"]/g, '').trim();
+                timeStr = String(timeStr).replace(/['"]/g, '').trim();
+
+                const today = new Date();
+                const todayStr = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+                
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = `${String(yesterday.getDate()).padStart(2, '0')}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${yesterday.getFullYear()}`;
+
+                const dayBefore = new Date(today);
+                dayBefore.setDate(dayBefore.getDate() - 2);
+                const dayBeforeStr = `${String(dayBefore.getDate()).padStart(2, '0')}-${String(dayBefore.getMonth() + 1).padStart(2, '0')}-${dayBefore.getFullYear()}`;
+
+                if (dateStr === todayStr) {
+                    return `Hoy ${timeStr}`;
+                } else if (dateStr === yesterdayStr) {
+                    return `Ayer ${timeStr}`;
+                } else if (dateStr === dayBeforeStr) {
+                    return `Anteayer ${timeStr}`;
+                } else {
+                    const parts = dateStr.split('-');
+                    if(parts.length === 3) {
+                        return `${parts.at(0)}/${parts.at(1)} ${timeStr}`;
+                    }
+                    return `${dateStr} ${timeStr}`;
+                }
+            },
+
+            renderChatMessages() {
+                if(!this.currentChatFila) return;
+                const row = this.data.find(r => r.idAlerta === this.currentChatFila);
+                if(!row) return;
+
+                const rawText = row.mensajeAlerta || '';
+                
+                if (this.lastChatRawText === rawText) return; 
+                this.lastChatRawText = rawText;
+
+                const container = document.getElementById('chat-messages-container');
+                const messages = rawText.split('|').map(s => s.trim()).filter(s => s);
+
+                this.readStatus[row.idAlerta] = messages.length;
+                localStorage.setItem('sisbom_alertas_reads', JSON.stringify(this.readStatus));
+
+                if(messages.length === 0) {
+                    container.innerHTML = `
+                        <div class="flex flex-col items-center justify-center h-full text-slate-400 opacity-70 mt-10">
+                            <i class="fas fa-comments text-4xl mb-2 text-red-300"></i>
+                            <p class="text-sm font-medium">Inicia la conversación.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                let html = '';
+                messages.forEach(msg => {
+                    const match = msg.match(/^(\d{2}-\d{2}-\d{4})\/(\d{2}:\d{2})\/(.*?):\s*([\s\S]*)$/);
+                    let senderId, text, timeDisplay = '';
+
+                    if (match) {
+                        timeDisplay = this.formatChatTime(match.at(1), match.at(2));
+                        senderId = match.at(3).trim();
+                        text = match.at(4).trim();
+                    } else {
+                        const firstColon = msg.indexOf(':');
+                        if (firstColon === -1) {
+                            senderId = row.quienAlerta; 
+                            if(senderId.includes('-') && senderId.includes(' ')) {
+                                senderId = senderId.split(' ').at(0);
+                            }
+                            text = msg;
+                            timeDisplay = this.formatChatTime(this.cleanDate(row.fechaAlerta), row.horaAlerta);
+                        } else {
+                            senderId = msg.substring(0, firstColon).trim();
+                            text = msg.substring(firstColon + 1).trim();
+                        }
+                    }
+
+                    const isMe = this.myRadialId && (senderId.toUpperCase() === this.myRadialId.toUpperCase() || (this.myIdRegistro && senderId.toUpperCase() === this.myIdRegistro.toUpperCase()));
+
+                    let firstName = senderId;
+                    const person = this.personalData.find(p => String(p.idRadial).toUpperCase() === senderId.toUpperCase() || String(p.idRegistro) === senderId.toUpperCase());
+                    if (person) {
+                        firstName = person.nombreBombero.split(' ').at(0);
+                    }
+
+                    const displayName = `${senderId} • ${firstName}`;
+                    const timeHtml = timeDisplay ? `<span class="opacity-70 block mt-1 ${isMe ? 'text-red-200 text-right' : 'text-slate-400 text-left'}" style="font-size: 8px;">${timeDisplay}</span>` : '';
+
+                    if (isMe) {
+                        html += `
+                            <div class="flex flex-col items-end mb-2 relative" style="z-index: 10;">
+                                <span class="font-bold text-slate-400 mb-0.5 mr-1 text-right" style="font-size: 9px;">Tú</span>
+                                <div class="bg-bomberos-red text-white font-medium px-4 py-2 rounded-l-2xl rounded-tr-2xl shadow-sm break-words leading-relaxed" style="font-size: 13px; max-width: 85%;">
+                                    ${text}
+                                    ${timeHtml}
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="flex flex-col items-start mb-2 relative" style="z-index: 10;">
+                                <span class="font-bold text-slate-500 mb-0.5 ml-1" style="font-size: 9px;">${displayName}</span>
+                                <div class="bg-white border border-slate-200 text-slate-800 font-medium px-4 py-2 rounded-r-2xl rounded-tl-2xl shadow-sm break-words leading-relaxed" style="font-size: 13px; max-width: 85%;">
+                                    ${text}
+                                    ${timeHtml}
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+
+                container.innerHTML = html;
+                
+                setTimeout(() => {
+                    if (container) container.scrollTop = container.scrollHeight;
+                }, 10);
+            },
+
+            handleChatKey(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendChatMessage();
+                }
+            },
+
+            async sendChatMessage() {
+                const targetFila = this.currentChatFila;
+                if(!targetFila || !this.myRadialId) return;
+                
+                const input = document.getElementById('chat-input');
+                const btn = document.getElementById('chat-send-btn');
+                const text = input ? input.value.trim() : '';
+                
+                if(!text) return;
+
+                const row = this.data.find(r => r.idAlerta === targetFila);
+                if(!row) return;
+
+                if(input) input.disabled = true;
+                if(btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>'; }
+
+                const now = new Date();
+                const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                const senderId = this.myIdRegistro || this.myRadialId;
+                const newMsgStr = `${dStr}/${tStr}/${senderId}: ${text} | `;
+                let currentRaw = row.mensajeAlerta || '';
+                
+                if (currentRaw.endsWith('|')) currentRaw = currentRaw.substring(0, currentRaw.length - 1).trim();
+                
+                if (currentRaw !== '') {
+                    row.mensajeAlerta = currentRaw + ' | ' + newMsgStr;
+                } else {
+                    row.mensajeAlerta = newMsgStr;
+                }
+
+                const msgsCount = row.mensajeAlerta.split('|').filter(s => s.trim()).length;
+                this.readStatus[row.idAlerta] = msgsCount;
+                localStorage.setItem('sisbom_alertas_reads', JSON.stringify(this.readStatus));
+
+                if(input) { input.value = ''; input.style.height = 'auto'; }
+                
+                if (this.currentChatFila === targetFila) {
+                    this.renderChatMessages();
+                }
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, 'alertas', String(targetFila));
+                    await window.fbUpdateDoc(docRef, { mensajeAlerta: row.mensajeAlerta });
+                } catch(e) {
+                    this.showToast("Error de conexión al enviar mensaje.", "error");
+                } finally {
+                    if (input) input.disabled = false;
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-paper-plane"></i>';
+                    }
+                    if (this.currentChatFila === targetFila && input) {
+                        input.focus();
+                    }
+                }
+            },
+
+            // --- LÓGICAS DE ELIMINAR Y RESTAURAR CON MODAL GENÉRICO ---
+            openConfirmModal(action, idAlerta) {
+                this.confirmActionType = action;
+                this.confirmTargetFila = idAlerta;
+
+                const iconContainer = document.getElementById('confirm-modal-icon-container');
+                const icon = document.getElementById('confirm-modal-icon');
+                const title = document.getElementById('confirm-modal-title');
+                const msg = document.getElementById('confirm-modal-msg');
+                const btn = document.getElementById('confirm-modal-btn');
+
+                if (action === 'delete') {
+                    iconContainer.className = "w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center text-2xl mx-auto mb-4 border border-red-100";
+                    icon.className = "fas fa-trash-alt";
+                    title.innerText = "Ocultar Alerta";
+                    msg.innerText = "¿Estás seguro de eliminar esta alerta? Desaparecerá para el resto de la compañía.";
+                    btn.className = "flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 shadow-sm rounded-xl transition-colors";
+                    btn.innerText = "Sí, Eliminar";
+                } else {
+                    iconContainer.className = "w-14 h-14 rounded-full bg-green-50 text-green-600 flex items-center justify-center text-2xl mx-auto mb-4 border border-green-100";
+                    icon.className = "fas fa-undo";
+                    title.innerText = "Restaurar Alerta";
+                    msg.innerText = "¿Deseas volver a activar esta alerta? Será visible para todos nuevamente.";
+                    btn.className = "flex-1 py-2.5 text-sm font-bold text-white bg-green-600 hover:bg-green-700 shadow-sm rounded-xl transition-colors";
+                    btn.innerText = "Sí, Restaurar";
+                }
+
+                const modal = document.getElementById('confirm-modal');
+                const content = document.getElementById('confirm-modal-content');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            closeConfirmModal() {
+                this.confirmTargetFila = null;
+                const modal = document.getElementById('confirm-modal');
+                const content = document.getElementById('confirm-modal-content');
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 200);
+            },
+
+            async executeConfirmAction() {
+                if (!this.confirmTargetFila) return;
+                const idAlerta = this.confirmTargetFila;
+                const action = this.confirmActionType;
+                this.closeConfirmModal();
+
+                const row = this.data.find(r => r.idAlerta === idAlerta);
+                let prevVal = '';
+                let newVal = '';
+
+                if (row) {
+                    prevVal = row.duracion;
+                    if (action === 'delete') {
+                        newVal = '';
+                    } else {
+                        const isConv = row.mensajeAlerta && row.mensajeAlerta.includes('|') && row.mensajeAlerta.includes(':');
+                        newVal = isConv ? 'C' : 'i';
+                    }
+                    row.duracion = newVal;
+                    this.applyFilters();
+                }
+
+                try {
+                    if (!fbDb) await this.initFirebase();
+                    const docRef = window.fbDoc(fbDb, 'alertas', String(idAlerta));
+                    await window.fbUpdateDoc(docRef, { duracion: newVal });
+                } catch(e) {
+                    if (row) {
+                        row.duracion = prevVal; 
+                        this.applyFilters();
+                    }
+                    this.showToast("Error de conexión.", "error");
+                }
+            },
+
+
+
+            showLoader() { const el = document.getElementById('loading-overlay'); if(el) { el.classList.remove('hidden'); el.classList.add('flex'); } },
+            hideLoader() { const el = document.getElementById('loading-overlay'); if(el) { el.classList.add('hidden'); el.classList.remove('flex'); } },
+            showToast(message, type = 'success') {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+                toast.className = `transform transition-all duration-300 translate-y-full opacity-0 max-w-sm w-full shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 ${bg} text-white`;
+                toast.innerHTML = `<div class="p-4 w-full flex items-center gap-3">${type === 'success' ? '<i class="fas fa-check-circle text-lg"></i>' : '<i class="fas fa-times-circle text-lg"></i>'}<p class="text-sm font-medium">${message}</p></div>`;
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 10);
+                setTimeout(() => { toast.classList.add('translate-y-full', 'opacity-0'); setTimeout(() => toast.remove(), 300); }, 3500);
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => App.init());
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

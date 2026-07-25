@@ -1,0 +1,3071 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>COMANDANCIA</title>
+    
+    <link rel="icon" type="image/png" href="Logo.png">
+    <meta name="theme-color" content="#0f172a">
+    
+    <!-- Captura de errores JS para depuración en Python backend (con cola de eventos) -->
+    <script>
+        window.js_errors = [];
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errorStr = error ? error.stack : '';
+            const errObj = { type: 'error', message: message, source: source, lineno: lineno, colno: colno, errorStr: errorStr };
+            window.js_errors.push(errObj);
+            flushJsErrors();
+            return false;
+        };
+        window.onunhandledrejection = function(event) {
+            const reason = event.reason;
+            const msg = reason ? (reason.stack || reason.message || reason) : 'Unknown promise rejection';
+            const errObj = { type: 'msg', message: "Unhandled Rejection: " + msg };
+            window.js_errors.push(errObj);
+            flushJsErrors();
+        };
+        function flushJsErrors() {
+            if (window.pywebview && window.pywebview.api) {
+                while (window.js_errors.length > 0) {
+                    const err = window.js_errors.shift();
+                    if (err.type === 'error') {
+                        if (window.pywebview.api.log_js_error) {
+                            window.pywebview.api.log_js_error(err.message, err.source, err.lineno, err.colno, err.errorStr);
+                        }
+                    } else {
+                        if (window.pywebview.api.log_js_msg) {
+                            window.pywebview.api.log_js_msg(err.message);
+                        }
+                    }
+                }
+            }
+        }
+        window.addEventListener('pywebviewready', flushJsErrors);
+    </script>
+    
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <style>
+    /* Hide Edge/IE default password reveal icon & auto-fill buttons */
+    ::-ms-reveal,
+    ::-ms-clear,
+    input::-ms-reveal,
+    input::-ms-clear {
+        display: none !important;
+        width: 0 !important;
+        height: 0 !important;
+    }
+    input::-webkit-contacts-auto-fill-button,
+    input::-webkit-credentials-auto-fill-button {
+        visibility: hidden !important;
+        display: none !important;
+        pointer-events: none !important;
+    }
+    .login-input-pass {
+        -webkit-text-security: disc !important;
+        text-security: disc !important;
+    }
+    .login-input-pass.show-pass-text {
+        -webkit-text-security: none !important;
+        text-security: none !important;
+    }
+    </style>
+    
+    <!-- Configuración unificada de SisBom -->
+    <script>
+        // Immediately apply branding cache to prevent flash of unbranded content
+        (function applyBrandingCache() {
+            const cachedName = localStorage.getItem('saas_client_name') || 'SisBom';
+            const cachedLogo = localStorage.getItem('saas_logo_url') || 'Logo.png';
+            
+            document.title = cachedName + " - COMANDANCIA";
+            
+            window.applyDynamicBranding = function() {
+                const name = localStorage.getItem('saas_client_name') || 'SisBom';
+                const logo = localStorage.getItem('saas_logo_url') || 'Logo.png';
+                
+                document.title = name + " - COMANDANCIA";
+                document.querySelectorAll('.dynamic-logo').forEach(img => {
+                    img.src = logo;
+                });
+                
+                const loginTitle = document.getElementById('login-client-name');
+                if (loginTitle) loginTitle.innerText = name;
+                
+                const headerTitle = document.getElementById('header-client-name');
+                if (headerTitle) headerTitle.innerText = name.toUpperCase();
+            };
+
+            document.addEventListener('DOMContentLoaded', () => {
+                window.applyDynamicBranding();
+                const cachedSync = localStorage.getItem('last_sync_time') || 'SINC.: --:--:--';
+                const timeEl = document.getElementById('last-sync-time');
+                if (timeEl) timeEl.innerText = cachedSync;
+                
+                // Initialize globalYearFilter
+                const filter = document.getElementById('globalYearFilter');
+                if (filter) {
+                    const currentYear = new Date().getFullYear();
+                    let optionsHtml = '';
+                    for (let y = currentYear + 1; y >= 1963; y--) {
+                        optionsHtml += `<option value="${y}">CICLO ${y}</option>`;
+                    }
+                    filter.innerHTML = optionsHtml;
+                    const savedYear = localStorage.getItem('selectedCycleYear') || String(currentYear);
+                    filter.value = savedYear;
+                    if (!localStorage.getItem('selectedCycleYear')) {
+                        localStorage.setItem('selectedCycleYear', savedYear);
+                    }
+                }
+            });
+        })();
+    </script>
+
+    <style>
+        /* Reglas base del sistema SisBom */
+        html { font-size: 14px; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: #F8FAFC; overflow: hidden; color: #334155; }
+        
+        /* Animación para el spinner de carga EXTRA GRANDE */
+        .spinner {
+            border: 6px solid transparent; 
+            border-radius: 50%;
+            border-top: 6px solid #B91C1C;
+            width: 160px;
+            height: 160px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        /* Botones de Navegación Lateral */
+        .nav-btn {
+            display: flex; align-items: center; width: 100%; padding: 12px 24px; 
+            margin-bottom: 4px; color: #94a3b8; font-weight: 500; font-size: 13px; 
+            border-radius: 12px; transition: all 0.2s;
+            border: 1px solid transparent; justify-content: space-between;
+        }
+        .nav-btn:hover { background-color: #1e293b; color: #f8fafc; }
+        .nav-btn.active { 
+            background-color: #B91C1C; 
+            color: #ffffff; 
+            font-weight: 600;
+            box-shadow: 0 4px 6px -1px rgba(185, 28, 28, 0.3);
+        }
+        .nav-btn i { width: 24px; text-align: center; margin-right: 16px; font-size: 1.1rem; flex-shrink: 0; }
+        
+        /* Inputs estandarizados (Login) */
+        .f-input { 
+            width: 100%; padding: 0.75rem 1rem; border: 1px solid #cbd5e1; border-radius: 0.75rem; 
+            line-height: 1.25rem; background-color: #f8fafc; color: #0f172a; outline: none; transition: all 0.2s; font-size: 14px; font-weight: 500;
+        }
+        .f-input:focus { border-color: #B91C1C; box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.1); background-color: #ffffff; }
+
+        /* Estilo específico para los inputs de Login */
+        .login-input {
+            padding-top: 1rem !important;
+            padding-bottom: 1rem !important;
+            padding-left: 3rem !important;
+            padding-right: 1rem !important;
+            text-align: left !important;
+        }
+        .login-input-pass {
+            padding-right: 3rem !important;
+        }
+
+        /* Estilo Seguro para Botón de Login */
+        .btn-login-shadow { box-shadow: 0 4px 14px 0 rgba(185,28,28,0.39); }
+        .btn-login-shadow:hover { box-shadow: 0 6px 20px rgba(185,28,28,0.23); }
+
+        /* EFECTOS DE SALVAPANTALLAS */
+        #login-screen { transition: background-color 2s ease, opacity 0.5s ease; }
+        #login-screen.screensaver-mode { background-color: #020617; background-image: none !important; }
+        #login-box { transition: all 2s ease; }
+        #login-screen.screensaver-mode #login-box { background-color: transparent; border-color: transparent; box-shadow: none; }
+        #login-form-elements { transition: opacity 1.5s ease, transform 1.5s ease; }
+        #login-screen.screensaver-mode #login-form-elements { opacity: 0; transform: translateY(20px); pointer-events: none; }
+        #main-logo { transition: transform 2s cubic-bezier(0.25, 1, 0.5, 1), filter 2s ease; cursor: pointer; }
+        #login-screen.screensaver-mode #main-logo { transform: scale(3.5) translateY(30px); filter: drop-shadow(0px 0px 30px rgba(255,255,255,0.05)); }
+
+        #login-screen.screensaver-mode #main-logo { transform: scale(3.5) translateY(30px); filter: drop-shadow(0px 0px 30px rgba(255,255,255,0.05)); }
+
+        /* SCROLL WIDGET */
+        .widget-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+        .widget-scroll::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+
+        /* SCROLL SIDEBAR */
+        .sidebar-scroll { overflow-x: hidden !important; }
+        .sidebar-scroll::-webkit-scrollbar { width: 3px; height: 0px; }
+        .sidebar-scroll::-webkit-scrollbar-thumb { background-color: #334155; border-radius: 10px; }
+        .sidebar-scroll:hover::-webkit-scrollbar-thumb { background-color: #475569; }
+
+        .f-input-pass::-ms-reveal,
+        .f-input-pass::-ms-clear { display: none; }
+
+        /* Estilos Modo Lectura SaaS */
+        body.saas-read-only-active .btn-red,
+        body.saas-read-only-active .btn-blue,
+        body.saas-read-only-active .btn-green,
+        body.saas-read-only-active button[type="submit"],
+        body.saas-read-only-active input[type="submit"],
+        body.saas-read-only-active .button-10:not(.btn-white),
+        body.saas-read-only-active #btnLogin,
+        body.saas-read-only-active .btn-login-shadow {
+            opacity: 0.5;
+            pointer-events: none !important;
+            cursor: not-allowed;
+        }
+        body.saas-read-only-active textarea,
+        body.saas-read-only-active input:not([type="search"]):not(#searchInput):not(#tableSearch) {
+            pointer-events: none !important;
+            background-color: #f1f5f9 !important;
+            color: #94a3b8 !important;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col text-slate-800 antialiased">
+    <!-- FORZAR MAYÚSCULAS EN LOS INPUTS (EXCEPTO CHAT) -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('input', e => {
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (e.target.type !== 'password' && !e.target.classList.contains('chat-input') && e.target.id !== 'chat-message') {
+                        const start = e.target.selectionStart, end = e.target.selectionEnd;
+                        e.target.value = e.target.value.toUpperCase();
+                        e.target.setSelectionRange(start, end);
+                    }
+                }
+            });
+        });
+    </script>
+
+    <!-- OVERLAY DE CARGA GLOBAL -->
+    <div id="loader-overlay" class="fixed inset-0 flex flex-col items-center justify-center bg-slate-900 bg-opacity-95 backdrop-blur-sm transition-opacity duration-300" style="z-index: 9999;">
+        <div class="relative flex items-center justify-center">
+            <div class="spinner"></div>
+            <img src="Logo.png" class="dynamic-logo absolute w-20 h-20 object-contain" style="filter: drop-shadow(0 4px 6px rgba(0,0,0,0.3));">
+        </div>
+    </div>
+
+    <!-- PANTALLA DE BLOQUEO DE LICENCIA -->
+    <div id="license-lock" class="fixed inset-0 hidden flex-col items-center justify-center bg-slate-900 text-white p-6 text-center select-none" style="z-index: 9998;">
+        <img src="Logo.png" class="dynamic-logo w-32 h-32 mb-6 object-contain opacity-80 filter grayscale" style="filter: drop-shadow(0 0 15px rgba(255,255,255,0.05));">
+        <h2 class="text-3xl font-black text-red-500 uppercase tracking-widest mb-2">Equipo No Autorizado</h2>
+        <p class="text-slate-400 font-semibold mb-6 max-w-md mx-auto text-sm uppercase">Este computador no tiene una licencia activa para ejecutar SisBom Comandancia.</p>
+        
+        <div class="bg-slate-800 border border-slate-700 p-4 rounded-xl max-w-md w-full mb-6 shadow-inner">
+            <span class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">ID de Hardware (HWID) del Equipo:</span>
+            <code id="lock-hwid-display" class="block font-mono text-base font-black text-red-400 select-all p-2 bg-slate-950 rounded border border-slate-900 break-all">Cargando...</code>
+        </div>
+
+        <div class="bg-slate-800 border border-slate-700 p-5 rounded-2xl max-w-md w-full mb-8 shadow-lg text-left">
+            <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Ingresar Clave de Licencia:</label>
+            <div class="flex gap-2">
+                <input type="text" id="activation-key-input" class="bg-slate-950 border border-slate-900 rounded-lg px-3 py-2 text-sm text-white font-mono uppercase tracking-wider flex-1 focus:outline-none focus:border-red-500" placeholder="Ej: SB-LICENCIA-KEY">
+                <button type="button" onclick="activateLicenseKey()" class="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-lg text-xs uppercase tracking-wider transition-colors shrink-0">Activar</button>
+            </div>
+            <div id="activation-error" class="text-red-400 text-xs font-bold mt-2 hidden"></div>
+        </div>
+        
+        <p class="text-slate-500 font-medium max-w-sm text-xs leading-relaxed uppercase">
+            Para habilitar este computador, entregue el ID anterior al administrador para generar la autorización.
+        </p>
+    </div>
+
+    <!-- MODAL DE CONFIRMACIÓN SISTEMA BASE -->
+    <div id="sys-modal" class="fixed inset-0 bg-slate-900 bg-opacity-60 backdrop-blur-sm hidden flex items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8000;">
+        <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200" id="sys-modal-content">
+            <div class="p-6 text-center">
+                <div class="w-14 h-14 rounded-full bg-red-50 text-red-600 flex items-center justify-center text-2xl mx-auto mb-4 border border-red-100">
+                    <i id="sys-modal-icon" class="fas fa-question"></i>
+                </div>
+                <h3 id="sys-modal-title" class="font-semibold text-lg text-slate-800 mb-2 uppercase tracking-tight">Confirmación</h3>
+                <p id="sys-modal-msg" class="text-sm text-slate-600 font-medium">¿Está seguro?</p>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-2 gap-2">
+                <button type="button" id="sys-modal-cancel" onclick="window.closeSysModal()" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
+                <button type="button" id="sys-modal-confirm" class="flex-1 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 shadow-sm rounded-xl transition-colors">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANTALLA DE LOGIN -->
+    <div id="login-screen" class="fixed inset-0 flex items-center justify-center bg-slate-100 p-4 transition-all duration-500" style="z-index: 5000; background-image: url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAiIGhlaWdodD0iMjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGNpcmNsZSBjeD0iMiIgY3k9IjIiIHI9IjEiIGZpbGw9InJnYmEoMCwwLDAsMC4wNSkiLz48L3N2Zz4=');">
+        <div id="login-box" class="bg-white w-full max-w-md p-8 rounded-3xl shadow-xl border border-slate-200 text-center relative">
+            <img id="main-logo" class="dynamic-logo w-24 h-24 mx-auto mb-4 object-contain relative z-10" src="Logo.png" title="Tocar para desbloquear" style="filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));">
+            
+            <form id="login-form-elements" class="relative z-0" onsubmit="event.preventDefault(); window.handleLogin();">
+                <h1 id="login-client-name" class="text-3xl font-bold text-slate-800 tracking-tight mb-1">SisBom</h1>
+                <p class="text-slate-400 font-semibold uppercase tracking-widest mb-8" style="font-size: 12px;">COMANDANCIA</p>
+                
+                <div class="space-y-4">
+                    <div class="w-full text-left">
+                        <label for="loginUser" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 pl-1">Usuario</label>
+                        <div class="relative w-full">
+                            <input type="text" id="loginUser" class="peer f-input login-input w-full rounded-xl font-bold text-slate-700 bg-slate-50 border-slate-200 focus:bg-white focus:border-bomberos-red focus:ring-4 transition-all text-base" placeholder="Introduce tu usuario" onkeydown="if(event.key==='Enter') { event.preventDefault(); document.getElementById('loginPass').focus(); }">
+                            <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-400 transition-colors peer-focus:text-bomberos-red"><i class="fas fa-user text-lg"></i></div>
+                        </div>
+                    </div>
+                    
+                    <div class="w-full text-left">
+                        <label for="loginPass" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 pl-1">Clave de Acceso</label>
+                        <div class="relative w-full">
+                            <input type="text" id="loginPass" autocomplete="off" spellcheck="false" class="peer f-input login-input login-input-pass w-full rounded-xl font-bold text-slate-700 bg-slate-50 border-slate-200 focus:bg-white focus:border-bomberos-red focus:ring-4 transition-all text-base" placeholder="Introduce tu clave">
+                            <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-400 transition-colors peer-focus:text-bomberos-red"><i class="fas fa-lock text-lg"></i></div>
+                            <div class="absolute inset-y-0 right-0 pr-4 flex items-center z-10"><button type="button" onclick="window.togglePassword()" class="text-slate-400 hover:text-bomberos-red transition-colors focus:outline-none p-2" tabindex="-1"><i class="fas fa-eye text-lg" id="togglePassIcon"></i></button></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="loginError" class="text-red-500 text-xs font-bold text-center h-5 mt-4 mb-2 flex items-center justify-center gap-2 transition-opacity"></div>
+                <button type="submit" id="btnLogin" class="w-full py-4 bg-bomberos-red hover:bg-bomberos-dark text-white font-bold rounded-xl btn-login-shadow hover:-translate-y-0.5 transition-all duration-200 text-sm uppercase tracking-widest flex items-center justify-center gap-2"><i class="fas fa-sign-in-alt"></i> Ingresar al Sistema</button>
+            </form>
+            <p id="sisbom-version" class="mt-8 text-slate-400 font-semibold tracking-wider transition-opacity" style="font-size: 10px; transition-duration: 1500ms;">SisBom V.1.1.7</p>
+        </div>
+    </div>
+
+    <!-- MODAL ACTUALIZACIONES (CHANGELOG) -->
+    <div id="changelog-modal" class="fixed inset-0 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm transition-all duration-300" style="z-index: 9999;">
+        <div class="bg-white rounded-3xl shadow-2xl p-6 w-11/12 max-w-md max-h-[85vh] flex flex-col transform scale-100 transition-transform border border-slate-100">
+            <div class="flex flex-col items-center mb-4 text-bomberos-red shrink-0 text-center">
+                <i class="fas fa-bolt text-4xl mb-2 animate-bounce"></i>
+                <h3 class="text-xl font-black text-slate-800 uppercase leading-none">¡Nueva Actualización!</h3>
+                <span class="text-slate-400 font-bold text-xs mt-1">SISBOM</span>
+            </div>
+            
+            <div class="text-left space-y-4 mb-6 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-thin">
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-bomberos-red shrink-0"><i class="fas fa-lock text-sm"></i></div>
+                    <div>
+                        <h4 class="font-bold text-slate-700 text-sm">Seguridad y Autenticación</h4>
+                        <p class="text-xs text-slate-500">Se implementó el inicio de sesión seguro con credenciales institucionales.</p>
+                    </div>
+                </div>
+                <div class="flex items-start gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-bomberos-red shrink-0"><i class="fas fa-cloud text-sm"></i></div>
+                    <div>
+                        <h4 class="font-bold text-slate-700 text-sm">Optimización de Lecturas</h4>
+                        <p class="text-xs text-slate-500">Sincronización optimizada para reducir drásticamente el consumo de lecturas diarias.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="shrink-0 mt-auto pt-2">
+                <button onclick="window.dismissChangelog()" class="w-full py-3 bg-bomberos-red hover:bg-bomberos-dark text-white font-bold rounded-xl transition-all text-xs uppercase tracking-widest">Entendido</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- INTERFAZ PRINCIPAL -->
+    <div id="app-shell" class="flex flex-col h-full w-full hidden opacity-0 transition-opacity duration-500 relative overflow-hidden">
+        <!-- BANNER DE MODO LECTURA SAAS -->
+        <div id="saas-readonly-banner" class="hidden bg-amber-500 text-white font-bold py-2 px-4 text-center text-xs uppercase tracking-widest relative z-[60] shadow-md flex items-center justify-center gap-2">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Suscripción en Modo Lectura (SaaS) - Las funciones de escritura están deshabilitadas</span>
+        </div>
+        
+        <!-- HEADER SUPERIOR -->
+        <header class="h-16 bg-bomberos-dark border-b border-red-950 flex items-center justify-between px-4 sm:px-6 shadow-sm shrink-0 relative w-full" style="z-index: 50;">
+            <div class="flex items-center gap-4">
+                <button type="button" onclick="window.toggleSidebar()" class="text-white hover:text-white transition-colors md:hidden p-2 rounded-lg hover:bg-red-800 shrink-0">
+                    <i class="fas fa-bars text-lg"></i>
+                </button>
+                <div class="flex items-center gap-3">
+                    <img src="Logo.png" class="dynamic-logo h-9 w-9 object-contain shrink-0 drop-shadow-sm">
+                    <div class="flex flex-col">
+                        <span id="header-client-name" class="font-bold text-white tracking-tight text-sm sm:text-base leading-none">SISBOM</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-red-200 font-black leading-tight uppercase tracking-widest mt-0.5" style="font-size: 10px;">Comandancia</span>
+                            <div id="offline-indicator" class="hidden items-center gap-1 bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-[8px] font-black tracking-widest uppercase mt-0.5 shadow-inner border border-orange-200" title="Trabajando sin conexión">
+                                <span class="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span> OFFLINE
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- TÍTULO EN EL CENTRO ABSOLUTO -->
+            <div id="header-title-wrapper" class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none hidden lg:block transition-opacity duration-300">
+                <h2 id="page-title" class="text-xl sm:text-2xl tracking-tight whitespace-nowrap">
+                    <span class="font-light text-red-200/80">Estadísticas</span> <span class="font-bold text-white">Globales</span>
+                </h2>
+            </div>
+
+            <div class="flex items-center gap-4 sm:gap-6">
+                <div class="hidden md:flex items-center gap-3 border-r border-red-900 pr-4 sm:pr-6">
+                    <div class="flex flex-col text-right min-w-0">
+                        <span id="user-name-display" class="font-bold text-white leading-none truncate text-xs">Cargando...</span>
+                        <span id="user-role-display" class="text-red-200 uppercase font-black tracking-widest leading-tight mt-0.5" style="font-size: 9px;">Administrador</span>
+                    </div>
+                    <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-red-200 border border-white/10 shrink-0"><i class="fas fa-user-shield text-sm"></i></div>
+                </div>
+                
+                <div class="hidden sm:flex flex-col items-end">
+                    <div id="clock-time" class="text-lg font-bold text-white leading-none tracking-tight">00:00:00</div>
+                    <div id="clock-date" class="font-semibold text-red-200/80 uppercase tracking-wider mt-0.5" style="font-size: 10px;">...</div>
+                </div>
+                <!-- Selector de Ciclo Global -->
+                <select id="globalYearFilter" class="bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-wider h-10 px-3 rounded-full shadow-sm focus:outline-none focus:border-red-500 mr-2" onchange="window.changeGlobalYearFilter(this.value)">
+                </select>
+                <button type="button" id="btn-global-refresh" onclick="window.refreshAllDatabaseData(true)" class="hidden">
+                    <i id="global-sync-icon" class="fas fa-sync"></i>
+                    <span id="last-sync-time">SINC.: --:--:--</span>
+                </button>
+                <button type="button" onclick="window.requestLogout()" class="text-red-200/80 hover:text-white hover:bg-red-600 bg-white/10 border border-white/10 transition-colors w-10 h-10 flex items-center justify-center rounded-xl shadow-sm shrink-0" title="Cerrar Sesión"><i class="fas fa-power-off text-sm"></i></button>
+            </div>
+        </header>
+
+        <!-- CONTENEDOR INFERIOR -->
+        <div class="flex-1 flex relative w-full overflow-hidden bg-slate-50">
+            
+            <div id="sidebar-overlay" onclick="window.toggleSidebar()" class="fixed inset-0 top-16 bg-slate-900/60 hidden md:hidden backdrop-blur-sm transition-opacity" style="z-index: 30;"></div>
+
+            <!-- BARRA LATERAL (Hover-expanding) -->
+            <aside class="group bg-slate-900 text-slate-300 flex flex-col shadow-2xl shrink-0 transition-all duration-300 absolute h-full z-40 w-64 md:w-20 hover:w-64 overflow-hidden whitespace-nowrap -translate-x-full md:translate-x-0 left-0 top-0 border-r border-slate-800" id="main-sidebar">
+                <div class="py-4 flex flex-col gap-1 overflow-y-auto overflow-x-hidden flex-1 sidebar-scroll">
+                    <div class="font-semibold text-slate-500 uppercase tracking-widest mb-2 mt-2 px-6 transition-opacity duration-200 md:opacity-0 group-hover:opacity-100" style="font-size: 10px;">Principal</div>
+                    
+                    <button type="button" onclick="window.navigate('dashboard', 'estadisticas.html', this)" class="nav-btn active" id="btn-default">
+                        <div class="flex items-center">
+                            <i class="fas fa-chart-pie shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Estadísticas</span>
+                        </div>
+                    </button>
+                    
+                    <div class="font-semibold text-slate-500 uppercase tracking-widest mb-2 mt-4 px-6 transition-opacity duration-200 md:opacity-0 group-hover:opacity-100" style="font-size: 10px;">Administración</div>
+
+                    <button type="button" onclick="window.navigate('personal', 'personal.html', this)" class="nav-btn">
+                        <div class="flex items-center">
+                            <i class="fas fa-users-cog shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Personal</span>
+                        </div>
+                    </button>
+                    
+                    <button type="button" onclick="window.navigate('asistencia', 'asistencia.html', this)" class="nav-btn">
+                        <div class="flex items-center">
+                            <i class="fas fa-clipboard-check shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Asistencias</span>
+                        </div>
+                    </button>
+
+                    <button type="button" onclick="window.navigate('vehiculos', 'vehiculos.html', this)" class="nav-btn">
+                        <div class="flex items-center">
+                            <i class="fas fa-truck shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Vehículos</span>
+                        </div>
+                    </button>
+
+                    <button type="button" onclick="window.navigate('accesos', 'accesos.html', this)" class="nav-btn">
+                        <div class="flex items-center">
+                            <i class="fas fa-history shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Log de Accesos</span>
+                        </div>
+                    </button>
+
+                    <div class="font-semibold text-slate-500 uppercase tracking-widest mb-2 mt-4 px-6 transition-opacity duration-200 md:opacity-0 group-hover:opacity-100" style="font-size: 10px;">Operativo</div>
+
+                    <button type="button" onclick="window.navigate('bitacora', 'bitacora.html', this)" class="nav-btn">
+                        <div class="flex items-center">
+                            <i class="fas fa-book shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Bitácora</span>
+                        </div>
+                    </button>
+                    
+                    <button type="button" onclick="window.navigate('despachos', 'despachos.html', this)" class="nav-btn">
+                        <div class="flex items-center">
+                            <i class="fas fa-satellite-dish shrink-0"></i>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Despachos</span>
+                        </div>
+                    </button>
+
+                    <button type="button" onclick="window.navigate('alertas', 'alertas.html', this)" class="nav-btn relative" id="nav-btn-alertas">
+                        <div class="flex items-center">
+                            <div class="relative shrink-0" style="width: 24px; margin-right: 16px;">
+                                <i class="fas fa-bell w-full text-center m-0 text-red-400"></i>
+                                <span id="global-alert-badge" class="hidden absolute -top-1 -right-1 flex h-3 w-3">
+                                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                    <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500 shadow-sm border border-slate-900"></span>
+                                </span>
+                            </div>
+                            <span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Ordenes y Alertas</span>
+                        </div>
+                    </button>
+                    
+                    <button type="button" id="nav-btn-update" onclick="window.triggerAppUpdate()" class="hidden nav-btn bg-amber-600/20 hover:bg-amber-600/40 text-amber-300 border border-amber-500/30 mt-4">
+                        <div class="flex items-center">
+                            <div class="relative shrink-0" style="width: 24px; margin-right: 16px;">
+                                <i class="fas fa-arrow-alt-circle-up w-full text-center m-0 text-amber-400"></i>
+                            </div>
+                            <span class="font-black transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 text-xs tracking-wider">ACTUALIZAR SISBOM</span>
+                        </div>
+                    </button>
+                </div>
+                <!-- Indicador de Reconexión Silenciosa -->
+                <div class="px-3 py-2 border-t border-slate-800/80 bg-slate-950/50 flex flex-col gap-1.5 shrink-0">
+                    <div id="sidebar-reconnect-indicator" class="hidden flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold transition-all cursor-pointer" onclick="window.softReconnect('manual')" title="Haga clic para reconectar ahora">
+                        <div class="w-3.5 h-3.5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin shrink-0"></div>
+                        <span id="sidebar-reconnect-text" class="truncate transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 uppercase tracking-wider" style="font-size: 11px;">Reconectando...</span>
+                    </div>
+                </div>
+                <!-- Versión Visual del Sistema -->
+                <div class="border-t border-slate-800/60 p-4 flex items-center justify-center shrink-0 bg-slate-950/20">
+                    <span class="text-slate-500 font-bold tracking-widest text-[10px] select-none md:hidden group-hover:inline transition-opacity duration-200">
+                        SISBOM V1.1.7
+                    </span>
+                    <span class="text-slate-500 font-bold tracking-wider text-[10px] select-none hidden md:inline group-hover:hidden transition-opacity duration-200">
+                        V1.1.7
+                    </span>
+                </div>
+            </aside>
+
+            <!-- CONTENEDOR CENTRAL -->
+            <main class="flex-1 flex flex-col relative min-w-0 md:pl-20 w-full overflow-hidden">
+                
+                <div class="flex-1 relative overflow-hidden bg-slate-100" id="iframe-container">
+                    <div id="iframe-loader" class="absolute inset-0 bg-slate-50 flex flex-col items-center justify-center transition-opacity duration-200 hidden opacity-0" style="z-index: 50;">
+                        <div class="w-10 h-10 border-4 border-slate-200 border-t-bomberos-red rounded-full animate-spin mb-3"></div>
+                        <span class="text-xs font-semibold text-slate-500 uppercase tracking-widest animate-pulse">Cargando Módulo...</span>
+                    </div>
+                </div>
+
+                <!-- FLOATING CHAT WIDGET (MINIMIZABLE) -->
+                <div id="floating-chat-widget" class="fixed bottom-0 right-4 sm:right-8 flex flex-col items-end transition-transform duration-300 translate-y-full opacity-0" style="z-index: 5000;">
+                    
+                    <!-- CONTENEDOR EXPANDIDO -->
+                    <div id="fc-expanded" class="hidden bg-white rounded-t-xl border border-slate-200 flex-col overflow-hidden" style="width: 90vw; max-width: 24rem; height: 450px; box-shadow: 0 -5px 25px rgba(0,0,0,0.15);">
+                        <div class="bg-gradient-to-r from-bomberos-red to-bomberos-dark text-white px-4 py-3 flex justify-between items-center cursor-pointer shadow-md" style="z-index: 20;" onclick="App.toggleFloatingChat()">
+                            <div class="flex items-center gap-3 min-w-0">
+                                <i class="fas fa-comments text-lg"></i>
+                                <div class="flex flex-col min-w-0">
+                                    <span id="fc-title" class="font-bold text-sm truncate leading-tight">Chat de Alerta</span>
+                                    <span id="fc-subtitle" class="text-red-100 truncate leading-tight" style="font-size: 10px;">...</span>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 shrink-0">
+                                <button onclick="window.navigate('alertas', 'alertas.html', document.getElementById('nav-btn-alertas')); App.closeFloatingChat(event);" class="text-red-200 hover:text-white transition-colors" title="Abrir Central de Alertas"><i class="fas fa-external-link-alt"></i></button>
+                                <i class="fas fa-chevron-down text-red-200"></i>
+                            </div>
+                        </div>
+                        
+                        <!-- Contenedor del Scroll Fijo Modificado -->
+                        <div class="flex-1 relative flex flex-col overflow-hidden" style="z-index: 10; background-color: #F0F2F5;">
+                            <!-- Marca de Agua Fija y Estática -->
+                            <div class="absolute inset-0 flex items-center justify-center pointer-events-none" style="z-index: 0; opacity: 0.03;">
+                                <img src="Logo.png" class="w-40 h-40 object-contain filter grayscale">
+                            </div>
+                            <!-- Scroll de Mensajes -->
+                            <div id="fc-messages" class="flex-1 overflow-y-auto p-4 flex flex-col gap-2 widget-scroll relative" style="z-index: 10;">
+                                <div id="fc-messages-content" class="flex flex-col gap-2"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="p-3 bg-white border-t border-slate-200 flex gap-2 items-end" style="z-index: 20; box-shadow: 0 -2px 10px rgba(0,0,0,0.05);">
+                            <div class="relative w-full">
+                                <textarea id="fc-input" rows="1" class="peer w-full bg-slate-100 border border-slate-300 rounded-xl px-3 pt-5 pb-1.5 text-sm focus:outline-none focus:border-bomberos-red focus:ring-1 focus:ring-bomberos-red resize-none widget-scroll text-slate-800 font-medium placeholder-transparent" placeholder="Responder rápidamente..." onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); App.sendFloatingChat(); }"></textarea>
+                                <label for="fc-input" class="absolute left-3 top-1 text-slate-400 transition-all pointer-events-none font-bold peer-placeholder-shown:top-3 peer-placeholder-shown:text-sm peer-placeholder-shown:font-medium peer-focus:top-1 peer-focus:text-bomberos-red peer-focus:font-bold" style="font-size: 10px;">Responder rápidamente...</label>
+                            </div>
+                            <button id="fc-send-btn" onclick="App.sendFloatingChat()" class="bg-bomberos-red text-white w-10 h-10 rounded-xl hover:bg-bomberos-dark flex items-center justify-center shrink-0 transition-all shadow-sm active:scale-95 mb-0.5"><i class="fas fa-paper-plane text-sm"></i></button>
+                        </div>
+                    </div>
+
+                    <!-- BOTÓN MINIMIZADO (Pestaña) -->
+                    <div id="fc-minimized" class="bg-white border-t border-l border-r border-slate-200 rounded-t-xl cursor-pointer flex items-center gap-3 px-4 py-3 hover:bg-slate-50 transition-colors" style="width: 90vw; max-width: 20rem; box-shadow: 0 -5px 15px rgba(0,0,0,0.1);" onclick="App.toggleFloatingChat()">
+                        <div class="relative flex items-center justify-center w-10 h-10 bg-red-50 text-bomberos-red rounded-full shrink-0 border border-red-100">
+                            <i class="fas fa-comments text-lg"></i>
+                            <span id="fc-badge" class="absolute -top-1 -right-1 bg-red-600 text-white font-black w-5 h-5 flex items-center justify-center rounded-full shadow-sm hidden border border-white" style="font-size: 10px;"></span>
+                        </div>
+                        <div class="flex flex-col min-w-0 flex-1">
+                            <span class="font-bold text-bomberos-red uppercase tracking-widest leading-tight" style="font-size: 9px;">Chat Activo</span>
+                            <span id="fc-min-sender" class="font-bold text-slate-800 text-sm truncate leading-tight mt-0.5">--</span>
+                            <span id="fc-min-text" class="text-xs text-slate-500 truncate leading-tight mt-0.5">--</span>
+                        </div>
+                        <div class="ml-auto flex items-center gap-2 shrink-0">
+                            <i class="fas fa-chevron-up text-slate-400"></i>
+                            <button onclick="App.dismissFloatingChat(event)" class="text-slate-400 hover:text-red-500 hover:bg-slate-200 w-8 h-8 rounded-lg flex items-center justify-center transition-colors" title="Cerrar notificación">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- CONTENEDOR DE TOASTS NORMALES PARA ALERTAS OFICIALES -->
+                <div id="index-toast-container" class="absolute bottom-5 right-5 flex flex-col gap-3 pointer-events-none" style="z-index: 4000;"></div>
+
+            </main>
+        </div>
+    </div>
+
+    <script>
+        try {
+            Object.defineProperty(navigator, 'onLine', { get: () => true });
+        } catch(e) {
+            console.error("Error overriding navigator.onLine:", e);
+        }
+        (function() {
+            const originalSetItem = Storage.prototype.setItem;
+            Storage.prototype.setItem = function(key, value) {
+                originalSetItem.call(this, key, value);
+                if (key === 'sisbom_personal_cache' || key === 'db_personal') {
+                    originalSetItem.call(this, key + '_updated', String(Date.now()));
+                }
+            };
+        })();
+
+        window.isSystemLoggedIn = false; // DEFINICIÓN GLOBAL PROTEGIDA
+        
+        window.closeApp = function() {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.closeApp) {
+                window.pywebview.api.closeApp();
+            } else {
+                window.close();
+            }
+        };
+        
+        let personnelData = [];
+        let fbDb = null;
+        let shellPersonalUnsubscribe = null;
+        let sessionSnapshotUnsubscribe = null;
+
+        // CONFIGURACIÓN DE FIREBASE
+        const firebaseConfig = null;
+
+        // Lógica de Visibilidad del Password
+        window.togglePassword = function() {
+            const input = document.getElementById('loginPass');
+            const icon = document.getElementById('togglePassIcon');
+            if (input.classList.contains('show-pass-text')) {
+                input.classList.remove('show-pass-text');
+                icon.classList.remove('fa-eye-slash');
+                icon.classList.add('fa-eye');
+            } else {
+                input.classList.add('show-pass-text');
+                icon.classList.remove('fa-eye');
+                icon.classList.add('fa-eye-slash');
+            }
+            input.focus();
+        };
+
+        // FUNCIONES DE CONTROL DEL LOADER
+        window.showLoader = function() {
+            const el = document.getElementById('loader-overlay');
+            if (el) {
+                el.classList.remove('hidden', 'opacity-0');
+                el.classList.add('flex');
+                el.style.opacity = '1';
+            }
+        };
+
+        window.hideLoader = function() {
+            const el = document.getElementById('loader-overlay');
+            if (el) {
+                el.style.opacity = '0';
+                setTimeout(() => {
+                    el.classList.add('hidden');
+                    el.classList.remove('flex');
+                }, 300);
+            }
+        };
+
+        // DICCIONARIO DE MÓDULOS PARA PRECARGA
+        const APP_MODULES = {
+            'dashboard': 'estadisticas.html',
+            'personal': 'personal.html',
+            'asistencia': 'asistencia.html',
+            'vehiculos': 'vehiculos.html',
+            'accesos': 'accesos.html',
+            'bitacora': 'bitacora.html',
+            'despachos': 'despachos.html',
+            'alertas': 'alertas.html'
+        };
+
+        let currentModuleId = null;
+
+        const App = {
+            myRadialId: null,
+            myIdRegistro: null,
+            notifiedState: {}, 
+            alertasUnsubscribe: null,
+            isFirstCheck: true,
+            fcActiveAlertId: null,
+            fcIsOpen: false,
+
+            playNotificationSound() {
+                try {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioContext) return; 
+                    
+                    const ctx = new AudioContext();
+                    const playTone = (freq, startTime, duration) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        
+                        osc.type = 'sine'; 
+                        osc.frequency.value = freq;
+                        
+                        gain.gain.setValueAtTime(0, startTime);
+                        gain.gain.linearRampToValueAtTime(0.3, startTime + 0.02);
+                        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+                        
+                        osc.start(startTime);
+                        osc.stop(startTime + duration);
+                    };
+
+                    playTone(783.99, ctx.currentTime, 0.3); // Sol5
+                    playTone(1046.50, ctx.currentTime + 0.15, 0.5); // Do6
+                } catch(e) {}
+            },
+
+            showGlobalToast(alertData) {
+                const container = document.getElementById('index-toast-container');
+                if (!container) return;
+                
+                const alertId = alertData.idAlerta || alertData.ID || Date.now();
+                const toastId = 'toast-alert-' + alertId;
+                
+                if (document.getElementById(toastId)) document.getElementById(toastId).remove();
+
+                const toast = document.createElement('div');
+                toast.id = toastId;
+                toast.className = `transform transition-all duration-500 translate-y-full opacity-0 w-80 shadow-2xl rounded-2xl pointer-events-auto bg-white border-l-4 border-bomberos-red overflow-hidden flex flex-col`;
+                
+                toast.innerHTML = `
+                    <div class="p-4 w-full flex items-start gap-4 bg-gradient-to-r from-red-50/50 to-transparent cursor-pointer hover:bg-red-50 transition-colors" onclick="navigate('alertas', 'alertas.html', document.getElementById('nav-btn-alertas'))">
+                        <div class="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center shrink-0 border border-red-200">
+                            <i class="fas fa-bullhorn text-lg text-bomberos-red animate-bounce"></i>
+                        </div>
+                        <div class="flex flex-col mt-0.5 min-w-0">
+                            <p class="font-bold text-slate-500 uppercase tracking-widest leading-tight truncate" style="font-size: 10px;">Nueva Alerta Oficial</p>
+                            <p class="text-sm font-bold text-slate-800 mt-1 truncate">${alertData.razonAlerta}</p>
+                            <p class="text-xs font-medium text-slate-600 mt-1 line-clamp-2 leading-tight">${alertData.mensajeAlerta || ''}</p>
+                        </div>
+                    </div>
+                `;
+
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 50);
+                setTimeout(() => {
+                    toast.classList.add('translate-y-full', 'opacity-0');
+                    setTimeout(() => toast.remove(), 500);
+                }, 8000); 
+            },
+
+            parseChatMessage(msg, rowData) {
+                let senderId = 'Sistema', text = String(msg).trim(), timeDisplay = '';
+                let datePart = null, timePart = null;
+
+                const firstSlash = msg.indexOf('/');
+                const secondSlash = msg.indexOf('/', firstSlash + 1);
+
+                if (firstSlash !== -1 && secondSlash !== -1) {
+                    const potentialDate = msg.substring(0, firstSlash).trim();
+                    const potentialTime = msg.substring(firstSlash + 1, secondSlash).trim();
+                    
+                    if (/^\d{2}-\d{2}-\d{4}$/.test(potentialDate) && /^\d{2}:\d{2}$/.test(potentialTime)) {
+                        datePart = potentialDate;
+                        timePart = potentialTime;
+                        const rest = msg.substring(secondSlash + 1);
+                        const colonIdx = rest.indexOf(':');
+                        if (colonIdx !== -1) {
+                            senderId = rest.substring(0, colonIdx).trim();
+                            text = rest.substring(colonIdx + 1).trim();
+                        } else {
+                            senderId = rest.trim();
+                            text = "";
+                        }
+                        timeDisplay = this.formatChatTime(datePart, timePart);
+                    }
+                }
+
+                if (!datePart) {
+                    const firstColon = msg.indexOf(':');
+                    if (firstColon !== -1) {
+                        senderId = msg.substring(0, firstColon).trim();
+                        text = msg.substring(firstColon + 1).trim();
+                    } else {
+                        senderId = rowData.quienAlerta ? String(rowData.quienAlerta).split(' - ').at(0) : 'Sistema';
+                        text = msg.trim();
+                    }
+                    timeDisplay = this.formatChatTime(this.cleanDate(rowData.fechaAlerta), rowData.horaAlerta);
+                }
+                
+                return { senderId: String(senderId), text: String(text), timeDisplay: String(timeDisplay) };
+            },
+
+            cleanDate(dateStr) {
+                if(!dateStr) return '';
+                const d = String(dateStr).replace(/['"]/g, '').trim();
+                if(d.includes('T')) {
+                    const p = d.split('T').at(0).split('-');
+                    return `${p.at(2)}-${p.at(1)}-${p.at(0)}`;
+                }
+                return d;
+            },
+
+            formatChatTime(dateStr, timeStr) {
+                if (!dateStr || !timeStr) return '';
+                
+                dateStr = String(dateStr).replace(/['"]/g, '').trim();
+                timeStr = String(timeStr).replace(/['"]/g, '').trim();
+
+                const today = new Date();
+                const todayStr = `${String(today.getDate()).padStart(2, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${today.getFullYear()}`;
+                
+                const yesterday = new Date(today);
+                yesterday.setDate(yesterday.getDate() - 1);
+                const yesterdayStr = `${String(yesterday.getDate()).padStart(2, '0')}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${yesterday.getFullYear()}`;
+
+                if (dateStr === todayStr) return `Hoy ${timeStr}`;
+                if (dateStr === yesterdayStr) return `Ayer ${timeStr}`;
+                
+                const parts = dateStr.split('-');
+                if(parts.length === 3) return `${parts.at(0)}/${parts.at(1)} ${timeStr}`;
+                return `${dateStr} ${timeStr}`;
+            },
+
+            updateFloatingChat(alertData, unreadCount, senderName, messageText) {
+                const widget = document.getElementById('floating-chat-widget');
+                if (!widget) return;
+
+                this.fcActiveAlertId = alertData.idAlerta || alertData.ID;
+                
+                document.getElementById('fc-min-sender').innerText = senderName;
+                document.getElementById('fc-min-text').innerText = messageText;
+                
+                const badge = document.getElementById('fc-badge');
+                if (unreadCount > 0) {
+                    badge.innerText = unreadCount > 9 ? '+9' : unreadCount;
+                    badge.classList.remove('hidden');
+                } else {
+                    badge.classList.add('hidden');
+                }
+
+                document.getElementById('fc-title').innerText = alertData.razonAlerta;
+                const aQuien = String(alertData.aQuienAlerta).trim();
+                const namesStr = (aQuien === 'TC' || aQuien === '1') ? 'Toda la Compañía' : 'Chat Específico';
+                document.getElementById('fc-subtitle').innerText = `Para: ${namesStr}`;
+
+                this.renderFloatingChatMessages(alertData);
+                widget.classList.remove('translate-y-full', 'opacity-0');
+            },
+
+            renderFloatingChatMessages(alertData) {
+                const content = document.getElementById('fc-messages-content');
+                const rawText = alertData.mensajeAlerta || '';
+                const messages = rawText.split('|').filter(s => s.trim());
+                
+                if (messages.length === 0) {
+                    content.innerHTML = '<div class="text-center text-xs text-slate-400 italic mt-10">Inicia la conversación.</div>';
+                    return;
+                }
+
+                let html = '';
+                messages.forEach(msg => {
+                    const parsedMsg = this.parseChatMessage(msg, alertData);
+                    const senderId = parsedMsg.senderId;
+                    const text = parsedMsg.text;
+                    const timeDisplay = parsedMsg.timeDisplay;
+
+                    const isMe = this.myRadialId && senderId && (String(senderId).toUpperCase() === String(this.myRadialId).toUpperCase() || (this.myIdRegistro && String(senderId).toUpperCase() === String(this.myIdRegistro).toUpperCase()));
+                    
+                    let firstName = senderId;
+                    const person = personnelData.find(p => String(p.idRadial).toUpperCase() === String(senderId).toUpperCase() || String(p.idRegistro).toUpperCase() === String(senderId).toUpperCase());
+                    if (person) firstName = person.nombreBombero.split(' ').at(0);
+
+                    if (isMe) {
+                        html += `
+                            <div class="flex flex-col items-end mb-1.5 relative" style="z-index: 10;">
+                                <span class="font-bold text-slate-400 mb-0.5 mr-1 text-right" style="font-size: 9px;">Tú</span>
+                                <div class="bg-bomberos-red text-white font-medium px-4 py-2 rounded-l-2xl rounded-tr-2xl shadow-sm break-words leading-relaxed" style="font-size: 13px; max-width: 85%;">
+                                    ${text}
+                                </div>
+                                <span class="text-slate-400 mt-0.5 font-semibold" style="font-size: 9px;">${timeDisplay}</span>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="flex flex-col items-start mb-1.5 relative" style="z-index: 10;">
+                                <span class="font-bold text-slate-500 mb-0.5 ml-1" style="font-size: 9px;">${firstName}</span>
+                                <div class="bg-white border border-slate-200 text-slate-800 font-medium px-4 py-2 rounded-r-2xl rounded-tl-2xl shadow-sm break-words leading-relaxed" style="font-size: 13px; max-width: 85%;">
+                                    ${text}
+                                </div>
+                                <span class="text-slate-400 mt-0.5 ml-1 font-semibold" style="font-size: 9px;">${timeDisplay}</span>
+                            </div>
+                        `;
+                    }
+                });
+                
+                content.innerHTML = html;
+                
+                if(this.fcIsOpen) {
+                    const container = document.getElementById('fc-messages');
+                    container.scrollTop = container.scrollHeight;
+                }
+            },
+
+            markFloatingChatAsRead(alertData) {
+                const id = alertData.idAlerta || alertData.ID;
+                const rawText = alertData.mensajeAlerta || '';
+                const msgCount = rawText.split('|').filter(s => s.trim()).length;
+                
+                const readsStr = localStorage.getItem('sisbom_alertas_reads');
+                const readStatus = readsStr ? JSON.parse(readsStr) : {};
+                readStatus[id] = msgCount;
+                localStorage.setItem('sisbom_alertas_reads', JSON.stringify(readStatus));
+                
+                this.notifiedState[id] = msgCount;
+                document.getElementById('fc-badge').classList.add('hidden');
+            },
+
+            toggleFloatingChat() {
+                this.fcIsOpen = !this.fcIsOpen;
+                const minTab = document.getElementById('fc-minimized');
+                const expPanel = document.getElementById('fc-expanded');
+                
+                if (this.fcIsOpen) {
+                    minTab.classList.add('hidden');
+                    expPanel.classList.remove('hidden');
+                    expPanel.classList.add('flex');
+                    
+                    setTimeout(() => {
+                        const container = document.getElementById('fc-messages');
+                        container.scrollTop = container.scrollHeight;
+                        document.getElementById('fc-input').focus();
+                    }, 50);
+                    
+                    if (this.fcActiveAlertId) {
+                        const cachedData = localStorage.getItem('sisbom_alertas_cache_v2');
+                        if (cachedData) {
+                            const parsed = JSON.parse(cachedData);
+                            const row = parsed.alertas.find(r => String(r.idAlerta || r.ID) === String(this.fcActiveAlertId));
+                            if (row) {
+                                this.markFloatingChatAsRead(row);
+                            }
+                        }
+                    }
+                } else {
+                    minTab.classList.remove('hidden');
+                    expPanel.classList.add('hidden');
+                    expPanel.classList.remove('flex');
+                }
+            },
+
+            dismissFloatingChat(e) {
+                if(e) e.stopPropagation();
+                const widget = document.getElementById('floating-chat-widget');
+                widget.classList.add('translate-y-full', 'opacity-0');
+                
+                if (this.fcActiveAlertId) {
+                    const cachedData = localStorage.getItem('sisbom_alertas_cache_v2');
+                    if (cachedData) {
+                        const parsed = JSON.parse(cachedData);
+                        const row = parsed.alertas.find(r => String(r.idAlerta || r.ID) === String(this.fcActiveAlertId));
+                        if (row) {
+                            this.markFloatingChatAsRead(row);
+                        }
+                    }
+                }
+                
+                setTimeout(() => {
+                    document.getElementById('fc-expanded').classList.add('hidden');
+                    document.getElementById('fc-expanded').classList.remove('flex');
+                    document.getElementById('fc-minimized').classList.remove('hidden');
+                }, 300);
+                
+                this.fcIsOpen = false;
+                this.fcActiveAlertId = null;
+            },
+
+            closeFloatingChat(e) {
+                if(e) e.stopPropagation();
+                this.fcIsOpen = false;
+                const widget = document.getElementById('floating-chat-widget');
+                widget.classList.add('translate-y-full', 'opacity-0');
+                
+                setTimeout(() => {
+                    document.getElementById('fc-expanded').classList.add('hidden');
+                    document.getElementById('fc-expanded').classList.remove('flex');
+                    document.getElementById('fc-minimized').classList.remove('hidden');
+                }, 300);
+                
+                this.fcActiveAlertId = null;
+            },
+
+            async sendFloatingChat() {
+                if(!this.fcActiveAlertId || !this.myRadialId) return;
+                
+                const input = document.getElementById('fc-input');
+                const btn = document.getElementById('fc-send-btn');
+                const text = input.value.trim();
+                
+                if(!text) return;
+
+                input.disabled = true;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+
+                try {
+                    const cachedData = localStorage.getItem('sisbom_alertas_cache_v2');
+                    if (!cachedData) throw new Error("No hay caché disponible");
+                    const parsed = JSON.parse(cachedData);
+                    
+                    const row = parsed.alertas.find(r => String(r.idAlerta || r.ID) === String(this.fcActiveAlertId));
+                    if (!row) throw new Error("Alerta no encontrada");
+
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                    const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                    
+                    const senderId = this.myIdRegistro || this.myRadialId;
+                    const newMsgStr = `${dStr}/${tStr}/${senderId}: ${text} | `;
+                    
+                    let currentRaw = row.mensajeAlerta || '';
+                    if (currentRaw.endsWith('|')) currentRaw = currentRaw.substring(0, currentRaw.length - 1).trim();
+                    const finalMsg = currentRaw !== '' ? currentRaw + ' | ' + newMsgStr : newMsgStr;
+                    
+                    row.mensajeAlerta = finalMsg;
+                    this.markFloatingChatAsRead(row);
+                    this.renderFloatingChatMessages(row);
+                    
+                    input.value = '';
+                    
+                    // Escribir directamente en Firestore
+                    const docRef = window.fbDoc(fbDb, 'alertas', String(this.fcActiveAlertId));
+                    await window.fbUpdateDoc(docRef, { mensajeAlerta: finalMsg });
+                    
+                } catch(e) {
+                    console.error("Error al enviar chat flotante", e);
+                } finally {
+                    input.disabled = false;
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-paper-plane text-sm"></i>';
+                    input.focus();
+                }
+            },
+
+            startNotificationEngine() {
+                if (this.alertasUnsubscribe) {
+                    this.alertasUnsubscribe();
+                    this.alertasUnsubscribe = null;
+                }
+                if (!fbDb) return;
+                
+                // Suscribirse en tiempo real a Firebase
+                this.alertasUnsubscribe = window.fbOnSnapshot(window.fbCollection(fbDb, 'alertas'), (snap) => {
+                    const alertas = [];
+                    snap.forEach(doc => {
+                        const data = doc.data();
+                        data.idAlerta = doc.id;
+                        data.ID = doc.id;
+                        alertas.push(data);
+                    });
+                    this.checkAlertsDatabase(alertas);
+                }, (error) => {
+                    console.error("Error en conexión en vivo de alertas", error);
+                });
+            },
+
+            async checkAlertsDatabase(alertas) {
+                if (!window.isSystemLoggedIn) return;
+                
+                try {
+                    const cacheKey = 'sisbom_alertas_cache_v2';
+                    const cachedData = localStorage.getItem(cacheKey);
+                    if (cachedData) {
+                        const parsed = JSON.parse(cachedData);
+                        parsed.alertas = alertas;
+                        if (personnelData.length > 0) parsed.personal = personnelData;
+                        localStorage.setItem(cacheKey, JSON.stringify(parsed));
+                    } else {
+                        localStorage.setItem(cacheKey, JSON.stringify({ alertas: alertas, personal: personnelData }));
+                    }
+
+                    const sessionStr = localStorage.getItem('adminUser');
+                    if (!sessionStr) return;
+                    const user = JSON.parse(sessionStr);
+                    
+                    let myRadialId = user.nombreBombero;
+                    let myIdRegistro = user.idRegistro ? String(user.idRegistro).trim() : '';
+                    if (user.nombreBombero === "Admin Test Canvas") {
+                        myRadialId = "00-TEST";
+                    } else {
+                        const match = personnelData.find(p => p.nombreBombero.toUpperCase() === user.nombreBombero.toUpperCase());
+                        if (match) {
+                            myIdRegistro = match.idRegistro ? String(match.idRegistro).trim() : myIdRegistro;
+                            if (match.idRadial) myRadialId = String(match.idRadial).trim();
+                            else if (match.idRegistro) myRadialId = String(match.idRegistro).trim();
+                        }
+                    }
+                    this.myRadialId = myRadialId;
+                    this.myIdRegistro = myIdRegistro;
+                    
+                    const readsStr = localStorage.getItem('sisbom_alertas_reads');
+                    const readStatus = readsStr ? JSON.parse(readsStr) : {};
+
+                    let hasAnyUnread = false;
+
+                    alertas.forEach(row => {
+                        const isDeleted = String(row.duracion).trim() === '';
+                        if (isDeleted) return; 
+
+                        const aQuien = String(row.aQuienAlerta).trim();
+                        let isForMe = false;
+                        const myUpper = myRadialId.toUpperCase();
+                        const myRegUpper = (myIdRegistro || '').toUpperCase();
+                        
+                        if (aQuien === 'TC' || aQuien === '1') {
+                            isForMe = true;
+                        } else if (myRadialId) {
+                            const targets = aQuien.split(',').map(t => t.trim().toUpperCase());
+                            isForMe = targets.some(t => t === myUpper || t.startsWith(myUpper + ' -') || t.startsWith(myUpper + ' ') ||
+                                                       (myRegUpper && (t === myRegUpper || t.startsWith(myRegUpper + ' -') || t.startsWith(myRegUpper + ' '))));
+                        }
+
+                        if (isForMe) {
+                            const id = row.idAlerta || row.ID || '-';
+                            const isConversation = String(row.duracion).trim().toUpperCase() === 'C';
+                            
+                            if (isConversation) {
+                                const rawText = row.mensajeAlerta || '';
+                                const messages = rawText.split('|').filter(s => s.trim());
+                                const msgCount = messages.length;
+                                
+                                const lastReadCount = parseInt(readStatus[id]) || 0;
+                                const lastNotifiedCount = parseInt(this.notifiedState[id]) || lastReadCount;
+                                
+                                if (msgCount > lastReadCount) {
+                                    hasAnyUnread = true; 
+                                    
+                                    if (msgCount > lastNotifiedCount) {
+                                        this.notifiedState[id] = msgCount;
+                                        
+                                        const lastMsg = messages[messages.length - 1];
+                                        const parsedMsg = this.parseChatMessage(lastMsg, row);
+                                        
+                                        const senderIdUpper = String(parsedMsg.senderId).toUpperCase();
+                                        const isSelfChat = senderIdUpper === myUpper || senderIdUpper.includes(myUpper) || (myRegUpper && (senderIdUpper === myRegUpper || senderIdUpper.includes(myRegUpper)));
+                                        if (!isSelfChat) {
+                                            
+                                            let senderName = parsedMsg.senderId;
+                                            const pMatch = personnelData.find(p => String(p.idRadial).toUpperCase() === senderIdUpper || String(p.idRegistro).toUpperCase() === senderIdUpper);
+                                            if (pMatch) {
+                                                senderName = `${parsedMsg.senderId} • ${pMatch.nombreBombero.split(' ').at(0)}`;
+                                            }
+
+                                            if (!this.isFirstCheck) {
+                                                this.playNotificationSound();
+                                                if (currentModuleId !== 'alertas') {
+                                                    this.updateFloatingChat(row, (msgCount - lastReadCount), senderName, parsedMsg.text);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                const conformes = String(row.conforme || '').split(',').map(s => s.trim().toUpperCase());
+                                if (!conformes.includes(myUpper) && (!myRegUpper || !conformes.includes(myRegUpper))) {
+                                    hasAnyUnread = true;
+                                    
+                                    if (!this.notifiedState[id]) {
+                                        this.notifiedState[id] = true;
+                                        
+                                        const senderRaw = row.quienAlerta ? row.quienAlerta.split(' - ').at(0).trim().toUpperCase() : '';
+                                        const isSelfAlert = senderRaw === myUpper || senderRaw.includes(myUpper) || (myRegUpper && (senderRaw === myRegUpper || senderRaw.includes(myRegUpper)));
+                                        if (!isSelfAlert) {
+                                            if (!this.isFirstCheck) {
+                                                this.playNotificationSound();
+                                                if (currentModuleId !== 'alertas') {
+                                                    this.showGlobalToast(row);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    const badge = document.getElementById('global-alert-badge');
+                    if (hasAnyUnread) {
+                        if (badge) badge.classList.remove('hidden');
+                    } else {
+                        if (badge) badge.classList.add('hidden');
+                    }
+
+                    this.isFirstCheck = false;
+
+                } catch (e) {}
+            }
+        }; 
+
+        // --- SISTEMA DE MODALES INTERNOS ---
+        window.showSysModal = function(title, message, iconClass, onConfirm, hideCancel = false) {
+            const modal = document.getElementById('sys-modal');
+            const content = document.getElementById('sys-modal-content');
+            const cancelBtn = document.getElementById('sys-modal-cancel');
+            
+            document.getElementById('sys-modal-title').innerText = title;
+            document.getElementById('sys-modal-msg').innerHTML = message;
+            document.getElementById('sys-modal-icon').className = `fas ${iconClass}`;
+            
+            if (cancelBtn) {
+                if (hideCancel) cancelBtn.classList.add('hidden');
+                else cancelBtn.classList.remove('hidden');
+            }
+            
+            const confirmBtn = document.getElementById('sys-modal-confirm');
+            const newBtn = confirmBtn.cloneNode(true);
+            if (hideCancel) {
+                newBtn.innerText = "Aceptar";
+                newBtn.className = "flex-1 py-2.5 text-sm font-semibold text-white bg-slate-700 hover:bg-slate-800 shadow-sm rounded-xl transition-colors";
+            } else {
+                newBtn.innerText = "Confirmar";
+                newBtn.className = "flex-1 py-2.5 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 shadow-sm rounded-xl transition-colors";
+            }
+            confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+            
+            newBtn.onclick = () => { 
+                if(onConfirm) onConfirm(); 
+                else window.closeSysModal(); 
+            };
+            
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            
+            setTimeout(() => { 
+                modal.classList.remove('opacity-0'); 
+                content.classList.remove('scale-95'); 
+            }, 10);
+        };
+
+        window.closeSysModal = function() {
+            const modal = document.getElementById('sys-modal');
+            const content = document.getElementById('sys-modal-content');
+            
+            modal.classList.add('opacity-0');
+            content.classList.add('scale-95');
+            
+            setTimeout(() => { 
+                modal.classList.add('hidden'); 
+                modal.classList.remove('flex'); 
+            }, 200);
+        };
+
+        // --- UTILIDADES ---
+        const getFormattedDate = () => {
+            const d = new Date();
+            return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+        };
+
+        const getFormattedTime = () => {
+            const d = new Date();
+            return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+        };
+        
+        function startClock() {
+            setInterval(() => {
+                const now = new Date();
+                document.getElementById('clock-time').innerText = now.toLocaleTimeString('es-CL', {hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false});
+                document.getElementById('clock-date').innerText = now.toLocaleDateString('es-CL', { weekday: 'long', day: 'numeric', month: 'long' });
+            }, 1000);
+        }
+
+        window.toggleSidebar = function() {
+            const sb = document.getElementById('main-sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sb.classList.toggle('-translate-x-full');
+            if (overlay) {
+                overlay.classList.toggle('hidden');
+            }
+        };
+
+        // --- NAVEGACIÓN INSTANTÁNEA (SPA) ---
+        window.changeGlobalYearFilter = function(year) {
+            localStorage.setItem('selectedCycleYear', year);
+            const iframes = document.querySelectorAll('#iframe-container iframe');
+            iframes.forEach(iframe => {
+                try {
+                    if (iframe.contentWindow && typeof iframe.contentWindow.handleCycleChange === 'function') {
+                        iframe.contentWindow.handleCycleChange(year);
+                    }
+                } catch (e) {
+                    console.error("Error calling handleCycleChange on iframe: ", e);
+                }
+            });
+        };
+
+        window.navigate = function(id, fileUrl, btn) {
+            if (currentModuleId === id) {
+                if(window.innerWidth < 768) window.toggleSidebar();
+                return;
+            }
+
+            if (id === 'alertas' && App.fcIsOpen) {
+                App.closeFloatingChat();
+            }
+
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+            if(btn) btn.classList.add('active');
+            
+            const titles = { 
+                'dashboard': '<span class="font-light text-red-200/80">Estadísticas</span> <span class="font-bold text-white">Globales</span>', 
+                'personal': '<span class="font-light text-red-200/80">Gestión de</span> <span class="font-bold text-white">Personal</span>', 
+                'accesos': '<span class="font-light text-red-200/80">Historial de</span> <span class="font-bold text-white">Accesos</span>',
+                'asistencia': '<span class="font-light text-red-200/80">Control de</span> <span class="font-bold text-white">Asistencias</span>', 
+                'vehiculos': '<span class="font-light text-red-200/80">Flota de</span> <span class="font-bold text-white">Vehículos</span>', 
+                'bitacora': '<span class="font-light text-red-200/80">Historial de</span> <span class="font-bold text-white">Bitácora</span>', 
+                'despachos': '<span class="font-light text-red-200/80">Registro de</span> <span class="font-bold text-white">Despachos</span>',
+                'alertas': '<span class="font-light text-red-200/80">Órdenes y</span> <span class="font-bold text-white">Alertas</span>'
+            };
+            document.getElementById('page-title').innerHTML = titles[id] || 'Panel de Control';
+
+            const container = document.getElementById('iframe-container');
+            const prevId = currentModuleId;
+
+            if (prevId) {
+                const prevIframe = document.getElementById(`frame-${prevId}`);
+                if (prevIframe) {
+                    prevIframe.classList.add('opacity-0', 'pointer-events-none');
+                    prevIframe.style.zIndex = "0";
+                }
+            }
+
+            currentModuleId = id;
+
+            let targetIframe = document.getElementById(`frame-${id}`);
+            
+            if (!targetIframe) {
+                targetIframe = document.createElement('iframe');
+                targetIframe.id = `frame-${id}`;
+                targetIframe.className = 'absolute inset-0 w-full h-full border-none bg-transparent opacity-0 pointer-events-none transition-opacity duration-300';
+                targetIframe.style.zIndex = "10";
+                container.appendChild(targetIframe);
+                
+                window.showLoader(); 
+
+                targetIframe.onload = function() {
+                    window.hideLoader();
+                    if (currentModuleId === id) {
+                        targetIframe.classList.remove('opacity-0', 'pointer-events-none');
+                    }
+                    try {
+                        const iframeDoc = targetIframe.contentWindow.document;
+                        Array.of('mousedown', 'touchstart', 'keydown').forEach(evt => iframeDoc.addEventListener(evt, () => wakeUp()));
+                    } catch(e) {}
+                    try {
+                        if (targetIframe.contentWindow && typeof targetIframe.contentWindow.handleCycleChange === 'function') {
+                            const currentYear = localStorage.getItem('selectedCycleYear') || new Date().getFullYear();
+                            targetIframe.contentWindow.handleCycleChange(currentYear);
+                        }
+                    } catch(e) {}
+                };
+                targetIframe.src = fileUrl;
+            } else {
+                targetIframe.classList.remove('opacity-0', 'pointer-events-none');
+                targetIframe.style.zIndex = "10";
+                
+                try {
+                    if (targetIframe.contentWindow && typeof targetIframe.contentWindow.handleCycleChange === 'function') {
+                        const currentYear = localStorage.getItem('selectedCycleYear') || new Date().getFullYear();
+                        targetIframe.contentWindow.handleCycleChange(currentYear);
+                    }
+                } catch(e) {}
+
+                try {
+                    if (targetIframe.contentWindow && typeof targetIframe.contentWindow.App !== 'undefined' && id !== 'alertas') {
+                        targetIframe.contentWindow.App.loadData(false);
+                    }
+                } catch(e) {}
+            }
+
+            if(window.innerWidth < 768) window.toggleSidebar();
+        };
+
+        // --- PRECARGA SILENCIOSA ESCALONADA ---
+        async function preloadModules() {
+            const keys = Object.keys(APP_MODULES);
+            for (let key of keys) {
+                if (key === currentModuleId || document.getElementById(`frame-${key}`)) continue;
+                
+                const iframe = document.createElement('iframe');
+                iframe.id = `frame-${key}`;
+                iframe.className = 'absolute inset-0 w-full h-full border-none bg-transparent opacity-0 pointer-events-none transition-opacity duration-300';
+                iframe.style.zIndex = "0";
+                
+                iframe.onload = function() {
+                    if (currentModuleId === key) {
+                        iframe.classList.remove('opacity-0', 'pointer-events-none');
+                    }
+                    try {
+                        const iframeDoc = iframe.contentWindow.document;
+                        Array.of('mousedown', 'touchstart', 'keydown').forEach(evt => iframeDoc.addEventListener(evt, () => wakeUp()));
+                    } catch(e) {}
+                    try {
+                        if (iframe.contentWindow && typeof iframe.contentWindow.handleCycleChange === 'function') {
+                            const currentYear = localStorage.getItem('selectedCycleYear') || new Date().getFullYear();
+                            iframe.contentWindow.handleCycleChange(currentYear);
+                        }
+                    } catch(e) {}
+                };
+                
+                document.getElementById('iframe-container').appendChild(iframe);
+                iframe.src = APP_MODULES[key];
+                
+                await new Promise(resolve => setTimeout(resolve, 2500));
+            }
+        }
+
+        window.runBackupProcess = async function() {
+            window.showLoader();
+            console.log("Iniciando proceso de respaldo de seguridad...");
+            
+            const collectionsList = ['personal', 'vehiculos', 'bitacora', 'alertas', 'asistencia', 'despachos', 'sirena', 'prueba_radial'];
+            const backupData = {
+                backup_date: new Date().toLocaleString(),
+                metadata: {
+                    app: "SisBom Comandancia",
+                    version: "1.0",
+                    operator: "Oficial de Turno"
+                }
+            };
+            
+            try {
+                const sessionStr = localStorage.getItem('adminUser');
+                if (sessionStr) {
+                    backupData.metadata.operator = JSON.parse(sessionStr).nombreBombero || "Oficial de Turno";
+                }
+            } catch(e) {}
+
+            let successCount = 0;
+            let fallbackCount = 0;
+
+            for (const col of collectionsList) {
+                let colData = [];
+                let fetchedOnline = false;
+                
+                if (typeof fbDb !== 'undefined' && fbDb && navigator.onLine) {
+                    try {
+                        const snap = await window.fbGetDocs(window.fbCollection(fbDb, col));
+                        snap.forEach(doc => {
+                            colData.push({ ID: doc.id, ...doc.data() });
+                        });
+                        fetchedOnline = true;
+                        successCount++;
+                    } catch (err) {
+                        console.warn(`Error al descargar coleccion ${col} de Firebase en vivo, usando cache local...`, err);
+                    }
+                }
+                
+                if (!fetchedOnline) {
+                    fallbackCount++;
+                    try {
+                        if (col === 'personal') {
+                            const cached = localStorage.getItem('db_personal');
+                            if (cached) colData = JSON.parse(cached);
+                        } else if (col === 'vehiculos') {
+                            const cached = localStorage.getItem('sisbom_vehiculos_cache_v3');
+                            if (cached) {
+                                const parsed = JSON.parse(cached);
+                                colData = parsed.vehiculos || [];
+                            }
+                        } else if (col === 'bitacora') {
+                            const cached = localStorage.getItem('db_bitacora');
+                            if (cached) colData = JSON.parse(cached);
+                        } else if (col === 'alertas') {
+                            const cached = localStorage.getItem('sisbom_alertas_cache_v2');
+                            if (cached) {
+                                const parsed = JSON.parse(cached);
+                                colData = parsed.alertas || [];
+                            }
+                        } else if (col === 'asistencia') {
+                            const cached = localStorage.getItem('sisbom_asistencia_cache');
+                            if (cached) colData = JSON.parse(cached);
+                        } else if (col === 'despachos') {
+                            const cached = localStorage.getItem('sisbom_despachos_cache_v3');
+                            if (cached) colData = JSON.parse(cached);
+                        }
+                        
+                        if (!colData || colData.length === 0) {
+                            const res = await fetch(`./db_${col}.json`);
+                            if (res.ok) {
+                                colData = await res.json();
+                            }
+                        }
+                    } catch (cacheErr) {
+                        console.error(`Error al recuperar cache local para ${col}`, cacheErr);
+                    }
+                }
+                
+                backupData[col] = colData || [];
+            }
+
+            const jsonStr = JSON.stringify(backupData, null, 2);
+            const now = new Date();
+            const dateStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+            const filename = `SISBOM_RESPALDO_COMANDANCIA_${dateStr}.json`;
+
+            const alertMsgSuccess = "RESPALDO GENERADO CON ÉXITO.\n\n" + 
+                                    "- COLECCIONES EN VIVO: " + successCount + "\n" +
+                                    "- COLECCIONES DESDE CACHÉ LOCAL: " + fallbackCount + "\n\n" +
+                                    "EL ARCHIVO SE GUARDÓ EN SU COMPUTADOR.";
+
+            const showSuccess = () => {
+                window.showSysModal("Respaldo de Seguridad", alertMsgSuccess, "fa-database text-green-500", () => window.closeSysModal(), true);
+            };
+
+            const fallbackDownload = () => {
+                window.hideLoader();
+                try {
+                    const blob = new Blob([jsonStr], { type: "application/json" });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = filename;
+                    document.body.appendChild(a);
+                    a.click();
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        URL.revokeObjectURL(url);
+                    }, 100);
+                    showSuccess();
+                } catch (downloadErr) {
+                    console.error("Error al descargar respaldo", downloadErr);
+                    alert("ERROR AL GENERAR EL RESPALDO. REVISE LA CONSOLA.");
+                }
+            };
+
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.save_backup_excel) {
+                window.pywebview.api.save_backup_excel(jsonStr, filename.replace('.json', '.xls'))
+                    .then(success => {
+                        window.hideLoader();
+                        if (success) {
+                            showSuccess();
+                        } else {
+                            console.log("Respaldo cancelado por el usuario o error al guardar.");
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error en API de guardado excel, usando fallback:", err);
+                        fallbackDownload();
+                    });
+            } else if (window.pywebview && window.pywebview.api && window.pywebview.api.save_backup) {
+                window.pywebview.api.save_backup(jsonStr, filename)
+                    .then(success => {
+                        window.hideLoader();
+                        if (success) {
+                            showSuccess();
+                        } else {
+                            console.log("Respaldo cancelado por el usuario o error al guardar.");
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error en API de guardado, usando fallback:", err);
+                        fallbackDownload();
+                    });
+            } else {
+                fallbackDownload();
+            }
+        };
+
+        window.refreshAllDatabaseData = async function(force = false) {
+            if (!window.isSystemLoggedIn || !fbDb || !window.fbGetDocs) return;
+            if (window.isGlobalRefreshing) return;
+            window.isGlobalRefreshing = true;
+
+            console.log("Iniciando actualización completa de la base de datos...");
+            window.showLoader();
+
+            const syncIcon = document.getElementById('global-sync-icon');
+            if (syncIcon) syncIcon.classList.add('fa-spin');
+
+            try {
+                const collections = ['personal', 'vehiculos', 'bitacora', 'alertas', 'asistencia', 'despachos'];
+                for (const col of collections) {
+                    try {
+                        const snap = await window.fbGetDocs(window.fbCollection(fbDb, col));
+                        const list = [];
+                        snap.forEach(d => {
+                            const data = d.data();
+                            data.id = d.id;
+                            if (col === 'personal') data.idRegistro = d.id;
+                            if (col === 'vehiculos') data.idCarro = d.id;
+                            if (col === 'alertas') data.idAlerta = d.id;
+                            if (col === 'asistencia') data.idLista = d.id;
+                            if (col === 'despachos') data.idServicio = d.id;
+                            list.push(data);
+                        });
+
+                        if (col === 'personal') {
+                            localStorage.setItem('db_personal', JSON.stringify(list));
+                            localStorage.setItem('sisbom_personal_cache', JSON.stringify(list));
+                            localStorage.setItem('sisbom_personal_cache_updated', new Date().toISOString());
+                        } else if (col === 'vehiculos') {
+                            localStorage.setItem('sisbom_vehiculos_cache_v3', JSON.stringify({ vehiculos: list }));
+                        } else if (col === 'bitacora') {
+                            localStorage.setItem('db_bitacora', JSON.stringify(list));
+                        } else if (col === 'alertas') {
+                            const cachedPers = JSON.parse(localStorage.getItem('db_personal') || '[]');
+                            localStorage.setItem('sisbom_alertas_cache_v2', JSON.stringify({ alertas: list, personal: cachedPers }));
+                        } else if (col === 'asistencia') {
+                            localStorage.setItem('sisbom_asistencia_cache', JSON.stringify(list));
+                        } else if (col === 'despachos') {
+                            localStorage.setItem('sisbom_despachos_cache_v3', JSON.stringify(list));
+                        }
+                        console.log(`Colección ${col} actualizada correctamente con ${list.length} documentos.`);
+                    } catch (e) {
+                        console.error(`Error al actualizar colección ${col}:`, e);
+                    }
+                }
+
+                // Recargar/notificar iframes
+                Object.keys(APP_MODULES).forEach(key => {
+                    const iframe = document.getElementById('frame-' + key);
+                    if (iframe && iframe.contentWindow) {
+                        try {
+                            if (typeof iframe.contentWindow.loadData === 'function') {
+                                iframe.contentWindow.loadData(false);
+                            } else if (typeof iframe.contentWindow.fetchData === 'function') {
+                                iframe.contentWindow.fetchData(false);
+                            } else {
+                                iframe.contentWindow.location.reload();
+                            }
+                        } catch(err) {
+                            try { iframe.src = iframe.src; } catch(ex) {}
+                        }
+                    }
+                });
+
+                const now = new Date();
+                const timeStr = `SINC.: ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+                localStorage.setItem('last_sync_time', timeStr);
+                const timeEl = document.getElementById('last-sync-time');
+                if (timeEl) timeEl.innerText = timeStr;
+
+                if (force) {
+                    window.showSysModal("Base de Datos Actualizada", "Todos los módulos han sido actualizados con los datos más recientes del servidor.", "fa-check-circle text-green-500", () => window.closeSysModal(), true);
+                }
+            } catch (err) {
+                console.error("Error en actualización global de base de datos:", err);
+            } finally {
+                if (syncIcon) syncIcon.classList.remove('fa-spin');
+                window.isGlobalRefreshing = false;
+                window.hideLoader();
+            }
+        };
+
+        window.silentSyncDatabase = async function(showUI = false) {
+            if (!window.isSystemLoggedIn || !fbDb || !window.fbGetDocs) return;
+            if (window.isSilentSyncing) return;
+            window.isSilentSyncing = true;
+            
+            if (showUI) window.showLoader("Sincronizando Base de Datos...");
+            console.log("Iniciando sincronización silenciosa de base de datos...");
+            
+            try {
+                const collections = ['personal', 'vehiculos', 'bitacora', 'alertas', 'asistencia', 'despachos'];
+                for (const col of collections) {
+                    try {
+                        const snap = await window.fbGetDocs(window.fbCollection(fbDb, col));
+                        const list = [];
+                        snap.forEach(d => {
+                            const data = d.data();
+                            data.id = d.id;
+                            if (col === 'personal') data.idRegistro = d.id;
+                            if (col === 'vehiculos') data.idCarro = d.id;
+                            if (col === 'alertas') data.idAlerta = d.id;
+                            if (col === 'asistencia') data.idLista = d.id;
+                            if (col === 'despachos') data.idServicio = d.id;
+                            list.push(data);
+                        });
+                        
+                        // Guardar en LocalStorage (ambas llaves)
+                        localStorage.setItem('sisbom_db_' + col, JSON.stringify(list));
+                        if (col === 'personal') {
+                            localStorage.setItem('db_personal', JSON.stringify(list));
+                            localStorage.setItem('sisbom_personal_cache', JSON.stringify(list));
+                            localStorage.setItem('sisbom_personal_cache_updated', new Date().toISOString());
+                        } else if (col === 'vehiculos') {
+                            localStorage.setItem('sisbom_vehiculos_cache_v3', JSON.stringify({ vehiculos: list }));
+                        } else if (col === 'bitacora') {
+                            localStorage.setItem('db_bitacora', JSON.stringify(list));
+                        } else if (col === 'alertas') {
+                            const cachedPers = JSON.parse(localStorage.getItem('db_personal') || '[]');
+                            localStorage.setItem('sisbom_alertas_cache_v2', JSON.stringify({ alertas: list, personal: cachedPers }));
+                        } else if (col === 'asistencia') {
+                            localStorage.setItem('sisbom_asistencia_cache', JSON.stringify(list));
+                        } else if (col === 'despachos') {
+                            localStorage.setItem('sisbom_despachos_cache_v3', JSON.stringify(list));
+                        }
+                        
+                        // Guardar en disco físico
+                        if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                            const filename = `comandancia/db_${col}.json`;
+                            await window.pywebview.api.save_local_db(filename, JSON.stringify(list))
+                                .catch(err => console.error("Error al guardar archivo en disco:", filename, err));
+                        }
+                    } catch (e) {
+                        console.error(`Error al sincronizar colección ${col}:`, e);
+                    }
+                }
+                
+                // Recargar/notificar iframes
+                Object.keys(APP_MODULES).forEach(key => {
+                    const iframe = document.getElementById('frame-' + key);
+                    if (iframe && iframe.contentWindow) {
+                        try {
+                            if (typeof iframe.contentWindow.loadData === 'function') {
+                                iframe.contentWindow.loadData(false);
+                            } else if (typeof iframe.contentWindow.fetchData === 'function') {
+                                iframe.contentWindow.fetchData(false);
+                            } else {
+                                iframe.contentWindow.location.reload();
+                            }
+                        } catch(err) {
+                            try { iframe.src = iframe.src; } catch(ex) {}
+                        }
+                    }
+                });
+                
+                if (showUI) {
+                    window.showSysModal("Sincronización Completada", "La base de datos se ha sincronizado correctamente con el servidor.", "fa-check-circle text-green-500", () => window.closeSysModal(), true);
+                }
+            } catch (err) {
+                console.error("Error en sincronización silenciosa:", err);
+            } finally {
+                window.isSilentSyncing = false;
+                if (showUI) window.hideLoader();
+            }
+        };
+
+        window.startGlobalBackgroundSync = function() {
+            setInterval(() => {
+                const keys = Object.keys(APP_MODULES);
+                keys.forEach(key => {
+                    if (key !== 'alertas' && key !== currentModuleId) {
+                        const iframe = document.getElementById(`frame-${key}`);
+                        if (iframe && iframe.contentWindow && typeof iframe.contentWindow.App !== 'undefined') {
+                            try {
+                                iframe.contentWindow.App.loadData(false);
+                            } catch(e) {}
+                        }
+                    }
+                });
+            }, 60000); 
+        };
+
+        // --- SISTEMA DE VERIFICACIÓN DE LICENCIA LOCAL ---
+        async function checkLicenseStatus() {
+            return new Promise((resolve) => {
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.check_license) {
+                    window.pywebview.api.check_license().then(resolve);
+                } else {
+                    window.addEventListener('pywebviewready', () => {
+                        window.pywebview.api.check_license().then(resolve);
+                    });
+                }
+            });
+        }
+
+        function showLicenseLockScreen(reason, hwid) {
+            if (reason) {
+                const descEl = document.querySelector('#license-lock p.max-w-md');
+                if (descEl) descEl.innerText = reason;
+            }
+            document.getElementById('lock-hwid-display').innerText = hwid || "No disponible";
+            const lockScreen = document.getElementById('license-lock');
+            if (lockScreen) {
+                lockScreen.classList.remove('hidden');
+                lockScreen.classList.add('flex');
+            }
+        }
+
+        async function activateLicenseKey() {
+            const key = document.getElementById('activation-key-input').value.trim();
+            const errEl = document.getElementById('activation-error');
+            errEl.classList.add('hidden');
+            errEl.innerText = "";
+            
+            if (!key) {
+                errEl.innerText = "Por favor ingrese una clave de licencia.";
+                errEl.classList.remove('hidden');
+                return;
+            }
+            
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.save_license_key) {
+                const res = await window.pywebview.api.save_license_key(key);
+                if (res.success) {
+                    window.location.reload();
+                } else {
+                    errEl.innerText = "Error al guardar: " + res.reason;
+                    errEl.classList.remove('hidden');
+                }
+            } else {
+                errEl.innerText = "API de Python no disponible.";
+                errEl.classList.remove('hidden');
+            }
+        }
+
+        // --- CARGA Y SINCRONIZACIÓN DE SESIÓN CON FIRESTORE ---
+        async function initSystem() {
+            // Wait up to 1000ms for pywebview to be defined
+            if (!window.pywebview || !window.pywebview.api) {
+                await new Promise(resolve => {
+                    let resolved = false;
+                    const handleReady = () => {
+                        if (!resolved) {
+                            resolved = true;
+                            window.removeEventListener('pywebviewready', handleReady);
+                            resolve();
+                        }
+                    };
+                    window.addEventListener('pywebviewready', handleReady);
+                    
+                    let elapsed = 0;
+                    const interval = setInterval(() => {
+                        elapsed += 30;
+                        if ((window.pywebview && window.pywebview.api) || elapsed >= 1000) {
+                            clearInterval(interval);
+                            if (!resolved) {
+                                resolved = true;
+                                window.removeEventListener('pywebviewready', handleReady);
+                                resolve();
+                            }
+                        }
+                    }, 30);
+                });
+            }
+            window.isNativeApp = !!(window.pywebview && window.pywebview.api);
+
+            try {
+                const licRes = await checkLicenseStatus();
+                
+                // Save branding info if returned so lock screen shows it immediately
+                if (licRes.nombreMostrar) {
+                    localStorage.setItem('saas_client_name', licRes.nombreMostrar);
+                }
+                if (licRes.logoUrl) {
+                    localStorage.setItem('saas_logo_url', licRes.logoUrl);
+                }
+                if (window.applyDynamicBranding) window.applyDynamicBranding();
+
+                if (!licRes.authorized) {
+                    window.hideLoader();
+                    showLicenseLockScreen(licRes.reason, licRes.hwid);
+                    return;
+                }
+                localStorage.setItem('saas_firebase_config', JSON.stringify(licRes.firebaseConfig || {}));
+                localStorage.setItem('saas_read_only', licRes.status === 'read_only' ? '1' : '0');
+
+                if (licRes.status === 'read_only') {
+                    document.body.classList.add('saas-read-only-active');
+                    const banner = document.getElementById('saas-readonly-banner');
+                    if (banner) banner.classList.remove('hidden');
+                } else {
+                    document.body.classList.remove('saas-read-only-active');
+                    const banner = document.getElementById('saas-readonly-banner');
+                    if (banner) banner.classList.add('hidden');
+                }
+            } catch (err) {
+                console.error("Error validando licencia:", err);
+            }
+
+            // Load databases from local disk if available
+            if (window.isNativeApp && window.pywebview.api.load_local_db) {
+                try {
+                    const pDb = await window.pywebview.api.load_local_db('db_personal.json');
+                    if (pDb) {
+                        localStorage.setItem('db_personal', pDb);
+                    }
+                    const bDb = await window.pywebview.api.load_local_db('db_bitacora.json');
+                    if (bDb) {
+                        localStorage.setItem('db_bitacora', bDb);
+                    }
+                } catch (e) {
+                    console.error("Error loading local DB from disk:", e);
+                }
+            }
+
+            let cachedData = localStorage.getItem('db_personal');
+            let forceLogout = false;
+            shellPersonalUnsubscribe = null;
+            
+            // Si no está en LocalStorage, intentar cargar del JSON local (Offline backup)
+            if (!cachedData && !window.isNativeApp) {
+                try {
+                    const resPers = await fetch('./db_personal.json');
+                    if (resPers.ok) {
+                        const data = await resPers.json();
+                        localStorage.setItem('db_personal', JSON.stringify(data));
+                        cachedData = localStorage.getItem('db_personal');
+                    }
+                } catch(e) {}
+            }
+
+            // Intentar cargar la alerta inicial del JSON local si es necesario
+            let cachedAlerts = localStorage.getItem('sisbom_alertas_cache_v2');
+            if (!cachedAlerts && !window.isNativeApp) {
+                try {
+                    const resAlerts = await fetch('./db_alertas.json');
+                    if (resAlerts.ok) {
+                        const alertsData = await resAlerts.json();
+                        const persParsed = cachedData ? JSON.parse(cachedData) : [];
+                        localStorage.setItem('sisbom_alertas_cache_v2', JSON.stringify({
+                            alertas: alertsData,
+                            personal: persParsed
+                        }));
+                    }
+                } catch(e) {}
+            }
+            
+            if (cachedData) {
+                try { 
+                    personnelData = JSON.parse(cachedData); 
+                    checkSession(); 
+                } catch(e) {}
+            }
+            
+            window.applySidebarPermissions = function(userDoc) {
+                const radialLimpio = String(userDoc.idRadial || '').trim();
+                const cargoLimpio = String(userDoc.cargo || '').trim().toUpperCase();
+                const isComandanteRadial1 = (cargoLimpio === 'COMANDANTE' && ['1', '01'].includes(radialLimpio));
+                const isAuthAdmin = (String(userDoc.autorizadoAdmin) === '1' || String(userDoc.autorizadoAdmin).toUpperCase() === 'SI' || userDoc.autorizadoAdmin === true);
+
+                if (isComandanteRadial1 || isAuthAdmin) {
+                    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('hidden'));
+                    return;
+                }
+
+                const allowedModules = userDoc.modulosComandancia || [];
+                document.querySelectorAll('.nav-btn').forEach(btn => {
+                    const onclickAttr = btn.getAttribute('onclick') || '';
+                    const match = onclickAttr.match(/window\.navigate\(\s*['"]([^'"]+)['"]/);
+                    if (match) {
+                        const moduleName = match[1];
+                        if (moduleName === 'dashboard' || allowedModules.includes(moduleName)) {
+                            btn.classList.remove('hidden');
+                        } else {
+                            btn.classList.add('hidden');
+                        }
+                    }
+                });
+            };
+
+            try {
+                // IMPORTAMOS LOS MODULOS DE FIREBASE LOCALS (OFFLINE SUPPORT)
+                const { initializeApp } = await import("./libs/firebase-app.js");
+                const { getAuth, onAuthStateChanged } = await import("./libs/firebase-auth.js");
+                const { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, addDoc, getDoc, onSnapshot, writeBatch, deleteField } = await import("./libs/firebase-firestore.js");
+
+                const sanitizeData = (val) => {
+                    if (val === null || val === undefined) return val;
+                    if (typeof val !== 'object') return val;
+                    if (Array.isArray(val)) return val.map(sanitizeData);
+                    if (val.constructor && val.constructor.name === 'Object') {
+                        const res = {};
+                        for (const k of Object.keys(val)) {
+                            res[k] = sanitizeData(val[k]);
+                        }
+                        return res;
+                    }
+                    return val;
+                };
+
+                window.fbDoc = doc;
+                window.fbSetDoc = (reference, data, options) => {
+                    if (localStorage.getItem('saas_read_only') === '1') {
+                        console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbSetDoc.");
+                        return Promise.resolve();
+                    }
+                    return setDoc(reference, sanitizeData(data), options);
+                };
+                window.fbUpdateDoc = (reference, data) => {
+                    if (localStorage.getItem('saas_read_only') === '1') {
+                        console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbUpdateDoc.");
+                        return Promise.resolve();
+                    }
+                    return updateDoc(reference, sanitizeData(data));
+                };
+                window.fbDeleteDoc = (reference) => {
+                    if (localStorage.getItem('saas_read_only') === '1') {
+                        console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbDeleteDoc.");
+                        return Promise.resolve();
+                    }
+                    return deleteDoc(reference);
+                };
+                window.fbCollection = collection;
+                window.fbGetDocs = getDocs;
+                window.fbAddDoc = (collRef, data) => {
+                    if (localStorage.getItem('saas_read_only') === '1') {
+                        console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbAddDoc.");
+                        return Promise.resolve();
+                    }
+                    return addDoc(collRef, sanitizeData(data));
+                };
+                window.fbGetDoc = getDoc;
+                window.fbOnSnapshot = onSnapshot;
+                window.fbWriteBatch = writeBatch;
+                window.fbDeleteField = deleteField;
+
+                let configToUse = null;
+                try {
+                    const dynamicConfigStr = localStorage.getItem('saas_firebase_config') || localStorage.getItem('firebaseConfig');
+                    if (dynamicConfigStr) {
+                        configToUse = JSON.parse(dynamicConfigStr);
+                    }
+                } catch (e) {
+                    console.error("Error parsing saas_firebase_config:", e);
+                }
+                if (!configToUse) {
+                    console.error("No se encontró configuración de Firebase en Comandancia. Redirigiendo a activación.");
+                    window.location.href = "../index.html";
+                    return;
+                }
+                const app = initializeApp(configToUse);
+                const auth = getAuth(app);
+                window.fbAuth = auth;
+                // Inicializar Firestore con la caché activada (IndexedDB persistente multi-pestaña)
+                try {
+                    fbDb = initializeFirestore(app, {
+                        localCache: persistentLocalCache({
+                            tabManager: persistentMultipleTabManager()
+                        })
+                    });
+                    console.log("Caché local offline activada correctamente.");
+                } catch (err) {
+                    console.warn("No se pudo activar caché en Comandancia:", err);
+                    fbDb = getFirestore(app);
+                }
+                window.fbDb = fbDb;
+                
+                onAuthStateChanged(auth, async (fbUser) => {
+                    if (fbUser) {
+                        const offlineInd = document.getElementById('offline-indicator');
+                        if (offlineInd) offlineInd.classList.add('hidden');
+
+                        window.notifyFirebaseReady();
+
+                        const u = fbUser.uid;
+                        try {
+                            const userDocRef = window.fbDoc(fbDb, 'personal', u);
+                            const userDocSnap = await window.fbGetDoc(userDocRef);
+                            if (userDocSnap.exists()) {
+                                const loggedUserData = userDocSnap.data();
+                                window.applySidebarPermissions(loggedUserData);
+
+                                const radialLimpio = String(loggedUserData.idRadial || '').trim();
+                                const cargoLimpio = String(loggedUserData.cargo || '').trim().toUpperCase();
+                                const isComandante = (cargoLimpio === 'COMANDANTE' && ['1', '01', '2', '02', '3', '03'].includes(radialLimpio));
+                                const isAuthAdmin = (String(loggedUserData.autorizadoAdmin) === '1' || String(loggedUserData.autorizadoAdmin).toUpperCase() === 'SI');
+                                const hasPersonalModulo = isComandante || isAuthAdmin || (loggedUserData.modulosComandancia && loggedUserData.modulosComandancia.includes('personal'));
+
+                                if (hasPersonalModulo) {
+                                    if (shellPersonalUnsubscribe) {
+                                        shellPersonalUnsubscribe();
+                                        shellPersonalUnsubscribe = null;
+                                    }
+                                    shellPersonalUnsubscribe = window.fbOnSnapshot(window.fbCollection(fbDb, 'personal'), (snapshot) => {
+                                        const persData = [];
+                                        snapshot.forEach(d => {
+                                            const val = d.data();
+                                            val.ID = d.id;
+                                            val.idRegistro = d.id;
+                                            persData.push(val);
+                                        });
+                                        
+                                        if(persData.length > 0) {
+                                            personnelData = persData;
+                                            localStorage.setItem('db_personal', JSON.stringify(personnelData));
+                                        }
+                                    }, (error) => {
+                                        console.warn("Personal snapshot listener error in Comandancia index:", error);
+                                    });
+                                }
+                            }
+                        } catch (e) {
+                            console.error("Error loading user profile on auth change:", e);
+                        }
+
+                        // Verificar si la sesión actual ha sido cerrada remotamente en Firebase
+                        const sessionStr = localStorage.getItem('adminUser');
+                        if (sessionStr) {
+                            const sessionData = JSON.parse(sessionStr);
+                            if (sessionData.idIngreso) {
+                                const docRef = window.fbDoc(fbDb, 'accesos/comandancia/registros', String(sessionData.idIngreso));
+                                const docSnap = await window.fbGetDoc(docRef);
+                                if (docSnap.exists()) {
+                                    const dbSession = docSnap.data();
+                                    if (String(dbSession.estado).toLowerCase() === 'cerrado') {
+                                        localStorage.removeItem('adminUser');
+                                        window.isSystemLoggedIn = false;
+                                        const appShell = document.getElementById('app-shell');
+                                        if (appShell) appShell.classList.add('hidden');
+                                        const loginScreen = document.getElementById('login-screen');
+                                        if (loginScreen) {
+                                            loginScreen.classList.remove('hidden');
+                                            loginScreen.style.opacity = '1';
+                                        }
+                                        const loginErr = document.getElementById('loginError');
+                                        if (loginErr) loginErr.innerHTML = '<i class="fas fa-user-clock"></i> Sesión cerrada remotamente';
+                                        resetScreensaverTimer();
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Firebase signed out or token expired - propagate to iframes and clean up listeners
+                        window.notifyFirebaseLogout();
+                        if (shellPersonalUnsubscribe) {
+                            try { shellPersonalUnsubscribe(); } catch(e){}
+                            shellPersonalUnsubscribe = null;
+                        }
+                        if (sessionSnapshotUnsubscribe) {
+                            try { sessionSnapshotUnsubscribe(); } catch(e){}
+                            sessionSnapshotUnsubscribe = null;
+                        }
+                        const offlineInd = document.getElementById('offline-indicator');
+                        if (offlineInd) offlineInd.classList.remove('hidden');
+                    }
+                });
+
+                // Auto-login if session exists in localStorage or physical disk file but Firebase Auth is not signed in
+                let storedUser = localStorage.getItem('authUserId');
+                let storedPassSecure = localStorage.getItem('authPasswordSecure');
+
+                if ((!storedUser || !storedPassSecure) && window.pywebview && window.pywebview.api && window.pywebview.api.load_local_db) {
+                    try {
+                        const diskAuthStr = await window.pywebview.api.load_local_db('comandancia/auth_session.json');
+                        if (diskAuthStr) {
+                            const diskAuth = JSON.parse(diskAuthStr);
+                            if (diskAuth && diskAuth.authUserId && diskAuth.authPasswordSecure) {
+                                storedUser = diskAuth.authUserId;
+                                storedPassSecure = diskAuth.authPasswordSecure;
+                                localStorage.setItem('authUserId', storedUser);
+                                localStorage.setItem('authPasswordSecure', storedPassSecure);
+                                console.log("Sesión de Comandancia restaurada desde archivo físico de disco.");
+                            }
+                        }
+                    } catch(e){}
+                }
+
+                let isSoftReconnecting = false;
+                let lastSoftReconnectTime = 0;
+
+                window.softReconnect = async function(reason = 'auto') {
+                    const now = Date.now();
+                    if (isSoftReconnecting || (now - lastSoftReconnectTime < 3000)) {
+                        return;
+                    }
+                    isSoftReconnecting = true;
+                    lastSoftReconnectTime = now;
+
+                    console.log(`[SisBom Comandancia SoftReconnect] Ejecutando F5 silencioso (motivo: ${reason})...`);
+
+                    const indicator = document.getElementById('sidebar-reconnect-indicator');
+                    const textEl = document.getElementById('sidebar-reconnect-text');
+                    if (indicator) {
+                        if (textEl) textEl.innerText = (reason === 'permission-denied' || reason === 'permission') ? 'Reconectando...' : 'Actualizando...';
+                        indicator.classList.remove('hidden');
+                    }
+
+                    try {
+                        let storedUser = localStorage.getItem('authUserId');
+                        let storedPassSecure = localStorage.getItem('authPasswordSecure');
+                        if (storedUser && storedPassSecure && window.fbAuth) {
+                            try {
+                                const email = storedUser + "@sisbom.com";
+                                const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                                await signInWithEmailAndPassword(window.fbAuth, email, storedPassSecure);
+                            } catch(e){}
+                        }
+                    } catch(err) {
+                        console.warn("[SisBom Comandancia SoftReconnect] Error durante reconexión silenciosa:", err);
+                    } finally {
+                        setTimeout(() => {
+                            if (indicator) indicator.classList.add('hidden');
+                            isSoftReconnecting = false;
+                        }, 1800);
+                    }
+                };
+
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'F5' || (e.ctrlKey && e.key.toLowerCase() === 'r')) {
+                        e.preventDefault();
+                        console.log("F5 interceptado en Comandancia -> Ejecutando F5 silencioso");
+                        window.softReconnect('f5-key');
+                    }
+                });
+
+                if (storedUser && storedPassSecure && !auth.currentUser) {
+                    try {
+                        const email = storedUser + "@sisbom.com";
+                        const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                        await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                        console.log("Sesión de Firebase autocompletada con éxito al iniciar en Comandancia.");
+                    } catch (e) {
+                        console.warn("Auto-login fallido en inicio de Comandancia:", e);
+                    }
+                }
+
+            } catch (e) {
+                console.warn("Fallo al conectar con Firebase. Modo offline activo.", e);
+                const offlineInd = document.getElementById('offline-indicator');
+                if (offlineInd) offlineInd.classList.remove('hidden');
+                
+                if(personnelData.length === 0) {
+                    const loginErr = document.getElementById('loginError');
+                    if (loginErr) loginErr.innerHTML = '<i class="fas fa-wifi"></i> Sin conexión al servidor';
+                }
+            }
+            
+            if (forceLogout) {
+                localStorage.removeItem('adminUser');
+                window.isSystemLoggedIn = false;
+                document.getElementById('app-shell').classList.add('hidden');
+                const loginScreen = document.getElementById('login-screen');
+                loginScreen.classList.remove('hidden');
+                loginScreen.style.opacity = '1';
+                document.getElementById('loginError').innerHTML = '<i class="fas fa-user-clock"></i> Sesión cerrada remotamente';
+                window.hideLoader();
+                resetScreensaverTimer();
+                return;
+            }
+
+            if(!localStorage.getItem('adminUser')) {
+                window.hideLoader();
+            } else if (!cachedData) {
+                checkSession();
+            }
+        }
+
+        window.getNextSessionId = async function() {
+            try {
+                if (fbDb) {
+                    const snap = await window.fbGetDocs(window.fbCollection(fbDb, 'accesos/comandancia/registros'));
+                    let maxId = 0;
+                    snap.forEach(d => {
+                        const val = parseInt(d.data().idInicio);
+                        if (!isNaN(val) && val > maxId) maxId = val;
+                    });
+                    if (maxId > 0) return maxId + 1;
+                }
+            } catch(e) {}
+            
+            let lastId = parseInt(localStorage.getItem('sisbom_last_session_id')) || 0;
+            return lastId + 1;
+        };
+
+        function checkSession() {
+            const session = localStorage.getItem('adminUser');
+            if(session) {
+                restoreSession(JSON.parse(session));
+            } else {
+                window.hideLoader();
+            }
+        }
+
+        window.handleLogin = async function() {
+            const u = document.getElementById('loginUser').value.trim();
+            const p = document.getElementById('loginPass').value.trim();
+            const err = document.getElementById('loginError');
+            const btn = document.getElementById('btnLogin');
+            
+            if(!u || !p) { 
+                err.innerHTML = '<i class="fas fa-exclamation-circle"></i> Complete ambos campos'; 
+                return; 
+            }
+            
+            btn.disabled = true;
+            btn.innerHTML = '<div class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2"></div> Validando...';
+            
+            let user = null;
+            let loggedViaAuth = false;
+            
+            try {
+                if (window.fbAuth) {
+                    const email = u + "@sisbom.com";
+                    const password = p + "_secure_sisbom";
+                    const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                    await signInWithEmailAndPassword(window.fbAuth, email, password);
+                    
+                    const userDocRef = window.fbDoc(fbDb, 'personal', u);
+                    const userDocSnap = await window.fbGetDoc(userDocRef);
+                    if (userDocSnap.exists()) {
+                        user = userDocSnap.data();
+                        user.idRegistro = u;
+                        loggedViaAuth = true;
+                    }
+                }
+            } catch (authError) {
+                console.warn("Auth sign-in failed, trying local fallback:", authError);
+                if (authError.code === 'auth/wrong-password' || authError.code === 'auth/invalid-credential' || authError.code === 'auth/user-not-found') {
+                    err.innerHTML = '<i class="fas fa-times-circle"></i> Credenciales incorrectas';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Ingresar al Sistema';
+                    return;
+                }
+                
+                // Offline fallback
+                if (personnelData && personnelData.length > 0) {
+                    user = personnelData.find(x => String(x.idRegistro) === u && String(x.contrasena) === p);
+                } else {
+                    const cachedPers = localStorage.getItem('db_personal');
+                    if (cachedPers) {
+                        try {
+                            const parsed = JSON.parse(cachedPers);
+                            user = parsed.find(x => String(x.idRegistro) === u && String(x.contrasena) === p);
+                        } catch (e) {}
+                    }
+                }
+            }
+
+            if(user) {
+                const radialLimpio = String(user.idRadial || '').trim();
+                const cargoLimpio = String(user.cargo || '').trim().toUpperCase();
+                const isComandanteRadial1 = (cargoLimpio === 'COMANDANTE' && ['1', '01'].includes(radialLimpio));
+                const isAuthAdmin = (String(user.autorizadoAdmin) === '1' || String(user.autorizadoAdmin).toUpperCase() === 'SI' || user.autorizadoAdmin === true);
+
+                if(!isAuthAdmin && !isComandanteRadial1) {
+                    err.innerHTML = '<i class="fas fa-lock"></i> Usuario no autorizado.';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Ingresar al Sistema';
+                    if (loggedViaAuth && window.fbAuth) {
+                        try {
+                            await window.fbAuth.signOut();
+                        } catch(e){}
+                    }
+                    return;
+                }
+
+                try {
+                    window.showLoader(); 
+                    window.isSystemLoggedIn = true;
+                    wakeUp(); 
+                    
+                    const sessionID = await window.getNextSessionId();
+                    localStorage.setItem('sisbom_last_session_id', sessionID);
+                    
+                    const dateFormatted = getFormattedDate();
+                    const timeFormatted = getFormattedTime();
+
+                    // GUARDADO EN FIRESTORE (Si hay conexión)
+                    if (fbDb && loggedViaAuth) {
+                        const docRef = window.fbDoc(fbDb, 'accesos/comandancia/registros', String(sessionID));
+                        await window.fbSetDoc(docRef, {
+                            idInicio: sessionID,
+                            idRegistro: user.idRegistro,
+                            cargo: user.cargo || 'Admin',
+                            nombreBombero: user.nombreBombero,
+                            fechaIngreso: dateFormatted,
+                            horaIngreso: timeFormatted,
+                            fechaCierre: "",
+                            horaCierre: "",
+                            estado: "activo"
+                        });
+                    }
+                    
+                    const sessionData = {
+                        idIngreso: String(sessionID),
+                        idInicio: sessionID,
+                        idRegistro: user.idRegistro,
+                        cargo: user.cargo || 'Admin',
+                        nombreBombero: user.nombreBombero,
+                        fechaIngreso: dateFormatted,
+                        horaIngreso: timeFormatted
+                    };
+                    
+                    localStorage.setItem('adminUser', JSON.stringify(sessionData));
+                    localStorage.setItem('authUserId', String(user.idRegistro || u));
+                    localStorage.setItem('authPasswordSecure', p + "_secure_sisbom");
+                    
+                    try {
+                        if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                            const diskAuthObj = new Object({ authUserId: String(user.idRegistro || u), authPasswordSecure: p + "_secure_sisbom", nombreBombero: user.nombreBombero || "" });
+                            await window.pywebview.api.save_local_db('comandancia/auth_session.json', JSON.stringify(diskAuthObj));
+                        }
+                    } catch(diskErr){}
+                    
+                    document.getElementById('user-name-display').innerText = user.nombreBombero;
+                    document.getElementById('user-role-display').innerText = user.cargo;
+                    
+                    const app = document.getElementById('app-shell');
+                    const loginScreen = document.getElementById('login-screen');
+                    
+                    loginScreen.style.opacity = '0';
+                    setTimeout(() => loginScreen.classList.add('hidden'), 500);
+                    
+                    app.classList.remove('hidden');
+                    setTimeout(() => app.classList.remove('opacity-0'), 50);
+                    
+                    window.navigate('dashboard', 'estadisticas.html', document.getElementById('btn-default'));
+                    
+                    if (fbDb) {
+                        startSessionValidator();
+                    }
+                    
+                    preloadModules();
+                    window.silentSyncDatabase(true);
+                    App.startNotificationEngine();
+                    
+                    window.hideLoader();
+                    if (window.checkChangelog) window.checkChangelog(user);
+                } catch (error) { 
+                    window.hideLoader();
+                    err.innerHTML = '<i class="fas fa-times-circle"></i> Error de conexión a la BD';
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Ingresar al Sistema';
+                    console.error(error);
+                }
+            } else {
+                err.innerHTML = '<i class="fas fa-times-circle"></i> Credenciales incorrectas';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-sign-in-alt"></i> Ingresar al Sistema';
+            }
+        };
+
+        window.triggerBackupIfNeeded = async function() {
+            if (window.pywebview && window.pywebview.api) {
+                try {
+                    const shouldBackup = await window.pywebview.api.check_should_backup();
+                    if (shouldBackup) {
+                        console.log("SISBOM Backup: Iniciando copia de seguridad diaria...");
+                        const backupData = {
+                            asistencia: JSON.parse(localStorage.getItem('sisbom_asistencia_cache') || '[]'),
+                            personal: JSON.parse(localStorage.getItem('sisbom_personal_cache') || '[]'),
+                            despachos: JSON.parse(localStorage.getItem('sisbom_despachos_cache_v3') || '[]'),
+                            bitacora: JSON.parse(localStorage.getItem('db_bitacora') || '[]'),
+                            vehiculos: JSON.parse(localStorage.getItem('db_vehiculos') || '[]')
+                        };
+                        await window.pywebview.api.save_database_backup(JSON.stringify(backupData));
+                        console.log("SISBOM Backup: Copia de seguridad guardada con éxito.");
+                    }
+                } catch(e) {
+                    console.error("Error al ejecutar copia de seguridad:", e);
+                }
+            }
+        };
+
+        window.forceBackup = async function() {
+            if (window.pywebview && window.pywebview.api) {
+                try {
+                    console.log("SISBOM Backup: Forzando actualización de copia de seguridad...");
+                    const backupData = {
+                        asistencia: JSON.parse(localStorage.getItem('sisbom_asistencia_cache') || '[]'),
+                        personal: JSON.parse(localStorage.getItem('sisbom_personal_cache') || '[]'),
+                        despachos: JSON.parse(localStorage.getItem('sisbom_despachos_cache_v3') || '[]'),
+                        bitacora: JSON.parse(localStorage.getItem('db_bitacora') || '[]'),
+                        vehiculos: JSON.parse(localStorage.getItem('db_vehiculos') || '[]')
+                    };
+                    await window.pywebview.api.save_database_backup(JSON.stringify(backupData));
+                    console.log("SISBOM Backup: Copia de seguridad actualizada con éxito.");
+                } catch(e) {
+                    console.error("Error al forzar copia de seguridad:", e);
+                }
+            }
+        };
+
+        window.restoreSession = function(user) {
+            window.isSystemLoggedIn = true;
+            wakeUp();
+
+            document.getElementById('user-name-display').innerText = user.nombreBombero;
+            document.getElementById('user-role-display').innerText = user.cargo;
+            
+            document.getElementById('login-screen').classList.add('hidden');
+            window.hideLoader();
+            
+            const app = document.getElementById('app-shell');
+            app.classList.remove('hidden');
+            setTimeout(() => app.classList.remove('opacity-0'), 50);
+            
+            window.navigate('dashboard', 'estadisticas.html', document.getElementById('btn-default'));
+            
+            if (fbDb) {
+                startSessionValidator();
+            }
+            
+            preloadModules();
+            window.silentSyncDatabase(false);
+            window.triggerBackupIfNeeded();
+            App.startNotificationEngine();
+            let fullUser = null;
+            try {
+                const cachedPers = localStorage.getItem('db_personal');
+                if (cachedPers) {
+                    const parsed = JSON.parse(cachedPers);
+                    fullUser = parsed.find(x => String(x.idRegistro) === String(user.idRegistro));
+                }
+            } catch (e) {}
+            if (window.checkChangelog) window.checkChangelog(fullUser || user);
+        };
+
+        window.requestLogout = function() {
+            window.showSysModal("Cerrar Sesión", "¿Desea finalizar su sesión de forma segura?", "fa-power-off text-red-500", () => performLogout());
+        };
+
+        async function performLogout() {
+            window.showLoader(); 
+            const user = JSON.parse(localStorage.getItem('adminUser'));
+            if(user && user.idIngreso && fbDb) {
+                try {
+                    const docRef = window.fbDoc(fbDb, 'accesos/comandancia/registros', String(user.idIngreso));
+                    await window.fbUpdateDoc(docRef, {
+                        estado: 'cerrado',
+                        fechaCierre: getFormattedDate(),
+                        horaCierre: getFormattedTime()
+                    });
+                } catch(e) {
+                    console.error("Error actualizando logout en Firebase", e);
+                }
+            }
+            window.notifyFirebaseLogout();
+            if (shellPersonalUnsubscribe) {
+                try { shellPersonalUnsubscribe(); } catch(e){}
+                shellPersonalUnsubscribe = null;
+            }
+            if (sessionSnapshotUnsubscribe) {
+                try { sessionSnapshotUnsubscribe(); } catch(e){}
+                sessionSnapshotUnsubscribe = null;
+            }
+            if (window.fbAuth) {
+                try { await window.fbAuth.signOut(); } catch(e){}
+            }
+            localStorage.removeItem('adminUser');
+            localStorage.removeItem('authUserId');
+            localStorage.removeItem('authPasswordSecure');
+            try {
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                    await window.pywebview.api.save_local_db('comandancia/auth_session.json', '');
+                }
+            } catch(e){}
+            window.location.reload(); 
+        }
+
+        window.performLogoutOnClose = async function() {
+            try {
+                const user = JSON.parse(localStorage.getItem('adminUser'));
+                if (user && user.idIngreso && typeof fbDb !== 'undefined' && fbDb) {
+                    const docRef = window.fbDoc(fbDb, 'accesos/comandancia/registros', String(user.idIngreso));
+                    await window.fbUpdateDoc(docRef, {
+                        estado: 'cerrado',
+                        fechaCierre: getFormattedDate(),
+                        horaCierre: getFormattedTime()
+                    });
+                }
+                localStorage.removeItem('adminUser');
+                localStorage.removeItem('authUserId');
+                localStorage.removeItem('authPasswordSecure');
+            } catch (e) {
+                console.error("Error actualizando logout en Firebase al cerrar", e);
+            }
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.on_logout_completed) {
+                window.pywebview.api.on_logout_completed();
+            }
+            return true;
+        };
+
+        // --- SISTEMA DE MONITOREO DE SESIÓN REMOTA EN FIRESTORE ---
+        sessionSnapshotUnsubscribe = null;
+        async function startSessionValidator() {
+            if (sessionSnapshotUnsubscribe) {
+                sessionSnapshotUnsubscribe();
+                sessionSnapshotUnsubscribe = null;
+            }
+            
+            const sessionStr = localStorage.getItem('adminUser');
+            if(!sessionStr) return;
+            const sessionData = JSON.parse(sessionStr);
+            if(!sessionData.idIngreso) return;
+
+            try {
+                const docRef = window.fbDoc(fbDb, 'accesos/comandancia/registros', String(sessionData.idIngreso));
+                
+                sessionSnapshotUnsubscribe = window.fbOnSnapshot(docRef, (docSnap) => {
+                    if(docSnap.exists()) {
+                        const dbSession = docSnap.data();
+                        if (String(dbSession.estado).toLowerCase() === 'cerrado') {
+                            if (sessionSnapshotUnsubscribe) sessionSnapshotUnsubscribe();
+                            window.showSysModal("Sesión Finalizada", "Tu sesión ha sido cerrada de forma remota por seguridad.", "fa-user-clock text-red-500", () => {
+                                localStorage.removeItem('adminUser');
+                                window.location.reload();
+                            }, true); 
+                            setTimeout(() => { localStorage.removeItem('adminUser'); window.location.reload(); }, 5000);
+                        }
+                    }
+                }, (error) => {
+                    console.warn("Session validator listener error in Comandancia:", error);
+                });
+            } catch(e) {
+                console.error("Error validando sesión:", e);
+            }
+        }
+
+        window.notifyFirebaseLogout = function() {
+            const keys = Object.keys(APP_MODULES);
+            keys.forEach(moduleKey => {
+                const iframe = document.getElementById('frame-' + moduleKey);
+                if (iframe && iframe.contentWindow && iframe.contentWindow.onFirebaseParentLogout) {
+                    try { iframe.contentWindow.onFirebaseParentLogout(); } catch(e) {}
+                }
+            });
+        };
+
+        window.notifyFirebaseReady = function() {
+            const keys = Object.keys(APP_MODULES);
+            keys.forEach(moduleKey => {
+                const iframe = document.getElementById('frame-' + moduleKey);
+                if (iframe && iframe.contentWindow && iframe.contentWindow.onFirebaseParentReady) {
+                    try { iframe.contentWindow.onFirebaseParentReady(); } catch(e) {}
+                }
+            });
+        };
+
+        // --- SISTEMA DE SALVAPANTALLAS INTERACTIVO ---
+        let screensaverTimeout;
+
+        function wakeUp() {
+            const loginScreen = document.getElementById('login-screen');
+            const sisbomVersion = document.getElementById('sisbom-version');
+            if (loginScreen && !loginScreen.classList.contains('hidden') && loginScreen.style.opacity !== '0') {
+                if (loginScreen.classList.contains('screensaver-mode')) {
+                    loginScreen.classList.remove('screensaver-mode');
+                    if(sisbomVersion) sisbomVersion.style.opacity = '1';
+                }
+            }
+            resetScreensaverTimer();
+        }
+
+        function sleep() {
+            if (window.isSystemLoggedIn) return; 
+            
+            const loginScreen = document.getElementById('login-screen');
+            const sisbomVersion = document.getElementById('sisbom-version');
+            if (loginScreen && !loginScreen.classList.contains('hidden') && loginScreen.style.opacity !== '0') {
+                loginScreen.classList.add('screensaver-mode');
+                if(sisbomVersion) sisbomVersion.style.opacity = '0';
+            }
+        }
+
+        function resetScreensaverTimer() {
+            clearTimeout(screensaverTimeout);
+            if (window.isSystemLoggedIn) return; 
+            screensaverTimeout = setTimeout(sleep, 20000);
+        }
+
+        function initScreensaver() {
+            Array.of('mousedown', 'touchstart', 'keydown').forEach(evt => document.addEventListener(evt, wakeUp));
+            resetScreensaverTimer();
+        }
+
+        const APP_VERSION = "1.2.0";
+        const CHANGELOGS = [
+            {
+                version: "1.2.0",
+                title: "Auto-recuperación y Conectividad (V1.2.0)",
+                items: [
+                    "Soporte para sesiones persistentes 24/7/365 en consolas.",
+                    "Saneamiento profundo de datos de red e inmunidad cross-realm.",
+                    "Auto-sanación y reconexión activa de escuchadores en tiempo real."
+                ]
+            },
+            {
+                version: "1.1.6",
+                title: "Estabilidad y Validación de Comandante (V1.1.6)",
+                items: [
+                    "Sincronización de versión a 1.1.6 para todo el ecosistema SisBom.",
+                    "Corrección en el flujo de validación de primer uso del Comandante.",
+                    "Optimización de peticiones en red offline para evitar advertencias 404 en consola."
+                ]
+            },
+            {
+                version: "1.1.5",
+                title: "Sincronización y Estadísticas Comandancia (V1.1.5)",
+                items: [
+                    "Rediseñado botón de sincronización global a formato de píldora interactiva con indicador de estado y hora.",
+                    "Optimización matemática en cálculos de disponibilidad por bloques de 168 horas.",
+                    "Establecida precisión entera en gráficos y reportes del módulo Personal.",
+                    "Soporte de comunicación en tiempo real entre marcos para carga asíncrona de datos."
+                ]
+            },
+            {
+                version: "1.1.4",
+                title: "Asistencia/Lista & Seguridad Comandante (V1.1.4)",
+                items: [
+                    "Añadido soporte para el módulo de control de Asistencia/Lista.",
+                    "Implementado portal de seguridad y confirmación del Comandante (idRadial 1) para primer uso."
+                ]
+            },
+            {
+                version: "1.1.3",
+                title: "SaaS White-Labeling & Activaciones (V1.1.3)",
+                items: [
+                    "Añadido soporte dynamic branding multiempresa (logo y nombre dinámico).",
+                    "Optimización de persistencia y caché de marca en carga inicial.",
+                    "Soporte para modo lectura (saas_read_only) y bloqueo directo desde consola."
+                ]
+            },
+            {
+                version: "1.1.0",
+                title: "Persistencia Local y Sincronización Unificada",
+                items: [
+                    "Habilitada persistencia local (IndexedDB) para optimizar la velocidad y reducir consultas en Firebase.",
+                    "Sincronización automática de todas las colecciones al iniciar sesión y mediante el nuevo botón de actualización global."
+                ]
+            },
+            {
+                version: "1.0.13",
+                title: "Optimización de Conexión de Datos",
+                items: [
+                    "Sincronización robusta de sesión en segundo plano y restauración automática del canal de base de datos."
+                ]
+            },
+            {
+                version: "1.0.12",
+                title: "Corrección de Permisos y Estabilidad",
+                items: [
+                    "Solución a error de base de datos al ingresar con usuarios administradores.",
+                    "Restricción de acceso a la Comandancia: solo el Comandante General (Radial 1) o usuarios autorizados como administradores pueden iniciar sesión.",
+                    "Se corrigió la carga de la Hoja de Vida/Historial en la sección de Vehículos (Material Mayor).",
+                    "Corrección en cierre de sesión seguro al cerrar la aplicación desde la X.",
+                    "Búsqueda en alerta por radial o nombre (asigna por registro único ID para evitar conflictos).",
+                    "Las conversaciones y alertas se muestran permanentemente en la grilla sin filtros de destinatario."
+                ]
+            },
+            {
+                version: "1.0.11",
+                title: "Estabilización General y Solución de Errores",
+                items: [
+                    "Solución a error de carga en Material Mayor (error de sintaxis).",
+                    "Normalización de serialización de objetos en transferencias cruzadas de marcos (soluciona error de Prueba Radial).",
+                    "Restablecimiento automático de sesión de fondo de Firebase Auth en el APK.",
+                    "Sincronización robusta de subcomponentes en Comandancia."
+                ]
+            },
+            {
+                version: "1.0.10",
+                title: "Correcciones de Sincronización y Estabilidad",
+                items: [
+                    "Sincronización robusta en la Central al alternar ventanas (iframes).",
+                    "Se corrigió el guardado de historial de estados y sirena en modo offline o ventana independiente (detached).",
+                    "Mejora de estabilidad en la aplicación móvil (evita cierres inesperados por pérdida de permisos de Firebase).",
+                    "Actualización de versión general a SISBOM V1.0.10."
+                ]
+            },
+            {
+                version: "1.0.9",
+                title: "Corrección de Errores y Sincronización",
+                items: [
+                    "Solución a problema de sincronización offline de personal en ventanas secundarias.",
+                    "Corrección de visualización repetida de novedades (changelog).",
+                    "Mejoras en el inicio de sesión del APK móvil (placeholder ID Registro)."
+                ]
+            },
+            {
+                version: "1.0.7",
+                title: "Seguridad y Autenticación",
+                items: [
+                    "Inicio de sesión seguro con credenciales institucionales.",
+                    "Soporte de actualización automática OTA para el APK y los EXEs de Windows.",
+                    "Optimización de lecturas en base de datos para reducir consumo en Firebase."
+                ]
+            }
+        ];
+
+        function compareVersions(v1, v2) {
+            if (!v1) return -1;
+            if (!v2) return 1;
+            const parts1 = String(v1).split('.').map(Number);
+            const parts2 = String(v2).split('.').map(Number);
+            for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+                const p1 = parts1[i] || 0;
+                const p2 = parts2[i] || 0;
+                if (p1 < p2) return -1;
+                if (p1 > p2) return 1;
+            }
+            return 0;
+        }
+
+        window.checkChangelog = function(user) {
+            if (!user) return;
+            const lastSeen = user.lastSeenVersion || localStorage.getItem('last_seen_version') || '0.0.0';
+            
+            if (compareVersions(APP_VERSION, lastSeen) > 0) {
+                const unseenLogs = CHANGELOGS.filter(c => compareVersions(c.version, lastSeen) > 0);
+                if (unseenLogs.length > 0) {
+                    const container = document.querySelector('#changelog-modal .text-left');
+                    if (container) {
+                        let html = '';
+                        unseenLogs.forEach(log => {
+                            html += `
+                                <div class="mb-4">
+                                    <div class="flex items-center gap-2 mb-1.5">
+                                        <span class="px-2 py-0.5 text-[10px] font-bold bg-red-100 text-bomberos-red rounded-full">V.${log.version}</span>
+                                        <h4 class="font-bold text-slate-800 text-xs uppercase tracking-wider">${log.title}</h4>
+                                    </div>
+                                    <ul class="list-disc list-inside space-y-1 pl-1 text-[11px] text-slate-500 font-medium leading-relaxed">
+                            `;
+                            log.items.forEach(item => {
+                                html += `<li>${item}</li>`;
+                            });
+                            html += `
+                                    </ul>
+                                </div>
+                            `;
+                        });
+                        container.innerHTML = html;
+                    }
+                    
+                    const verLabel = document.querySelector('#changelog-modal span.text-slate-400');
+                    if (verLabel) {
+                        verLabel.innerText = `SISBOM V.${APP_VERSION}`;
+                    }
+
+                    const modal = document.getElementById('changelog-modal');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        modal.classList.add('flex');
+                    }
+                }
+            }
+        };
+
+        window.dismissChangelog = async function() {
+            const user = JSON.parse(localStorage.getItem('adminUser'));
+            if (user && user.idRegistro) {
+                localStorage.setItem('last_seen_version', APP_VERSION);
+                try {
+                    const userDocRef = window.fbDoc(fbDb, 'personal', String(user.idRegistro));
+                    await window.fbSetDoc(userDocRef, { lastSeenVersion: APP_VERSION }, { merge: true });
+                    console.log("lastSeenVersion guardada en Firestore para usuario", user.idRegistro);
+                } catch (e) {
+                    console.error("Error guardando lastSeenVersion en Firestore:", e);
+                    if (window.queueFirebaseWrite) {
+                        window.queueFirebaseWrite('update', 'personal', String(user.idRegistro), new Object({ lastSeenVersion: APP_VERSION }));
+                    }
+                }
+            }
+            const modal = document.getElementById('changelog-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        };
+
+        window._updateDownloadUrl = "";
+        window._updateLatestVersion = "";
+
+        window.showUpdateNotification = function(latestVersion, downloadUrl) {
+            window._updateDownloadUrl = downloadUrl;
+            window._updateLatestVersion = latestVersion;
+            
+            const btn = document.getElementById('nav-btn-update');
+            if (btn) {
+                btn.classList.remove('hidden');
+                const span = btn.querySelector('span');
+                if (span) {
+                    span.innerText = `ACTUALIZAR A V${latestVersion}`;
+                }
+            }
+        };
+
+        window.triggerAppUpdate = function() {
+            if (!window._updateDownloadUrl) return;
+            
+            window.showSysModal(
+                "ACTUALIZACIÓN DISPONIBLE",
+                `EXISTE UNA NUEVA VERSIÓN DE LA APLICACIÓN (V${window._updateLatestVersion}) DISPONIBLE.<br><br>¿DESEA DESCARGARLA E INSTALARLA DE MANERA AUTOMÁTICA AHORA? EL PROCESO REINICIARÁ EL SISTEMA.`,
+                "fa-arrow-alt-circle-up text-amber-500",
+                () => {
+                    const msgEl = document.getElementById('sys-modal-msg');
+                    if (msgEl) {
+                        msgEl.innerHTML = "DESCARGANDO E INSTALANDO ACTUALIZACIÓN...<br><br>POR FAVOR ESPERE, EL SISTEMA SE REINICIARÁ AUTOMÁTICAMENTE.";
+                    }
+                    const confirmBtn = document.getElementById('sys-modal-confirm');
+                    if (confirmBtn) confirmBtn.disabled = true;
+                    const cancelBtn = document.getElementById('sys-modal-cancel');
+                    if (cancelBtn) cancelBtn.disabled = true;
+                    
+                    if (window.pywebview && window.pywebview.api && window.pywebview.api.trigger_ota_update) {
+                        window.pywebview.api.trigger_ota_update(window._updateLatestVersion, window._updateDownloadUrl);
+                    }
+                }
+            );
+        };
+
+        window.runDatabaseMigration = async function() {
+            if (!window.fbDb || !window.fbGetDocs || !window.fbSetDoc || !window.fbDeleteDoc) {
+                console.error("Firebase is not initialized or you are not logged in!");
+                return;
+            }
+            console.log("MIGRATION: Starting assistance list migration...");
+            try {
+                const snap = await window.fbGetDocs(window.fbCollection(window.fbDb, 'asistencia'));
+                console.log(`MIGRATION: Found ${snap.size} documents in 'asistencia' collection.`);
+                
+                let successCount = 0;
+                let errorCount = 0;
+                
+                const docs = [];
+                snap.forEach(d => {
+                    docs.push({ id: d.id, data: d.data() });
+                });
+                
+                // Sort by numeric id to migrate in order
+                docs.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+                
+                for (const docObj of docs) {
+                    const oldIdStr = docObj.id;
+                    const oldId = parseInt(oldIdStr);
+                    if (isNaN(oldId)) {
+                        console.warn(`MIGRATION: Skipping document with non-numeric ID: ${oldIdStr}`);
+                        continue;
+                    }
+                    
+                    const data = docObj.data;
+                    const oldDate = data.fecha || '';
+                    
+                    // Normalize Date
+                    let dateStr = oldDate.replace(/\//g, '-');
+                    const parts = dateStr.split('-');
+                    if (parts.length < 3) {
+                        console.error(`MIGRATION: Invalid date format for list ${oldId}: ${oldDate}`);
+                        errorCount++;
+                        continue;
+                    }
+                    
+                    let day = parseInt(parts[0]);
+                    let month = parseInt(parts[1]);
+                    let year = parseInt(parts[2]);
+                    
+                    if (month > 12) {
+                        // mm-dd-yyyy -> dd-mm-yyyy
+                        const tmp = day;
+                        day = month;
+                        month = tmp;
+                    }
+                    
+                    const normalizedDateStr = `${String(day).padStart(2, '0')}-${String(month).padStart(2, '0')}-${year}`;
+                    
+                    // Calculate cycle year (December 1st - November 30th)
+                    const cycleYear = (month === 12) ? (year + 1) : year;
+                    
+                    // Shift ID by 20
+                    const newSeq = oldId + 20;
+                    const newIdStr = `${cycleYear}${String(newSeq).padStart(3, '0')}`;
+                    
+                    console.log(`MIGRATION: Migrating ${oldIdStr} (${oldDate}) -> ${newIdStr} (${normalizedDateStr})`);
+                    
+                    // Prepare updated document data
+                    const updatedData = { ...data };
+                    updatedData.idLista = newIdStr;
+                    updatedData.id = newIdStr;
+                    updatedData.ID = newIdStr;
+                    updatedData.idRegistro = newIdStr;
+                    updatedData.fecha = normalizedDateStr;
+                    
+                    // Write new document
+                    const newDocRef = window.fbDoc(window.fbDb, 'asistencia', newIdStr);
+                    await window.fbSetDoc(newDocRef, updatedData);
+                    
+                    // Delete old document
+                    const oldDocRef = window.fbDoc(window.fbDb, 'asistencia', oldIdStr);
+                    await window.fbDeleteDoc(oldDocRef);
+                    
+                    successCount++;
+                }
+                
+                console.log(`MIGRATION COMPLETE! Successfully migrated ${successCount} lists. Errors: ${errorCount}`);
+                alert(`MIGRACIÓN COMPLETADA CON ÉXITO!\nSe migraron ${successCount} listas de asistencia.\nPor favor, reinicie la aplicación.`);
+            } catch (e) {
+                console.error("MIGRATION FAILED with exception:", e);
+                alert("MIGRACIÓN FALLIDA: " + e.message);
+            }
+        };
+
+        
+        window.runSubcollectionMigration = async function() {
+            if (!window.fbDb || !window.fbGetDocs || !window.fbSetDoc || !window.fbDeleteDoc) {
+                console.error("Firebase is not initialized or you are not logged in!");
+                return;
+            }
+            console.log("RECOVERY: Starting subcollection migration...");
+            try {
+                let successCount = 0;
+                let totalFfCopied = 0;
+                
+                // Scan range 136 to 305
+                for (let oldId = 136; oldId <= 305; oldId++) {
+                    const oldIdStr = String(oldId);
+                    const newSeq = oldId + 20;
+                    const newIdStr = `2026${String(newSeq).padStart(3, '0')}`;
+                    
+                    const oldSubCollRef = window.fbCollection(window.fbDb, `asistencia/${oldIdStr}/bomberos`);
+                    const subSnap = await window.fbGetDocs(oldSubCollRef);
+                    
+                    if (!subSnap.empty) {
+                        console.log(`RECOVERY: Found ${subSnap.size} firefighters in old list ${oldIdStr}. Moving to ${newIdStr}...`);
+                        
+                        for (const ffDoc of subSnap.docs) {
+                            const ffData = ffDoc.data();
+                            const ffId = ffDoc.id;
+                            
+                            // Write to new subcollection
+                            const newFfDocRef = window.fbDoc(window.fbDb, `asistencia/${newIdStr}/bomberos`, ffId);
+                            await window.fbSetDoc(newFfDocRef, ffData);
+                            
+                            // Delete from old subcollection
+                            const oldFfDocRef = window.fbDoc(window.fbDb, `asistencia/${oldIdStr}/bomberos`, ffId);
+                            await window.fbDeleteDoc(oldFfDocRef);
+                            
+                            totalFfCopied++;
+                        }
+                        successCount++;
+                    }
+                }
+                console.log(`RECOVERY COMPLETE! Migrated subcollections for ${successCount} lists. Total records moved: ${totalFfCopied}`);
+                alert(`RECOVERY EXITOSO!\nSe migraron las subcolecciones de ${successCount} listas.\nTotal registros de bomberos movidos: ${totalFfCopied}\nPor favor, reinicie la aplicación.`);
+            } catch (e) {
+                console.error("RECOVERY FAILED:", e);
+                alert("RECOVERY FALLIDO: " + e.message);
+            }
+        };
+
+        window.onload = function() { 
+            startClock(); 
+            initSystem(); 
+            initScreensaver();
+            // window.startGlobalBackgroundSync(); // Optimized to prevent periodic query storm
+        };
+
+        // Escucha cambios de almacenamiento local para sincronizar estados del chat flotante
+        window.addEventListener("storage", function(e) {
+            if (e.key === 'sisbom_alertas_reads' || e.key === 'sisbom_alertas_cache_v2') {
+                try {
+                    const cachedData = localStorage.getItem('sisbom_alertas_cache_v2');
+                    if (cachedData) {
+                        const parsed = JSON.parse(cachedData);
+                        if (parsed && parsed.alertas && App.fcActiveAlertId) {
+                            const matchRow = parsed.alertas.find(r => String(r.idAlerta || r.ID) === String(App.fcActiveAlertId));
+                            if (matchRow) {
+                                App.renderFloatingChatMessages(matchRow);
+                            }
+                        }
+                    }
+                } catch(err) {}
+            }
+        });
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.4 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

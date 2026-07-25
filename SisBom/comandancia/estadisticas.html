@@ -1,0 +1,2671 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Estadísticas - SisBom</title>
+    
+    <!-- Librerías -->
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <script src="./libs/chart.js"></script>
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+
+    <style>
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder { text-transform: uppercase !important; }
+
+        /* Reglas base del sistema SisBom */
+        html { font-size: 16px; }
+        body { font-family: 'Segoe UI', sans-serif; background-color: transparent; color: #334155; -webkit-font-smoothing: antialiased; }
+        
+        /* Animación para el spinner de carga (Minimalista y Pequeño) */
+        .spinner {
+            border: 5px solid transparent;
+            border-radius: 50%;
+            border-top: 5px solid #B91C1C;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Scrollbar estilizado M3 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Inputs y Selects estandarizados M3 */
+        .f-input { 
+            padding: 0.75rem 1rem; border: 1px solid #cbd5e1; border-radius: 1rem; 
+            background-color: #fff; color: #0f172a; outline: none; transition: all 0.2s; font-size: 13px; font-weight: 600;
+        }
+        .f-input:focus { border-color: #B91C1C; box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.1); }
+
+        /* Pestañas de Navegación Superiores (IGUALITARIAS) */
+        .nav-scroller { overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; width: 100%; display: flex; }
+        .nav-scroller::-webkit-scrollbar { display: none; }
+        
+        .tab-btn { 
+            display: inline-flex; flex: 1; justify-content: center; align-items: center; gap: 0.5rem; padding: 0.75rem 0.5rem; 
+            font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; 
+            color: #64748b; border-bottom: 0px solid transparent; transition: all 0.2s; cursor: pointer; border-radius: 1rem; min-width: auto;
+        }
+        .tab-btn:hover { color: #334155; background-color: #f8fafc; }
+        .tab-btn.active { color: #B91C1C; background-color: #FEF2F2; }
+
+        /* Estilos de Tabla y Detalles Expandibles */
+        .detail-table th { background-color: #f8fafc; color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; padding: 16px 20px; text-align: left; border-bottom: 1px solid #e2e8f0; letter-spacing: 0.05em;}
+        .detail-table td { font-size: 13px; font-weight: 500; color: #334155; padding: 14px 20px; border-bottom: 1px solid #f1f5f9; vertical-align: middle; }
+        .expanded-row { background-color: #f8fafc; }
+        
+        .d-label { display: block; font-size: 11px; font-weight: 800; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+        .d-value { display: block; font-size: 13px; font-weight: 600; color: #1e293b; }
+    </style>
+</head>
+<body class="min-h-screen pb-20 bg-slate-50">
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('input', e => {
+                if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) {
+                    if (e.target.type !== 'password' && !e.target.classList.contains('chat-input') && e.target.id !== 'chat-message') {
+                        const start = e.target.selectionStart, end = e.target.selectionEnd;
+                        e.target.value = e.target.value.toUpperCase();
+                        e.target.setSelectionRange(start, end);
+                    }
+                }
+            });
+        });
+    </script>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8 relative">
+
+        <!-- BARRA SUPERIOR Y PESTAÑAS (FLEX-1 IGUALITARIAS) -->
+        <div class="sticky top-4 z-50 border border-slate-200 flex bg-white/95 backdrop-blur-md shrink-0 p-2 shadow-sm mb-6 gap-2" style="border-radius: 1.5rem;">
+            <div class="nav-scroller">
+                <button onclick="window.switchView('despachos')" class="tab-btn active" id="tab-despachos"><i class="fas fa-satellite-dish"></i> Despachos</button>
+                <button onclick="window.switchView('bitacora')" class="tab-btn" id="tab-bitacora"><i class="fas fa-clipboard-list"></i> Bitácora</button>
+                <button onclick="window.switchView('pruebas')" class="tab-btn" id="tab-pruebas"><i class="fas fa-walkie-talkie"></i> Pruebas</button>
+                <button onclick="window.switchView('asistencias')" class="tab-btn" id="tab-asistencias"><i class="fas fa-user-check"></i> Asistencia</button>
+                <button onclick="window.switchView('disponibilidad')" class="tab-btn" id="tab-disponibilidad"><i class="fas fa-clock"></i> Disponibilidad</button>
+                <button onclick="window.switchView('sirena')" class="tab-btn" id="tab-sirena"><i class="fas fa-bullhorn"></i> Sirena</button>
+            </div>
+        </div>
+
+        <div id="dashboard-content" class="transition-opacity duration-300">
+            
+            <!-- TARJETAS KPI -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <!-- Tarjeta Hoy -->
+                <div class="bg-white p-6 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between group cursor-default" style="border-radius: 1.5rem; border-top-width: 8px; border-top-color: #f87171;">
+                    <div>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Registros de Hoy</p>
+                        <h3 id="kpi-day" class="text-4xl font-black text-slate-800 tracking-tight">0</h3>
+                    </div>
+                    <div class="w-14 h-14 bg-red-50 flex items-center justify-center text-red-400 text-2xl group-hover:scale-110 transition-transform" style="border-radius: 9999px;">
+                        <i class="fas fa-calendar-day"></i>
+                    </div>
+                </div>
+                <!-- Tarjeta Este Mes -->
+                <div class="bg-white p-6 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between group cursor-default" style="border-radius: 1.5rem; border-top-width: 8px; border-top-color: #B91C1C;">
+                    <div>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Este Mes</p>
+                        <h3 id="kpi-month" class="text-4xl font-black text-slate-800 tracking-tight">0</h3>
+                    </div>
+                    <div class="w-14 h-14 bg-red-50 flex items-center justify-center text-bomberos-red text-2xl group-hover:scale-110 transition-transform" style="border-radius: 9999px;">
+                        <i class="fas fa-calendar-alt"></i>
+                    </div>
+                </div>
+                <!-- Tarjeta Total -->
+                <div class="bg-white p-6 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center justify-between group cursor-default" style="border-radius: 1.5rem; border-top-width: 8px; border-top-color: #334155;">
+                    <div>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Total Mostrado</p>
+                        <h3 id="kpi-cycle" class="text-4xl font-black text-slate-800 tracking-tight">0</h3>
+                    </div>
+                    <div class="w-14 h-14 bg-slate-100 flex items-center justify-center text-slate-600 text-2xl group-hover:scale-110 transition-transform" style="border-radius: 9999px;">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GRÁFICOS ESTADÍSTICOS -->
+            <div id="default-charts-section" class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                <div class="bg-white p-6 shadow-sm border border-slate-200 lg:col-span-1 flex flex-col" style="border-radius: 1.5rem;">
+                    <h4 id="chart-pie-title" class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-6 flex items-center gap-2">
+                        <i class="fas fa-chart-pie text-bomberos-red"></i> Distribución
+                    </h4>
+                    <div class="relative flex-1 w-full flex flex-col" style="min-height: 250px;"><canvas id="chartPie"></canvas></div>
+                </div>
+                <div class="bg-white p-6 shadow-sm border border-slate-200 lg:col-span-2 flex flex-col relative overflow-hidden" style="border-radius: 1.5rem;">
+                    <h4 id="chart-trend-title" class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-6 flex items-center gap-2">
+                        <i class="fas fa-chart-bar text-slate-500"></i> Tendencia Mensual
+                    </h4>
+                    <div class="relative flex-1 w-full flex flex-col" id="chart-trend-wrapper" style="min-height: 250px;">
+                        <canvas id="chartTrend"></canvas>
+                        <div id="drilldown-overlay" class="absolute inset-0 bg-white/95 backdrop-blur-sm hidden flex-col border border-slate-200 overflow-hidden shadow-lg transform transition-all" style="z-index: 20; border-radius: 1.5rem;">
+                            <div class="bg-white border-b border-slate-200 p-4 flex justify-between items-center shrink-0 shadow-sm" style="z-index: 10;">
+                                <span id="drilldown-title" class="font-bold text-sm text-slate-800 flex items-center gap-2 uppercase"></span>
+                                <button onclick="closeDrilldown()" class="text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 w-10 h-10 flex items-center justify-center transition-colors" style="border-radius: 9999px;"><i class="fas fa-times"></i></button>
+                            </div>
+                            <div id="drilldown-content" class="flex-1 overflow-y-auto p-6 custom-scrollbar relative z-0"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="vehiculos-section" class="hidden mb-8">
+                <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2 mb-4 px-2">
+                    <i class="fas fa-truck text-bomberos-red"></i> Estado del Parque Automotriz (En Tiempo Real)
+                </h4>
+                <div id="vehiculos-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6"></div>
+            </div>
+
+            <div id="asistencia-report-section" class="hidden mb-8 bg-white shadow-sm border border-slate-200 overflow-hidden" style="border-radius: 1.5rem;">
+                <div class="p-6 border-b border-slate-200 bg-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                        <i class="fas fa-ranking-star text-blue-600"></i> Ranking de Asistencia
+                    </h4>
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs bg-slate-100 text-slate-500 px-4 py-1.5 font-bold uppercase tracking-widest hidden sm:inline-block" style="border-radius: 1rem;">Acumulado del Ciclo</span>
+                        <button onclick="printReport('asistencia-report-container', 'Ranking de Asistencia - SisBom')" class="text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
+                            <i class="fas fa-print"></i> Imprimir
+                        </button>
+                        <button onclick="window.saveAsPDF('asistencia-report-container', 'Ranking de Asistencia - SisBom')" class="text-xs bg-red-50 hover:bg-red-100 text-bomberos-red border border-red-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
+                            <i class="fas fa-file-pdf"></i> Guardar PDF
+                        </button>
+                    </div>
+                </div>
+                <div id="asistencia-report-container" class="p-0"></div>
+            </div>
+
+            <div id="default-table-section" class="bg-white shadow-sm border border-slate-200 overflow-hidden flex flex-col mb-8" style="border-radius: 1.5rem;">
+                <div class="p-6 border-b border-slate-200 bg-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <div>
+                        <h4 id="table-title" class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                            <i class="fas fa-table text-bomberos-red"></i> Detalle de Registros
+                        </h4>
+                        <p id="table-subtitle" class="text-xs text-slate-400 font-bold uppercase tracking-widest mt-1">Haga clic en una fila para ver más detalles</p>
+                    </div>
+                    <div id="search-container" class="relative w-full sm:w-64">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                            <i class="fas fa-search text-slate-400"></i>
+                        </div>
+                        <input type="text" id="tableSearch" onkeyup="renderCurrentTable()" placeholder="Buscar registro..." class="f-input pl-12 w-full text-sm uppercase" style="border-radius: 1rem;">
+                    </div>
+                </div>
+                
+                <div id="table-container" class="overflow-x-auto flex-1 pb-4">
+                    <table class="detail-table w-full">
+                        <thead class="bg-slate-50 shadow-sm" style="position: relative; z-index: 10;">
+                            <tr id="table-header-row"></tr>
+                        </thead>
+                        <tbody id="table-body" class="bg-white divide-y divide-slate-100"></tbody>
+                    </table>
+                </div>
+
+                <div id="grid-container" class="hidden p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-5 bg-slate-50/50"></div>
+                
+                <div id="pagination-controls" class="hidden flex items-center justify-between px-6 py-4 border-t border-slate-200 bg-slate-50">
+                    <p class="text-xs text-slate-500 font-bold uppercase tracking-widest"><span id="page-info">Página 1</span></p>
+                    <div class="flex gap-2">
+                        <button onclick="window.prevPage()" id="btn-prev" class="bg-white border border-slate-300 text-slate-600 px-4 py-2 shadow-sm hover:bg-slate-50 disabled:opacity-50 transition-colors" style="border-radius: 0.75rem;"><i class="fas fa-chevron-left text-xs"></i></button>
+                        <button onclick="window.nextPage()" id="btn-next" class="bg-white border border-slate-300 text-slate-600 px-4 py-2 shadow-sm hover:bg-slate-50 disabled:opacity-50 transition-colors" style="border-radius: 0.75rem;"><i class="fas fa-chevron-right text-xs"></i></button>
+                    </div>
+                </div>
+                
+                <div id="empty-state" class="hidden py-16 flex flex-col items-center justify-center bg-slate-50/50">
+                    <div class="w-20 h-20 bg-slate-200 flex items-center justify-center text-slate-400 text-4xl mb-5" style="border-radius: 9999px;">
+                        <i class="fas fa-folder-open"></i>
+                    </div>
+                    <p class="text-slate-600 font-black text-lg uppercase tracking-wide">No hay registros para mostrar</p>
+                    <p class="text-sm font-semibold text-slate-400 mt-1.5 uppercase">Sincronice los datos o cambie los criterios.</p>
+                </div>
+            </div>
+
+            <div id="radio-global-summary" class="hidden mb-8 grid grid-cols-2 md:grid-cols-4 gap-6"></div>
+
+            <div id="radio-report-section" class="hidden mb-8 bg-white shadow-sm border border-slate-200 overflow-hidden" style="border-radius: 1.5rem;">
+                <div class="p-6 border-b border-slate-200 bg-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                    <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                        <i class="fas fa-list-check text-blue-600"></i> Reporte Individual de Radios
+                    </h4>
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs bg-slate-100 text-slate-500 px-4 py-1.5 font-bold uppercase tracking-widest hidden sm:inline-block" style="border-radius: 1rem;">Acumulado del Ciclo</span>
+                        <button onclick="printReport('radio-report-container', 'Reporte Individual de Radios 11-5 - SisBom')" class="text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
+                            <i class="fas fa-print"></i> Imprimir
+                        </button>
+                        <button onclick="window.saveAsPDF('radio-report-container', 'Reporte Individual de Radios 11-5 - SisBom')" class="text-xs bg-red-50 hover:bg-red-100 text-bomberos-red border border-red-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
+                            <i class="fas fa-file-pdf"></i> Guardar PDF
+                        </button>
+                    </div>
+                </div>
+                <div id="radio-report-container" class="p-0"></div>
+            </div>
+
+            <div id="disponibilidad-section" class="hidden">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+                    <div class="bg-white p-6 shadow-sm border border-slate-200 lg:col-span-1 flex flex-col" style="border-radius: 1.5rem;">
+                        <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-6 flex items-center gap-2">
+                            <i class="fas fa-clock text-bomberos-red"></i> DISPONIBILIDAD POR HORA (PROMEDIO)
+                        </h4>
+                        <div class="relative flex-1 w-full flex flex-col" style="min-height: 250px;"><canvas id="chartDispHora"></canvas></div>
+                    </div>
+                    <div class="bg-white p-6 shadow-sm border border-slate-200 lg:col-span-1 flex flex-col" style="border-radius: 1.5rem;">
+                        <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-6 flex items-center gap-2">
+                            <i class="fas fa-calendar-day text-bomberos-red"></i> DISPONIBILIDAD POR DÍA (PROMEDIO)
+                        </h4>
+                        <div class="relative flex-1 w-full flex flex-col" style="min-height: 250px;"><canvas id="chartDispDia"></canvas></div>
+                    </div>
+                    <div class="bg-white p-6 shadow-sm border border-slate-200 lg:col-span-1 flex flex-col" style="border-radius: 1.5rem;">
+                        <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide mb-6 flex items-center gap-2">
+                            <i class="fas fa-calendar-alt text-bomberos-red"></i> DISPONIBILIDAD POR MES (PROMEDIO)
+                        </h4>
+                        <div class="relative flex-1 w-full flex flex-col" style="min-height: 250px;"><canvas id="chartDispMes"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="bg-white shadow-sm border border-slate-200 overflow-hidden" style="border-radius: 1.5rem;">
+                    <div class="p-6 border-b border-slate-200 bg-white flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                        <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
+                            <i class="fas fa-ranking-star text-blue-600"></i> RANKING DE DISPONIBILIDAD DE PERSONAL
+                        </h4>
+                        <div class="flex items-center gap-3">
+                            <select id="disp-period-filter" class="text-[10px] sm:text-xs bg-slate-100 text-slate-600 font-bold uppercase tracking-widest px-2 sm:px-4 py-1.5 shadow-sm border border-slate-200 focus:outline-none focus:ring-1 focus:ring-bomberos-red cursor-pointer" style="border-radius: 1rem;" onchange="window.changeDispPeriod(this.value)">
+                                <option value="ciclo">TODO EL CICLO</option>
+                                <option value="mes">ESTE MES</option>
+                                <option value="semana">ESTA SEMANA</option>
+                                <option value="dia">HOY</option>
+                            </select>
+                            <button onclick="printReport('disponibilidad-report-container', 'Ranking de Disponibilidad - SisBom')" class="text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
+                                <i class="fas fa-print"></i> Imprimir
+                            </button>
+                            <button onclick="window.saveAsPDF('disponibilidad-report-container', 'Ranking de Disponibilidad - SisBom')" class="text-xs bg-red-50 hover:bg-red-100 text-bomberos-red border border-red-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
+                                <i class="fas fa-file-pdf"></i> Guardar PDF
+                            </button>
+                        </div>
+                    </div>
+                    <div id="disponibilidad-report-container" class="p-0"></div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <div id="modal-115" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm flex flex-col items-center justify-center p-4 lg:p-8 transition-opacity duration-200" style="z-index: 150;">
+        <div class="bg-white shadow-2xl w-full max-w-7xl h-full flex flex-col overflow-hidden transform transition-all scale-100" style="border-radius: 1.5rem;">
+            <div class="px-6 py-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+                <div>
+                    <h3 id="modal-115-title" class="text-xl font-bold text-slate-800 flex items-center gap-2 uppercase">
+                        <i class="far fa-calendar-alt text-bomberos-red"></i> Detalle Mensual Pruebas Radiales
+                    </h3>
+                    <p class="text-xs text-slate-500 mt-1 font-medium uppercase">Seleccione un día en las pestañas para ver las pruebas correspondientes.</p>
+                </div>
+                <button type="button" onclick="closeMonthModal()" class="text-slate-500 hover:text-red-600 hover:bg-red-50 transition-colors p-3 bg-white shadow-sm border border-slate-200 flex items-center justify-center gap-2 font-bold text-sm" style="border-radius: 1rem;">
+                    <i class="fas fa-times text-lg"></i> <span class="hidden sm:inline uppercase">Cerrar</span>
+                </button>
+            </div>
+            <div class="nav-scroller border-b border-slate-200 flex bg-white shrink-0 px-4 pt-4 shadow-sm" style="z-index: 10;" id="modal-115-tabs"></div>
+            <div class="flex-1 overflow-y-auto p-4 lg:p-6 bg-slate-100" id="modal-115-content"></div>
+        </div>
+    </div>
+
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-900 bg-opacity-40 backdrop-blur-sm hidden flex-col items-center justify-center transition-opacity duration-300" style="z-index: 200;">
+        <div class="spinner"></div>
+        <p class="text-white mt-4 font-bold uppercase tracking-widest text-sm" id="loading-text">Cargando...</p>
+    </div>
+
+    <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
+
+    <script type="module">
+        let fbDb = null;
+        window.DB = new Object({ despachos: new Array(), bitacora: new Array(), pruebas: new Array(), asistencias: new Array(), sirena: new Array(), personal: new Array(), vehiculos: new Array() });
+        window.currentView = 'despachos';
+        window.chartsInstance = new Object({ pie: null, trend: null, dispHora: null, dispDia: null, dispMes: null });
+        window.groupedDataCache = new Array();
+        
+        window.currentPage = 1;
+        window.itemsPerPage = 10;
+        window.filteredTableData = new Array();
+        window.selectedCycleYear = new Date().getFullYear();
+        window.dispPeriod = 'ciclo';
+
+        window.changeDispPeriod = function(val) {
+            window.dispPeriod = val;
+            window.refreshDashboard();
+        };
+
+        window.IDB = {
+            db: null,
+            init: function() {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open('SisbomStatsDB', 1);
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        ['despachos', 'bitacora', 'pruebas', 'asistencias', 'sirena', 'personal', 'vehiculos'].forEach(store => {
+                            if (!db.objectStoreNames.contains(store)) db.createObjectStore(store, { keyPath: 'id_gen' });
+                        });
+                    };
+                    request.onsuccess = (e) => { window.IDB.db = e.target.result; resolve(); };
+                    request.onerror = (e) => { console.error("IDB Error", e); reject(e); };
+                });
+            },
+            saveAll: async function(data) {
+                if(!window.IDB.db) return;
+                return new Promise((resolve, reject) => {
+                    const tx = window.IDB.db.transaction(Object.keys(data), 'readwrite');
+                    tx.oncomplete = resolve;
+                    tx.onerror = reject;
+                    for (const key of Object.keys(data)) {
+                        const store = tx.objectStore(key);
+                        store.clear();
+                        if(data[key] && data[key].length > 0) {
+                            data[key].forEach((item, index) => {
+                                item.id_gen = index;
+                                store.put(item);
+                            });
+                        }
+                    }
+                });
+            },
+            loadAll: async function() {
+                if(!window.IDB.db) return null;
+                const data = { despachos: [], bitacora: [], pruebas: [], asistencias: [], sirena: [], personal: [], vehiculos: [] };
+                const tx = window.IDB.db.transaction(Object.keys(data), 'readonly');
+                for (const key of Object.keys(data)) {
+                    const store = tx.objectStore(key);
+                    const req = store.getAll();
+                    await new Promise(resolve => {
+                        req.onsuccess = () => { data[key] = req.result; resolve(); };
+                    });
+                }
+                return data;
+            }
+        };
+
+        // RUTINA DE AUTO-RECONEXIÓN ANTE PÉRDIDA DE SESIÓN (TOKEN EXPIRADO)
+        window.reconnectAuth = async function() {
+            try {
+                const storedUser = localStorage.getItem('authUserId');
+                const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                if (storedUser && storedPassSecure) {
+                    const authModule = await import("./libs/firebase-auth.js");
+                    const authToUse = window.fbAuth || (window.parent && window.parent.fbAuth);
+                    if (authToUse) {
+                        await authModule.signInWithEmailAndPassword(authToUse, storedUser + "@sisbom.com", storedPassSecure);
+                        console.log("Reconexión automática exitosa tras pérdida de permisos.");
+                        return true;
+                    }
+                }
+            } catch(e) {
+                console.error("Fallo al intentar reconectar automáticamente:", e);
+            }
+            return false;
+        };
+
+        window.initFirebase = async function() {
+            if (window.parent && window.parent.fbDb) {
+                fbDb = window.parent.fbDb;
+                window.fbCollection = window.parent.fbCollection;
+                window.fbGetDocs = window.parent.fbGetDocs;
+                window.fbAuth = window.parent.fbAuth; // IMPORTANTÍSIMO PARA RECONEXIÓN
+                return;
+            }
+            try {
+                const { initializeApp } = await import("./libs/firebase-app.js");
+                const { getFirestore, collection, getDocs } = await import("./libs/firebase-firestore.js");
+                const { getAuth, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                
+                const firebaseConfig = {
+                    apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+                    authDomain: "sisbom-de5f8.firebaseapp.com",
+                    projectId: "sisbom-de5f8",
+                    storageBucket: "sisbom-de5f8.firebasestorage.app",
+                    messagingSenderId: "39449538456",
+                    appId: "1:39449538456:web:64f767264356ae587485ed"
+                };
+
+                let configToUse = firebaseConfig;
+                try {
+                    const dynamicConfigStr = localStorage.getItem('saas_firebase_config');
+                    if (dynamicConfigStr) configToUse = JSON.parse(dynamicConfigStr);
+                } catch (e) {}
+                
+                const app = initializeApp(configToUse);
+                fbDb = getFirestore(app);
+                window.fbCollection = collection;
+                window.fbGetDocs = getDocs;
+                window.fbAuth = getAuth(app);
+
+                // Auto login fallback
+                const storedUser = localStorage.getItem('authUserId');
+                const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                if (storedUser && storedPassSecure) {
+                    await signInWithEmailAndPassword(window.fbAuth, storedUser + "@sisbom.com", storedPassSecure);
+                }
+            } catch(e) {
+                console.error("Error inicializando Firebase:", e);
+            }
+        };
+
+        window.fetchAllData = async function(force = false, isRetry = false) {
+            window.toggleLoader(true);
+            try {
+                if (!fbDb) await window.initFirebase();
+                if (!fbDb) throw new Error("Sin conexión a la base de datos.");
+
+                const results = await Promise.all([
+                    window.fbGetDocs(window.fbCollection(fbDb, 'despachos')),
+                    window.fbGetDocs(window.fbCollection(fbDb, 'bitacora')),
+                    window.fbGetDocs(window.fbCollection(fbDb, 'prueba_radial')),
+                    window.fbGetDocs(window.fbCollection(fbDb, 'sirena')),
+                    window.fbGetDocs(window.fbCollection(fbDb, 'personal')),
+                    window.fbGetDocs(window.fbCollection(fbDb, 'vehiculos')),
+                    window.fbGetDocs(window.fbCollection(fbDb, 'asistencia'))
+                ]);
+
+                window.DB.despachos = []; results[0].forEach(d => { let obj = d.data(); obj.idServicio = d.id; window.DB.despachos.push(obj); });
+                window.DB.bitacora = []; results[1].forEach(d => { let obj = d.data(); obj.idSalida = d.id; window.DB.bitacora.push(obj); });
+                window.DB.sirena = []; results[3].forEach(d => { let obj = d.data(); obj.idToqueSirena = d.id; window.DB.sirena.push(obj); });
+                window.DB.personal = []; results[4].forEach(d => { let obj = d.data(); obj.idRegistro = d.id; window.DB.personal.push(obj); });
+                window.DB.vehiculos = []; results[5].forEach(d => { let obj = d.data(); obj.idCarro = d.id; window.DB.vehiculos.push(obj); });
+
+                const estadosPromises = window.DB.personal.map(p => {
+                    return window.fbGetDocs(window.fbCollection(fbDb, `personal/${p.idRegistro}/estados`))
+                    .then(subSnap => {
+                        const subList = [];
+                        subSnap.forEach(doc => subList.push(doc.data()));
+                        p.estadosHistorico = subList;
+                    }).catch(err => { p.estadosHistorico = []; });
+                });
+                await Promise.all(estadosPromises);
+
+                // 1. Cargar base de datos local db_backup.json para usar caché de listas aprobadas
+                let localAsistencias = [];
+                try {
+                    const localRes = await fetch('../asistencias/db_backup.json');
+                    if (localRes.ok) {
+                        const localData = await localRes.json();
+                        localAsistencias = localData.asistencia || [];
+                    }
+                } catch (err) {
+                    console.warn("No se pudo cargar la base de datos local db_backup.json:", err);
+                }
+
+                // 2. Procesar las asistencias (híbrido local/Firebase)
+                const asistenciasData = [];
+                const asisPromises = [];
+                
+                results[6].forEach(d => {
+                    const docId = d.id;
+                    const data = d.data();
+                    const isApproved = (data.aprobadoPor && data.aprobadoPor.trim() !== '');
+                    
+                    // Buscar si ya la tenemos en el JSON local con bomberos
+                    const localGroup = localAsistencias.find(g => String(g.idLista) === String(docId));
+                    if (isApproved && localGroup && localGroup.firefighters && localGroup.firefighters.length > 0) {
+                        // La lista está aprobada y ya la tenemos en caché local, no consultamos Firebase
+                        const header = Object.assign({ idLista: docId }, data);
+                        localGroup.firefighters.forEach(b => {
+                            asistenciasData.push(Object.assign({}, header, b));
+                        });
+                    } else {
+                        // Es pendiente o no está en caché local, consultamos Firebase
+                        asisPromises.push(
+                            window.fbGetDocs(window.fbCollection(fbDb, `asistencia/${docId}/bomberos`))
+                            .then(subSnap => {
+                                const header = Object.assign({ idLista: docId }, data);
+                                const bomberos = [];
+                                subSnap.forEach(b => bomberos.push(b.data()));
+                                if (bomberos.length === 0) asistenciasData.push(header);
+                                else bomberos.forEach(b => asistenciasData.push(Object.assign({}, header, b)));
+                            }).catch(()=> { asistenciasData.push(Object.assign({ idLista: docId }, data)); })
+                        );
+                    }
+                });
+                await Promise.all(asisPromises);
+                window.DB.asistencias = asistenciasData;
+
+                const pruebasData = [];
+                const pruebasPromises = [];
+                results[2].forEach(d => {
+                    pruebasPromises.push(
+                        window.fbGetDocs(window.fbCollection(fbDb, `prueba_radial/${d.id}/bomberos`))
+                        .then(subSnap => {
+                            const header = Object.assign({ id115: d.id }, d.data());
+                            const bomberos = [];
+                            subSnap.forEach(b => bomberos.push(b.data()));
+                            if (bomberos.length === 0) pruebasData.push(header);
+                            else bomberos.forEach(b => pruebasData.push(Object.assign({}, header, b)));
+                        }).catch(()=> { pruebasData.push(Object.assign({ id115: d.id }, d.data())); })
+                    );
+                });
+                await Promise.all(pruebasPromises);
+                window.DB.pruebas = pruebasData;
+
+                await window.IDB.saveAll(window.DB);
+                window.refreshDashboard();
+                if (force && !isRetry) window.showToast("ESTADÍSTICAS ACTUALIZADAS", "success");
+
+            } catch(e) {
+                console.error("Error al obtener datos:", e);
+                
+                // DETECCIÓN DE PÉRDIDA DE PERMISOS (TOKEN EXPIRADO TRAS OFFLINE)
+                const errorStr = String(e).toLowerCase();
+                if (errorStr.includes('permission') || errorStr.includes('missing') || errorStr.includes('denied') || e.code === 'permission-denied') {
+                    if (!isRetry) {
+                        console.warn("Permisos denegados detectados. Intentando auto-reconexión de sesión...");
+                        const reconnected = await window.reconnectAuth();
+                        if (reconnected) {
+                            return window.fetchAllData(force, true); // Reintento silencioso
+                        }
+                    }
+                }
+                
+                window.showToast("ERROR AL SINCRONIZAR. REVISE SU CONEXIÓN.", "error");
+            } finally {
+                window.toggleLoader(false);
+            }
+        };
+
+        window.onload = async () => {
+            if (window.stopLoadingData) return; 
+            
+            const savedYear = localStorage.getItem('selectedCycleYear');
+            if(savedYear) window.selectedCycleYear = parseInt(savedYear, 10);
+            
+            try {
+                await window.IDB.init();
+                const localData = await window.IDB.loadAll();
+                
+                if (localData && (localData.despachos.length > 0 || localData.personal.length > 0)) {
+                    window.DB = localData;
+                    window.refreshDashboard();
+                } else {
+                    await window.fetchAllData(false);
+                }
+            } catch(e) {
+                console.error("IDB fallo", e);
+                await window.fetchAllData(false);
+            }
+        };
+
+        window.handleCycleChange = function(year) {
+            window.selectedCycleYear = parseInt(year, 10);
+            window.refreshDashboard();
+        };
+
+        window.loadData = async function(force) {
+            await window.fetchAllData(force);
+        };
+
+        window.toggleLoader = function(show) { 
+            const loader = document.getElementById('loading-overlay');
+            if (show) { loader.classList.remove('hidden'); loader.classList.add('flex'); }
+            else { loader.classList.add('hidden'); loader.classList.remove('flex'); }
+        };
+
+        window.normalizeDate = function(dateVal) { 
+            if(!dateVal) return ''; 
+            let s = String(dateVal).replace(new RegExp('[\'"]', 'g'), '').trim(); 
+            if(s.includes('T')) { 
+                s = s.split('T').at(0);
+                const parts = s.split('-');
+                return `${parts.at(2)}-${parts.at(1)}-${parts.at(0)}`; 
+            } 
+            if (s.includes('/')) {
+                const parts = s.split('/');
+                if (parts.length === 3) {
+                    return `${parts.at(0).padStart(2, '0')}-${parts.at(1).padStart(2, '0')}-${parts.at(2)}`;
+                }
+            }
+            if (s.includes('-') && s.split('-').at(0).length === 4) {
+                 const parts = s.split('-');
+                 return `${parts.at(2)}-${parts.at(1)}-${parts.at(0)}`;
+            }
+            return s; 
+        };
+        
+        window.calculateDuration = function(dateStr1, timeStr1, dateStr2, timeStr2) {
+            if (!dateStr1 || !timeStr1 || !dateStr2 || !timeStr2) return null;
+            if (timeStr1.includes('-') || timeStr2.includes('-')) return null;
+
+            const parseDateTime = (dStr, tStr) => {
+                const p = dStr.split('-');
+                if(p.length !== 3) return null;
+                const t = tStr.split(':');
+                if(t.length < 2) return null;
+                return new Date(p.at(2), p.at(1)-1, p.at(0), t.at(0), t.at(1));
+            };
+
+            const d1 = parseDateTime(dateStr1, timeStr1);
+            const d2 = parseDateTime(dateStr2, timeStr2);
+
+            if (d1 && d2 && d2 >= d1) {
+                const diffMs = d2 - d1;
+                const diffMins = Math.floor(diffMs / 60000);
+                const h = Math.floor(diffMins / 60);
+                const m = diffMins % 60;
+                return new Object({ h, m });
+            }
+            return null;
+        };
+
+        window.getFormattedToday = function() { 
+            const d = new Date(); 
+            return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`; 
+        };
+
+        window.formatShortName = function(fullName) {
+            if (!fullName) return "DESCONOCIDO";
+            let n = String(fullName).replace(new RegExp(',', 'g'), ' ').trim(); 
+            if (n.includes(' • ')) n = n.split(' • ').at(1).trim();
+            if (n.includes(' - ')) n = n.split(' - ').at(1).trim();
+            const words = n.split(new RegExp('\\s+'));
+            if (words.length >= 3) return `${words.at(0)} ${words.at(words.length - 2)}`;
+            if (words.length === 2) return `${words.at(0)} ${words.at(1)}`;
+            return words.at(0) || n;
+        };
+
+        window.getFormattedName = function(input, mode = 'full') {
+            if(!input || input === '0') return '---';
+            const cleanId = String(input).trim().toUpperCase();
+            if (cleanId === 'S/I') return 'S/I';
+            if (cleanId === 'GESTION' || cleanId === 'GESTIÓN') return 'GESTIÓN';
+
+            let found = window.DB.personal.find(p => String(p.idRegistro).trim().toUpperCase() === cleanId);
+            if(!found) found = window.DB.personal.find(p => String(p.idRadial).trim().toUpperCase() === cleanId);
+            if(!found) found = window.DB.personal.find(p => String(p.nombreBombero).trim().toUpperCase().includes(cleanId));
+
+            if(found) {
+                if (mode === 'exact') return found.nombreBombero || found.idRadial;
+                const shortName = window.formatShortName(found.nombreBombero);
+                if (mode === 'nameOnly') return shortName;
+                if (mode === 'radialOnly') return found.idRadial || found.idRegistro;
+                return `${found.idRadial || 'S/R'} • ${shortName}`;
+            }
+            return window.formatShortName(cleanId);
+        };
+
+        window.switchView = function(viewName) {
+            window.currentView = viewName;
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`tab-${viewName}`).classList.add('active');
+            document.getElementById('tableSearch').value = '';
+            window.refreshDashboard();
+        };
+
+        window.refreshDashboard = function() {
+            window.closeDrilldown();
+
+            const yearStr = localStorage.getItem('selectedCycleYear');
+            const year = yearStr ? parseInt(yearStr, 10) : window.selectedCycleYear;
+            const todayStr = window.getFormattedToday();
+            const currentMonth = new Date().getMonth(); 
+
+            const radioGlobalDiv = document.getElementById('radio-global-summary');
+            const radioReportDiv = document.getElementById('radio-report-section');
+            const trendTitle = document.getElementById('chart-trend-title');
+            const searchContainer = document.getElementById('search-container');
+            const tableSubtitle = document.getElementById('table-subtitle');
+            const vehiculosDiv = document.getElementById('vehiculos-section');
+            const asistenciaDiv = document.getElementById('asistencia-report-section');
+            
+            const defaultChartsSec = document.getElementById('default-charts-section');
+            const defaultTableSec = document.getElementById('default-table-section');
+            const dispDiv = document.getElementById('disponibilidad-section');
+
+            if (window.currentView === 'disponibilidad') {
+                if (defaultChartsSec) defaultChartsSec.classList.add('hidden');
+                if (defaultTableSec) defaultTableSec.classList.add('hidden');
+                if (dispDiv) dispDiv.classList.remove('hidden');
+                
+                if (radioGlobalDiv) radioGlobalDiv.classList.add('hidden');
+                if (radioReportDiv) radioReportDiv.classList.add('hidden');
+                if (searchContainer) searchContainer.classList.add('hidden');
+                if (vehiculosDiv) vehiculosDiv.classList.add('hidden');
+                if (asistenciaDiv) asistenciaDiv.classList.add('hidden');
+                
+                const kpiDayTitle = document.querySelector('#kpi-day').previousElementSibling;
+                const kpiMonthTitle = document.querySelector('#kpi-month').previousElementSibling;
+                const kpiCycleTitle = document.querySelector('#kpi-cycle').previousElementSibling;
+                const kpiDayIcon = document.querySelector('#kpi-day').parentElement.nextElementSibling.querySelector('i');
+                const kpiMonthIcon = document.querySelector('#kpi-month').parentElement.nextElementSibling.querySelector('i');
+                const kpiCycleIcon = document.querySelector('#kpi-cycle').parentElement.nextElementSibling.querySelector('i');
+
+                if (kpiDayTitle) kpiDayTitle.innerText = "PROM. BOMBEROS 0-9";
+                if (kpiMonthTitle) kpiMonthTitle.innerText = "HORA CON MÁS 0-9";
+                if (kpiCycleTitle) kpiCycleTitle.innerText = "HORA CON MÁS 0-8";
+                
+                if (kpiDayIcon) { kpiDayIcon.className = "fas fa-users text-bomberos-red"; }
+                if (kpiMonthIcon) { kpiMonthIcon.className = "fas fa-clock text-bomberos-red"; }
+                if (kpiCycleIcon) { kpiCycleIcon.className = "fas fa-calendar-day text-bomberos-red"; }
+
+                window.renderDisponibilidadDashboard();
+                return;
+            } else {
+                if (defaultChartsSec) defaultChartsSec.classList.remove('hidden');
+                if (defaultTableSec) defaultTableSec.classList.remove('hidden');
+                if (dispDiv) dispDiv.classList.add('hidden');
+                
+                const kpiDayTitle = document.querySelector('#kpi-day').previousElementSibling;
+                const kpiMonthTitle = document.querySelector('#kpi-month').previousElementSibling;
+                const kpiCycleTitle = document.querySelector('#kpi-cycle').previousElementSibling;
+                const kpiDayIcon = document.querySelector('#kpi-day').parentElement.nextElementSibling.querySelector('i');
+                const kpiMonthIcon = document.querySelector('#kpi-month').parentElement.nextElementSibling.querySelector('i');
+                const kpiCycleIcon = document.querySelector('#kpi-cycle').parentElement.nextElementSibling.querySelector('i');
+
+                if (kpiDayTitle) kpiDayTitle.innerText = "REGISTROS DE HOY";
+                if (kpiMonthTitle) kpiMonthTitle.innerText = "ESTE MES";
+                if (kpiCycleTitle) kpiCycleTitle.innerText = "TOTAL MOSTRADO";
+                
+                if (kpiDayIcon) { kpiDayIcon.className = "fas fa-calendar-day"; }
+                if (kpiMonthIcon) { kpiMonthIcon.className = "fas fa-calendar-alt"; }
+                if (kpiCycleIcon) { kpiCycleIcon.className = "fas fa-chart-line"; }
+            }
+
+            if(window.currentView === 'pruebas') {
+                radioGlobalDiv.classList.remove('hidden');
+                radioReportDiv.classList.remove('hidden');
+                searchContainer.classList.add('hidden');
+                tableSubtitle.innerText = "Seleccione un mes para acceder al desglose de pruebas.";
+            } else {
+                radioGlobalDiv.classList.add('hidden');
+                radioReportDiv.classList.add('hidden');
+                searchContainer.classList.remove('hidden');
+                tableSubtitle.innerText = "Haga clic en una fila para ver más detalles.";
+            }
+
+            if(window.currentView === 'bitacora') {
+                vehiculosDiv.classList.remove('hidden');
+                window.renderVehiculosCards();
+            } else {
+                vehiculosDiv.classList.add('hidden');
+            }
+
+            if(window.currentView === 'asistencias') {
+                asistenciaDiv.classList.remove('hidden');
+            } else {
+                asistenciaDiv.classList.add('hidden');
+            }
+
+            let rawData = new Array(), dateField = '', idField = '', categoryField = '', headers = new Array();
+
+            if(window.currentView === 'despachos') {
+                rawData = window.DB.despachos.filter(r => r.operadorFinal && String(r.operadorFinal).trim() !== ''); 
+                dateField = 'fechaDespacho'; idField = 'idServicio'; categoryField = 'clave';
+                document.getElementById('chart-pie-title').innerHTML = '<i class="fas fa-chart-pie text-bomberos-red"></i> Distribución por Clave';
+                trendTitle.innerHTML = '<i class="fas fa-chart-bar text-slate-500"></i> Tendencia Mensual <span class="bg-red-50 text-bomberos-red border border-red-100 hidden md:inline-flex items-center shadow-sm cursor-default px-2 py-0.5 font-bold ml-2 uppercase" style="border-radius: 9999px; font-size: 10px;"><i class="fas fa-hand-pointer mr-1"></i> Clic en la barra para explorar</span>';
+                headers = new Array('ID', 'Fecha', 'Clave', 'Lugar', 'A Cargo (OBAC)');
+            } 
+            else if(window.currentView === 'bitacora') {
+                rawData = window.DB.bitacora.filter(b => {
+                    const veh = window.DB.vehiculos.find(v => String(v.idCarro).trim().toUpperCase() === String(b.carro).trim().toUpperCase());
+                    if (veh) {
+                        const enServicio = String(veh.enServicio || '').trim();
+                        if (enServicio !== '' && enServicio !== '0') {
+                            if (!b.km || String(b.km).trim() === '' || String(b.idServicio) === enServicio) return false;
+                        }
+                    }
+                    return true;
+                });
+                dateField = 'fecha60'; idField = 'idSalida'; categoryField = 'carro';
+                document.getElementById('chart-pie-title').innerHTML = '<i class="fas fa-chart-pie text-bomberos-red"></i> Uso por Unidad (Carro)';
+                trendTitle.innerHTML = '<i class="fas fa-chart-bar text-slate-500"></i> Tendencia Mensual';
+                headers = new Array('ID Salida', 'Unidad', 'Clave', 'Fecha', 'Hora Salida', 'Conductor', 'A Cargo (OBAC)');
+            } 
+            else if(window.currentView === 'pruebas') {
+                rawData = window.DB.pruebas; dateField = 'fecha115'; idField = 'id115'; categoryField = 'calidad'; 
+                document.getElementById('chart-pie-title').innerHTML = '<i class="fas fa-chart-pie text-bomberos-red"></i> Calidad de Respuesta (Global)';
+                trendTitle.innerHTML = '<i class="fas fa-chart-bar text-slate-500"></i> Rendimiento por Personal (Acumulado)';
+                headers = new Array();
+            } 
+            else if(window.currentView === 'asistencias') {
+                rawData = window.DB.asistencias; 
+                
+                // Normalizador de Subclaves (Ej: 10-0-1 -> 10-0)
+                rawData.forEach(a => {
+                    if (a.clave) {
+                        let parts = String(a.clave).trim().split('-');
+                        if (parts.length > 2 && !isNaN(parseInt(parts[0]))) {
+                            a.clave = parts[0] + '-' + parts[1];
+                        }
+                    }
+                });
+
+                dateField = 'fecha'; idField = 'idLista'; categoryField = 'clave';
+                document.getElementById('chart-pie-title').innerHTML = '<i class="fas fa-chart-pie text-bomberos-red"></i> Listas por Clave';
+                trendTitle.innerHTML = '<i class="fas fa-chart-bar text-slate-500"></i> Tendencia Mensual';
+                headers = new Array('ID Lista', 'Fecha y Hora', 'Clave', 'Motivo / Evento', 'Estado Documento');
+            } 
+            else if(window.currentView === 'sirena') {
+                rawData = window.DB.sirena; dateField = 'fechaDeToque'; idField = 'idToqueSirena'; categoryField = 'razonDeToque';
+                document.getElementById('chart-pie-title').innerHTML = '<i class="fas fa-chart-pie text-bomberos-red"></i> Motivos de Toque';
+                trendTitle.innerHTML = '<i class="fas fa-chart-bar text-slate-500"></i> Tendencia Mensual';
+                headers = new Array('ID', 'Fecha', 'Hora', 'Motivo Exacto', '¿Sonó?');
+            }
+
+            if(headers.length > 0) window.setupTableHeaders(headers);
+
+            const tempGroups = new Map();
+            const qualityDist = new Object(); 
+
+            rawData.forEach(item => {
+                const id = String(Reflect.get(item, idField)).trim();
+                if(!id) return; 
+                
+                const safeID = id.replace(new RegExp('\\W', 'g'), '_');
+                
+                if(!tempGroups.has(safeID)) {
+                    tempGroups.set(safeID, Object.assign(new Object(), item, { _safeID: safeID, _details: new Array() }));
+                } else {
+                    const g = tempGroups.get(safeID);
+                    const mainFields = new Array('fecha', 'fecha115', 'fechaDespacho', 'fecha60', 'fechaDeToque', 'clave', 'evento', 'hora', 'hora115', 'obac', 'listaPor', 'lugar', 'observacion', 'aprobadoPor', 'anulada', 'carro', 'carros', 'fechaTermino', 'horaTermino', 'informeObac', 'fecha67', 'hora67', 'abono');
+                    mainFields.forEach(field => {
+                        if (!Reflect.get(g, field) && Reflect.get(item, field)) Reflect.set(g, field, Reflect.get(item, field));
+                    });
+                }
+
+                if(window.currentView === 'asistencias' && !item.idRegistro && !item.estado) return;
+                if(window.currentView === 'pruebas' && !item.idRadial) return;
+
+                tempGroups.get(safeID)._details.push(item);
+            });
+
+            const filteredGroups = new Array();
+            const monthGroups115 = new Map();
+            const selectedCycleYear = parseInt(year, 10);
+
+            tempGroups.forEach(group => {
+                const dNorm = window.normalizeDate(Reflect.get(group, dateField));
+                
+                if(dNorm) {
+                    const parts = dNorm.split('-'); 
+                    if(parts.length === 3) {
+                        const m = parseInt(parts.at(1), 10);
+                        const y = parseInt(parts.at(2), 10);
+                        
+                        let recordCycleYear = y; 
+                        
+                        if (window.currentView === 'asistencias' && m === 12) {
+                            recordCycleYear = y + 1;
+                        }
+
+                        if(recordCycleYear === selectedCycleYear) {
+                            
+                            if (window.currentView === 'pruebas') {
+                                const monthKey = `${parts.at(1)}-${parts.at(2)}`;
+                                group._normalizedDate = dNorm;
+
+                                group._details.forEach(d => {
+                                    if (!d.hora115 && group.hora115) d.hora115 = group.hora115;
+                                });
+
+                                if(!monthGroups115.has(monthKey)) {
+                                    monthGroups115.set(monthKey, new Object({
+                                        _safeID: monthKey,
+                                        _monthKey: monthKey,
+                                        _lists: new Array(group)
+                                    }));
+                                } else {
+                                    monthGroups115.get(monthKey)._lists.push(group);
+                                }
+
+                                group._details.forEach(d => {
+                                    if(d.idRadial && String(d.idRadial).trim().toUpperCase() !== 'C1' && String(d.idRegistro).trim().toUpperCase() !== 'C1') {
+                                        let q = String(d.calidad || 'X').trim().toUpperCase();
+                                        if (q === '') q = 'X';
+                                        Reflect.set(qualityDist, q, (Reflect.get(qualityDist, q) || 0) + 1);
+                                    }
+                                });
+
+                            } else {
+                                group._normalizedDate = dNorm;
+                                filteredGroups.push(group);
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (window.currentView === 'pruebas') {
+                window.groupedDataCache = Array.from(monthGroups115.values()).sort((a,b) => {
+                    const ma = parseInt(a._monthKey.split('-').at(0), 10);
+                    const ya = parseInt(a._monthKey.split('-').at(1), 10);
+                    const mb = parseInt(b._monthKey.split('-').at(0), 10);
+                    const yb = parseInt(b._monthKey.split('-').at(1), 10);
+                    return new Date(yb, mb-1, 1) - new Date(ya, ma-1, 1); 
+                });
+            } else {
+                window.groupedDataCache = filteredGroups.sort((a,b) => (parseInt(Reflect.get(b, idField), 10) || 0) - (parseInt(Reflect.get(a, idField), 10) || 0));
+            }
+
+            let kpiCycle = 0, kpiMonth = 0, kpiDay = 0;
+            
+            if (window.currentView === 'pruebas') {
+                window.groupedDataCache.forEach(mGroup => {
+                    kpiCycle += mGroup._lists.length;
+                    const mm = mGroup._monthKey.split('-').at(0);
+                    if (parseInt(mm, 10)-1 === currentMonth) kpiMonth += mGroup._lists.length;
+                    mGroup._lists.forEach(l => { if (l._normalizedDate === todayStr) kpiDay++; });
+                });
+            } else {
+                kpiCycle = window.groupedDataCache.length;
+                kpiMonth = window.groupedDataCache.filter(g => {
+                    const parts = g._normalizedDate.split('-');
+                    if(parts.length === 3) return (parseInt(parts.at(1), 10) - 1) === currentMonth;
+                    return false;
+                }).length;
+                kpiDay = window.groupedDataCache.filter(g => g._normalizedDate === todayStr).length;
+            }
+
+            window.updateKPI("kpi-day", kpiDay);
+            window.updateKPI("kpi-month", kpiMonth);
+            window.updateKPI("kpi-cycle", kpiCycle);
+
+            if(window.currentView === 'pruebas') {
+                window.renderPieChart(qualityDist);
+                window.renderTrendChart(monthGroups115, '_normalizedDate');
+                window.renderRadioGlobalSummary(qualityDist);
+                window.renderRadioPersonnelTable(); 
+            } 
+            else if (window.currentView === 'asistencias') {
+                const validStatsData = window.groupedDataCache.filter(g => {
+                    const isAnulada = g.anulada == 1 || String(g.anulada).toUpperCase() === 'SI';
+                    const isAprobada = g.aprobadoPor && String(g.aprobadoPor).trim() !== '';
+                    return !isAnulada && isAprobada;
+                });
+                window.renderChartsGeneric(validStatsData, '_normalizedDate', categoryField);
+                window.renderAsistenciaTable(); 
+            }
+            else {
+                window.renderChartsGeneric(window.groupedDataCache, '_normalizedDate', categoryField);
+            }
+
+            window.renderCurrentTable();
+        };
+
+        window.updateKPI = function(id, endValue) { 
+            const obj = document.getElementById(id); 
+            if(!obj) return; 
+            let endFmt = (endValue % 1 !== 0) ? parseFloat(endValue).toFixed(1) : endValue;
+            const startValue = parseFloat(obj.innerText.replace(new RegExp('[^\\d.-]', 'g'), '')) || 0; 
+            if (startValue == endFmt) { obj.innerText = endFmt; return; }
+            window.animateValue(id, startValue, parseFloat(endFmt), 600); 
+        };
+        
+        window.animateValue = function(id, start, end, duration) { 
+            const obj = document.getElementById(id); 
+            if(!obj) return; 
+            let startTimestamp = null; 
+            const isFloat = end % 1 !== 0;
+            const step = (timestamp) => { 
+                if (!startTimestamp) startTimestamp = timestamp; 
+                const progress = Math.min((timestamp - startTimestamp) / duration, 1); 
+                const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+                let val = (easeOutQuart * (end - start) + start);
+                obj.innerHTML = isFloat ? val.toFixed(1) : Math.floor(val); 
+                if (progress < 1) window.requestAnimationFrame(step); 
+            }; 
+            window.requestAnimationFrame(step); 
+        };
+
+        window.renderVehiculosCards = function() {
+            const container = document.getElementById('vehiculos-grid');
+            if(!window.DB.vehiculos || window.DB.vehiculos.length === 0) {
+                container.innerHTML = `<div class="col-span-full text-center py-6 text-slate-500 italic bg-slate-50 border border-slate-200" style="border-radius: 1.5rem;">NO HAY INFORMACIÓN DE VEHÍCULOS REGISTRADA.</div>`;
+                return;
+            }
+
+            const validVehicles = window.DB.vehiculos.filter(v => v.idCarro && String(v.idCarro).trim() !== '');
+
+            const html = validVehicles.map(item => {
+                const carro = String(item.idCarro).trim();
+                const patente = item.patente || 'SIN PATENTE';
+                const estado = parseInt(item.estado) || 0; 
+                const enServicio = String(item.enServicio || '').trim();
+                const kmActual = item.kmActual || '0';
+                const obs = item.observacion || '';
+                const notas = item.notas || '';
+
+                let statusBadge = '';
+                let serviceInfo = '';
+                
+                let borderClass = 'border-t-slate-400';
+                let iconBg = 'bg-slate-100';
+                let iconColor = 'text-slate-500';
+
+                const isFuera = (String(estado) === '0-8' || String(estado) === '0');
+
+                if (!isFuera) {
+                    borderClass = 'border-t-green-500';
+                    iconBg = 'bg-green-50';
+                    iconColor = 'text-green-600';
+                    
+                    if (enServicio === '6-13') {
+                        statusBadge = `<span class="bg-blue-50 text-blue-700 px-3 py-1 font-black border border-blue-200 shadow-sm" style="font-size: 10px; border-radius: 0.5rem;"><i class="fas fa-route mr-1"></i> 6-13 (TRÁMITES)</span>`;
+                        borderClass = 'border-t-blue-500';
+                        iconBg = 'bg-blue-50';
+                        iconColor = 'text-blue-600';
+                    } else if (enServicio === '6-14') {
+                        statusBadge = `<span class="bg-yellow-50 text-yellow-700 px-3 py-1 font-black border border-yellow-200 shadow-sm" style="font-size: 10px; border-radius: 0.5rem;"><i class="fas fa-gas-pump mr-1"></i> 6-14 (COMBUSTIBLE)</span>`;
+                        borderClass = 'border-t-yellow-500';
+                        iconBg = 'bg-yellow-50';
+                        iconColor = 'text-yellow-600';
+                    } else if (enServicio !== '' && enServicio !== '0') {
+                        const despachoRelacionado = window.DB.despachos.find(d => String(d.idServicio) === enServicio);
+                        const claveTexto = despachoRelacionado && despachoRelacionado.clave ? despachoRelacionado.clave : `SERV. #${enServicio}`;
+                        statusBadge = `<span class="bg-red-50 text-bomberos-red px-3 py-1 font-black border border-red-200 shadow-sm" style="font-size: 10px; border-radius: 0.5rem;" title="Despacho ID #${enServicio}"><i class="fas fa-fire mr-1"></i> CLAVE ${claveTexto}</span>`;
+                        borderClass = 'border-t-bomberos-red';
+                        iconBg = 'bg-red-50';
+                        iconColor = 'text-bomberos-red';
+                    } else {
+                        statusBadge = `<span class="bg-green-50 text-green-700 px-3 py-1 font-black border border-green-200 shadow-sm" style="font-size: 10px; border-radius: 0.5rem;"><i class="fas fa-check mr-1"></i> DISPONIBLE</span>`;
+                    }
+                } else {
+                    statusBadge = `<span class="bg-slate-100 text-slate-600 px-3 py-1 font-black border border-slate-300 shadow-sm" style="font-size: 10px; border-radius: 0.5rem;"><i class="fas fa-wrench mr-1"></i> FUERA DE SERVICIO</span>`;
+                    iconBg = 'bg-slate-100';
+                    iconColor = 'text-slate-500';
+                    if (notas) serviceInfo = `<div class="text-xs text-slate-600 mt-2 bg-slate-50 p-3 border border-slate-200 font-medium" style="border-radius: 1rem;"><i class="fas fa-info-circle mr-1 text-slate-400"></i> ${notas}</div>`;
+                }
+
+                return `
+                <div class="bg-white p-5 border border-slate-200 ${borderClass} shadow-sm flex flex-col h-full hover:shadow-md transition-shadow relative" style="border-radius: 1.5rem; border-top-width: 8px;">
+                    <div class="flex justify-between items-start mb-4 gap-2">
+                        <div class="flex items-center gap-3">
+                            <div class="w-12 h-12 ${iconBg} ${iconColor} flex items-center justify-center border border-current border-opacity-10 shrink-0" style="border-radius: 9999px;"><i class="fas fa-truck text-2xl"></i></div>
+                            <div class="flex flex-col"><h5 class="font-black text-slate-800 text-xl leading-none">${carro}</h5><span class="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5">${patente}</span></div>
+                        </div>
+                        <div class="text-right flex-shrink-0 pt-1">${statusBadge}</div>
+                    </div>
+                    <div class="flex flex-col gap-2 mt-auto">
+                        <div class="flex justify-between items-center bg-slate-50 p-4 border border-slate-100" style="border-radius: 1rem;">
+                            <span class="text-xs font-bold text-slate-500 uppercase tracking-widest"><i class="fas fa-tachometer-alt mr-1"></i> ODÓMETRO</span>
+                            <span class="text-base font-black text-slate-800">${kmActual} KM</span>
+                        </div>
+                        ${serviceInfo}
+                        ${obs ? `<div class="text-xs text-slate-600 italic bg-blue-50/50 p-3 border border-blue-100/50 mt-1 line-clamp-2" title="${obs}" style="border-radius: 1rem;"><i class="fas fa-comment-dots mr-1 text-blue-400"></i> ${obs}</div>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
+            container.innerHTML = html;
+        };
+
+        window.renderAsistenciaTable = function() {
+            const container = document.getElementById('asistencia-report-container');
+            const stats = new Object();
+            
+            const validLists = window.groupedDataCache.filter(list => {
+                const isAnulada = list.anulada == 1 || String(list.anulada).toUpperCase() === 'SI';
+                const isAprobada = list.aprobadoPor && String(list.aprobadoPor).trim() !== '';
+                return !isAnulada && isAprobada;
+            });
+            
+            validLists.forEach(list => {
+                const isAbono = list.abono == 1 || String(list.abono).toUpperCase() === 'SÍ' || String(list.abono).toUpperCase() === 'SI' || String(list.clave).toUpperCase().includes('ABONO');
+
+                list._details.forEach(d => {
+                    const id = String(d.idRegistro || d.idRadial || '').trim();
+                    if (!id || id.toUpperCase() === 'C1') return; 
+                    
+                    let person = window.DB.personal.find(p => String(p.idRegistro).trim() === id);
+                    if (!person) person = window.DB.personal.find(p => String(p.idRadial).trim().toLowerCase() === id.toLowerCase());
+
+                    if (person && String(person.idRadial).trim().toUpperCase() === 'C1') return; 
+                    
+                    if (!Reflect.has(stats, id)) {
+                        Reflect.set(stats, id, new Object({
+                            id: id,
+                            nombre: person ? window.formatShortName(person.nombreBombero) : 'DESCONOCIDO',
+                            foto: person && person.foto ? person.foto : './Logo.png',
+                            orden: parseInt(d.ordenEnLista, 10) || 9999,
+                            attended: 0,
+                            mandatory: 0,
+                            abonosAsistidos: 0,
+                            obligatoriasAsistidas: 0
+                        }));
+                    }
+                    
+                    if (d.ordenEnLista && Reflect.get(stats, id).orden === 9999) Reflect.get(stats, id).orden = parseInt(d.ordenEnLista, 10);
+
+                    const st = String(d.estado || '').toUpperCase().trim();
+                    const isPresent = st === 'A' || st === 'ASISTE' || st === 'CDS';
+                    
+                    if (isAbono) {
+                        if (isPresent) Reflect.get(stats, id).abonosAsistidos++;
+                    } else {
+                        Reflect.get(stats, id).mandatory++;
+                        if (isPresent) Reflect.get(stats, id).obligatoriasAsistidas++;
+                    }
+                });
+            });
+
+            const list = Object.values(stats).map(item => {
+                const effectiveAttended = Math.min(item.mandatory, item.obligatoriasAsistidas + item.abonosAsistidos);
+                item.attended = effectiveAttended;
+                item.p = item.mandatory > 0 ? (effectiveAttended / item.mandatory * 100) : (item.abonosAsistidos > 0 ? 100 : 0);
+                return item;
+            });
+
+            list.sort((a, b) => {
+                if (b.p !== a.p) return b.p - a.p;
+                return a.orden - b.orden;
+            });
+
+            if(list.length === 0) {
+                container.innerHTML = `<div class="p-6 text-center text-slate-500 font-bold bg-slate-50">NO HAY INFORMACIÓN DE ASISTENCIA REGISTRADA PARA ESTE CICLO.</div>`;
+                return;
+            }
+
+            const mid = Math.ceil(list.length / 2);
+
+            const rowMaker = (item, index, isLeft) => {
+                const pValue = item.p.toFixed(2);
+                const p = item.p;
+                const rank = isLeft ? index + 1 : index + 1 + mid;
+                
+                let pClass = 'text-green-600 bg-green-50 border-green-200';
+                if (p < 30) pClass = 'text-red-600 bg-red-50 border-red-200';
+                else if (p < 40) pClass = 'text-yellow-600 bg-yellow-50 border-yellow-200';
+
+                let rankBadge = `<span class="w-6 h-6 bg-slate-100 text-slate-400 font-black flex items-center justify-center border border-slate-200 shadow-sm" style="font-size: 11px; border-radius: 9999px;">${rank}</span>`;
+                if (rank === 1) rankBadge = `<div class="w-7 h-7 bg-yellow-100 border border-yellow-300 text-yellow-600 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="1° LUGAR"><i class="fas fa-trophy"></i></div>`;
+                else if (rank === 2) rankBadge = `<div class="w-7 h-7 bg-slate-100 border border-slate-300 text-slate-500 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="2° LUGAR"><i class="fas fa-medal"></i></div>`;
+                else if (rank === 3) rankBadge = `<div class="w-7 h-7 bg-orange-50 border border-orange-200 text-orange-700 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="3° LUGAR"><i class="fas fa-medal"></i></div>`;
+
+                return `
+                <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100 relative">
+                    <td class="py-3 px-2 text-center align-middle print-rank" style="width: 50px;"><div class="flex justify-center">${rankBadge}</div></td>
+                    <td class="py-3 px-2 font-black text-slate-300 text-center align-middle" style="width: 32px; font-size: 11px;">${item.orden === 9999 ? '-' : item.orden}</td>
+                    <td class="py-3 px-2 overflow-hidden">
+                        <div class="flex items-center gap-3">
+                            <img src="${item.foto}" class="w-9 h-9 object-cover shadow-sm border border-slate-200 flex-shrink-0 hidden sm:block print-hide" style="border-radius: 9999px;">
+                            <div class="min-w-0 flex-1">
+                                <div class="font-bold text-slate-800 text-xs leading-tight truncate print-text" title="${item.nombre}">${item.nombre}</div>
+                                <div class="font-bold text-slate-400 mt-1 tracking-wider uppercase truncate print-hide" style="font-size: 10px;">REG: ${item.id}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2 text-center align-middle">
+                        <div class="flex flex-col items-center justify-center">
+                            <span class="text-sm font-black text-slate-700 leading-none print-text">${item.attended}</span>
+                            <span class="font-bold text-slate-400 mt-1 whitespace-nowrap print-hide" style="font-size: 10px;">DE ${item.mandatory}</span>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2 text-center align-middle">
+                        <span class="inline-block px-3 py-1 text-xs font-black tracking-widest border shadow-sm print-pill ${pClass}" style="border-radius: 0.5rem;">${pValue}%</span>
+                    </td>
+                </tr>`;
+            };
+
+            const col1 = list.slice(0, mid).map((item, i) => rowMaker(item, i, true)).join('');
+            const col2 = list.slice(mid).map((item, i) => rowMaker(item, i, false)).join('');
+
+            const tableTemplate = (tbodyContent) => `
+                <table class="w-full text-left border-collapse table-fixed min-w-full">
+                    <thead class="bg-slate-50 shadow-sm z-10 sticky top-0">
+                        <tr>
+                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200 print-rank" style="font-size: 11px; width: 50px;">TOP</th>
+                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 11px; width: 32px;">LISTA</th>
+                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="font-size: 11px; width: 40%;">BOMBERO</th>
+                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 11px; width: 20%;">TOTAL</th>
+                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 11px; width: 20%;">REND.</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-slate-100">${tbodyContent}</tbody>
+                </table>
+            `;
+
+            container.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+        };
+
+        window.renderRadioGlobalSummary = function(dist) {
+            const container = document.getElementById('radio-global-summary');
+            let total = 0; Object.values(dist).forEach(v => total += v);
+            
+            const c11_1 = Reflect.get(dist, '11-1') || 0; 
+            const c11_2 = Reflect.get(dist, '11-2') || 0; 
+            const cX = Reflect.get(dist, 'X') || 0;
+            const c0_8 = Object.keys(dist).filter(k => k.includes('0-8')).reduce((sum, k) => sum + Reflect.get(dist, k), 0);
+
+            const p1 = total ? Math.round((c11_1/total)*100) : 0; 
+            const p2 = total ? Math.round((c11_2/total)*100) : 0;
+            const pX = total ? Math.round((cX/total)*100) : 0; 
+            const p8 = total ? Math.round((c0_8/total)*100) : 0;
+
+            container.innerHTML = `
+                <div class="bg-white p-5 border border-green-200 shadow-sm flex flex-col relative overflow-hidden" style="border-radius: 1.5rem;">
+                    <div class="absolute right-[-10px] top-[-10px] text-green-50 opacity-50 text-7xl"><i class="fas fa-check-circle"></i></div>
+                    <span class="text-xs font-bold text-green-600 uppercase tracking-widest relative z-10">11-1 (ÓPTIMO)</span>
+                    <div class="flex items-end gap-2 mt-2 relative z-10">
+                        <span class="text-4xl font-black text-green-700 leading-none">${p1}%</span><span class="text-sm font-bold text-green-500 mb-0.5">(${c11_1})</span>
+                    </div>
+                </div>
+                <div class="bg-white p-5 border border-yellow-200 shadow-sm flex flex-col relative overflow-hidden" style="border-radius: 1.5rem;">
+                    <div class="absolute right-[-10px] top-[-10px] text-yellow-50 opacity-50 text-7xl"><i class="fas fa-exclamation-triangle"></i></div>
+                    <span class="text-xs font-bold text-yellow-600 uppercase tracking-widest relative z-10">11-2 (MALO)</span>
+                    <div class="flex items-end gap-2 mt-2 relative z-10">
+                        <span class="text-4xl font-black text-yellow-700 leading-none">${p2}%</span><span class="text-sm font-bold text-yellow-500 mb-0.5">(${c11_2})</span>
+                    </div>
+                </div>
+                <div class="bg-white p-5 border border-red-200 shadow-sm flex flex-col relative overflow-hidden" style="border-radius: 1.5rem;">
+                    <div class="absolute right-[-10px] top-[-10px] text-red-50 opacity-50 text-7xl"><i class="fas fa-times-circle"></i></div>
+                    <span class="text-xs font-bold text-red-600 uppercase tracking-widest relative z-10">X (NO RESPONDE)</span>
+                    <div class="flex items-end gap-2 mt-2 relative z-10">
+                        <span class="text-4xl font-black text-red-700 leading-none">${pX}%</span><span class="text-sm font-bold text-red-500 mb-0.5">(${cX})</span>
+                    </div>
+                </div>
+                <div class="bg-white p-5 border border-slate-200 shadow-sm flex flex-col relative overflow-hidden" style="border-radius: 1.5rem;">
+                    <div class="absolute right-[-10px] top-[-10px] text-slate-50 opacity-50 text-7xl"><i class="fas fa-user-slash"></i></div>
+                    <span class="text-xs font-bold text-slate-500 uppercase tracking-widest relative z-10">0-8 (FUERA SERVICIO)</span>
+                    <div class="flex items-end gap-2 mt-2 relative z-10">
+                        <span class="text-4xl font-black text-slate-600 leading-none">${p8}%</span><span class="text-sm font-bold text-slate-400 mb-0.5">(${c0_8})</span>
+                    </div>
+                </div>
+            `;
+        };
+
+        window.renderRadioPersonnelTable = function() {
+            const container = document.getElementById('radio-report-container');
+            const radioPersonnel = window.DB.personal.filter(p => p.radio && String(p.radio).trim() !== '' && String(p.idRadial).trim().toUpperCase() !== 'C1' && String(p.idRegistro).trim().toUpperCase() !== 'C1');
+            const stats = new Object();
+            
+            radioPersonnel.forEach(p => { 
+                const rid = String(p.idRadial).trim(); 
+                if(rid) Reflect.set(stats, rid, new Object({ name: `${p.idRadial} • ${window.formatShortName(p.nombreBombero)}`, idRadial: rid, c11_1: 0, c11_2: 0, cX: 0, c0_8: 0, total: 0 })); 
+            });
+
+            window.groupedDataCache.forEach(monthGroup => {
+                monthGroup._lists.forEach(list => {
+                    list._details.forEach(r => {
+                        const rid = String(r.idRadial).trim();
+                        if(rid.toUpperCase() === 'C1' || String(r.idRegistro).trim().toUpperCase() === 'C1') return;
+                        if(Reflect.has(stats, rid)) {
+                            let q = String(r.calidad || 'X').trim().toUpperCase();
+                            if (q === '') q = 'X';
+                            if(q === '11-1') Reflect.get(stats, rid).c11_1++; 
+                            else if(q === '11-2') Reflect.get(stats, rid).c11_2++; 
+                            else if(q === 'X') Reflect.get(stats, rid).cX++; 
+                            else if(q.includes('0-8')) Reflect.get(stats, rid).c0_8++;
+                            Reflect.get(stats, rid).total++;
+                        }
+                    });
+                });
+            });
+
+            const list = Object.values(stats).sort((a,b) => {
+                const numA = parseInt(String(a.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
+                const numB = parseInt(String(b.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
+                return numA - numB;
+            });
+
+            const rowMaker = (item) => {
+                const t = item.total; 
+                const p1 = t ? Math.round((item.c11_1/t)*100):0; 
+                const p2 = t ? Math.round((item.c11_2/t)*100):0; 
+                const pX = t ? Math.round((item.cX/t)*100):0; 
+                const p8 = t ? Math.round((item.c0_8/t)*100):0;
+                
+                return `
+                <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0">
+                    <td class="py-3 px-4 font-bold text-slate-700 text-xs truncate print-text" style="max-width: 150px;" title="${item.name}">${item.name}</td>
+                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-green-700 leading-none">${p1}%</span><span class="text-xs font-bold text-green-500 mt-1 print-hide">(${item.c11_1})</span></div></td>
+                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-yellow-700 leading-none">${p2}%</span><span class="text-xs font-bold text-yellow-500 mt-1 print-hide">(${item.c11_2})</span></div></td>
+                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-red-700 leading-none">${pX}%</span><span class="text-xs font-bold text-red-500 mt-1 print-hide">(${item.cX})</span></div></td>
+                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-slate-600 leading-none">${p8}%</span><span class="text-xs font-bold text-slate-400 mt-1 print-hide">(${item.c0_8})</span></div></td>
+                </tr>`;
+            };
+
+            const mid = Math.ceil(list.length / 2);
+            const col1 = list.slice(0, mid).map(rowMaker).join('');
+            const col2 = list.slice(mid).map(rowMaker).join('');
+
+            const tableTemplate = (tbodyContent) => `
+                <table class="w-full text-left border-collapse table-fixed">
+                    <thead class="bg-slate-50 shadow-sm z-10 sticky top-0">
+                        <tr>
+                            <th class="py-4 px-4 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="width: 40%;">BOMBERO</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">11-1</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">11-2</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">X</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">0-8</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-slate-100">${tbodyContent}</tbody>
+                </table>
+            `;
+
+            container.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+        };
+
+        window.renderChartsGeneric = function(data, dateField, catField) { 
+            const dist = new Object(); 
+            const trend = new Array(12).fill(0); 
+            
+            data.forEach(item => { 
+                const cat = Reflect.get(item, catField) || 'SIN CLASIFICAR'; 
+                Reflect.set(dist, cat, (Reflect.get(dist, cat) || 0) + 1); 
+                
+                const parts = Reflect.get(item, dateField).split('-'); 
+                if(parts.length >= 2) { 
+                    const m = parseInt(parts.at(1), 10) - 1; 
+                    if(m >= 0 && m < 12) Reflect.set(trend, m, Reflect.get(trend, m) + 1); 
+                } 
+            }); 
+            
+            window.renderPieChart(dist); 
+            window.renderTrendChart(null, null, trend); 
+        };
+
+        window.renderPieChart = function(dataObj) { 
+            const ctx = document.getElementById('chartPie').getContext('2d');
+            let labels = Object.keys(dataObj);
+            let dataValues = Object.values(dataObj);
+            
+            if (window.currentView === 'pruebas') {
+                const consolidatedData = new Object({ '11-1': 0, '11-2': 0, '0-8': 0, 'X': 0 });
+                const otherData = new Object();
+
+                labels.forEach(label => {
+                    const val = Reflect.get(dataObj, label);
+                    const l = String(label).toUpperCase().trim();
+                    if (l === '11-1') consolidatedData['11-1'] += val;
+                    else if (l === '11-2') consolidatedData['11-2'] += val;
+                    else if (l === 'X') consolidatedData['X'] += val;
+                    else if (l.includes('0-8')) consolidatedData['0-8'] += val;
+                    else Reflect.set(otherData, label, val);
+                });
+
+                const desiredOrder = new Array('11-1', '11-2', '0-8', 'X');
+                labels = new Array();
+                dataValues = new Array();
+
+                desiredOrder.forEach(key => {
+                    if (Reflect.get(consolidatedData, key) > 0) {
+                        labels.push(key);
+                        dataValues.push(Reflect.get(consolidatedData, key));
+                    }
+                });
+
+                Object.keys(otherData).forEach(k => {
+                    if (Reflect.get(otherData, k) > 0) {
+                        labels.push(k);
+                        dataValues.push(Reflect.get(otherData, k));
+                    }
+                });
+            }
+            
+            const defaultColors = new Array('#B91C1C', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#6366f1', '#8b5cf6', '#334155');
+
+            const backgroundColors = labels.map((label, index) => {
+                if (window.currentView === 'pruebas') {
+                    const l = String(label).toUpperCase();
+                    if (l === '11-1') return '#22c55e'; 
+                    if (l === '11-2') return '#ca8a04'; 
+                    if (l.includes('0-8')) return '#64748b'; 
+                    if (l === 'X') return '#ef4444';    
+                    return '#94a3b8';
+                }
+                return defaultColors.at(index % defaultColors.length);
+            });
+            
+            if (!window.chartsInstance.pie) { 
+                window.chartsInstance.pie = new Chart(ctx, new Object({ 
+                    type: 'doughnut', 
+                    data: new Object({ labels: new Array(), datasets: new Array(new Object({ data: new Array(), backgroundColor: new Array(), borderWidth: 2, borderColor: '#ffffff' })) }), 
+                    options: new Object({ 
+                        responsive: true, maintainAspectRatio: false, cutout: '65%',
+                        plugins: new Object({ legend: new Object({ position: 'right', labels: new Object({ boxWidth: 12, padding: 15, font: new Object({ family: "'Segoe UI', sans-serif", size: 11, weight: '600' }) }) }) }) 
+                    }) 
+                })); 
+            } 
+            
+            window.chartsInstance.pie.data.labels = labels; 
+            Reflect.get(window.chartsInstance.pie.data.datasets, 0).data = dataValues; 
+            Reflect.get(window.chartsInstance.pie.data.datasets, 0).backgroundColor = backgroundColors;
+            window.chartsInstance.pie.update(); 
+        };
+
+        window.renderTrendChart = function(data, dateField, preCalcData = null) { 
+            if(window.chartsInstance.trend) {
+                window.chartsInstance.trend.destroy();
+                window.chartsInstance.trend = null;
+            }
+
+            const ctx = document.getElementById('chartTrend').getContext('2d');
+            
+            if (window.currentView === 'pruebas') {
+                const radioPersonnel = window.DB.personal.filter(p => p.radio && String(p.radio).trim() !== '' && String(p.idRadial).trim().toUpperCase() !== 'C1' && String(p.idRegistro).trim().toUpperCase() !== 'C1');
+                const stats = new Object();
+                
+                radioPersonnel.forEach(p => { 
+                    const rid = String(p.idRadial).trim(); 
+                    if(rid) Reflect.set(stats, rid, new Object({ name: rid, c11_1: 0, c11_2: 0, cX: 0, c0_8: 0 })); 
+                });
+
+                window.groupedDataCache.forEach(monthGroup => {
+                    monthGroup._lists.forEach(group => {
+                        group._details.forEach(d => {
+                            const rid = String(d.idRadial).trim();
+                            if(rid.toUpperCase() === 'C1' || String(d.idRegistro).trim().toUpperCase() === 'C1') return;
+                            if(Reflect.has(stats, rid)) {
+                                let q = String(d.calidad || 'X').trim().toUpperCase();
+                                if (q === '') q = 'X';
+                                if(q === '11-1') Reflect.get(stats, rid).c11_1++; 
+                                else if(q === '11-2') Reflect.get(stats, rid).c11_2++; 
+                                else if(q === 'X') Reflect.get(stats, rid).cX++; 
+                                else if(q.includes('0-8')) Reflect.get(stats, rid).c0_8++;
+                            }
+                        });
+                    });
+                });
+
+                const list = Object.values(stats).sort((a,b) => {
+                    const numA = parseInt(String(a.name).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
+                    const numB = parseInt(String(b.name).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
+                    return numA - numB;
+                });
+
+                window.chartsInstance.trend = new Chart(ctx, new Object({
+                    type: 'bar',
+                    data: new Object({
+                        labels: list.map(i => i.name),
+                        datasets: new Array(
+                            new Object({ label: '11-1', data: list.map(i => i.c11_1), backgroundColor: '#22c55e', borderWidth: 2, borderColor: '#ffffff', borderSkipped: false, borderRadius: 2 }),
+                            new Object({ label: '11-2', data: list.map(i => i.c11_2), backgroundColor: '#ca8a04', borderWidth: 2, borderColor: '#ffffff', borderSkipped: false, borderRadius: 2 }),
+                            new Object({ label: '0-8', data: list.map(i => i.c0_8), backgroundColor: '#64748b', borderWidth: 2, borderColor: '#ffffff', borderSkipped: false, borderRadius: 2 }),
+                            new Object({ label: 'X', data: list.map(i => i.cX), backgroundColor: '#ef4444', borderWidth: 2, borderColor: '#ffffff', borderSkipped: false, borderRadius: 2 })
+                        )
+                    }),
+                    options: new Object({
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: new Object({ 
+                            legend: new Object({ display: true, position: 'bottom', labels: new Object({ boxWidth: 12, padding: 15, font: new Object({ size: 10, weight: 'bold' }) }) }),
+                            tooltip: new Object({ mode: 'index', intersect: false })
+                        }),
+                        scales: new Object({
+                            x: new Object({ stacked: true, grid: new Object({ display: false }), ticks: new Object({ font: new Object({ size: 10, weight: 'bold' }), maxRotation: 90, minRotation: 45 }) }),
+                            y: new Object({ stacked: true, beginAtZero: true, grid: new Object({ borderDash: new Array(4, 4), color: '#e2e8f0' }), ticks: new Object({ precision: 0 }) })
+                        })
+                    })
+                }));
+
+            } else {
+                let trend = preCalcData; 
+                if(!trend) { 
+                    trend = new Array(12).fill(0); 
+                    data.forEach(item => { 
+                        const parts = Reflect.get(item, dateField).split('-'); 
+                        if(parts.length >= 2) { 
+                            const m = parseInt(parts.at(1), 10) - 1; 
+                            if(m >= 0 && m < 12) Reflect.set(trend, m, Reflect.get(trend, m) + 1); 
+                        } 
+                    }); 
+                } 
+                
+                window.chartsInstance.trend = new Chart(ctx, new Object({ 
+                    type: 'bar', 
+                    data: new Object({ 
+                        labels: new Array('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'), 
+                        datasets: new Array(new Object({ label: 'Registros', data: trend, backgroundColor: '#B91C1C', borderRadius: 8, borderSkipped: false })) 
+                    }), 
+                    options: new Object({ 
+                        responsive: true, maintainAspectRatio: false, 
+                        onClick: (event, elements) => {
+                            if (window.currentView === 'despachos' && elements.length > 0) {
+                                window.openDrilldownMonth(elements.at(0).index);
+                            }
+                        },
+                        onHover: (event, elements) => {
+                            if (window.currentView === 'despachos') {
+                                event.native.target.style.cursor = elements.length > 0 ? 'pointer' : 'default';
+                            }
+                        },
+                        plugins: new Object({ legend: new Object({ display: false }), tooltip: new Object({ mode: 'index', intersect: false }) }), 
+                        scales: new Object({ 
+                            y: new Object({ beginAtZero: true, grid: new Object({ borderDash: new Array(4, 4), color: '#e2e8f0' }), ticks: new Object({ font: new Object({ family: "'Segoe UI', sans-serif", size: 11 }), precision: 0 }) }),
+                            x: new Object({ grid: new Object({ display: false }), ticks: new Object({ font: new Object({ family: "'Segoe UI', sans-serif", size: 11, weight: 'bold' }) }) })
+                        }) 
+                    }) 
+                })); 
+            }
+        };
+
+        window.openDrilldownMonth = function(monthIndex) {
+            const monthNames = new Array('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE');
+            const monthName = monthNames.at(monthIndex);
+            const monthStr = String(monthIndex + 1).padStart(2, '0');
+
+            const monthData = window.groupedDataCache.filter(item => {
+                const parts = item._normalizedDate.split('-');
+                return parts.at(1) === monthStr;
+            });
+
+            if (monthData.length === 0) return;
+
+            const days = new Object();
+            monthData.forEach(item => {
+                const day = item._normalizedDate;
+                if (!Reflect.has(days, day)) Reflect.set(days, day, new Array());
+                Reflect.get(days, day).push(item);
+            });
+
+            const sortedDays = Object.keys(days).sort((a, b) => {
+                const da = a.split('-'); const db = b.split('-');
+                return parseInt(da.at(0), 10) - parseInt(db.at(0), 10);
+            });
+
+            let html = `<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3">`;
+            sortedDays.forEach(day => {
+                const count = Reflect.get(days, day).length;
+                const dayNum = day.split('-').at(0);
+                html += `
+                    <button onclick="openDrilldownDay('${day}')" class="bg-white border border-slate-200 hover:border-bomberos-red hover:shadow-md transition-all p-4 flex flex-col items-center justify-center group focus:outline-none" style="border-radius: 1.5rem;">
+                        <span class="text-2xl font-black text-slate-700 group-hover:text-bomberos-red leading-none mb-1">${dayNum}</span>
+                        <span class="font-bold text-slate-400 uppercase tracking-widest" style="font-size: 10px;">${count} SERVICIOS</span>
+                    </button>
+                `;
+            });
+            html += `</div>`;
+
+            document.getElementById('drilldown-title').innerHTML = `<i class="far fa-calendar-alt text-bomberos-red mr-2"></i> DESPACHOS DE ${monthName}`;
+            document.getElementById('drilldown-content').innerHTML = html;
+            
+            const overlay = document.getElementById('drilldown-overlay');
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+        };
+
+        window.openDrilldownDay = function(dayStr) {
+            const dayData = window.groupedDataCache.filter(item => item._normalizedDate === dayStr);
+            const parts = dayStr.split('-');
+            const mStr = parts.at(1);
+            
+            let html = `
+                <div class="mb-5 sticky top-0 bg-slate-50/90 backdrop-blur-sm z-10 pb-2 pt-1">
+                    <button onclick="openDrilldownMonth(parseInt('${mStr}', 10) - 1)" class="font-bold text-slate-500 hover:text-bomberos-red transition-colors flex items-center gap-2 bg-white px-4 py-2 border border-slate-200 shadow-sm w-fit focus:outline-none uppercase" style="border-radius: 1rem; font-size: 11px;">
+                        <i class="fas fa-arrow-left"></i> Volver a los días
+                    </button>
+                </div>
+                <div class="flex flex-col gap-4 pb-2">
+            `;
+
+            dayData.forEach(item => {
+                const hora = item.hora || item.horaDespacho || item.hora60 || '--:--';
+                const visibleID = item.idServicio || item.idSalida || item.idLista || '';
+                html += `
+                    <button onclick="focusService('${item._safeID}', '${visibleID}')" class="bg-white border border-slate-200 hover:border-bomberos-red p-4 flex items-center justify-between text-left transition-all group shadow-sm hover:shadow-md focus:outline-none" style="border-radius: 1.5rem;">
+                        <div class="flex items-center gap-4">
+                            <div class="w-12 h-12 bg-slate-50 group-hover:bg-red-50 flex items-center justify-center text-slate-500 group-hover:text-bomberos-red transition-colors shrink-0" style="border-radius: 9999px;">
+                                <i class="fas fa-truck text-lg"></i>
+                            </div>
+                            <div class="flex flex-col">
+                                <span class="font-black text-base text-slate-800 leading-tight group-hover:text-bomberos-red transition-colors">${item.clave || 'SIN CLAVE'}</span>
+                                <span class="font-bold text-slate-400 uppercase tracking-widest mt-1 flex items-center gap-1" style="font-size: 11px;"><i class="far fa-clock"></i> ${hora} <span class="mx-1 text-slate-300">&bull;</span> ID #${visibleID}</span>
+                            </div>
+                        </div>
+                        <div class="w-10 h-10 bg-slate-50 group-hover:bg-bomberos-red flex items-center justify-center transition-colors shrink-0" style="border-radius: 9999px;">
+                            <i class="fas fa-arrow-down text-slate-300 group-hover:text-white transition-colors"></i>
+                        </div>
+                    </button>
+                `;
+            });
+            html += `</div>`;
+
+            document.getElementById('drilldown-title').innerHTML = `<i class="far fa-calendar-day text-bomberos-red mr-2"></i> DETALLE DEL ${dayStr}`;
+            const container = document.getElementById('drilldown-content');
+            container.innerHTML = html;
+            container.scrollTop = 0;
+        };
+
+        window.focusService = function(safeID, visibleID) {
+            window.closeDrilldown();
+            
+            const searchInput = document.getElementById('tableSearch');
+            searchInput.value = visibleID;
+            window.renderCurrentTable();
+            
+            setTimeout(() => {
+                const detailRow = document.getElementById(`detail-${safeID}`);
+                if (detailRow && detailRow.classList.contains('hidden')) {
+                    window.toggleDetail(safeID);
+                }
+            }, 50);
+        };
+
+        window.closeDrilldown = function() {
+            const overlay = document.getElementById('drilldown-overlay');
+            if(overlay) {
+                overlay.classList.add('hidden');
+                overlay.classList.remove('flex');
+            }
+        };
+
+        window.openMonthModal = function(monthKey) {
+            const modal = document.getElementById('modal-115');
+            const title = document.getElementById('modal-115-title');
+            const tabsContainer = document.getElementById('modal-115-tabs');
+            const contentContainer = document.getElementById('modal-115-content');
+
+            const monthData = window.groupedDataCache.find(g => g._monthKey === monthKey);
+            if(!monthData) return;
+
+            const monthNames = new Object({ '01': 'ENERO', '02': 'FEBRERO', '03': 'MARZO', '04': 'ABRIL', '05': 'MAYO', '06': 'JUNIO', '07': 'JULIO', '08': 'AGOSTO', '09': 'SEPTIEMBRE', '10': 'OCTUBRE', '11': 'NOVIEMBRE', '12': 'DICIEMBRE' });
+            const mm = monthData._monthKey.split('-').at(0);
+            const yyyy = monthData._monthKey.split('-').at(1);
+            const monthName = Reflect.get(monthNames, mm);
+            
+            title.innerHTML = `<i class="far fa-calendar-alt text-bomberos-red"></i> DETALLE 11-5: ${monthName} ${yyyy}`;
+
+            const listsByDay = new Object();
+            monthData._lists.forEach(list => {
+                const day = list._normalizedDate; 
+                if(!Reflect.has(listsByDay, day)) Reflect.set(listsByDay, day, new Array());
+                Reflect.get(listsByDay, day).push(list);
+            });
+
+            const sortedDays = Object.keys(listsByDay).sort((a,b) => {
+                const da = a.split('-');
+                const db = b.split('-');
+                return new Date(da.at(2), da.at(1)-1, da.at(0)) - new Date(db.at(2), db.at(1)-1, db.at(0)); 
+            });
+
+            let tabsHTML = '';
+            let panelsHTML = '';
+
+            sortedDays.forEach((dayStr, index) => {
+                const dayId = `panel-${monthData._safeID}-${dayStr.replace(new RegExp('-', 'g'), '')}`;
+                
+                tabsHTML += `
+                    <button onclick="switchDayTab('${dayId}')" class="tab-btn-day px-6 py-4 text-sm font-bold text-slate-500 hover:text-slate-800 hover:bg-slate-50 transition-colors whitespace-nowrap border-transparent" style="border-top-left-radius: 1rem; border-top-right-radius: 1rem; border-bottom-width: 3px;" id="tab-${dayId}">
+                        DÍA ${dayStr.split('-').at(0)}
+                    </button>
+                `;
+
+                const dayLists = Reflect.get(listsByDay, dayStr).sort((a, b) => (a.hora115 || '').localeCompare(b.hora115 || ''));
+                
+                let listsHTML = dayLists.map(list => {
+                    let count11_1 = 0, count11_2 = 0, countX = 0, count08 = 0;
+                    
+                    list._details.forEach(d => {
+                        let q = String(d.calidad || 'X').trim().toUpperCase();
+                        if (q === '') q = 'X';
+                        if (q === '11-1') count11_1++;
+                        else if (q === '11-2') count11_2++;
+                        else if (q === 'X') countX++;
+                        else if (q.includes('0-8')) count08++;
+                    });
+
+                    const horaStr = list.hora115 || '--:--';
+                    
+                    const sortedRadios = Array.from(list._details).filter(d => String(d.idRadial).trim().toUpperCase() !== 'C1' && String(d.idRegistro).trim().toUpperCase() !== 'C1').sort((a, b) => {
+                        const numA = parseInt(String(a.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
+                        const numB = parseInt(String(b.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
+                        return numA - numB;
+                    });
+                    
+                    const listItemsHTML = sortedRadios.map(d => {
+                        let qual = String(d.calidad || 'X').trim().toUpperCase();
+                        if (qual === '') qual = 'X';
+                        
+                        let bgClass = 'bg-slate-50', textClass = 'text-slate-500';
+                        if(qual === '11-1') { bgClass = 'bg-green-50'; textClass = 'text-green-700'; }
+                        else if(qual === '11-2') { bgClass = 'bg-yellow-50'; textClass = 'text-yellow-700'; }
+                        else if(qual === 'X') { bgClass = 'bg-red-50'; textClass = 'text-red-700'; }
+                        else if(qual.includes('0-8')) { bgClass = 'bg-slate-100'; textClass = 'text-slate-600'; }
+                        
+                        let person = window.DB.personal.find(p => String(p.idRadial).trim().toLowerCase() === String(d.idRadial).trim().toLowerCase());
+                        if(!person) person = window.DB.personal.find(p => String(p.idRegistro).trim() === String(d.idRadial).trim());
+                        
+                        const foto = person && person.foto ? person.foto : './Logo.png';
+                        const nombre = person ? window.formatShortName(person.nombreBombero) : window.formatShortName(d.idRadial || 'DESCONOCIDO');
+                        const regInfo = person && person.idRegistro ? `REG: ${person.idRegistro}` : `ID: ${d.idRadial}`;
+                        
+                        return `
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                            <td class="py-3 px-4 overflow-hidden print-p-2">
+                                <div class="flex items-center gap-4">
+                                    <img src="${foto}" class="w-10 h-10 object-cover shadow-sm border border-slate-200 flex-shrink-0 print-hide" style="border-radius: 9999px;">
+                                    <div class="min-w-0 flex-1">
+                                        <div class="font-bold text-slate-800 text-xs leading-tight truncate print-text uppercase" title="${nombre}">${nombre}</div>
+                                        <div class="text-[10px] font-bold text-slate-400 mt-1 tracking-wider uppercase truncate print-hide" title="${regInfo}">${regInfo}</div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td class="py-3 px-4 text-center align-middle overflow-hidden print-p-2">
+                                <span class="inline-block w-full px-3 py-1.5 font-bold tracking-widest ${bgClass} ${textClass} border border-current border-opacity-20 shadow-sm truncate print-pill" style="border-radius: 0.5rem; font-size: 11px;">${qual}</span>
+                            </td>
+                            <td class="py-3 px-4 text-xs text-slate-500 truncate align-middle uppercase print-text print-p-2" title="${d.lugar || ''}">${d.lugar || '-'}</td>
+                        </tr>`;
+                    }).join('');
+                    
+                    return `
+                        <div class="flex flex-col border border-slate-200 overflow-hidden shadow-sm bg-white h-full" style="border-radius: 1.5rem;">
+                            <div class="bg-slate-50 p-5 border-b border-slate-200 flex flex-col gap-4 shrink-0">
+                                <span class="font-bold text-slate-700 text-sm flex items-center gap-2 pl-1 uppercase">
+                                    <i class="far fa-clock text-bomberos-red print-hide"></i> PRUEBA DE LAS ${horaStr}
+                                </span>
+                                <div class="grid grid-cols-4 gap-3 w-full print-hide">
+                                    <div class="bg-white border border-green-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-green-600 mb-1">11-1</span><span class="text-xl font-black text-green-700 leading-none">${count11_1}</span></div>
+                                    <div class="bg-white border border-yellow-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-yellow-600 mb-1">11-2</span><span class="text-xl font-black text-yellow-700 leading-none">${count11_2}</span></div>
+                                    <div class="bg-white border border-red-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-red-500 mb-1">X</span><span class="text-xl font-black text-red-700 leading-none">${countX}</span></div>
+                                    <div class="bg-white border border-slate-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-slate-500 mb-1">0-8</span><span class="text-xl font-black text-slate-700 leading-none">${count08}</span></div>
+                                </div>
+                            </div>
+                            <div class="border-t border-slate-200 bg-white flex-1 overflow-x-hidden w-full">
+                                <table class="w-full text-left border-collapse table-fixed min-w-full print-table">
+                                    <thead class="bg-white border-b border-slate-200 shadow-sm z-10 sticky top-0">
+                                        <tr>
+                                            <th class="py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest print-p-2" style="width: 50%;">PERSONAL</th>
+                                            <th class="py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center print-p-2" style="width: 25%;">CALIDAD</th>
+                                            <th class="py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center print-p-2" style="width: 25%;">UBICACIÓN</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">${listItemsHTML}</tbody>
+                                </table>
+                            </div>
+                        </div>`;
+                }).join('');
+
+                const printTitle = `PRUEBAS RADIALES - ${dayStr.split('-').at(0)} DE ${monthName} DE ${yyyy}`;
+                const btnImprimirHTML = `<div class="mb-4"><button onclick="printReport('${dayId}-content', '${printTitle}')" class="bg-white border border-slate-300 text-slate-600 hover:text-bomberos-red hover:border-bomberos-red px-4 py-2 font-bold text-xs uppercase shadow-sm transition-colors flex items-center gap-2" style="border-radius: 0.75rem;"><i class="fas fa-print"></i> IMPRIMIR DÍA</button></div>`;
+
+                panelsHTML += `
+                    <div id="${dayId}" class="day-panel hidden h-full flex flex-col">
+                        ${btnImprimirHTML}
+                        <div id="${dayId}-content" class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch flex-1 pb-4">
+                            ${listsHTML}
+                        </div>
+                    </div>
+                `;
+            });
+
+            tabsContainer.innerHTML = tabsHTML;
+            contentContainer.innerHTML = panelsHTML;
+
+            modal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+
+            if(sortedDays.length > 0) {
+                const firstId = `panel-${monthData._safeID}-${sortedDays.at(0).replace(new RegExp('-', 'g'), '')}`;
+                window.switchDayTab(firstId);
+            }
+        };
+
+        window.closeMonthModal = function() {
+            document.getElementById('modal-115').classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        };
+
+        window.switchDayTab = function(dayId) {
+            document.querySelectorAll('.day-panel').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn-day').forEach(el => {
+                el.classList.remove('text-bomberos-red', 'border-bomberos-red', 'bg-red-50');
+                el.classList.add('text-slate-500', 'border-transparent');
+            });
+            
+            const panel = document.getElementById(dayId);
+            if(panel) panel.classList.remove('hidden');
+            
+            const activeTab = document.getElementById(`tab-${dayId}`);
+            if(activeTab) {
+                activeTab.classList.add('text-bomberos-red', 'border-bomberos-red', 'bg-red-50');
+                activeTab.classList.remove('text-slate-500', 'border-transparent');
+            }
+        };
+
+        window.saveAsPDF = function(containerId, title) {
+            alert("SELECCIONE 'GUARDAR COMO PDF' EN LA VENTANA DE IMPRESIÓN PARA ELEGIR DÓNDE GUARDAR EL ARCHIVO.");
+            setTimeout(() => { window.printReport(containerId, title); }, 1000);
+        };
+
+        window.printReport = function(containerId, title) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            
+            const contentHTML = container.innerHTML;
+            
+            let printedBy = 'SISTEMA SISBOM';
+            try {
+                const sessionStr = localStorage.getItem('adminUser');
+                if (sessionStr) {
+                    printedBy = window.formatShortName(JSON.parse(sessionStr).nombreBombero);
+                }
+            } catch(e) {}
+
+            const iframe = document.createElement('iframe');
+            iframe.style.position = 'fixed';
+            iframe.style.right = '0';
+            iframe.style.bottom = '0';
+            iframe.style.width = '0';
+            iframe.style.height = '0';
+            iframe.style.border = '0';
+            document.body.appendChild(iframe);
+
+            const doc = iframe.contentWindow.document;
+            doc.open();
+            doc.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>${title}</title>
+                    <script src="./libs/tailwind.min.js"><\/script>
+                    <script>if(!window.tailwind) document.write('<script src="https://cdn.tailwindcss.com"><\\/script>')<\/script>
+                    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+                    <style>
+                        @page { size: letter portrait; margin: 10mm; }
+                        body { font-family: "Segoe UI", sans-serif; font-size: 12px; padding: 0; margin: 0; background-color: white; text-transform: uppercase; }
+                        
+                        /* Optimizaciones estructurales de grilla */
+                        .lg\\:grid-cols-2 { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+                        
+                        table { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
+                        th { background-color: transparent !important; color: #475569; font-size: 11px !important; font-weight: bold; border-bottom: 1px solid #cbd5e1; text-align: left; padding: 2px 4px !important; }
+                        td { padding: 2px 4px !important; border-bottom: 1px solid #f1f5f9; font-size: 12px !important; vertical-align: middle; line-height: 1.1 !important; height: auto !important; }
+                        
+                        .text-sm { font-size: 12px !important; }
+                        .text-xs { font-size: 10px !important; }
+                        
+                        /* Limpieza Estrema para Entrar 60 Filas */
+                        .print-hide, table img { display: none !important; }
+                        .shadow-sm, .shadow-md, .shadow-inner { box-shadow: none !important; }
+                        .rounded-full, .rounded-xl, .rounded-2xl { border-radius: 0 !important; }
+                        .bg-slate-50, .bg-white { background-color: transparent !important; }
+                        .print-pill { padding: 1px 4px !important; font-size: 11px !important; border: none !important; background: transparent !important; color: black !important; font-weight: bold !important; }
+                        .print-text { font-size: 12px !important; font-weight: bold !important; color: black !important; }
+                        .print-rank { width: 30px !important; padding: 0 !important; font-size: 10px !important; }
+                        .border-b { border-bottom: 1px solid #e2e8f0 !important; }
+                        
+                        tr { page-break-inside: avoid; height: 18px !important; }
+                        
+                        thead { display: table-header-group !important; position: static !important; }
+                        .sticky { position: static !important; top: auto !important; }
+                        
+                        [style*="max-height"] { max-height: none !important; }
+                        [style*="overflow-y: auto"], [style*="overflow-x: hidden"] { overflow: visible !important; }
+                    </style>
+                </head>
+                <body class="bg-white">
+                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 5px; margin-bottom: 10px;">
+                        <div>
+                            <h1 style="font-size: 16px; font-weight: 800; color: #000; margin: 0; text-transform: uppercase; letter-spacing: -0.02em;">${title}</h1>
+                            <p style="font-size: 10px; color: #555; font-weight: 700; margin-top: 2px; text-transform: uppercase;">GENERADO POR: ${printedBy} • ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
+                        </div>
+                        <img src="./Logo.png" style="width: 40px; height: 40px; object-fit: contain;">
+                    </div>
+                    
+                    <div>${contentHTML}</div>
+                    
+                    <div style="margin-top: 15px; text-align: center; font-size: 9px; color: #999; border-top: 1px solid #eee; padding-top: 5px; text-transform: uppercase;">
+                        DOCUMENTO INTERNO - SISBOM
+                    </div>
+                    <script>
+                        window.onload = () => { setTimeout(() => { window.print(); }, 1000); };
+                        window.onafterprint = () => { parent.document.body.removeChild(window.frameElement); };
+                    <\/script>
+                </body>
+                </html>
+            `);
+            doc.close();
+            iframe.contentWindow.focus();
+        };
+
+        window.setupTableHeaders = function(headers) { 
+            const tr = document.getElementById('table-header-row'); 
+            tr.innerHTML = headers.map(h => `<th class="${h.includes('RESPUESTA') || h.includes('PRUEBAS') || h.includes('LISTAS') || h.includes('DÍAS') ? 'text-center' : ''}">${h}</th>`).join('') + '<th class="text-center" style="width: 60px;">VER</th>'; 
+        };
+
+        window.toggleDetail = function(id) { 
+            const row = document.getElementById(`detail-${id}`); 
+            const icon = document.getElementById(`icon-${id}`); 
+            
+            if (row.classList.contains('hidden')) { 
+                row.classList.remove('hidden'); 
+                icon.classList.remove('fa-chevron-down');
+                icon.classList.add('fa-chevron-up', 'text-bomberos-red');
+                setTimeout(() => {
+                    const mainRow = row.previousElementSibling;
+                    if (mainRow) window.scrollTo(new Object({top: mainRow.getBoundingClientRect().top + window.scrollY - 100, behavior: 'smooth'}));
+                }, 50);
+            } else { 
+                row.classList.add('hidden'); 
+                icon.classList.add('fa-chevron-down');
+                icon.classList.remove('fa-chevron-up', 'text-bomberos-red');
+            } 
+        };
+
+        window.renderCurrentTable = function() {
+            const q = document.getElementById('tableSearch').value.toLowerCase();
+            const gridContainer = document.getElementById('grid-container');
+            
+            if (window.currentView === 'pruebas') {
+                document.getElementById('table-container').classList.add('hidden');
+                gridContainer.classList.remove('hidden');
+                document.getElementById('empty-state').classList.add('hidden');
+                document.getElementById('pagination-controls').classList.add('hidden');
+                
+                const cycleYear = window.selectedCycleYear;
+                
+                const monthsCycle = new Array(
+                    new Object({m: '12', y: cycleYear - 1, name: 'DICIEMBRE'}),
+                    new Object({m: '01', y: cycleYear, name: 'ENERO'}),
+                    new Object({m: '02', y: cycleYear, name: 'FEBRERO'}),
+                    new Object({m: '03', y: cycleYear, name: 'MARZO'}),
+                    new Object({m: '04', y: cycleYear, name: 'ABRIL'}),
+                    new Object({m: '05', y: cycleYear, name: 'MAYO'}),
+                    new Object({m: '06', y: cycleYear, name: 'JUNIO'}),
+                    new Object({m: '07', y: cycleYear, name: 'JULIO'}),
+                    new Object({m: '08', y: cycleYear, name: 'AGOSTO'}),
+                    new Object({m: '09', y: cycleYear, name: 'SEPTIEMBRE'}),
+                    new Object({m: '10', y: cycleYear, name: 'OCTUBRE'}),
+                    new Object({m: '11', y: cycleYear, name: 'NOVIEMBRE'})
+                );
+
+                let gridHTML = '';
+                monthsCycle.forEach(mc => {
+                    const monthKey = `${mc.m}-${mc.y}`;
+                    const rowData = window.groupedDataCache.find(r => r._monthKey === monthKey);
+
+                    if (rowData) {
+                        gridHTML += `
+                            <button onclick="openMonthModal('${monthKey}')" class="bg-white border border-slate-200 hover:border-bomberos-red hover:shadow-md transition-all p-5 flex flex-col items-center justify-center text-center gap-3 group shadow-sm w-full focus:outline-none" style="border-radius: 1.5rem;">
+                                <div class="w-14 h-14 bg-red-50 text-bomberos-red flex items-center justify-center group-hover:scale-110 group-hover:bg-bomberos-red group-hover:text-white transition-all" style="border-radius: 9999px;">
+                                    <i class="far fa-calendar-alt text-2xl"></i>
+                                </div>
+                                <div class="flex flex-col"><span class="font-black text-slate-700 uppercase tracking-widest text-sm">${mc.name}</span><span class="text-xs text-slate-400 font-bold tracking-wider mt-1">${mc.y}</span></div>
+                            </button>`;
+                    } else {
+                        gridHTML += `
+                            <div class="bg-slate-50 border border-slate-100 p-5 flex flex-col items-center justify-center text-center gap-3 opacity-60 w-full cursor-not-allowed" style="border-radius: 1.5rem;" title="SIN INFORMACIÓN REGISTRADA">
+                                <div class="w-14 h-14 bg-slate-200 text-slate-400 flex items-center justify-center" style="border-radius: 9999px;"><i class="fas fa-lock text-xl"></i></div>
+                                <div class="flex flex-col"><span class="font-black text-slate-400 uppercase tracking-widest text-sm">${mc.name}</span><span class="text-xs text-slate-400 font-bold tracking-wider mt-1">${mc.y}</span></div>
+                            </div>`;
+                    }
+                });
+
+                gridContainer.innerHTML = gridHTML;
+                return;
+            }
+
+            document.getElementById('table-container').classList.remove('hidden');
+            gridContainer.classList.add('hidden');
+
+            window.filteredTableData = window.groupedDataCache.filter(row => Object.values(row).some(val => String(val).toLowerCase().includes(q)));
+            
+            window.currentPage = 1;
+            window.renderTableRows();
+        };
+
+        window.renderTableRows = function() {
+            const tbody = document.getElementById('table-body');
+            const emptyState = document.getElementById('empty-state');
+            const pagination = document.getElementById('pagination-controls');
+
+            if(window.filteredTableData.length === 0) { 
+                tbody.innerHTML = ''; 
+                emptyState.classList.remove('hidden');
+                pagination.classList.add('hidden');
+                return; 
+            }
+            
+            emptyState.classList.add('hidden');
+
+            const totalPages = Math.ceil(window.filteredTableData.length / window.itemsPerPage);
+            if (window.currentPage > totalPages) window.currentPage = totalPages;
+            if (window.currentPage < 1) window.currentPage = 1;
+
+            const start = (window.currentPage - 1) * window.itemsPerPage;
+            const pageData = window.filteredTableData.slice(start, start + window.itemsPerPage);
+
+            tbody.innerHTML = pageData.map(row => {
+                const uniqueID = row._safeID;
+                let colspan = 6;
+                if(window.currentView === 'bitacora') colspan = 7;
+
+                let mainRowHTML = '';
+                let detailTableHTML = '';
+
+                // ---------- DESPACHOS ----------
+                if(window.currentView === 'despachos') {
+                    const obacFmt = window.getFormattedName(row.obacServicio);
+                    
+                    mainRowHTML = `
+                        <td class="font-black text-bomberos-red text-sm">#${row.idServicio}</td>
+                        <td class="font-bold text-slate-700">${row._normalizedDate}</td>
+                        <td><span class="bg-slate-100 text-slate-700 px-3 py-1.5 font-black uppercase tracking-widest border border-slate-200 shadow-sm" style="border-radius: 0.5rem; font-size: 10px;">${row.clave}</span></td>
+                        <td class="truncate text-xs font-bold text-slate-600 uppercase" style="max-width: 200px;" title="${row.lugar}">${row.lugar || '-'}</td>
+                        <td class="text-xs font-bold text-slate-600 uppercase">${obacFmt}</td>`;
+                        
+                    const carrosStr = row.carros ? row.carros : 'NO REGISTRADOS';
+                    const normFechaDespacho = window.normalizeDate(row.fechaDespacho) || row._normalizedDate; 
+                    const normFecha67 = window.normalizeDate(row.fecha67);
+                    const normFechaTermino = window.normalizeDate(row.fechaTermino);
+                    
+                    let duracionUI = '<span class="text-xs text-slate-400 italic">NO CALCULABLE</span>';
+                    const duracion = window.calculateDuration(normFechaDespacho, row.horaDespacho, normFechaTermino, row.horaTermino);
+                    
+                    if (duracion) {
+                        let text = '';
+                        if (duracion.h > 0) text += `${duracion.h}H `;
+                        text += `${duracion.m}M`;
+                        duracionUI = `<span class="font-black text-bomberos-red bg-red-50 px-3 py-1.5 border border-red-100 text-sm shadow-sm" style="border-radius: 0.5rem;">${text}</span>`;
+                    }
+
+                    detailTableHTML = `
+                        <div class="w-full bg-slate-50 border-bomberos-red p-6 sm:p-8 flex flex-col gap-6 shadow-inner" style="border-left-width: 4px;">
+                            
+                            <!-- Bloque Info Básica Adicional -->
+                            <div>
+                                <h5 class="text-xs font-bold text-bomberos-red uppercase tracking-widest mb-4 border-b border-slate-200 pb-3"><i class="fas fa-info-circle mr-1 text-red-400"></i> Datos Adicionales del Servicio</h5>
+                                <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                                    <div class="flex flex-col justify-center bg-white p-5 border border-slate-200 lg:col-span-1 shadow-sm" style="border-radius: 1.5rem;">
+                                        <span class="d-label text-slate-400">Unidades (Carros)</span> 
+                                        <span class="d-value font-black text-slate-800 flex items-center mt-2 text-base uppercase"><i class="fas fa-truck text-slate-400 mr-2 text-xl"></i> ${carrosStr}</span>
+                                    </div>
+                                    
+                                    <div class="bg-white p-5 border border-slate-200 flex flex-col gap-4 lg:col-span-2 shadow-sm" style="border-radius: 1.5rem;">
+                                        <div class="grid grid-cols-3 gap-2 sm:gap-4 text-center sm:text-left">
+                                            <div>
+                                                <span class="d-label text-red-600"><i class="far fa-clock mr-1"></i> Despacho</span> 
+                                                <span class="d-value text-xs text-slate-600 flex flex-col mt-2">
+                                                    <span class="text-2xl font-black text-slate-800 leading-none">${row.horaDespacho || '--:--'}</span>
+                                                    <span class="font-bold text-slate-400 mt-1 tracking-wider uppercase" style="font-size: 10px;">${normFechaDespacho || '-'}</span>
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span class="d-label text-blue-600"><i class="fas fa-water mr-1"></i> 6-7 (Control)</span> 
+                                                <span class="d-value text-xs text-slate-600 flex flex-col mt-2">
+                                                    <span class="text-2xl font-black text-slate-800 leading-none">${row.hora67 || '--:--'}</span>
+                                                    <span class="font-bold text-slate-400 mt-1 tracking-wider uppercase" style="font-size: 10px;">${normFecha67 || '-'}</span>
+                                                </span>
+                                            </div>
+                                            <div>
+                                                <span class="d-label text-slate-600"><i class="fas fa-flag-checkered mr-1"></i> Término</span> 
+                                                <span class="d-value text-xs text-slate-600 flex flex-col mt-2">
+                                                    <span class="text-2xl font-black text-slate-800 leading-none">${row.horaTermino || '--:--'}</span>
+                                                    <span class="font-bold text-slate-400 mt-1 tracking-wider uppercase" style="font-size: 10px;">${normFechaTermino || '-'}</span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="pt-4 border-t border-slate-100 flex justify-between items-center">
+                                            <span class="text-xs font-black text-slate-500 uppercase tracking-widest">TIEMPO TOTAL DEL SERVICIO:</span>
+                                            ${duracionUI}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Informes -->
+                            <div class="mt-2">
+                                <h5 class="text-xs font-bold text-bomberos-red uppercase tracking-widest mb-4 border-b border-slate-200 pb-3"><i class="fas fa-clipboard-list mr-1 text-red-400"></i> Informes de Servicio</h5>
+                                <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                                    <div><span class="d-label text-slate-500"><i class="fas fa-file-alt mr-1"></i> Pre-Informe de Salida</span><div class="p-4 bg-white shadow-sm border border-slate-200 text-xs italic text-slate-600 mt-2 uppercase leading-relaxed" style="border-radius: 1rem;">${row.preinforme || 'SIN INFORMACIÓN REGISTRADA.'}</div></div>
+                                    <div><span class="d-label text-slate-500"><i class="fas fa-microphone-lines mr-1"></i> Informe OBAC</span><div class="p-4 bg-white shadow-sm border border-slate-200 text-xs font-bold text-slate-700 mt-2 whitespace-pre-line uppercase leading-relaxed" style="border-radius: 1rem;">${row.informeObac || 'SIN INFORMACIÓN REGISTRADA.'}</div></div>
+                                    <div><span class="d-label text-slate-500"><i class="fas fa-comment-dots mr-1"></i> Observaciones (Op. Final)</span><div class="p-4 bg-white shadow-sm border border-slate-200 text-xs font-bold text-slate-700 mt-2 whitespace-pre-line uppercase leading-relaxed" style="border-radius: 1rem;">${row.Observacion || 'SIN OBSERVACIONES REGISTRADAS.'}</div></div>
+                                </div>
+                            </div>
+                        </div>`;
+                } 
+                // ---------- MATERIAL MAYOR (BITACORA) ----------
+                else if(window.currentView === 'bitacora') {
+                    const conductorFmt = window.getFormattedName(row.conductor);
+                    const obacFmt = window.getFormattedName(row.obac);
+                    mainRowHTML = `
+                        <td class="font-black text-bomberos-red text-sm">#${row.idSalida}</td>
+                        <td><span class="bg-red-50 text-red-700 px-3 py-1.5 font-black tracking-widest border border-red-200 shadow-sm" style="border-radius: 0.5rem; font-size: 11px;">${row.carro}</span></td>
+                        <td><span class="bg-slate-100 text-slate-700 px-3 py-1.5 font-black uppercase tracking-widest border border-slate-200 shadow-sm" style="border-radius: 0.5rem; font-size: 10px;">${row.clave || '-'}</span></td>
+                        <td class="font-bold text-slate-700">${row._normalizedDate}</td>
+                        <td class="font-bold text-slate-600"><i class="far fa-clock mr-1.5 text-slate-400"></i>${row.hora60 || '--:--'}</td>
+                        <td class="text-xs font-bold text-slate-600 uppercase">${conductorFmt}</td>
+                        <td class="text-xs font-bold text-slate-600 uppercase">${obacFmt}</td>`;
+                    
+                    detailTableHTML = `
+                        <div class="w-full bg-slate-50 border-bomberos-red p-6 sm:p-8 flex flex-col gap-6 shadow-inner" style="border-left-width: 4px;">
+                            
+                            <!-- Bloque Info Básica Reordenado -->
+                            <div>
+                                <h5 class="text-xs font-bold text-bomberos-red uppercase tracking-widest mb-4 border-b border-slate-200 pb-3"><i class="fas fa-info-circle mr-1 text-red-400"></i> Detalles del Servicio</h5>
+                                <div class="grid grid-cols-1 md:grid-cols-6 gap-5">
+                                    <div><span class="d-label text-slate-400">ID Servicio</span> <span class="d-value text-blue-600 font-black mt-1" style="font-size: 15px;">#${row.idServicio || 'NO ASIGNADO'}</span></div>
+                                    <div class="md:col-span-2"><span class="d-label text-slate-400">Dirección / Lugar</span> <span class="d-value font-bold text-slate-700 truncate uppercase mt-1" style="font-size: 14px;" title="${row.lugar}">${row.lugar || 'NO REGISTRADA'}</span></div>
+                                    <div><span class="d-label text-slate-400">Conductor</span> <span class="d-value text-slate-700 font-bold uppercase mt-1" style="font-size: 14px;"><i class="fas fa-steering-wheel mr-2 text-slate-400"></i> ${conductorFmt}</span></div>
+                                    <div><span class="d-label text-slate-400">Oficial (OBAC)</span> <span class="d-value text-slate-700 font-bold uppercase mt-1" style="font-size: 14px;"><i class="fas fa-user-shield mr-2 text-slate-400"></i> ${obacFmt}</span></div>
+                                    <div><span class="d-label text-slate-400">Tripulación</span> <span class="d-value font-black text-slate-800 mt-1" style="font-size: 14px;">${row.cuantosBomberos || '0'} BOM.</span></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Bloque Cronología -->
+                            <div class="mt-2">
+                                <h5 class="text-xs font-bold text-bomberos-red uppercase tracking-widest mb-4 border-b border-slate-200 pb-3"><i class="fas fa-clock mr-1 text-red-400"></i> Cronología de Comunicaciones</h5>
+                                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    <div class="bg-white p-4 border border-slate-200 text-center shadow-sm" style="border-radius: 1.5rem;"><span class="d-label text-red-600">6-0 (SALE)</span><span class="text-[10px] font-bold text-slate-400 tracking-wider block mt-1 uppercase">${window.normalizeDate(row.fecha60)}</span><span class="text-2xl font-black text-slate-800 mt-1 block">${row.hora60 || '--:--'}</span></div>
+                                    <div class="bg-white p-4 border border-slate-200 text-center shadow-sm" style="border-radius: 1.5rem;"><span class="d-label text-yellow-600">6-3 (LLEGA)</span><span class="text-[10px] font-bold text-slate-400 tracking-wider block mt-1 uppercase">${window.normalizeDate(row.fecha63)}</span><span class="text-2xl font-black text-slate-800 mt-1 block">${row.hora63 || '--:--'}</span></div>
+                                    <div class="bg-white p-4 border border-slate-200 text-center shadow-sm" style="border-radius: 1.5rem;"><span class="d-label text-blue-600">6-9 (RETIRA)</span><span class="text-[10px] font-bold text-slate-400 tracking-wider block mt-1 uppercase">${window.normalizeDate(row.fecha69)}</span><span class="text-2xl font-black text-slate-800 mt-1 block">${row.hora69 || '--:--'}</span></div>
+                                    <div class="bg-white p-4 border border-slate-200 text-center shadow-sm" style="border-radius: 1.5rem;"><span class="d-label text-slate-600">6-10 (CUARTEL)</span><span class="text-[10px] font-bold text-slate-400 tracking-wider block mt-1 uppercase">${window.normalizeDate(row.fecha610)}</span><span class="text-2xl font-black text-slate-800 mt-1 block">${row.hora610 || '--:--'}</span></div>
+                                    <div class="bg-emerald-50 p-4 border border-emerald-200 text-center shadow-sm" style="border-radius: 1.5rem;"><span class="d-label text-emerald-600">6-8 (LISTA)</span><span class="text-[10px] font-bold text-emerald-400/80 tracking-wider block mt-1 uppercase">${window.normalizeDate(row.fecha68)}</span><span class="text-2xl font-black text-emerald-700 mt-1 block">${row.hora68 || '--:--'}</span></div>
+                                </div>
+                            </div>
+                            
+                            <!-- Informes y KM -->
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mt-2">
+                                <div><span class="d-label text-slate-500"><i class="fas fa-microphone-lines mr-1 text-slate-400"></i> Pre-Informe por Radio</span><div class="p-4 bg-white shadow-sm border border-slate-200 text-xs italic text-slate-600 mt-2 uppercase leading-relaxed" style="border-radius: 1rem;">${row.preInforme || 'SIN INFORMACIÓN REGISTRADA'}</div></div>
+                                <div><span class="d-label text-slate-500"><i class="fas fa-clipboard-list mr-1 text-slate-400"></i> Informe de Llegada (6-3)</span><div class="p-4 bg-white shadow-sm border border-slate-200 text-xs italic text-slate-600 mt-2 uppercase leading-relaxed" style="border-radius: 1rem;">${row.informe63 || 'SIN INFORMACIÓN REGISTRADA'}</div></div>
+                                <div><span class="d-label text-slate-500"><i class="fas fa-comment-dots mr-1 text-slate-400"></i> Observaciones Adicionales</span><div class="p-4 bg-white shadow-sm border border-slate-200 text-xs text-slate-700 font-bold mt-2 uppercase leading-relaxed" style="border-radius: 1rem;">${row.observacion || 'SIN OBSERVACIONES REGISTRADAS'}</div></div>
+                            </div>
+                            
+                            <div class="flex justify-end items-center bg-white shadow-sm p-4 border border-slate-200 mt-2" style="border-radius: 1rem;">
+                                <span class="text-xs font-black text-slate-400 uppercase tracking-widest mr-4">RECORRIDO TOTAL DE LA UNIDAD:</span>
+                                <span class="text-2xl font-black text-slate-800 leading-none">${row.km || '0'} KM</span>
+                            </div>
+                        </div>`;
+                } 
+                // ---------- ASISTENCIAS ----------
+                else if(window.currentView === 'asistencias') {
+                    let docStatusUI = '';
+                    if (row.anulada == 1 || String(row.anulada).toUpperCase() === 'SI') docStatusUI = '<span class="px-3 py-1.5 bg-red-50 text-red-700 font-black tracking-widest text-[10px] uppercase border border-red-200 shadow-sm" style="border-radius: 0.5rem;"><i class="fas fa-ban mr-1"></i> ANULADO</span>';
+                    else if (row.aprobadoPor) docStatusUI = '<span class="px-3 py-1.5 bg-green-50 text-green-700 font-black tracking-widest text-[10px] uppercase border border-green-200 shadow-sm" style="border-radius: 0.5rem;"><i class="fas fa-check-double mr-1"></i> APROBADO</span>';
+                    else docStatusUI = '<span class="px-3 py-1.5 bg-yellow-50 text-yellow-700 font-black tracking-widest text-[10px] uppercase border border-yellow-200 shadow-sm" style="border-radius: 0.5rem;"><i class="fas fa-clock mr-1"></i> PENDIENTE</span>';
+
+                    mainRowHTML = `
+                        <td class="font-black text-bomberos-red text-sm">#${row.idLista}</td>
+                        <td class="font-bold text-slate-700">${row._normalizedDate} <span class="text-[10px] text-slate-400 font-black tracking-wider ml-1 uppercase block mt-1">${row.hora || ''}</span></td>
+                        <td><span class="bg-slate-100 text-slate-700 px-3 py-1.5 font-black uppercase tracking-widest border border-slate-200 shadow-sm" style="border-radius: 0.5rem; font-size: 10px;">${row.clave || 'ACAD'}</span></td>
+                        <td class="text-xs font-bold text-slate-700 truncate uppercase" style="max-width: 200px;" title="${row.evento}">${row.evento}</td>
+                        <td>${docStatusUI}</td>`;
+                    
+                    const sortedDetails = Array.from(row._details).sort((a, b) => (parseInt(a.ordenEnLista, 10) || 9999) - (parseInt(b.ordenEnLista, 10) || 9999));
+                    
+                    const listItems = sortedDetails.map(d => {
+                        const st = String(d.estado || '').toUpperCase().trim();
+                        if (!st && !d.idRegistro) return ''; 
+
+                        let bgClass = 'bg-slate-50', textClass = 'text-slate-500', icon = 'fa-minus';
+                        
+                        if (st === 'ASISTE' || st === 'CDS') { bgClass = 'bg-green-50'; textClass = 'text-green-700'; icon = 'fa-check'; }
+                        else if (st === 'FALTA') { bgClass = 'bg-red-50'; textClass = 'text-red-700'; icon = 'fa-times'; }
+                        else if (st === 'PERMISO') { bgClass = 'bg-yellow-50'; textClass = 'text-yellow-700'; icon = 'fa-file-signature'; }
+                        else if (st.includes('LICENCIA') || st === 'LM') { bgClass = 'bg-blue-50'; textClass = 'text-blue-700'; icon = 'fa-user-md'; }
+                        else if (st.includes('SUSPENDIDO') || st.includes('0-8')) { bgClass = 'bg-purple-50'; textClass = 'text-purple-700'; icon = 'fa-gavel'; }
+                        
+                        const lookupId = String(d.idRegistro || d.idRadial || '').trim();
+                        let person = window.DB.personal.find(p => String(p.idRegistro).trim() === lookupId);
+                        if(!person) person = window.DB.personal.find(p => String(p.idRadial).trim().toLowerCase() === lookupId.toLowerCase());
+                        
+                        const foto = person && person.foto ? person.foto : './Logo.png';
+                        const nombre = person ? window.formatShortName(person.nombreBombero) : window.formatShortName(d.idRegistro || 'DESCONOCIDO');
+                        const radialInfo = person && person.idRadial ? `<span class="mx-1 text-slate-300">&bull;</span> <span class="text-bomberos-red">RAD: ${person.idRadial}</span>` : '';
+                        const regInfo = person && person.idRegistro ? `REG: ${person.idRegistro}` : `ID: ${d.idRegistro}`;
+                        
+                        return `
+                        <div class="flex justify-between items-center p-3 border border-slate-200 bg-white shadow-sm hover:border-slate-300 hover:shadow transition-all break-inside-avoid" style="border-radius: 1rem;">
+                            <div class="flex items-center gap-3 min-w-0 pr-2 flex-1">
+                                <span class="font-black text-slate-300 text-xs w-5 text-right shrink-0">${d.ordenEnLista || '-'}</span>
+                                <img src="${foto}" class="w-8 h-8 object-cover border border-slate-100 shrink-0 hidden sm:block" style="border-radius: 9999px;">
+                                <div class="flex flex-col min-w-0">
+                                    <span class="font-bold text-slate-800 leading-tight truncate uppercase" title="${nombre}" style="font-size: 11px;">${nombre}</span>
+                                    <span class="font-bold text-slate-400 tracking-wider uppercase truncate mt-0.5" title="${regInfo} ${radialInfo.replace(new RegExp('<[^>]*>?', 'gm'), '')}" style="font-size: 9px;">${regInfo}${radialInfo}</span>
+                                </div>
+                            </div>
+                            <span class="inline-flex items-center justify-center gap-1.5 px-2 py-1.5 font-black uppercase tracking-widest ${bgClass} ${textClass} border border-current border-opacity-20 shrink-0 shadow-sm min-w-[75px]" style="font-size: 9px; border-radius: 0.5rem;">
+                                <i class="fas ${icon}"></i> <span class="">${st || 'S/E'}</span>
+                            </span>
+                        </div>`;
+                    }).join('');
+
+                    // NOMBRE EXACTO PARA OBAC Y QUIEN PASA LISTA (Sin truncate)
+                    const obacFmt = window.getFormattedName(row.obac, 'exact');
+                    const listaPorFmt = window.getFormattedName(row.listaPor, 'exact');
+
+                    const esAbono = row.abono == 1 || String(row.abono).toUpperCase() === 'SÍ' || String(row.abono).toUpperCase() === 'SI' || String(row.clave).toUpperCase().includes('ABONO');
+
+                    detailTableHTML = `
+                        <div class="w-full bg-slate-50 border-bomberos-red p-6 sm:p-8 flex flex-col relative shadow-inner" style="border-left-width: 4px;">
+                            <div>
+                                <div class="flex flex-wrap justify-between items-center mb-5 gap-3">
+                                    <h5 class="text-sm font-black text-bomberos-red uppercase tracking-widest flex items-center gap-2"><i class="fas fa-file-invoice text-red-400"></i> Resumen de Lista #${row.idLista}</h5>
+                                    ${row.aprobadoPor ? `<span class="bg-green-50 text-green-700 px-3 py-1.5 font-black border border-green-200 shadow-sm uppercase tracking-widest" style="font-size: 10px; border-radius: 0.5rem;"><i class="fas fa-shield-check mr-1"></i> APROBADA POR ${row.aprobadoPor}</span>` : '<span class="bg-yellow-50 text-yellow-700 px-3 py-1.5 font-black border border-yellow-200 shadow-sm uppercase tracking-widest" style="font-size: 10px; border-radius: 0.5rem;"><i class="fas fa-clock mr-1"></i> PENDIENTE DE REVISIÓN</span>'}
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-5 mb-2 bg-white p-6 shadow-sm border border-slate-200" style="border-radius: 1.5rem;">
+                                    <div><span class="d-label text-slate-400" style="font-size: 10px;">Tipo de Lista</span> <span class="d-value text-xs font-black mt-2 ${esAbono ? 'text-blue-600' : 'text-slate-700'} uppercase">${esAbono ? '<i class="fas fa-plus-circle mr-1" style="font-size: 11px;"></i> ABONO EXTRA' : 'ASISTENCIA OBLIGATORIA'}</span></div>
+                                    <div><span class="d-label text-slate-400" style="font-size: 10px;">A Cargo (OBAC)</span> <span class="d-value text-xs font-bold text-slate-700 whitespace-normal break-words uppercase mt-2">${obacFmt}</span></div>
+                                    <div><span class="d-label text-slate-400" style="font-size: 10px;">Pasada Por</span> <span class="d-value text-xs font-bold text-slate-700 whitespace-normal break-words uppercase mt-2">${listaPorFmt}</span></div>
+                                    <div><span class="d-label text-slate-400" style="font-size: 10px;">Ubicación / Sector</span> <span class="d-value text-xs font-bold text-slate-700 truncate uppercase mt-2" title="${row.lugar || 'NO REGISTRADA'}">${row.lugar || 'NO REGISTRADA'}</span></div>
+                                    <div class="col-span-2 md:col-span-4 mt-2 pt-4 border-t border-slate-100"><span class="d-label text-slate-400" style="font-size: 10px;">Observaciones del Documento</span> <div class="p-3 bg-slate-50 border border-slate-100 text-xs italic font-medium mt-2 text-slate-600 uppercase" style="border-radius: 1rem;">${row.observacion || 'SIN OBSERVACIONES REGISTRADAS.'}</div></div>
+                                </div>
+                            </div>
+                            <hr class="border-t border-bomberos-red/30 my-6 w-full">
+                            <div class="pl-2 sm:pl-4">
+                                <h5 class="text-xs font-bold text-slate-500 uppercase tracking-widest mb-5 flex justify-between items-center">
+                                    <span><i class="fas fa-users mr-2 text-slate-400 text-sm"></i> Personal Registrado</span>
+                                    <span class="bg-slate-100 text-slate-600 font-black px-3 py-1 shadow-sm border border-slate-200 uppercase tracking-widest" style="font-size: 10px; border-radius: 9999px;">${sortedDetails.length} BOMBEROS</span>
+                                </h5>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                                    ${listItems}
+                                </div>
+                            </div>
+                        </div>`;
+                }
+                // ---------- SIRENA ----------
+                else if(window.currentView === 'sirena') {
+                    const isOk = row.sono == 1 || String(row.sono).toLowerCase() === 'si';
+                    const iconSono = isOk ? '<i class="fas fa-check text-green-500"></i>' : '<i class="fas fa-times text-red-500"></i>';
+                    
+                    mainRowHTML = `
+                        <td class="font-black text-bomberos-red text-sm">#${row.idToqueSirena}</td>
+                        <td class="font-bold text-slate-700">${row._normalizedDate}</td>
+                        <td class="font-bold text-slate-600"><i class="far fa-clock mr-1.5 text-slate-400"></i>${row.horaDeToque}</td>
+                        <td class="text-xs font-bold text-slate-700 truncate uppercase" style="max-width: 250px;" title="${row.razonDeToque}">${row.razonDeToque}</td>
+                        <td class="text-center text-xl">${iconSono}</td>`;
+                        
+                    detailTableHTML = `
+                        <div class="w-full bg-slate-50 border-bomberos-red p-6 flex flex-col gap-5 shadow-inner" style="border-left-width: 4px;">
+                            <h5 class="text-xs font-bold text-bomberos-red uppercase tracking-widest mb-2 border-b border-slate-200 pb-3"><i class="fas fa-info-circle mr-1 text-red-400"></i> Detalle del Toque</h5>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-5 bg-white p-6 shadow-sm border border-slate-200" style="border-radius: 1.5rem;">
+                                <div><span class="d-label text-slate-400">ID del Sistema</span> <span class="d-value text-slate-600 font-black text-lg mt-1">#${row.idToqueSirena}</span></div>
+                                <div><span class="d-label text-slate-400">Motivo de Activación</span> <span class="d-value p-3 bg-slate-50 border border-slate-100 font-bold text-sm mt-2 uppercase" style="border-radius: 1rem;">${row.razonDeToque}</span></div>
+                                <div class="md:col-span-2 pt-4 border-t border-slate-100">
+                                    <span class="d-label text-slate-400">Estado de Confirmación Visual/Auditiva</span> 
+                                    <span class="d-value mt-2 uppercase font-black tracking-wide ${isOk ? 'text-green-600 bg-green-50 border border-green-200 p-4 shadow-sm' : 'text-red-600 bg-red-50 border border-red-200 p-4 shadow-sm'}" style="border-radius: 1rem;">
+                                        ${isOk ? '<i class="fas fa-check-circle mr-2 text-xl"></i> EL SISTEMA SE ACTIVÓ Y LA SIRENA SONÓ CORRECTAMENTE' : '<i class="fas fa-exclamation-triangle mr-2 text-xl"></i> FALLA CRÍTICA: EL SISTEMA FUE ACTIVADO PERO LA SIRENA NO SONÓ'}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>`;
+                }
+
+                return `
+                    <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100 cursor-pointer group" onclick="window.toggleDetail('${uniqueID}')">
+                        ${mainRowHTML}
+                        <td class="text-center px-4" style="width: 60px;">
+                            <div class="w-10 h-10 bg-slate-100 text-slate-400 flex items-center justify-center group-hover:bg-red-50 group-hover:text-bomberos-red transition-all mx-auto shadow-inner" style="border-radius: 9999px;">
+                                <i class="fas fa-chevron-down transition-transform duration-300 text-lg print-hide" id="icon-${uniqueID}"></i>
+                            </div>
+                        </td>
+                    </tr>
+                    <tr id="detail-${uniqueID}" class="hidden bg-slate-50">
+                        <td colspan="${colspan}" class="!p-0 border-b border-slate-200">${detailTableHTML}</td>
+                    </tr>`;
+
+            }).join('');
+
+            if (totalPages > 1) {
+                pagination.classList.remove('hidden');
+                pagination.classList.add('flex');
+                document.getElementById('page-info').innerText = `PÁGINA ${window.currentPage} DE ${totalPages} (${window.filteredTableData.length} REGISTROS)`;
+                document.getElementById('btn-prev').disabled = window.currentPage === 1;
+                document.getElementById('btn-next').disabled = window.currentPage === totalPages;
+            } else {
+                pagination.classList.add('hidden');
+                pagination.classList.remove('flex');
+            }
+        };
+
+        window.prevPage = function() { if (window.currentPage > 1) { window.currentPage--; window.renderTableRows(); } };
+        window.nextPage = function() { const t = Math.ceil(window.filteredTableData.length / window.itemsPerPage); if (window.currentPage < t) { window.currentPage++; window.renderTableRows(); } };
+
+        window.renderDisponibilidadDashboard = function() {
+            const year = window.selectedCycleYear;
+            const now = new Date();
+            
+            const personnel = window.DB.personal || [];
+            let minTimestamp = new Date(year, 0, 1, 0, 0, 0).getTime();
+            let allTimestamps = [];
+            
+            const activePersonnel = personnel.filter(p => p.activo !== 0 && p.activo !== '0' && p.activo !== false && String(p.activo).toUpperCase() !== 'NO');
+
+            activePersonnel.forEach(p => {
+                (p.estadosHistorico || []).forEach(r => {
+                    let ts = r.timestamp;
+                    if (!ts && r.fecha && r.hora) {
+                        const parts = r.fecha.split('-');
+                        const timeParts = r.hora.split(':');
+                        if (parts.length === 3) ts = new Date(parts[2], parts[1]-1, parts[0], timeParts[0]||0, timeParts[1]||0).getTime();
+                    }
+                    if (ts && new Date(ts).getFullYear() === year) {
+                        allTimestamps.push(ts);
+                    }
+                });
+            });
+
+            if (allTimestamps.length > 0) {
+                const earliestInYear = Math.min(...allTimestamps);
+                const d = new Date(earliestInYear);
+                d.setHours(0,0,0,0);
+                minTimestamp = Math.max(new Date(year, 0, 1).getTime(), d.getTime());
+            }
+
+            const endTimestamp = (year === now.getFullYear()) ? now.getTime() : new Date(year, 11, 31, 23, 59, 59).getTime();
+
+            if (activePersonnel.length === 0 || minTimestamp >= endTimestamp) {
+                document.getElementById('disponibilidad-report-container').innerHTML = `<div class="p-6 text-center text-slate-500 font-bold bg-slate-50">NO HAY INFORMACIÓN SUFICIENTE PARA ESTE CICLO.</div>`;
+                return;
+            }
+
+            const MS_PER_HOUR = 1000 * 60 * 60;
+            const hourSamples = []; 
+            
+            const timelines = activePersonnel.map(p => {
+                const history = (p.estadosHistorico || []).map(r => {
+                    let ts = r.timestamp;
+                    if (!ts && r.fecha && r.hora) {
+                        const parts = r.fecha.split('-');
+                        const timeParts = r.hora.split(':');
+                        if (parts.length === 3) ts = new Date(parts[2], parts[1]-1, parts[0], timeParts[0]||0, timeParts[1]||0).getTime();
+                    }
+                    return { estado: String(r.estado).toUpperCase().trim(), timestamp: ts || 0 };
+                }).sort((a, b) => a.timestamp - b.timestamp);
+
+                return {
+                    id: p.idRegistro,
+                    name: window.formatShortName(p.nombreBombero),
+                    foto: p.foto || './Logo.png',
+                    orden: parseInt(p.ordenEnLista, 10) || 9999,
+                    radial: p.idRadial || 'S/R',
+                    history: history,
+                    firstTs: history.length > 0 ? history[0].timestamp : minTimestamp,
+                    currentState: String(p.estado || '0-8').toUpperCase().trim(),
+                    total09Ms: 0,
+                    totalTrackedMs: 0
+                };
+            });
+
+            // Muestreo Hora a Hora
+            let currentTime = minTimestamp;
+            while(currentTime <= endTimestamp) {
+                let count09 = 0;
+                timelines.forEach(p => {
+                    let st = '0-8';
+                    if (p.history.length === 0) {
+                        st = p.currentState; 
+                    } else {
+                        let lastEv = null;
+                        for(let i=0; i<p.history.length; i++) {
+                            if (p.history[i].timestamp <= currentTime) lastEv = p.history[i];
+                            else break;
+                        }
+                        if (lastEv) st = lastEv.estado;
+                        else st = p.history[0].estado;
+                    }
+
+                    if (st === '0-9' || st === 'OPERADOR') count09++;
+                });
+
+                hourSamples.push({ ts: currentTime, count: count09 });
+                currentTime += MS_PER_HOUR;
+            }
+
+            // --- DETERMINAR RANGOS PARA EL RANKING SEGÚN EL SELECTOR ---
+            let rankStartTs = minTimestamp;
+            let rankEndTs = endTimestamp;
+            const pMode = window.dispPeriod || 'ciclo';
+
+            if (pMode === 'dia') {
+                rankStartTs = new Date(year, now.getMonth(), now.getDate(), 0, 0, 0).getTime();
+                rankEndTs = (year === now.getFullYear()) ? now.getTime() : new Date(year, now.getMonth(), now.getDate(), 23, 59, 59).getTime();
+            } else if (pMode === 'semana') {
+                const temp = new Date(now);
+                const day = temp.getDay() || 7; 
+                if (day !== 1) temp.setHours(-24 * (day - 1));
+                rankStartTs = new Date(year, temp.getMonth(), temp.getDate(), 0, 0, 0).getTime();
+                rankEndTs = (year === now.getFullYear()) ? now.getTime() : new Date(year, temp.getMonth(), temp.getDate() + 6, 23, 59, 59).getTime();
+            } else if (pMode === 'mes') {
+                rankStartTs = new Date(year, now.getMonth(), 1, 0, 0, 0).getTime();
+                rankEndTs = (year === now.getFullYear()) ? now.getTime() : new Date(year, now.getMonth() + 1, 0, 23, 59, 59).getTime();
+            }
+
+            // Asegurar que el rango no sea menor al inicio del sistema ni invertido
+            rankStartTs = Math.max(rankStartTs, minTimestamp);
+            if (rankEndTs < rankStartTs) rankEndTs = rankStartTs;
+
+            // Reflejar estado en el selector UI
+            const selectEl = document.getElementById('disp-period-filter');
+            if (selectEl) selectEl.value = pMode;
+
+            // Calculos exactos de milisegundos para Ranking Individual
+            timelines.forEach(p => {
+                let trackStart = Math.max(rankStartTs, p.firstTs); // BASE EXACTA EN EL PERIODO
+                let currentT = trackStart;
+                let currentSt = '0-8';
+                
+                p.total09Ms = 0;
+                p.totalTrackedMs = 0;
+
+                if (trackStart >= rankEndTs) return;
+
+                if (p.history.length > 0) {
+                    let lastEv = null;
+                    for (let i = 0; i < p.history.length; i++) {
+                        if (p.history[i].timestamp <= trackStart) lastEv = p.history[i];
+                        else break;
+                    }
+                    if (lastEv) currentSt = lastEv.estado;
+                    else currentSt = '0-8'; // Si no hay evento previo, asume 0-8 hasta su primer registro
+                } else {
+                    currentSt = p.currentState;
+                }
+
+                p.history.forEach(ev => {
+                    if (ev.timestamp > trackStart && ev.timestamp <= rankEndTs) {
+                        let dur = ev.timestamp - currentT;
+                        p.totalTrackedMs += dur;
+                        if (currentSt === '0-9' || currentSt === 'OPERADOR') p.total09Ms += dur;
+                        currentT = ev.timestamp;
+                        currentSt = ev.estado;
+                    }
+                });
+
+                if (currentT < rankEndTs) {
+                    let dur = rankEndTs - currentT;
+                    p.totalTrackedMs += dur;
+                    if (currentSt === '0-9' || currentSt === 'OPERADOR') p.total09Ms += dur;
+                }
+            });
+
+            // Agrupación para gráficos (Lunes=0)
+            const hrAvgs = new Array(24).fill(0); const hrCounts = new Array(24).fill(0);
+            const dayAvgs = new Array(7).fill(0); const dayCounts = new Array(7).fill(0); 
+            const monAvgs = new Array(12).fill(0); const monCounts = new Array(12).fill(0);
+
+            hourSamples.forEach(s => {
+                const d = new Date(s.ts);
+                const h = d.getHours();
+                const day = (d.getDay() + 6) % 7;
+                const m = d.getMonth();
+
+                hrAvgs[h] += s.count; hrCounts[h]++;
+                dayAvgs[day] += s.count; dayCounts[day]++;
+                monAvgs[m] += s.count; monCounts[m]++;
+            });
+
+            for(let i=0; i<24; i++) hrAvgs[i] = hrCounts[i] ? Math.round(hrAvgs[i]/hrCounts[i]) : 0;
+            for(let i=0; i<7; i++) dayAvgs[i] = dayCounts[i] ? Math.round(dayAvgs[i]/dayCounts[i]) : 0;
+            for(let i=0; i<12; i++) monAvgs[i] = monCounts[i] ? Math.round(monAvgs[i]/monCounts[i]) : 0;
+
+            let globalAvg = 0;
+            if (hourSamples.length > 0) {
+                const sum = hourSamples.reduce((a, b) => a + b.count, 0);
+                globalAvg = Math.round(sum / hourSamples.length);
+            }
+
+            let max09Hr = 0, max09Val = -1; hrAvgs.forEach((v, i) => { if(v>max09Val) {max09Val=v; max09Hr=i;} });
+            let min09Hr = 0, min09Val = Infinity; hrAvgs.forEach((v, i) => { if(v<min09Val) {min09Val=v; min09Hr=i;} });
+
+            document.getElementById('kpi-day').innerText = globalAvg;
+            document.getElementById('kpi-month').innerText = `${String(max09Hr).padStart(2, '0')}:00`;
+            document.getElementById('kpi-cycle').innerText = `${String(min09Hr).padStart(2, '0')}:00`;
+
+            window.renderDisponibilidadCharts(hrAvgs, dayAvgs, monAvgs);
+            window.renderDisponibilidadRanking(timelines);
+        };
+
+        window.renderDisponibilidadCharts = function(avgHr09, avgDay09, avgMon09) {
+            if (window.chartsInstance.dispHora) { window.chartsInstance.dispHora.destroy(); window.chartsInstance.dispHora = null; }
+            if (window.chartsInstance.dispDia) { window.chartsInstance.dispDia.destroy(); window.chartsInstance.dispDia = null; }
+            if (window.chartsInstance.dispMes) { window.chartsInstance.dispMes.destroy(); window.chartsInstance.dispMes = null; }
+
+            const ctxHora = document.getElementById('chartDispHora').getContext('2d');
+            window.chartsInstance.dispHora = new Chart(ctxHora, new Object({
+                type: 'line',
+                data: new Object({
+                    labels: Array.from({length: 24}, (_, i) => `${String(i).padStart(2, '0')}:00`),
+                    datasets: new Array(new Object({ label: 'Bomberos 0-9 (Prom.)', data: avgHr09, borderColor: '#B91C1C', backgroundColor: 'rgba(185, 28, 28, 0.1)', borderWidth: 3, fill: true, tension: 0.3 }))
+                }),
+                options: new Object({
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: new Object({ legend: new Object({ display: false }), tooltip: new Object({ mode: 'index', intersect: false }) }),
+                    scales: new Object({
+                        y: new Object({ beginAtZero: true, grid: new Object({ borderDash: new Array(4, 4), color: '#e2e8f0' }) }),
+                        x: new Object({ grid: new Object({ display: false }), ticks: new Object({ font: new Object({ family: "'Segoe UI', sans-serif", size: 10, weight: 'bold' }), maxRotation: 90, minRotation: 45 }) })
+                    })
+                })
+            }));
+
+            const ctxDia = document.getElementById('chartDispDia').getContext('2d');
+            window.chartsInstance.dispDia = new Chart(ctxDia, new Object({
+                type: 'bar',
+                data: new Object({
+                    labels: new Array('LUNES', 'MARTES', 'MIÉRCOLES', 'JUEVES', 'VIERNES', 'SÁBADO', 'DOMINGO'),
+                    datasets: new Array(new Object({ label: 'Bomberos 0-9 (Prom.)', data: avgDay09, backgroundColor: '#334155', borderRadius: 8, borderSkipped: false }))
+                }),
+                options: new Object({
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: new Object({ legend: new Object({ display: false }) }),
+                    scales: new Object({
+                        y: new Object({ beginAtZero: true, grid: new Object({ borderDash: new Array(4, 4), color: '#e2e8f0' }) }),
+                        x: new Object({ grid: new Object({ display: false }), ticks: new Object({ font: new Object({ family: "'Segoe UI', sans-serif", size: 10, weight: 'bold' }), maxRotation: 45, minRotation: 45 }) })
+                    })
+                })
+            }));
+
+            const ctxMes = document.getElementById('chartDispMes').getContext('2d');
+            window.chartsInstance.dispMes = new Chart(ctxMes, new Object({
+                type: 'bar',
+                data: new Object({
+                    labels: new Array('ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'),
+                    datasets: new Array(new Object({ label: 'Bomberos 0-9 (Prom.)', data: avgMon09, backgroundColor: '#B91C1C', borderRadius: 8, borderSkipped: false }))
+                }),
+                options: new Object({
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: new Object({ legend: new Object({ display: false }) }),
+                    scales: new Object({
+                        y: new Object({ beginAtZero: true, grid: new Object({ borderDash: new Array(4, 4), color: '#e2e8f0' }) }),
+                        x: new Object({ grid: new Object({ display: false }), ticks: new Object({ font: new Object({ family: "'Segoe UI', sans-serif", size: 10, weight: 'bold' }) }) })
+                    })
+                })
+            }));
+        };
+
+        window.renderDisponibilidadRanking = function(timelines) {
+            const container = document.getElementById('disponibilidad-report-container');
+            if (!container) return;
+
+            const list = timelines.map(p => {
+                const hours = (p.total09Ms / (1000 * 60 * 60)).toFixed(1);
+                let percent = 0;
+                if (p.totalTrackedMs > 0) percent = (p.total09Ms / p.totalTrackedMs) * 100;
+                
+                return {
+                    id: p.id, nombre: p.name, foto: p.foto,
+                    orden: p.orden, radial: p.radial, percent: percent, hours: hours
+                };
+            });
+
+            list.sort((a, b) => {
+                if (b.percent !== a.percent) return b.percent - a.percent;
+                return a.orden - b.orden;
+            });
+
+            const mid = Math.ceil(list.length / 2);
+
+            const rowMaker = (item, index, isLeft) => {
+                const rank = isLeft ? index + 1 : index + 1 + mid;
+                const p = item.percent;
+                const pValue = p.toFixed(2);
+                
+                let pClass = 'text-green-600 bg-green-50 border-green-200';
+                if (p < 30) pClass = 'text-red-600 bg-red-50 border-red-200';
+                else if (p < 60) pClass = 'text-yellow-600 bg-yellow-50 border-yellow-200';
+
+                let rankBadge = `<span class="w-6 h-6 bg-slate-100 text-slate-400 font-black flex items-center justify-center border border-slate-200 shadow-sm" style="font-size: 11px; border-radius: 9999px;">${rank}</span>`;
+                if (rank === 1) rankBadge = `<div class="w-7 h-7 bg-yellow-100 border border-yellow-300 text-yellow-600 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="1° LUGAR"><i class="fas fa-trophy"></i></div>`;
+                else if (rank === 2) rankBadge = `<div class="w-7 h-7 bg-slate-100 border border-slate-300 text-slate-500 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="2° LUGAR"><i class="fas fa-medal"></i></div>`;
+                else if (rank === 3) rankBadge = `<div class="w-7 h-7 bg-orange-50 border border-orange-200 text-orange-700 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="3° LUGAR"><i class="fas fa-medal"></i></div>`;
+
+                return `
+                <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100 relative">
+                    <td class="py-3 px-2 text-center align-middle print-rank" style="width: 50px;"><div class="flex justify-center">${rankBadge}</div></td>
+                    <td class="py-3 px-2 font-black text-slate-300 text-center align-middle" style="width: 32px; font-size: 11px;">${item.orden === 9999 ? '-' : item.orden}</td>
+                    <td class="py-3 px-2 overflow-hidden">
+                        <div class="flex items-center gap-3">
+                            <img src="${item.foto}" class="w-10 h-10 object-cover shadow-sm border border-slate-200 flex-shrink-0 print-hide" style="border-radius: 9999px;">
+                            <div class="min-w-0 flex-1">
+                                <div class="font-bold text-slate-800 text-xs leading-tight truncate uppercase print-text" title="${item.nombre}">${item.nombre}</div>
+                                <div class="text-[9px] font-bold text-slate-400 mt-1 tracking-wider uppercase truncate print-hide">RADIAL: ${item.radial}</div>
+                            </div>
+                        </div>
+                    </td>
+                    <td class="py-3 px-2 text-center align-middle overflow-hidden" style="width: 100px;">
+                        <span class="inline-block px-3 py-1.5 font-black tracking-widest ${pClass} border shadow-sm print-pill" style="border-radius: 0.5rem; font-size: 11px; width: 68px;">${pValue}%</span>
+                    </td>
+                    <td class="py-3 px-2 text-right align-middle text-slate-500 font-bold text-xs print-text" style="width: 100px; padding-right: 15px !important;">
+                        ${item.hours} HRS
+                    </td>
+                </tr>`;
+            };
+
+            const col1 = list.slice(0, mid).map((item, idx) => rowMaker(item, idx, true)).join('');
+            const col2 = list.slice(mid).map((item, idx) => rowMaker(item, idx, false)).join('');
+
+            const tableTemplate = (tbodyContent) => `
+                <table class="w-full text-left border-collapse table-fixed min-w-full">
+                    <thead class="bg-slate-50 shadow-sm z-10 sticky top-0">
+                        <tr>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200 print-rank" style="width: 50px; text-align: center;">P.</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="width: 32px; text-align: center;">ORD</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200">BOMBERO</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 100px;">DISP. %</th>
+                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-right border-b border-slate-200" style="width: 100px; padding-right: 15px !important;">DISP. HORAS</th>
+                        </tr>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-slate-100">${tbodyContent}</tbody>
+                </table>
+            `;
+
+            container.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+        };
+
+        window.showToast = function(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+            toast.className = `transform transition-all duration-300 translate-y-full opacity-0 max-w-sm w-full shadow-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 ${bg} text-white uppercase`;
+            toast.style.borderRadius = "1rem";
+            toast.innerHTML = `<div class="p-4 w-full flex items-center gap-3">
+                ${type === 'success' ? '<i class="fas fa-check-circle text-xl"></i>' : '<i class="fas fa-times-circle text-xl"></i>'}
+                <p class="text-sm font-bold tracking-wide">${message}</p>
+            </div>`;
+            container.appendChild(toast);
+            setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 10);
+            setTimeout(() => {
+                toast.classList.add('translate-y-full', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        };
+
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.4 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>
