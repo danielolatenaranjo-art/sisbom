@@ -26,28 +26,36 @@ struct AsistenciaTab: View {
         }
         
         // Calculate statistics
-        var mandatoryCount = 0
-        var attendedCount = 0
-        var totalObligatorias = 0
-        var totalAbonosAsiste = 0
-        
-        for h in displayedHistory {
-            let st = h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            let isAbono = h.userAbono == 1.0 || h.clave.uppercased().contains("ABONO")
+        let stats: (mandatoryCount: Int, attendedCount: Int, totalObligatorias: Int, totalAbonosAsiste: Int) = {
+            var mCount = 0
+            var aCount = 0
+            var tOblig = 0
+            var tAbonos = 0
             
-            if !isAbono {
-                totalObligatorias += 1
-                if st == "A" || st == "ASISTE" {
-                    attendedCount += 1
-                    mandatoryCount += 1
-                } else if st == "F" || st == "FALTA" {
-                    mandatoryCount += 1
+            for h in displayedHistory {
+                let st = h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let isAbono = h.userAbono == 1.0 || h.clave.uppercased().contains("ABONO")
+                
+                if !isAbono {
+                    tOblig += 1
+                    if st == "A" || st == "ASISTE" {
+                        aCount += 1
+                        mCount += 1
+                    } else if st == "F" || st == "FALTA" {
+                        mCount += 1
+                    }
+                } else if st == "A" || st == "ASISTE" {
+                    tAbonos += 1
+                    aCount += 1
                 }
-            } else if st == "A" || st == "ASISTE" {
-                totalAbonosAsiste += 1
-                attendedCount += 1
             }
-        }
+            return (mCount, aCount, tOblig, tAbonos)
+        }()
+        
+        let mandatoryCount = stats.mandatoryCount
+        let attendedCount = stats.attendedCount
+        let totalObligatorias = stats.totalObligatorias
+        let totalAbonosAsiste = stats.totalAbonosAsiste
         
         let pctAsist = mandatoryCount > 0 ? Int((Double(attendedCount) / Double(mandatoryCount)) * 100.0) : 0
         

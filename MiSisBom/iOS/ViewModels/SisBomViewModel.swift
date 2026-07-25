@@ -561,7 +561,7 @@ class SisBomViewModel: ObservableObject {
         }
     }
     
-    func sendChatMessage(alert: Alert, messageText: String) {
+    func sendChatMessage(alert: AlertaItem, messageText: String) {
         guard let user = currentUser else { return }
         
         let date = Date()

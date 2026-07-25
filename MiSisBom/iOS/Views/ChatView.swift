@@ -60,7 +60,6 @@ struct ChatView: View {
                         .aspectRatio(contentMode: .fit)
                         .frame(width: 280, height: 280)
                         .opacity(isDark ? 0.04 : 0.06)
-                        .alignmentGuide(.center) { d in d[HorizontalAlignment.center] }
                     
                     // Messages List
                     ScrollViewReader { proxy in
@@ -92,7 +91,7 @@ struct ChatView: View {
                                     proxy.scrollTo(lastMsg.id, anchor: .bottom)
                                 }
                             }
-                        }
+                        })
                         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
                             if let lastMsg = messages.last {
                                 withAnimation {
