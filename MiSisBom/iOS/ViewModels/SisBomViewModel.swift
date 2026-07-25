@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import FirebaseCore
 import FirebaseFirestore
 import FirebaseMessaging
 import FirebaseAuth
