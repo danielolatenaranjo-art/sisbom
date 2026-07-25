@@ -103,7 +103,7 @@ struct AsistenciaTab: View {
                 } else {
                     LazyVStack(spacing: 12) {
                         ForEach(displayedHistory) { item in
-                            AttendanceItemRow(item: item, isDark: isDark)
+                            AttendanceItemRow(item: item, viewModel: viewModel)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -157,9 +157,10 @@ struct AttendanceCircle: View {
 // MARK: - AttendanceItemRow Component
 struct AttendanceItemRow: View {
     let item: AttendanceSheet
-    let isDark: Bool
+    @ObservedObject var viewModel: SisBomViewModel
 
     var body: some View {
+        let isDark = viewModel.isDarkMode
         let cleanStatus: String = {
             switch item.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) {
             case "A", "ASISTE": return "ASISTE"
@@ -181,7 +182,7 @@ struct AttendanceItemRow: View {
             }
         }()
         
-        GlassCard(viewModel: SisBomViewModel()) {
+        GlassCard(viewModel: viewModel) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.clave)

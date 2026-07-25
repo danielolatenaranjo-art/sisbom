@@ -29,10 +29,11 @@ extension Color {
 // MARK: - SisBomBackground View
 struct SisBomBackground<Content: View>: View {
     @Environment(\.colorScheme) var colorScheme
-    @ObservedObject var viewModel: SisBomViewModel = SisBomViewModel()
+    @ObservedObject var viewModel: SisBomViewModel
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(viewModel: SisBomViewModel, @ViewBuilder content: () -> Content) {
+        self.viewModel = viewModel
         self.content = content()
     }
 
