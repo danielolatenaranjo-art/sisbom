@@ -13,6 +13,7 @@ targets:
           - project.yml
           - iOS_Setup_Guide.md
           - generate_icons.py
+          - Info.plist
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom
