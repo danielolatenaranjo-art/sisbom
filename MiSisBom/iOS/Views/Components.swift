@@ -151,7 +151,7 @@ struct SyncIndicatorDot: View {
                         scale = 1.0
                     }
                 }
-            }
+            })
     }
 }
 
