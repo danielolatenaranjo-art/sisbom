@@ -32,7 +32,7 @@ jobs:
       - name: Resolve Package Dependencies
         run: |
           cd MiSisBom/iOS
-          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom -clonedSourcePackagesPubKeyConfigDirectory build/SourcePackages
+          xcodebuild -resolvePackageDependencies -project SisBom.xcodeproj -scheme SisBom -clonedSourcePackagesDirPath build/SourcePackages
 
       - name: Build iOS Application
         run: |
@@ -43,7 +43,7 @@ jobs:
             -scheme SisBom \
             -sdk iphonesimulator \
             -configuration Release \
-            -clonedSourcePackagesPubKeyConfigDirectory build/SourcePackages \
+            -clonedSourcePackagesDirPath build/SourcePackages \
             -skipMacroValidation \
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="" \
