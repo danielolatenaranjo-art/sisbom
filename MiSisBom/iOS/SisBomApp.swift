@@ -10,8 +10,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
-        // Initialize Firebase SDK when the app launches
-        FirebaseApp.configure()
+        // Attempt dynamic Firebase configuration if cached config exists
+        if let cachedConfigStr = UserDefaults.standard.string(forKey: "saas_firebase_config"),
+           let data = cachedConfigStr.data(using: .utf8),
+           let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let apiKey = config["apiKey"] as? String,
+           let projectId = config["projectId"] as? String,
+           let appId = config["appId"] as? String,
+           let messagingSenderId = config["messagingSenderId"] as? String,
+           let storageBucket = config["storageBucket"] as? String {
+            
+            let options = FirebaseOptions(googleAppID: appId, gcmSenderID: messagingSenderId)
+            options.apiKey = apiKey
+            options.projectID = projectId
+            options.storageBucket = storageBucket
+            
+            if FirebaseApp.app() == nil {
+                FirebaseApp.configure(options: options)
+            }
+        }
         
         UNUserNotificationCenter.current().delegate = self
         
@@ -61,6 +78,8 @@ struct SisBomApp: App {
         WindowGroup {
             Group {
                 switch viewModel.currentScreen {
+                case .setup:
+                    SetupView(viewModel: viewModel)
                 case .login:
                     LoginView(viewModel: viewModel)
                 case .main, .chat:

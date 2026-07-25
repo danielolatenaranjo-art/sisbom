@@ -8,6 +8,7 @@ import UIKit
 
 // Screen definitions matching Android enum classes
 enum AppScreen: String, Codable {
+    case setup
     case login
     case main
     case chat
@@ -31,6 +32,14 @@ class SisBomViewModel: ObservableObject {
     @Published var currentUser: UserPersonal? = nil
     @Published var isSyncing: Bool = false
     @Published var isLoggingIn: Bool = false
+    
+    // MARK: - SaaS License States
+    @Published var saasLicenseKey: String = ""
+    @Published var saasClientName: String = ""
+    @Published var saasLogoUrl: String = ""
+    @Published var saasActivationError: String = ""
+    @Published var isActivatingLicense: Bool = false
+    
     @Published var isDarkMode: Bool = false {
         didSet {
             UserDefaults.standard.set(isDarkMode, forKey: "app_dark_mode")
@@ -87,11 +96,29 @@ class SisBomViewModel: ObservableObject {
         // Load local cache for instant offline view
         loadLocalCache()
         
-        // Load saved session
-        if let savedUser: UserPersonal = loadCache(key: "fire_user") {
-            self.currentUser = savedUser
-            self.currentScreen = .main
-            self.startFirebaseSync(userId: savedUser.idRegistro)
+        // Check SaaS License configuration
+        let savedLicense = UserDefaults.standard.string(forKey: "saas_license_key") ?? ""
+        let savedConfigStr = UserDefaults.standard.string(forKey: "saas_firebase_config") ?? ""
+        self.saasClientName = UserDefaults.standard.string(forKey: "saas_client_name") ?? ""
+        self.saasLogoUrl = UserDefaults.standard.string(forKey: "saas_logo_url") ?? ""
+        self.saasLicenseKey = savedLicense
+        
+        if savedLicense.isEmpty || savedConfigStr.isEmpty {
+            self.currentScreen = .setup
+        } else {
+            initializeDynamicFirebase(configStr: savedConfigStr)
+            
+            // Load saved user session
+            if let savedUser: UserPersonal = loadCache(key: "fire_user") {
+                self.currentUser = savedUser
+                self.currentScreen = .main
+                self.startFirebaseSync(userId: savedUser.idRegistro)
+            } else {
+                self.currentScreen = .login
+            }
+            
+            // Re-check license validity asynchronously
+            checkLicenseStatus()
         }
         
         // Timer to skip initial sound triggers for historical items
@@ -735,5 +762,185 @@ class SisBomViewModel: ObservableObject {
             self.currentUser = updated
             self.saveCache(updated, key: "fire_user")
         }
+    }
+    
+    // MARK: - Dynamic Firebase & SaaS License Methods
+    
+    func initializeDynamicFirebase(configStr: String) {
+        guard let data = configStr.data(using: .utf8),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let apiKey = config["apiKey"] as? String,
+              let projectId = config["projectId"] as? String,
+              let appId = config["appId"] as? String,
+              let messagingSenderId = config["messagingSenderId"] as? String,
+              let storageBucket = config["storageBucket"] as? String else {
+            print("Error: Invalid Firebase config JSON")
+            return
+        }
+        
+        let options = FirebaseOptions(googleAppID: appId, gcmSenderID: messagingSenderId)
+        options.apiKey = apiKey
+        options.projectID = projectId
+        options.storageBucket = storageBucket
+        
+        if let currentApp = FirebaseApp.app() {
+            currentApp.delete { _ in
+                FirebaseApp.configure(options: options)
+                print("Dynamic Firebase re-configured: \(projectId)")
+            }
+        } else {
+            FirebaseApp.configure(options: options)
+            print("Dynamic Firebase configured: \(projectId)")
+        }
+    }
+
+    func activateLicense(key: String, onComplete: ((Bool) -> Void)? = nil) {
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard !trimmedKey.isEmpty else { return }
+        
+        isActivatingLicense = true
+        saasActivationError = ""
+        
+        let urlString = "https://validatelicense-3kkeukidtq-uc.a.run.app"
+        guard let url = URL(string: urlString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("SisBom-iOS/1.1.7", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 10
+        
+        let body: [String: Any] = [
+            "licenseKey": trimmedKey,
+            "module": "apk"
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.isActivatingLicense = false
+                
+                if let error = error {
+                    self.saasActivationError = "Error de conexión: \(error.localizedDescription)"
+                    onComplete?(false)
+                    return
+                }
+                
+                guard let data = data,
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    self.saasActivationError = "Respuesta del servidor inválida."
+                    onComplete?(false)
+                    return
+                }
+                
+                let authorized = json["authorized"] as? Bool ?? false
+                if authorized, let firebaseConfig = json["firebaseConfig"] as? [String: Any],
+                   let configData = try? JSONSerialization.data(withJSONObject: firebaseConfig),
+                   let configStr = String(data: configData, encoding: .utf8) {
+                    
+                    let clientName = json["clientName"] as? String ?? json["nombreMostrar"] as? String ?? "SisBom"
+                    let logoUrl = json["logoUrl"] as? String ?? ""
+                    
+                    // Save to UserDefaults
+                    UserDefaults.standard.set(trimmedKey, forKey: "saas_license_key")
+                    UserDefaults.standard.set(configStr, forKey: "saas_firebase_config")
+                    UserDefaults.standard.set(clientName, forKey: "saas_client_name")
+                    UserDefaults.standard.set(logoUrl, forKey: "saas_logo_url")
+                    
+                    self.saasLicenseKey = trimmedKey
+                    self.saasClientName = clientName
+                    self.saasLogoUrl = logoUrl
+                    
+                    if !logoUrl.isEmpty {
+                        self.downloadClientLogo(logoUrl)
+                    }
+                    
+                    self.initializeDynamicFirebase(configStr: configStr)
+                    self.currentScreen = .login
+                    onComplete?(true)
+                } else {
+                    let reason = json["reason"] as? String ?? "Licencia no autorizada o vencida."
+                    self.saasActivationError = reason
+                    onComplete?(false)
+                }
+            }
+        }.resume()
+    }
+
+    func checkLicenseStatus() {
+        guard let licenseKey = UserDefaults.standard.string(forKey: "saas_license_key"), !licenseKey.isEmpty else {
+            self.currentScreen = .setup
+            return
+        }
+        
+        let urlString = "https://validatelicense-3kkeukidtq-uc.a.run.app"
+        guard let url = URL(string: urlString) else { return }
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("SisBom-iOS/1.1.7", forHTTPHeaderField: "User-Agent")
+        request.timeoutInterval = 8
+        
+        let body: [String: Any] = [
+            "licenseKey": licenseKey,
+            "module": "apk"
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if let data = data,
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    let authorized = json["authorized"] as? Bool ?? false
+                    if !authorized {
+                        self.clearLicense()
+                    }
+                }
+            }
+        }.resume()
+    }
+
+    func clearLicense() {
+        let fileManager = FileManager.default
+        if let docsDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let logoPath = docsDir.appendingPathComponent("client_logo.png")
+            try? fileManager.removeItem(at: logoPath)
+        }
+        
+        UserDefaults.standard.removeObject(forKey: "saas_license_key")
+        UserDefaults.standard.removeObject(forKey: "saas_firebase_config")
+        UserDefaults.standard.removeObject(forKey: "saas_client_name")
+        UserDefaults.standard.removeObject(forKey: "saas_logo_url")
+        UserDefaults.standard.removeObject(forKey: "fire_user")
+        
+        self.currentUser = nil
+        self.saasLicenseKey = ""
+        self.saasClientName = ""
+        self.saasLogoUrl = ""
+        self.currentScreen = .setup
+    }
+
+    func downloadClientLogo(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        URLSession.shared.dataTask(with: url) { data, response, error in
+            guard let data = data, error == nil else { return }
+            if let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let fileUrl = docsDir.appendingPathComponent("client_logo.png")
+                try? data.write(to: fileUrl)
+            }
+        }.resume()
+    }
+
+    func getInstitutionLogo() -> UIImage {
+        if let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let fileUrl = docsDir.appendingPathComponent("client_logo.png")
+            if let data = try? Data(contentsOf: fileUrl), let image = UIImage(data: data) {
+                return image
+            }
+        }
+        return UIImage(named: "logo") ?? UIImage(systemName: "shield.fill") ?? UIImage()
     }
 }

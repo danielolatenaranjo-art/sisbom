@@ -16,24 +16,26 @@ struct LoginView: View {
                 VStack(spacing: 0) {
                     Spacer(minLength: 40)
                     
-                    // Logo
-                    Image("logo")
+                    // Dynamic Institution Logo
+                    Image(uiImage: viewModel.getInstitutionLogo())
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 120, height: 120)
-                        .padding(.bottom, 16)
+                        .frame(width: 100, height: 100)
+                        .padding(.bottom, 14)
                     
-                    // Header Title
+                    // Header Title & Client Name
                     Text("SISBOM")
                         .font(.system(size: 24, weight: .black))
                         .foregroundColor(isDark ? .white : .textDark)
                         .padding(.bottom, 2)
                     
-                    Text("PORTAL MÓVIL DE PERSONAL")
+                    Text(viewModel.saasClientName.isEmpty ? "PORTAL MÓVIL DE PERSONAL" : viewModel.saasClientName.uppercased())
                         .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                        .foregroundColor(isDark ? Color.red.opacity(0.9) : .textSecondary)
                         .tracking(1.0)
-                        .padding(.bottom, 32)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .padding(.bottom, 24)
                     
                     // Glass Card Login Form
                     GlassCard(viewModel: viewModel) {
@@ -122,6 +124,20 @@ struct LoginView: View {
                         .padding(24)
                     }
                     .padding(.horizontal, 24)
+                    
+                    // Option to change license
+                    Button(action: {
+                        viewModel.clearLicense()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "key.fill")
+                            Text("CAMBIAR LICENCIA DE INSTITUCIÓN")
+                                .font(.system(size: 10, weight: .bold))
+                                .tracking(0.5)
+                        }
+                        .foregroundColor(isDark ? Color.white.opacity(0.4) : Color.black.opacity(0.4))
+                        .padding(.top, 20)
+                    }
                     
                     Spacer(minLength: 40)
                 }

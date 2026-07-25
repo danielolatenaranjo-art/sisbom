@@ -3322,8 +3322,18 @@ input::-webkit-credentials-auto-fill-button {
                         if (unsubMainAlertas) { try { unsubMainAlertas(); } catch(e){} unsubMainAlertas = null; }
                         if (unsubMainSirena) { try { unsubMainSirena(); } catch(e){} unsubMainSirena = null; }
 
+                        let authSuccess = true;
                         if (window.authenticateFirebase) {
-                            await window.authenticateFirebase();
+                            authSuccess = await window.authenticateFirebase();
+                        }
+
+                        // Si falló la autenticación por un error de red (falso positivo de 'online' sin DNS aún), reintentamos en 4 segundos
+                        if (!authSuccess && (reason === 'online' || reason === 'online-retry')) {
+                            console.warn("[SisBom SoftReconnect] La autenticación falló. Reintentando reconexión en 4 segundos por si la red/DNS aún se está propagando...");
+                            setTimeout(() => {
+                                window.softReconnect('online-retry');
+                            }, 4000);
+                            return; // Salimos, la reconexión se hará en el próximo intento
                         }
 
                         if (window.setupMainListeners) {
