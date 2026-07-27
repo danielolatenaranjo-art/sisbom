@@ -28,6 +28,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             if FirebaseApp.app() == nil {
                 FirebaseApp.configure(options: options)
             }
+        } else if FirebaseApp.app() == nil {
+            // Fallback initialization for fresh install to prevent crashes prior to license activation
+            let fallbackOptions = FirebaseOptions(googleAppID: "1:1234567890:ios:fallback0000000", gcmSenderID: "1234567890")
+            fallbackOptions.apiKey = "AIzaSyFallbackKeyForInitialSetup00"
+            fallbackOptions.projectID = "sisbom-fallback"
+            FirebaseApp.configure(options: fallbackOptions)
         }
         
         UNUserNotificationCenter.current().delegate = self

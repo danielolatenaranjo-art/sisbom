@@ -5,10 +5,13 @@ import FirebaseAuth
 
 // Since we'll import Firebase via Swift Package Manager (SPM) in Xcode, we can use the Firestore APIs directly.
 class FirebaseRepository {
-    private let db = Firestore.firestore()
+    private var db: Firestore {
+        return Firestore.firestore()
+    }
     
     // Check if Firebase Auth is currently logged in (anonymous fallback)
     func isUserActive() -> Bool {
+        guard FirebaseApp.app() != nil else { return false }
         return Auth.auth().currentUser != nil
     }
     
