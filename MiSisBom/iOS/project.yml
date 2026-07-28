@@ -32,4 +32,3 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes:
           - fetch
-          - remote-notification

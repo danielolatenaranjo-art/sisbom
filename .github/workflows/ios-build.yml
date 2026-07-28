@@ -49,9 +49,10 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Create App Payload Artifact
+      - name: Create Clean IPA Artifact
         run: |
           cd MiSisBom/iOS
+          rm -rf Payload SisBom.ipa
           mkdir -p Payload
           APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "SisBom.app" -type d | head -n 1)
           if [ -n "$APP_PATH" ]; then
@@ -60,10 +61,11 @@ jobs:
             echo "Error: SisBom.app not found in DerivedData"
             exit 1
           fi
-          zip -r SisBom_iOS_App.zip Payload/ SisBom.xcodeproj
+          zip -r SisBom.ipa Payload
+          echo "SisBom.ipa created successfully."
 
-      - name: Upload iOS Build Artifact
+      - name: Upload iOS IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MiSisBom-iOS-Build
-          path: MiSisBom/iOS/SisBom_iOS_App.zip
+          name: MiSisBom-iOS-IPA
+          path: MiSisBom/iOS/SisBom.ipa
