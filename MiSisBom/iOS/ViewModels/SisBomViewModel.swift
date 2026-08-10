@@ -248,39 +248,10 @@ class SisBomViewModel: ObservableObject {
                 ((!myId.isEmpty && idReg.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myId.lowercased()) ||
                  (!myName.isEmpty && opName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myName.lowercased()))
             
-            let wasActive = self.isCentralActive
             self.isCentralActive = isMeActive
             self.centralOperatorName = opName
             
             if isMeActive {
-                if !wasActive {
-                    let activeName = opName.isEmpty ? myName : opName
-                    let alertId = String(Int64(Date().timeIntervalSince1970 * 1000))
-                    
-                    let dateFormatter = DateFormatter()
-                    dateFormatter.dateFormat = "dd-MM-yyyy"
-                    let dateStr = dateFormatter.string(from: Date())
-                    
-                    let timeFormatter = DateFormatter()
-                    timeFormatter.dateFormat = "HH:mm"
-                    let timeStr = timeFormatter.string(from: Date())
-                    
-                    let safeCuerpo = (self.currentUser?.cuerpoId ?? "").replacingOccurrences(of: " ", with: "_")
-                    
-                    let alertData: [String: Any] = [
-                        "idAlerta": alertId,
-                        "razonAlerta": "OPERADOR DE CENTRAL ACTIVO",
-                        "mensajeAlerta": "\(activeName) ha iniciado sesión como Operador Central de Alarmas.",
-                        "duracion": "1",
-                        "aQuienAlerta": "TC",
-                        "fechaAlerta": dateStr,
-                        "horaAlerta": timeStr,
-                        "emisorAlerta": activeName,
-                        "idRegistroEmisor": myId,
-                        "cuerpoId": safeCuerpo
-                    ]
-                    self.repository.createAlert(alertData: alertData) { _ in }
-                }
                 if self.currentUser?.estado != "0-9" {
                     self.changeStatus(newStatus: "0-9")
                 }

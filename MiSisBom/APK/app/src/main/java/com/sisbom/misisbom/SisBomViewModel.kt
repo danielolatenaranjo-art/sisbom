@@ -693,27 +693,11 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                             ((myId.isNotEmpty() && idReg.trim().lowercase() == myId.lowercase()) ||
                                     (myName.isNotEmpty() && opName.trim().lowercase() == myName.lowercase()))
 
-                    val wasActive = isCentralActive
                     isCentralActive = isMeActive
                     prefs.edit().putBoolean("IS_CENTRAL_MODE", isMeActive).apply()
                     centralOperatorName = opName
 
                     if (isMeActive) {
-                        if (!wasActive) {
-                            val activeName = if (opName.isNotEmpty()) opName else myName
-                            val alertId = System.currentTimeMillis().toString()
-                            val alertObj = Alert(
-                                idAlerta = alertId,
-                                razonAlerta = "OPERADOR DE CENTRAL ACTIVO",
-                                mensajeAlerta = "$activeName ha iniciado sesión como Operador Central de Alarmas.",
-                                duracion = "1",
-                                aQuienAlerta = "TC",
-                                fechaAlerta = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()).format(java.util.Date()),
-                                horaAlerta = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
-                                quienAlerta = activeName
-                            )
-                            repository.createAlert(alertObj, {}, {})
-                        }
                         if (currentUser?.estado != "0-9") {
                             changeStatus("0-9")
                         }

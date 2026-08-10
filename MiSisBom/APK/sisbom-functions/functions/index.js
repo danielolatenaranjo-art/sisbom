@@ -677,6 +677,68 @@ exports.syncTokenTopicsOnUpdate = onDocumentUpdated(
   }
 );
 
+// 6. NOTIFICAR INICIO DE SESIÓN DE OPERADOR DE CENTRAL EN TIEMPO REAL (SOLO AL CAMBIAR OPERADOR EN FIRESTORE)
+exports.notificarOperadorCentral = onDocumentWritten(
+  { database: "{database}", document: "accesos/central" },
+  async (event) => {
+    const newData = event.data.after ? event.data.after.data() : null;
+    const oldData = event.data.before ? event.data.before.data() : null;
+
+    if (!newData) return null;
+
+    const newEstado = String(newData.estado || "").toLowerCase();
+    const oldEstado = oldData ? String(oldData.estado || "").toLowerCase() : "";
+
+    const newOperator = String(newData.nombreBombero || newData.operador || "").trim();
+    const oldOperator = oldData ? String(oldData.nombreBombero || oldData.operador || "").trim() : "";
+
+    const newId = String(newData.idRegistro || "").trim();
+    const oldId = oldData ? String(oldData.idRegistro || "").trim() : "";
+
+    const isNowActive = newEstado === "activo" && (newOperator || newId);
+    const wasActiveSameUser = oldEstado === "activo" && ((newId && newId === oldId) || (newOperator && newOperator === oldOperator));
+
+    if (isNowActive && !wasActiveSameUser) {
+      const dbName = event.params.database || "(default)";
+      const cuerpoId = newData.cuerpoId || newData.licenseKey || newData.cuerpo || (dbName !== "(default)" ? dbName : "");
+      const safeTenant = String(cuerpoId).replace(/[^a-zA-Z0-9-_.~%]/g, "_").trim();
+
+      const topicName = safeTenant ? `alertas_generales_${safeTenant}` : "alertas_generales";
+      const opName = newOperator || `ID ${newId}`;
+
+      const payload = new Object({
+        topic: topicName,
+        data: new Object({
+          title: "OPERADOR DE CENTRAL ACTIVO",
+          body: `${opName} ha iniciado sesión como Operador Central de Alarmas.`,
+          type: "STATUS_CHANGE",
+          gradoAlerta: "1",
+          cuerpoId: String(safeTenant)
+        }),
+        android: new Object({
+          priority: "high"
+        })
+      });
+
+      try {
+        await admin.messaging().send(payload);
+        console.log(`NOTIFICACION PUSH OPERADOR CENTRAL ENVIADA: ${opName} en topic ${topicName}`);
+
+        if (topicName !== "alertas_generales") {
+          try {
+            const fbPayload = Object.assign(new Object(), payload, new Object({ topic: "alertas_generales" }));
+            await admin.messaging().send(fbPayload);
+          } catch (_e) {}
+        }
+      } catch (e) {
+        console.error("Error enviando push de operador central:", e);
+      }
+    }
+
+    return null;
+  }
+);
+
 
 
 

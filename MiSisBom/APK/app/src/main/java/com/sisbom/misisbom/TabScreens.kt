@@ -198,7 +198,58 @@ fun ActividadTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
         ),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        item {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val isOpActive = viewModel.centralOperatorName.isNotEmpty()
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(if (isOpActive) Color(0x2610B981) else Color.Gray.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = if (isOpActive) Icons.Filled.CellTower else Icons.Filled.Business,
+                            contentDescription = null,
+                            tint = if (isOpActive) Color(0xFF10B981) else Color.Gray,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
 
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "OPERADOR CENTRAL DE ALARMAS",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        )
+                        Text(
+                            text = if (isOpActive) "EN CONSOLA: ${viewModel.centralOperatorName.uppercase()}" else "CENTRAL CERRADA / SIN OPERADOR",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isDark) Color.White else Color(0xFF1E293B)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .background(if (isOpActive) Color(0x2610B981) else Color.Black.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = if (isOpActive) "ACTIVO" else "CERRADA",
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isOpActive) Color(0xFF10B981) else Color.Gray
+                        )
+                    }
+                }
+            }
+        }
 
         if (activeDispatches.isEmpty()) {
             item {

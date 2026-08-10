@@ -18,8 +18,51 @@ struct ActividadTab: View {
         
         let activeDispatches = viewModel.dispatchesList.filter { $0.operadorFinal.isEmpty }
         
-        ScrollView {
             VStack(spacing: 16) {
+                // Central Operator Status Card
+                GlassCard(viewModel: viewModel) {
+                    HStack(spacing: 12) {
+                        ZStack {
+                            Circle()
+                                .fill(viewModel.centralOperatorName.isEmpty ? Color.gray.opacity(0.15) : Color.goGreen.opacity(0.15))
+                                .frame(width: 40, height: 40)
+                            
+                            Image(systemName: viewModel.centralOperatorName.isEmpty ? "building.2.crop.circle" : "antenna.radiowaves.left.and.right")
+                                .font(.system(size: 18))
+                                .foregroundColor(viewModel.centralOperatorName.isEmpty ? .textSecondary : .goGreen)
+                        }
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("OPERADOR CENTRAL DE ALARMAS")
+                                .font(.system(size: 9, weight: .black))
+                                .foregroundColor(isDark ? Color.textSecondaryDark : .textSecondary)
+                            
+                            if !viewModel.centralOperatorName.isEmpty {
+                                Text("EN CONSOLA: \(viewModel.centralOperatorName.uppercased())")
+                                    .font(.system(size: 13, weight: .black))
+                                    .foregroundColor(isDark ? .white : .textDark)
+                            } else {
+                                Text("CENTRAL CERRADA / SIN OPERADOR")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(isDark ? Color.textSecondaryDark : .textSecondary)
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        Text(viewModel.centralOperatorName.isEmpty ? "CERRADA" : "ACTIVO")
+                            .font(.system(size: 9, weight: .black))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .foregroundColor(viewModel.centralOperatorName.isEmpty ? (isDark ? Color.textSecondaryDark : .textSecondary) : .goGreen)
+                            .background(viewModel.centralOperatorName.isEmpty ? (isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.05)) : Color.goGreen.opacity(0.15))
+                            .cornerRadius(8)
+                    }
+                    .padding(14)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+                
                 // Availability Panel Card
                 GlassCard(viewModel: viewModel) {
                     VStack(alignment: .leading, spacing: 12) {
