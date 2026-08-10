@@ -213,7 +213,7 @@ fun ActividadTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = if (isOpActive) Icons.Filled.CellTower else Icons.Filled.Business,
+                            imageVector = if (isOpActive) Icons.Filled.CheckCircle else Icons.Filled.Info,
                             contentDescription = null,
                             tint = if (isOpActive) Color(0xFF10B981) else Color.Gray,
                             modifier = Modifier.size(20.dp)
