@@ -656,8 +656,7 @@
                         await signInWithEmailAndPassword(auth, email, storedPassSecure);
                         console.log("Firebase conectado con credenciales en Material Mayor Central");
                     } else {
-                        await signInAnonymously(auth);
-                        console.log("Firebase conectado de forma anónima en Material Mayor Central");
+                        console.warn("Sin credenciales para autenticar Firebase en Material Mayor Central");
                     }
                     
                     window.fbDoc = doc;
@@ -1830,8 +1829,7 @@
                     await signInWithEmailAndPassword(window.fbAuth, email, storedPassSecure);
                     console.log("RE-AUTHENTICATED WITH NEW USER CREDENTIALS:", storedUser);
                 } else {
-                    await signInAnonymously(window.fbAuth);
-                    console.log("RE-AUTHENTICATED ANONYMOUSLY (READ-ONLY)");
+                    console.warn("SIN CREDANCIALES PARA RE-AUTENTICAR EN VENTANA INDEPENDIENTE");
                 }
             } catch (err) {
                 console.error("ERROR RE-AUTHENTICATING IN STANDALONE WINDOW:", err);

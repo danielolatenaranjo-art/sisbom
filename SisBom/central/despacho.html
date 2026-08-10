@@ -21,10 +21,11 @@
            ESTILO FLUENT / MICROSOFT VISION
            ========================================= */
         :root {
-            --bg-app: #0f172a;
-            --bg-card: #1e293b;
-            --bg-input: #0b0f19;
-            --text-main: #f4f4f5;
+            --bg-app: radial-gradient(circle at top right, #1a0505 0%, #070913 100%);
+            --bg-card: rgba(19, 28, 46, 0.55);
+            --bg-card-header: rgba(15, 23, 42, 0.6);
+            --bg-input: rgba(15, 23, 42, 0.65);
+            --text-main: #f8fafc;
             --text-muted: #94a3b8;
             
             --primary-red: #ef4444;
@@ -33,18 +34,19 @@
             --primary-amber: #f59e0b;
             
             --glass-border: rgba(255, 255, 255, 0.08);
-            --shadow-soft: 0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -2px rgba(0, 0, 0, 0.2);
-            --shadow-hover: 0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3);
+            --shadow-soft: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3);
+            --shadow-hover: 0 20px 30px -5px rgba(0, 0, 0, 0.6), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
             
-            --card-radius: 8px;
-            --btn-radius: 6px;
+            --card-radius: 12px;
+            --btn-radius: 8px;
             
             --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         body { 
             font-family: "Segoe UI", "SegoeWP", "Helvetica Neue", sans-serif; 
-            background: var(--bg-app); 
+            background: var(--bg-app) !important; 
+            background-attachment: fixed;
             color: var(--text-main);
             height: 100vh;
             overflow: hidden;
@@ -57,6 +59,26 @@
         @keyframes fade-slide-up {
             from { opacity: 0; transform: translateY(15px); }
             to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* ELIMINAR COMPLETAMENTE FLECHAS BLANCAS Y BOTONES DE SCROLLBAR EN TEXTAREAS E INPUTS */
+        ::-webkit-scrollbar-button,
+        textarea::-webkit-scrollbar-button,
+        input::-webkit-scrollbar-button {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+        }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none !important; 
+            margin: 0 !important; 
+        }
+        input[type=number] {
+            -moz-appearance: textfield !important;
+        }
+        textarea {
+            resize: none !important;
         }
         @keyframes spin-ring {
             0% { transform: rotate(0deg); }
@@ -94,6 +116,8 @@
 
         .card-panel {
             background: var(--bg-card);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
             border: 1px solid var(--glass-border);
             border-radius: var(--card-radius);
             box-shadow: var(--shadow-soft);
@@ -105,7 +129,7 @@
         .panel-header {
             padding: 16px 20px;
             border-bottom: 1px solid var(--glass-border);
-            background: rgba(0, 0, 0, 0.2);
+            background: var(--bg-card-header);
             font-size: 0.8rem;
             font-weight: 700;
             color: var(--text-main);
@@ -284,10 +308,11 @@
         }
 
         /* Scrollbars */
-        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.3); }
+        ::-webkit-scrollbar-corner { background: transparent; }
 
         /* --- RESPONSIVE MOBILE --- */
         @media (max-width: 1024px) {
@@ -1091,6 +1116,7 @@
         let pendingKey = null;
         let currentDispatchId = localStorage.getItem('draft_dispatchId') || null;
         let currentSupportKey = localStorage.getItem('draft_claveApoyo') || null;
+        let isDispatchConfirmed = false;
 
         window.updateFinalizeButtonState = () => {
             const btn = document.getElementById('btn-dispatch-main');
@@ -1205,6 +1231,7 @@
             const btn = pendingBtn;
             const k = pendingKey;
             closePreDispatchModal();
+            isDispatchConfirmed = false;
 
             document.getElementById('svcKey').value = k; 
             document.querySelectorAll('.key-btn').forEach(b => b.classList.remove('selected')); 
@@ -1234,7 +1261,7 @@
                 window.queueFirebaseWrite('set', 'despachos', dispatchId, new Object({
                     id: dispatchId,
                     idServicio: dispatchId,
-                    estado: "activa",
+                    estado: "pre-despacho",
                     clave: k,
                     claveApoyo: "",
                     lugar: (k === '9-0' || k === 'LLAMADO COMANDANCIA') ? "Cuartel General" : "OBTENIENDO DIRECCIÓN...",
@@ -1257,7 +1284,8 @@
                     source: "despacho.html",
                     createdAt: Date.now(),
                     unidades: new Object(),
-                    solicitarConfirmacion: solicitarConfirmacion
+                    solicitarConfirmacion: solicitarConfirmacion,
+                    pushSent: false
                 }), new Object({ merge: true }));
             } catch (e) {
                 console.error("Error saving pre-dispatch:", e);
@@ -1370,6 +1398,7 @@
         };
 
         window.performDispatch = async () => {
+            isDispatchConfirmed = true;
             const btn = document.getElementById('btn-modal-confirm');
             btn.innerHTML = '<div class="spinner-modern" style="width: 20px; height: 20px; border-width: 2px; margin-right: 8px; display: inline-block; vertical-align: middle;"></div> CONFIRMANDO...';
             btn.disabled = true;
@@ -1445,12 +1474,14 @@
 
                     // Master collection updates
                     window.queueFirebaseWrite('update', 'despachos', dispatchId, new Object({
+                        estado: "activa",
                         lugar: loc,
                         preinforme: obs,
                         carros: selectedUnitsSnapshot,
                         carrosTexto: carrosStr,
                         unidades: unidadesData,
-                        solicitarConfirmacion: solicitarConfirmacion
+                        solicitarConfirmacion: solicitarConfirmacion,
+                        pushSent: false
                     }));
 
                     // Actualizar vehículos
@@ -1468,6 +1499,7 @@
 
         window.executeClearForm = (shouldCancelPreDispatch = true) => {
             closeClearModal();
+            isDispatchConfirmed = false;
             
             if (shouldCancelPreDispatch && currentDispatchId) {
                 try {
@@ -1559,8 +1591,13 @@
                 grid.classList.add('state-dispatch');
                 
                 if (header) {
-                    header.classList.remove('hidden');
-                    header.classList.add('flex');
+                    if (isDispatchConfirmed) {
+                        header.classList.remove('hidden');
+                        header.classList.add('flex');
+                    } else {
+                        header.classList.remove('flex');
+                        header.classList.add('hidden');
+                    }
                 }
                 
                 if (titleSpan) {

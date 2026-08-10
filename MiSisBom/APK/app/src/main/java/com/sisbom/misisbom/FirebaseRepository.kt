@@ -79,11 +79,13 @@ data class UserPersonal(
     }
 
     fun hasActiveCDS(): Boolean {
-        return when (cds) {
+        val st = estado.trim().uppercase()
+        val isCdsValue = when (cds) {
             is Number -> cds.toInt() == 1
-            is String -> cds.toString().equals("SI", ignoreCase = true) || cds.toString() == "1"
+            is String -> cds.toString().equals("SI", ignoreCase = true) || cds.toString() == "1" || cds.toString().uppercase().contains("CDS")
             else -> false
         }
+        return isCdsValue || st == "CDS" || st.contains("CDS") || st.contains("COMISION") || st.contains("COMISIÓN")
     }
 }
 
@@ -675,7 +677,8 @@ class FirebaseRepository {
             "visibleMovil" to true,
             "source" to "despacho.html",
             "createdAt" to System.currentTimeMillis(),
-            "unidades" to unidadesData
+            "unidades" to unidadesData,
+            "pushSent" to false
         )
         
         db.collection("despachos").document(idServicio)

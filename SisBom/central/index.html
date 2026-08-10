@@ -360,6 +360,15 @@ input::-webkit-credentials-auto-fill-button {
             color: #ffffff !important;
         }
 
+        #view-servicio .unit-card-tech {
+            height: 380px !important;
+            min-height: 380px !important;
+            max-height: 380px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: space-between !important;
+        }
+
         /* Modales en modo oscuro premium con borde rojo */
         #sys-modal-content,
         #changelog-modal > div,
@@ -444,6 +453,26 @@ input::-webkit-credentials-auto-fill-button {
         #view-servicio .unit-card-tech div[id^="u-overlay-"] .text-slate-500 {
             color: #94a3b8 !important;
         }
+
+        /* ELIMINAR COMPLETAMENTE FLECHAS BLANCAS Y BOTONES DE SCROLLBAR EN TEXTAREAS E INPUTS */
+        ::-webkit-scrollbar-button,
+        textarea::-webkit-scrollbar-button,
+        input::-webkit-scrollbar-button {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+        }
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+            -webkit-appearance: none !important; 
+            margin: 0 !important; 
+        }
+        input[type=number] {
+            -moz-appearance: textfield !important;
+        }
+        textarea {
+            resize: none !important;
+        }
     </style>
 </head>
 <body class="h-screen w-screen flex flex-col text-slate-800 antialiased">
@@ -508,37 +537,7 @@ input::-webkit-credentials-auto-fill-button {
         </div>
     </div>
 
-    <!-- MODAL ACTUALIZACIONES (CHANGELOG) -->
-    <div id="changelog-modal" class="fixed inset-0 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm transition-all duration-300" style="z-index: 9999;">
-        <div class="bg-white rounded-3xl shadow-2xl p-6 w-11/12 max-w-md max-h-[85vh] flex flex-col transform scale-100 transition-transform border border-slate-100">
-            <div class="flex flex-col items-center mb-4 text-bomberos-red shrink-0 text-center">
-                <i class="fas fa-bolt text-4xl mb-2 animate-bounce"></i>
-                <h3 class="text-xl font-black text-slate-800 uppercase leading-none">¡Nueva Actualización!</h3>
-                <span class="text-slate-400 font-bold text-xs mt-1">SISBOM</span>
-            </div>
-            
-            <div class="text-left space-y-4 mb-6 overflow-y-auto pr-2 flex-1 min-h-0 scrollbar-thin">
-                <div class="flex items-start gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-bomberos-red shrink-0"><i class="fas fa-lock text-sm"></i></div>
-                    <div>
-                        <h4 class="font-bold text-slate-700 text-sm">Seguridad y Autenticación</h4>
-                        <p class="text-xs text-slate-500">Se implementó el inicio de sesión seguro con credenciales institucionales.</p>
-                    </div>
-                </div>
-                <div class="flex items-start gap-3">
-                    <div class="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center text-bomberos-red shrink-0"><i class="fas fa-cloud text-sm"></i></div>
-                    <div>
-                        <h4 class="font-bold text-slate-700 text-sm">Optimización de Lecturas</h4>
-                        <p class="text-xs text-slate-500">Sincronización optimizada para reducir drásticamente el consumo de lecturas diarias.</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="shrink-0 mt-auto pt-2">
-                <button onclick="window.dismissChangelog()" class="w-full py-3 bg-bomberos-red hover:bg-bomberos-dark text-white font-bold rounded-xl transition-all text-xs uppercase tracking-widest">Entendido</button>
-            </div>
-        </div>
-    </div>
+
 
     <!-- MODAL FINALIZAR SERVICIO (OVERLAY TÁCTICO) -->
     <div id="finish-modal" class="fixed inset-0 hidden items-center justify-center bg-slate-900/50 backdrop-blur-sm transition-all duration-300" style="z-index: 100;">
@@ -591,6 +590,8 @@ input::-webkit-credentials-auto-fill-button {
                     <option value="10-10">10-10 REBROTE</option>
                     <option value="10-12">10-12 APOYO EXTERNO</option>
                     <option value="10-30">10-30 DECLARADO</option>
+                    <option value="9-0">9-0 ACUARTELAMIENTO</option>
+                    <option value="LLAMADO COMANDANCIA">LLAMADO COMANDANCIA</option>
                 </select>
             </div>
             <div class="flex border-t border-slate-100 bg-slate-50 p-2 gap-2">
@@ -711,14 +712,44 @@ input::-webkit-credentials-auto-fill-button {
                                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                                     <div class="header-card border-l-4 border-l-red-500 relative overflow-hidden">
                                         <div class="flex justify-between items-start mb-2"><div class="card-label">SERVICIO: <span id="svc-id" class="text-slate-600 ml-1">--</span></div></div>
-                                        <div class="flex-1 flex flex-col justify-center items-center text-center">
-                                            <div class="flex items-center justify-center gap-3 cursor-pointer hover:bg-slate-50 px-4 py-2 rounded-2xl transition-colors group" onclick="window.openChangeKeyModal()" title="Modificar clave">
-                                                <h2 id="svc-key" class="font-light text-slate-800 leading-none tracking-tighter" style="font-size: 4rem;">10-0</h2>
-                                                <div class="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors shrink-0"><i class="fas fa-pen text-sm"></i></div>
+                                        <div class="flex-1 flex flex-col justify-center items-center text-center relative">
+                                            <div class="flex items-center justify-center gap-2 cursor-pointer hover:bg-slate-800/40 px-3 py-2 rounded-2xl transition-all border border-transparent hover:border-slate-700/60 group my-auto" onclick="window.toggleInlineChangeKeyPanel()" title="Modificar clave">
+                                                <h2 id="svc-key" class="font-light text-slate-200 leading-none tracking-tighter" style="font-size: 3.5rem;">10-0</h2>
+                                                <div class="w-7 h-7 rounded-full bg-slate-800/60 text-slate-400 flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors shrink-0 border border-slate-700/50"><i class="fas fa-pen text-xs"></i></div>
                                             </div>
+
                                             <p id="svc-loc" class="text-sm font-medium text-slate-600 truncate max-w-full mt-1">Ubicación...</p>
                                             <div id="btn-10-30-container" class="mt-3 hidden w-full px-2">
                                                 <button onclick="window.declare1030()" class="button-10 bg-red-600 text-white text-xs w-full py-2 shadow-md hover:bg-red-700 animate-pulse rounded-full border border-red-500"><i class="fas fa-fire mr-1"></i> DECLARAR 10-30</button>
+                                            </div>
+                                        </div>
+
+                                        <!-- SUBMENÚ INLINE ABSOLUTO EN TARJETA 1 QUE CUBRE PERFECTAMENTE SIN MOVER NINGÚN ELEMENTO -->
+                                        <div id="inline-change-key-panel" class="hidden flex-col gap-2 absolute inset-0 bg-slate-900 opacity-100 border border-blue-500/50 rounded-xl shadow-2xl z-50 p-3 justify-between">
+                                            <div class="flex justify-between items-center">
+                                                <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider block text-left">Seleccionar Nueva Clave:</span>
+                                                <button type="button" onclick="window.toggleInlineChangeKeyPanel(false)" class="text-slate-400 hover:text-white text-xs px-1"><i class="fas fa-times"></i></button>
+                                            </div>
+                                            <select id="inline-new-svc-key" class="w-full py-1.5 px-2 bg-slate-950 text-white font-bold text-xs rounded-lg border border-slate-700 outline-none cursor-pointer">
+                                                <option value="10-0">10-0 ESTRUCTURAL</option>
+                                                <option value="10-1">10-1 VEHICULAR</option>
+                                                <option value="10-2">10-2 PASTIZALES</option>
+                                                <option value="10-3">10-3 RESCATE PERSONAS</option>
+                                                <option value="10-4">10-4 RESCATE VEHICULAR</option>
+                                                <option value="10-5">10-5 HAZMAT</option>
+                                                <option value="10-6">10-6 EMANACIÓN GAS</option>
+                                                <option value="10-7">10-7 ELÉCTRICO</option>
+                                                <option value="10-8">10-8 NO CLASIFICADO</option>
+                                                <option value="10-9">10-9 OTROS SERVICIOS</option>
+                                                <option value="10-10">10-10 REBROTE</option>
+                                                <option value="10-12">10-12 APOYO EXTERNO</option>
+                                                <option value="10-30">10-30 DECLARADO</option>
+                                                <option value="9-0">9-0 ACUARTELAMIENTO</option>
+                                                <option value="LLAMADO COMANDANCIA">LLAMADO COMANDANCIA</option>
+                                            </select>
+                                            <div class="flex gap-2">
+                                                <button type="button" onclick="window.toggleInlineChangeKeyPanel(false)" class="button-10 btn-white flex-1 py-1.5 text-xs font-bold">CANCELAR</button>
+                                                <button type="button" onclick="window.confirmChangeKeyInline()" class="button-10 btn-blue flex-1 py-1.5 text-xs font-bold">GUARDAR</button>
                                             </div>
                                         </div>
                                     </div>
@@ -752,9 +783,23 @@ input::-webkit-credentials-auto-fill-button {
                                                     <div id="svc-control-time" class="text-2xl font-light text-green-400 leading-none mb-2">00:00</div>
                                                 </div>
                                             </div>
-                                            <div class="flex gap-2 w-full items-end mt-auto">
+
+                                            <!-- SUBMENÚ INLINE ABSOLUTO PARA FINALIZAR SERVICIO SIN ALTERAR TAMAÑO DE NINGUNA TARJETA -->
+                                            <div id="inline-finish-panel" class="hidden flex-col gap-2 absolute inset-0 bg-slate-900 opacity-100 border border-red-500/50 rounded-xl shadow-2xl z-50 p-3 justify-between">
+                                                <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider block text-left">Observación de Cierre (Opcional):</span>
+                                                <textarea id="inline-finish-obs" class="input-primary text-xs w-full h-14 resize-none bg-slate-950 text-white p-1.5" placeholder="Detalles de cierre..."></textarea>
+                                                <div id="inline-finish-error" class="hidden text-[10px] font-bold text-red-400 bg-red-950/40 p-1.5 rounded border border-red-900/50 text-center uppercase">
+                                                    Aún hay carros activos. Deben estar 6-8.
+                                                </div>
+                                                <div class="flex gap-2">
+                                                    <button type="button" onclick="window.toggleInlineFinishPanel(false)" class="button-10 btn-white flex-1 py-1.5 text-xs">CANCELAR</button>
+                                                    <button type="button" id="btn-confirm-finish-inline" onclick="window.confirmFinishServiceInline(this)" class="button-10 btn-red flex-1 py-1.5 text-xs">CONFIRMAR</button>
+                                                </div>
+                                            </div>
+
+                                            <div id="finish-btn-row" class="flex gap-2 w-full items-end mt-auto">
                                                 <button id="btn-6-7-control" onclick="window.setControl67()" class="button-10 btn-green flex-1 h-10 text-xs shadow-sm font-bold">6-7 CONTROLADO</button>
-                                                <button onclick="window.finishService()" class="button-10 btn-red flex-1 h-10 text-xs shadow-sm font-bold">FINALIZAR</button>
+                                                <button onclick="window.toggleInlineFinishPanel(true)" class="button-10 btn-red flex-1 h-10 text-xs shadow-sm font-bold">FINALIZAR</button>
                                             </div>
                                         </div>
                                     </div>
@@ -824,13 +869,13 @@ input::-webkit-credentials-auto-fill-button {
                             <!-- UNIDADES EN EL ACTO -->
                             <div class="mb-10">
                                 <div class="flex items-center gap-4 mb-6"><h3 class="text-sm font-bold text-slate-600 uppercase tracking-widest pl-2 border-l-4 border-red-500">Unidades en el Acto</h3><div class="h-px bg-slate-200 flex-1"></div></div>
-                                <div id="active-units-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+                                <div id="active-units-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"></div>
                             </div>
 
                              <!-- HISTORIAL DE SALIDAS -->
                             <div class="mb-10">
                                 <div class="flex items-center gap-4 mb-6"><h3 class="text-sm font-bold text-slate-400 uppercase tracking-widest pl-2 border-l-4 border-slate-300">Historial de Salidas</h3><div class="h-px bg-slate-100 flex-1"></div></div>
-                                <div id="history-units-grid" class="flex flex-col gap-4"></div>
+                                <div id="history-units-grid" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
                             </div>
                         </div>
                     </div>
@@ -1685,6 +1730,31 @@ input::-webkit-credentials-auto-fill-button {
             if (lastDockHTML !== newContent) { dock.innerHTML = newContent; lastDockHTML = newContent; }
         };
 
+        window.updateSvcKeyDisplay = function(keyText) {
+            const el = document.getElementById('svc-key');
+            if (!el) return;
+            const cleanKey = String(keyText || '').trim();
+
+            if (cleanKey.length > 12) {
+                el.style.fontSize = '1.35rem';
+                el.style.lineHeight = '1.2';
+                el.style.fontWeight = '700';
+                el.style.wordBreak = 'break-word';
+            } else if (cleanKey.length > 5) {
+                el.style.fontSize = '2.1rem';
+                el.style.lineHeight = '1.1';
+                el.style.fontWeight = '600';
+                el.style.wordBreak = 'normal';
+            } else {
+                el.style.fontSize = '3.5rem';
+                el.style.lineHeight = '1';
+                el.style.fontWeight = '300';
+                el.style.wordBreak = 'normal';
+            }
+
+            el.innerText = cleanKey;
+        };
+
         window.declare1030 = function() {
             const svc = activeServices.at(currentModalIndex);
             if (!svc) return;
@@ -1694,7 +1764,7 @@ input::-webkit-credentials-auto-fill-button {
                 svc.lastLocalUpdate = Date.now();
                 localStorage.setItem('activeServices', JSON.stringify(activeServices));
                 window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: '10-30' }));
-                document.getElementById('svc-key').innerText = '10-30';
+                window.updateSvcKeyDisplay('10-30');
                 document.getElementById('btn-10-30-container').classList.add('hidden');
                 window.updateFloatingDock();
                 window.notifyLocalIframes();
@@ -1702,23 +1772,58 @@ input::-webkit-credentials-auto-fill-button {
             });
         };
 
-        window.openChangeKeyModal = function() {
+        window.toggleInlineChangeKeyPanel = function(show) {
+            const panel = document.getElementById('inline-change-key-panel');
+            if (!panel) return;
             const svc = activeServices.at(currentModalIndex);
             if (!svc) return;
-            document.getElementById('new-svc-key').value = svc.key;
-            const modal = document.getElementById('change-key-modal');
-            const content = document.getElementById('change-key-modal-content');
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+
+            const isCurrentlyHidden = panel.classList.contains('hidden');
+            const shouldShow = show !== undefined ? show : isCurrentlyHidden;
+
+            if (shouldShow) {
+                document.getElementById('inline-new-svc-key').value = svc.key;
+                panel.classList.remove('hidden');
+                panel.classList.add('flex');
+            } else {
+                panel.classList.add('hidden');
+                panel.classList.remove('flex');
+            }
+        };
+
+        window.confirmChangeKeyInline = function() {
+            const svc = activeServices.at(currentModalIndex);
+            if (!svc) return;
+            const newKey = document.getElementById('inline-new-svc-key').value;
+            svc.key = newKey;
+            svc.lastLocalUpdate = Date.now();
+            localStorage.setItem('activeServices', JSON.stringify(activeServices));
+            window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: newKey }));
+            window.updateSvcKeyDisplay(newKey);
+            
+            if (newKey === '10-0') {
+                document.getElementById('btn-10-30-container').classList.remove('hidden');
+            } else {
+                document.getElementById('btn-10-30-container').classList.add('hidden');
+            }
+
+            window.toggleInlineChangeKeyPanel(false);
+            window.updateFloatingDock();
+            window.notifyLocalIframes();
+            window.showToast(`Clave modificada a ${newKey}`);
+        };
+
+        window.openChangeKeyModal = function() {
+            window.toggleInlineChangeKeyPanel(true);
         };
 
         window.closeChangeKeyModal = function() {
+            window.toggleInlineChangeKeyPanel(false);
             const modal = document.getElementById('change-key-modal');
-            const content = document.getElementById('change-key-modal-content');
-            modal.classList.add('opacity-0');
-            content.classList.add('scale-95');
-            setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 200);
+            if (modal) {
+                modal.classList.add('opacity-0');
+                setTimeout(() => { modal.classList.add('hidden'); modal.classList.remove('flex'); }, 200);
+            }
         };
 
         window.confirmChangeKey = function() {
@@ -1729,7 +1834,7 @@ input::-webkit-credentials-auto-fill-button {
             svc.lastLocalUpdate = Date.now();
             localStorage.setItem('activeServices', JSON.stringify(activeServices));
             window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: newKey }));
-            document.getElementById('svc-key').innerText = newKey;
+            window.updateSvcKeyDisplay(newKey);
             
             if (newKey === '10-0') {
                 document.getElementById('btn-10-30-container').classList.remove('hidden');
@@ -1754,7 +1859,8 @@ input::-webkit-credentials-auto-fill-button {
             currentModuleId = 'gestor_tactico';
 
             document.getElementById('svc-id').innerText = svc.id;
-            document.getElementById('svc-key').innerText = svc.key === '10-12' && svc.claveApoyo ? `${svc.key} (${svc.claveApoyo})` : svc.key;
+            const displayKeyText = svc.key === '10-12' && svc.claveApoyo ? `${svc.key} (${svc.claveApoyo})` : svc.key;
+            window.updateSvcKeyDisplay(displayKeyText);
             
             if (svc.key === '10-0') {
                 document.getElementById('btn-10-30-container').classList.remove('hidden');
@@ -2161,7 +2267,7 @@ input::-webkit-credentials-auto-fill-button {
                     const btn66Class = !canRequest66 ? `bg-blue-600 text-white font-bold py-1.5 px-2 rounded text-xs shadow-sm flex items-center justify-center gap-1 cursor-default` : `bg-blue-500 hover:bg-blue-600 text-white font-bold py-1.5 px-2 rounded text-xs shadow-sm flex items-center justify-center gap-1`;
                     const btn66Action = !canRequest66 ? '' : `onclick="window.solicitar66(${i})"`;
 
-                    content = `<div class="mt-auto space-y-3 relative z-10"><div><label class="font-bold text-slate-400 uppercase block mb-1 text-xs">CONDUCTOR:</label><input type="text" id="u-driver-${i}" autocomplete="off" placeholder="" class="input-primary text-center py-2 text-xs" value="${u.driverRad||''}" oninput="window.handleUnitConfigInput(${i}, 'driverRad', this)" onkeydown="if(event.key === 'Enter') document.getElementById('u-obac-' + ${i}).focus()"></div><div><label class="font-bold text-slate-400 uppercase block mb-1 text-xs">OBAC:</label><input type="text" id="u-obac-${i}" autocomplete="off" placeholder="" class="input-primary text-center py-2 text-xs" value="${u.obacRad||''}" oninput="window.handleUnitConfigInput(${i}, 'obacRad', this)" onkeydown="if(event.key === 'Enter') document.getElementById('u-count-' + ${i}).focus()"></div><div><label class="font-bold text-slate-400 uppercase block mb-1 text-xs">TRIPULACIÓN:</label><input type="text" id="u-count-${i}" autocomplete="off" placeholder="Tripulación..." class="input-primary text-center py-2 text-xs" value="${u.count||''}" oninput="window.handleUnitConfigInput(${i}, 'count', this)" onkeydown="if(event.key === 'Enter') document.getElementById('btn-depart-' + ${i}).click()"></div><div class="grid grid-cols-2 gap-2"><button ${btn1210Action} class="button-10 ${btn1210Class}"><i class="fas fa-steering-wheel"></i> ${btn1210Text}</button><button ${btn66Action} class="button-10 ${btn66Class}"><i class="fas fa-users"></i> ${btn66Text}</button></div><div class="grid grid-cols-2 gap-2 mt-2"><button id="btn-depart-${i}" onclick="window.unitAction(${i}, 'depart', this)" class="button-10 btn-red py-2 shadow-md text-xs">6-0 SALIDA</button><button onclick="window.requestCancelUnit(${i})" class="button-10 btn-white py-2 text-red-500 border border-red-100 hover:bg-red-50 text-xs">CANCELAR</button></div></div>`;
+                    content = `<div class="flex-1 flex flex-col justify-between space-y-2 relative z-10"><div><div class="mb-1.5"><label class="font-bold text-slate-400 uppercase block mb-0.5 text-[10px]">CONDUCTOR:</label><input type="text" id="u-driver-${i}" autocomplete="off" placeholder="" class="input-primary text-center py-1 text-xs" value="${u.driverRad||''}" oninput="window.handleUnitConfigInput(${i}, 'driverRad', this)" onkeydown="if(event.key === 'Enter') document.getElementById('u-obac-' + ${i}).focus()"></div><div class="mb-1.5"><label class="font-bold text-slate-400 uppercase block mb-0.5 text-[10px]">OBAC:</label><input type="text" id="u-obac-${i}" autocomplete="off" placeholder="" class="input-primary text-center py-1 text-xs" value="${u.obacRad||''}" oninput="window.handleUnitConfigInput(${i}, 'obacRad', this)" onkeydown="if(event.key === 'Enter') document.getElementById('u-count-' + ${i}).focus()"></div><div class="mb-1.5"><label class="font-bold text-slate-400 uppercase block mb-0.5 text-[10px]">TRIPULACIÓN:</label><input type="text" id="u-count-${i}" autocomplete="off" placeholder="Tripulación..." class="input-primary text-center py-1 text-xs" value="${u.count||''}" oninput="window.handleUnitConfigInput(${i}, 'count', this)" onkeydown="if(event.key === 'Enter') document.getElementById('btn-depart-' + ${i}).click()"></div></div><div class="space-y-2 pt-1"><div class="grid grid-cols-2 gap-2"><button ${btn1210Action} class="button-10 ${btn1210Class}"><i class="fas fa-steering-wheel"></i> ${btn1210Text}</button><button ${btn66Action} class="button-10 ${btn66Class}"><i class="fas fa-users"></i> ${btn66Text}</button></div><div class="grid grid-cols-2 gap-2"><button id="btn-depart-${i}" onclick="window.unitAction(${i}, 'depart', this)" class="button-10 btn-red py-2 shadow-md text-xs">6-0 SALIDA</button><button onclick="window.requestCancelUnit(${i})" class="button-10 btn-white py-2 text-red-500 border border-red-100 hover:bg-red-50 text-xs">CANCELAR</button></div></div></div>`;
                 } else if(u.status === 'en_trayecto') {
                     borderClass = u.is615 ? 'border-orange-500' : 'border-blue-500';
                     const badgeClass = u.is615 ? 'bg-orange-950/30 text-orange-400 border border-orange-900/30' : 'bg-blue-950/30 text-blue-400 border border-blue-900/30';
@@ -2169,19 +2275,19 @@ input::-webkit-credentials-auto-fill-button {
                     const titleLabel = u.is615 ? 'CLAVE 6-15' : 'CLAVE 6-0';
                     headerBadge = `<span class="${badgeClass} px-2 py-0.5 rounded font-bold uppercase text-xs">${textLabel}</span>`;
                     const extraBtns = isExternal ? `<button onclick="window.unitAction(${i}, 'return')" class="button-10 btn-white py-2 col-span-2 text-xs">6-9</button>` : `<button onclick="window.unitAction(${i}, 'return')" class="button-10 btn-white py-2 text-xs">6-9</button><button onclick="window.unitAction(${i}, 'quarters')" class="button-10 btn-dark py-2 text-xs">6-10</button>`;
-                    content = `<div class="mt-auto relative z-10">${personnelInfoBlock}<div class="flex flex-col items-center justify-center mb-3 bg-slate-50 rounded-lg p-2 border border-slate-100"><span class="font-bold text-slate-400 uppercase tracking-widest mb-1 text-xs">${titleLabel}</span><span class="font-mono font-bold text-slate-700 leading-none tracking-tight text-xs">${u.departureTime ? String(u.departureTime).replace(/['"]/g, '').trim().substring(0, 5) : '--:--'}</span></div><textarea oninput="window.handleUnitTripInfo(${i}, this)" class="input-primary w-full mb-2 resize-none h-10 bg-slate-50 focus:bg-white text-xs" placeholder="Novedades del viaje...">${u.tripInfo || ''}</textarea><div class="grid grid-cols-2 gap-2"><button onclick="window.unitAction(${i}, 'arrive')" class="button-10 btn-blue py-2 shadow-md col-span-2 text-xs">6-3 LLEGADA</button>${extraBtns}</div></div>`;
+                    content = `<div class="flex-1 flex flex-col justify-between relative z-10"><div>${personnelInfoBlock}<div class="flex flex-col items-center justify-center my-2 bg-slate-50 rounded-lg p-2 border border-slate-100"><span class="font-bold text-slate-400 uppercase tracking-widest mb-1 text-xs">${titleLabel}</span><span class="font-mono font-bold text-slate-700 leading-none tracking-tight text-sm">${u.departureTime ? String(u.departureTime).replace(/['"]/g, '').trim().substring(0, 5) : '--:--'}</span></div><textarea oninput="window.handleUnitTripInfo(${i}, this)" class="input-primary w-full mb-1 resize-none h-16 bg-slate-50 focus:bg-white text-xs" placeholder="Novedades del viaje...">${u.tripInfo || ''}</textarea></div><div class="grid grid-cols-2 gap-2 pt-2"><button onclick="window.unitAction(${i}, 'arrive')" class="button-10 btn-blue py-2 shadow-md col-span-2 text-xs">6-3 LLEGADA</button>${extraBtns}</div></div>`;
                 } else if(u.status === 'en_lugar') {
                     borderClass = 'border-green-500';
                     const badgeClass = u.is615 ? 'bg-green-950/30 text-green-400 border border-green-900/30' : 'bg-green-950/30 text-green-400 border border-green-900/30';
                     const textLabel = u.is615 ? 'En Hospital' : 'En Lugar';
                     headerBadge = `<span class="${badgeClass} px-2 py-0.5 rounded font-bold uppercase text-xs">${textLabel}</span>`;
                     let optionalBtn = u.is615 ? `<button onclick="window.unitAction(${i}, 'return-emergency')" class="button-10 bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 w-full py-2" style="font-size: 10px;" title="Vuelve a la emergencia">6-13 CLAVE ${svc.key}</button>` : `<button onclick="window.unitAction(${i}, '6-15')" class="button-10 bg-orange-50 text-orange-600 border border-orange-200 hover:bg-orange-100 w-full py-2 text-xs" title="Se dirige a Centro Asistencial">6-15</button>`;
-                    content = `<div class="mt-auto relative z-10">${personnelInfoBlock}<div class="flex justify-between text-slate-400 font-bold mb-2 text-xs"><span>${u.is615 ? '6-15' : '6-0'}: ${u.departureTime ? String(u.departureTime).replace(/['"]/g, '').trim().substring(0, 5) : '--:--'}</span><span>6-3: ${u.arrivalTime ? String(u.arrivalTime).replace(/['"]/g, '').trim().substring(0, 5) : '--:--'}</span></div><textarea id="u-rep-${i}" rows="2" class="input-primary w-full mb-2 resize-none text-xs" placeholder="Informe..." oninput="window.handleUnitReportInput(${i}, this)">${u.report||''}</textarea><div class="grid grid-cols-2 gap-2"><button onclick="window.unitAction(${i}, 'return')" class="button-10 btn-white w-full py-2 text-xs">6-9</button>${optionalBtn}</div></div>`;
+                    content = `<div class="flex-1 flex flex-col justify-between relative z-10"><div>${personnelInfoBlock}<div class="flex justify-between text-slate-400 font-bold my-2 text-xs bg-slate-950/40 p-2 rounded-lg border border-slate-800/60"><span>${u.is615 ? '6-15' : '6-0'}: ${u.departureTime ? String(u.departureTime).replace(/['"]/g, '').trim().substring(0, 5) : '--:--'}</span><span>6-3: ${u.arrivalTime ? String(u.arrivalTime).replace(/['"]/g, '').trim().substring(0, 5) : '--:--'}</span></div><textarea id="u-rep-${i}" rows="3" class="input-primary w-full mb-1 resize-none text-xs h-20" placeholder="Informe..." oninput="window.handleUnitReportInput(${i}, this)">${u.report||''}</textarea></div><div class="grid grid-cols-2 gap-2 pt-2"><button onclick="window.unitAction(${i}, 'return')" class="button-10 btn-white w-full py-2 text-xs">6-9</button>${optionalBtn}</div></div>`;
                 } else if (u.status === 'retorno') {
                     borderClass = 'border-slate-500';
                     const titleLabel = u.is615 ? 'RETORNANDO DESDE C. ASIST.' : 'RETORNANDO (6-9)';
                     const time69 = u.time69 ? String(u.time69).replace(/['"]/g, '').trim().substring(0, 5) : '--:--';
-                    content = `<div class="mt-auto text-center relative z-10">${personnelInfoBlock}<h4 class="font-bold text-slate-700 uppercase mb-1 text-xs">${titleLabel}</h4><div class="font-mono font-bold text-slate-700 mb-2 text-xs">${time69}</div><button onclick="window.unitAction(${i}, 'quarters')" class="button-10 btn-dark w-full py-2 text-xs">6-10 EN CUARTEL</button></div>`;
+                    content = `<div class="flex-1 flex flex-col justify-between relative z-10"><div>${personnelInfoBlock}<div class="flex flex-col items-center justify-center my-6 bg-slate-50 rounded-xl p-4 border border-slate-100 text-center"><h4 class="font-bold text-slate-700 uppercase mb-2 text-xs">${titleLabel}</h4><div class="font-mono font-bold text-slate-700 text-lg leading-none">${time69}</div></div></div><button onclick="window.unitAction(${i}, 'quarters')" class="button-10 btn-dark w-full py-2.5 text-xs shadow-md">6-10 EN CUARTEL</button></div>`;
                 } else if (u.status === 'finalizado') {
                     borderClass = 'border-slate-500';
                     headerBadge = `<span class="bg-slate-800/60 text-slate-300 border border-slate-700/40 px-2 py-0.5 rounded font-bold uppercase text-xs">En Cuartel</span>`;
@@ -2193,10 +2299,10 @@ input::-webkit-credentials-auto-fill-button {
                     
                     const kmHtml = isExternal ? '' : `<input type="number" id="u-km-${i}" autocomplete="off" placeholder="Ultimo Km:${currentKm}" class="input-primary text-center font-bold text-xs" oninput="window.handleUnitConfigInput(${i}, 'kmVal', this)">`;
  
-                    content = `<div class="mt-auto space-y-2 relative z-10">${personnelInfoBlock}<div class="flex justify-between items-center font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded text-xs"><span>H. LLEGADA:</span><span class="font-mono text-slate-800">${time610}</span></div><input type="text" id="u-obs-${i}" autocomplete="off" placeholder="Observación..." class="input-primary text-xs" oninput="window.handleUnitObservationInput(${i}, this)" value="${u.observation||''}">${kmHtml}<button onclick="window.unitAction(${i}, 'available')" class="button-10 btn-green w-full py-2 shadow-md text-xs">6-8 DISPONIBLE</button></div>`;
+                    content = `<div class="flex-1 flex flex-col justify-between relative z-10"><div class="space-y-2">${personnelInfoBlock}<div class="flex justify-between items-center font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-lg text-xs"><span>H. LLEGADA:</span><span class="font-mono text-slate-800 text-sm">${time610}</span></div><input type="text" id="u-obs-${i}" autocomplete="off" placeholder="Observación..." class="input-primary text-xs py-2" oninput="window.handleUnitObservationInput(${i}, this)" value="${u.observation||''}">${kmHtml}</div><button onclick="window.unitAction(${i}, 'available')" class="button-10 btn-green w-full py-2.5 shadow-md text-xs">6-8 DISPONIBLE</button></div>`;
                 }
                 
-                return `<div class="unit-card-tech p-4 group relative overflow-hidden border-l-8 ${borderClass}"><div id="u-overlay-${i}" class="absolute inset-0 z-50 bg-slate-900/95 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4 hidden"></div>${bgIcon}<div class="relative z-10 flex justify-between items-start mb-2"><span class="text-3xl font-bold text-slate-800 tracking-tighter">${u.name}</span><div class="flex flex-col items-end gap-1.5">${headerBadge}${u.status !== 'pending_departure' && u.status !== 'finalizado' ? `<button onclick="window.requestUrgentRelease(${i})" class="text-[9px] text-red-500 hover:text-white bg-red-50 hover:bg-red-600 transition-colors px-1.5 py-0.5 rounded border border-red-200 font-bold uppercase tracking-wider shadow-sm"><i class="fas fa-eject mr-1"></i> Liberar</button>` : ''}</div></div><div id="u-error-${i}" class="hidden my-2 p-2 bg-red-500/15 border border-red-500/30 rounded-lg text-red-400 font-bold uppercase text-[9px] text-center animate-pulse relative z-10"></div>${content}</div>`;
+                return `<div class="unit-card-tech p-4 group relative overflow-hidden border-l-8 ${borderClass} flex flex-col justify-between h-[380px] min-h-[380px] max-h-[380px]"><div id="u-overlay-${i}" class="absolute inset-0 z-50 bg-slate-900/95 backdrop-blur-sm flex flex-col items-center justify-center text-center p-4 hidden"></div>${bgIcon}<div class="relative z-10 flex justify-between items-start mb-2"><span class="text-3xl font-bold text-slate-800 tracking-tighter">${u.name}</span><div class="flex flex-col items-end gap-1.5">${headerBadge}${u.status !== 'pending_departure' && u.status !== 'finalizado' ? `<button onclick="window.requestUrgentRelease(${i})" class="text-[9px] text-red-500 hover:text-white bg-red-50 hover:bg-red-600 transition-colors px-1.5 py-0.5 rounded border border-red-200 font-bold uppercase tracking-wider shadow-sm"><i class="fas fa-eject mr-1"></i> Liberar</button>` : ''}</div></div><div id="u-error-${i}" class="hidden my-2 p-2 bg-red-500/15 border border-red-500/30 rounded-lg text-red-400 font-bold uppercase text-[9px] text-center animate-pulse relative z-10"></div>${content}</div>`;
             };
 
             let finalHtml = localUnits.map(renderCard).join('');
@@ -2246,7 +2352,7 @@ input::-webkit-credentials-auto-fill-button {
                     return cleanTime.substring(0, 5) || '--:--';
                 };
 
-                const volunteerCount = parseInt(log.cuantosBomberos) || 0; 
+                const volunteerDisplay = log.cuantosBomberos ? String(log.cuantosBomberos).replace(/['"]/g, '').trim() : '0'; 
                 const isExternal = !vehiclesData.some(v => String(v.idCarro).trim() === String(log.carro).trim());
 
                 let displayCarro = String(log.carro || '');
@@ -2290,7 +2396,7 @@ input::-webkit-credentials-auto-fill-button {
                     );
                 }
 
-                const timeGrid = times.map(item => `<div class="flex flex-col items-center px-4 border-r border-slate-200 last:border-0"><span class="font-bold text-slate-500 uppercase mb-1 text-xs">${item.l}</span><span class="text-sm font-mono font-bold text-slate-800 leading-none">${createEditableHistField(item.key, safeTime(item.t), log.idSalida)}</span><span class="font-bold text-slate-400 leading-none mt-1 uppercase text-xs">${item.d ? String(item.d).replace(/['"]/g, '').trim() : '--'}</span></div>`).join('');
+                const timeGrid = times.map(item => `<div class="flex flex-col items-center px-1.5 border-r border-slate-700/60 last:border-0"><span class="font-bold text-slate-400 uppercase mb-0.5 text-[9px]">${item.l}</span><span class="text-xs font-mono font-bold text-white leading-none">${createEditableHistField(item.key, safeTime(item.t), log.idSalida)}</span><span class="font-bold text-slate-400 leading-none mt-0.5 uppercase text-[9px]">${item.d ? String(item.d).replace(/['"]/g, '').trim() : '--'}</span></div>`).join('');
                 const gridColsClass = isExternal ? 'grid-cols-3' : 'grid-cols-5';
 
                 const driverRaw = String(log.conductor || '').replace(/['"]/g, '').trim();
@@ -2302,9 +2408,9 @@ input::-webkit-credentials-auto-fill-button {
                 const driverLabelHtml = window.getPersonnelLabel(extractIdForLabel(driverRaw)); 
                 const obacLabelHtml = window.getPersonnelLabel(extractIdForLabel(obacRaw));
                 
-                const kmHtml = isExternal ? '' : `<div class="px-3 py-1 bg-slate-800 text-white rounded-lg font-bold uppercase w-fit tracking-wider shadow-sm text-xs flex items-center gap-1">KM: ${createEditableHistField('km', safeVal(log.km), log.idSalida)}</div>`;
+                const kmHtml = isExternal ? '' : `<div class="px-2.5 py-1 bg-slate-950 text-white rounded-lg font-bold uppercase w-fit tracking-wider border border-slate-800 text-[10px] flex items-center gap-1">KM: ${createEditableHistField('km', safeVal(log.km), log.idSalida)}</div>`;
                 
-                return `<div class="bg-white border-2 border-slate-100 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col gap-4 relative overflow-hidden group"><div class="absolute left-0 top-0 bottom-0 w-2 ${isExternal ? 'bg-red-400 group-hover:bg-red-500' : 'bg-slate-200 group-hover:bg-slate-400'} transition-colors"></div><div class="flex flex-col xl:flex-row gap-6 items-center border-b-2 border-slate-50 pb-4"><div class="flex items-center gap-5" style="min-width: 220px;"><div class="flex flex-col items-center justify-center w-24"><div class="w-20 h-20 rounded-3xl ${isExternal ? 'bg-red-50 text-red-700 border-red-200' : 'bg-slate-50 text-slate-800 border-slate-200'} flex items-center justify-center font-bold ${textSizeClass} border-2 shadow-inner p-2 text-center leading-tight break-words overflow-hidden">${displayCarro}</div>${extCommune ? `<div class="text-red-600 font-bold uppercase mt-2 text-center leading-tight tracking-widest break-words w-full" style="font-size: 10px;">${extCommune}</div>` : ''}</div><div class="flex flex-col gap-1">${kmHtml}</div></div><div class="flex-1 grid grid-cols-1 sm:grid-cols-3 gap-6 text-sm w-full"><div class="flex flex-col gap-1"><span class="card-label text-slate-500">Conductor:</span><div class="flex items-center gap-2"><i class="fas fa-steering-wheel text-slate-400 text-xs"></i><div class="flex items-center gap-1 overflow-hidden whitespace-nowrap text-xs">${createEditableHistField('conductor', driverLabelHtml, log.idSalida)}</div></div></div><div class="flex flex-col gap-1"><span class="card-label text-slate-500">OBAC:</span><div class="flex items-center gap-2"><i class="fas fa-user-shield text-slate-400 text-xs"></i><div class="flex items-center gap-1 overflow-hidden whitespace-nowrap text-xs">${createEditableHistField('obac', obacLabelHtml, log.idSalida)}</div></div></div><div class="flex flex-col gap-1"><span class="card-label text-slate-500">Bomberos:</span><div class="flex items-center gap-2"><i class="fas fa-users text-slate-400 text-xs"></i><span class="text-slate-800 font-bold text-lg leading-none">${createEditableHistField('cuantosBomberos', volunteerCount, log.idSalida)}</span></div></div></div></div><div class="grid ${gridColsClass} gap-2 ${isExternal ? 'bg-red-50/50 border-red-100' : 'bg-slate-50 border-slate-100'} p-4 rounded-2xl border-2 w-full shadow-inner">${timeGrid}</div><div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs"><div class="bg-slate-50 p-3 rounded-xl border border-slate-100"><span class="font-bold text-slate-500 uppercase block mb-1 text-xs">Pre-Informe</span><p class="text-slate-700 font-medium leading-snug text-xs">${log.preInforme||'-'}</p></div><div class="bg-slate-50 p-3 rounded-xl border border-slate-100"><span class="font-bold text-slate-500 uppercase block mb-1 text-xs">Informe (6-3)</span><p class="text-slate-700 font-medium leading-snug text-xs">${log.informe63||'-'}</p></div><div class="bg-slate-50 p-3 rounded-xl border border-slate-100"><span class="font-bold text-slate-500 uppercase block mb-1 text-xs">Observación</span><p class="text-slate-700 font-medium leading-snug text-xs">${log.observacion||'-'}</p></div></div></div>`;
+                return `<div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-xl flex flex-col gap-3 relative overflow-hidden group"><div class="absolute left-0 top-0 bottom-0 w-1.5 ${isExternal ? 'bg-red-500' : 'bg-slate-600'} transition-colors"></div><div class="flex items-center justify-between border-b border-slate-800/80 pb-3 gap-3"><div class="flex items-center gap-3"><div class="w-14 h-14 rounded-xl ${isExternal ? 'bg-red-950/40 text-red-400 border-red-900/40' : 'bg-slate-950 text-white border-slate-800'} flex flex-col items-center justify-center font-bold ${textSizeClass} border shadow-inner p-1 text-center leading-tight overflow-hidden"><span>${displayCarro}</span>${extCommune ? `<span class="text-red-400 text-[8px] font-bold uppercase mt-0.5 tracking-tighter truncate max-w-full">${extCommune}</span>` : ''}</div>${kmHtml}</div></div><div class="grid grid-cols-3 gap-2 text-xs bg-slate-950/40 p-2.5 rounded-xl border border-slate-800/60"><div class="flex flex-col min-w-0"><span class="text-[9px] font-bold text-slate-400 uppercase">Conductor</span><div class="flex items-center gap-1 text-slate-200 font-semibold text-xs truncate mt-0.5"><i class="fas fa-steering-wheel text-slate-400 text-[10px] shrink-0"></i><span class="truncate">${createEditableHistField('conductor', driverLabelHtml, log.idSalida)}</span></div></div><div class="flex flex-col min-w-0"><span class="text-[9px] font-bold text-slate-400 uppercase">OBAC</span><div class="flex items-center gap-1 text-slate-200 font-semibold text-xs truncate mt-0.5"><i class="fas fa-user-shield text-slate-400 text-[10px] shrink-0"></i><span class="truncate">${createEditableHistField('obac', obacLabelHtml, log.idSalida)}</span></div></div><div class="flex flex-col min-w-0"><span class="text-[9px] font-bold text-slate-400 uppercase">Bomberos</span><div class="flex items-center gap-1 text-slate-200 font-semibold text-xs truncate mt-0.5"><i class="fas fa-users text-slate-400 text-[10px] shrink-0"></i><span class="truncate font-bold">${createEditableHistField('cuantosBomberos', volunteerDisplay, log.idSalida)}</span></div></div></div><div class="grid ${gridColsClass} gap-1 ${isExternal ? 'bg-red-950/20 border-red-900/30' : 'bg-slate-950/60 border-slate-800/80'} p-2 rounded-xl border w-full">${timeGrid}</div><div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]"><div class="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60"><span class="font-bold text-slate-400 uppercase text-[9px] block mb-0.5">Pre-Informe</span><p class="text-slate-200 font-medium leading-snug line-clamp-2">${log.preInforme||'-'}</p></div><div class="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60"><span class="font-bold text-slate-400 uppercase text-[9px] block mb-0.5">Informe (6-3)</span><p class="text-slate-200 font-medium leading-snug line-clamp-2">${log.informe63||'-'}</p></div><div class="bg-slate-950/60 p-2 rounded-lg border border-slate-800/60"><span class="font-bold text-slate-400 uppercase text-[9px] block mb-0.5">Observación</span><p class="text-slate-200 font-medium leading-snug line-clamp-2">${log.observacion||'-'}</p></div></div></div>`;
             }).join('');
         };
 
@@ -2321,16 +2427,20 @@ input::-webkit-credentials-auto-fill-button {
             if (field.startsWith('hora')) {
                 currentValue = String(log[field] || '').replace(/['"]/g, '').trim().substring(0, 5);
                 inputType = 'time';
-            } else if (field === 'km' || field === 'cuantosBomberos') {
+            } else if (field === 'km') {
                 currentValue = log[field] || '0';
                 inputType = 'number';
             } else {
                 currentValue = String(log[field] || '').replace(/['"]/g, '').trim();
-                if (currentValue.includes(' - ')) currentValue = currentValue.split(' - ')[0]; // Mostrar solo ID al editar
+                if (field !== 'cuantosBomberos' && currentValue.includes(' - ')) currentValue = currentValue.split(' - ')[0]; // Mostrar solo ID al editar
             }
 
+            let inputWidth = '60px';
+            if (inputType === 'time') inputWidth = '70px';
+            else if (field === 'cuantosBomberos') inputWidth = '110px';
+
             container.dataset.originalHtml = container.innerHTML;
-            container.innerHTML = `<input type="${inputType}" id="hist-input-${logId}-${field}" class="bg-white border border-blue-400 rounded px-1 py-0.5 font-bold text-slate-700 outline-none shadow-sm text-xs" style="width: ${inputType === 'time' ? '70px' : '60px'};" value="${currentValue}" onblur="window.saveInlineHistEdit('${logId}', '${field}', this)" onkeydown="window.handleInlineHistKey(event, '${logId}', '${field}', this)">`;
+            container.innerHTML = `<input type="${inputType}" id="hist-input-${logId}-${field}" class="bg-white border border-blue-400 rounded px-1 py-0.5 font-bold text-slate-700 outline-none shadow-sm text-xs" style="width: ${inputWidth};" value="${currentValue}" onblur="window.saveInlineHistEdit('${logId}', '${field}', this)" onkeydown="window.handleInlineHistKey(event, '${logId}', '${field}', this)">`;
             
             const inputEl = document.getElementById(`hist-input-${logId}-${field}`);
             if(inputEl) {
@@ -2380,6 +2490,8 @@ input::-webkit-credentials-auto-fill-button {
 
         // Utilidad centralizada para borrar definitivamente un carro del mapa de unidades
         window.removeUnitFromServiceInFirebase = function(svc, unitName) {
+            if (!svc) return;
+            if (!Array.isArray(svc.units)) svc.units = [];
             const activeList = svc.units.map(u => u.name);
             const historyList = globalBitacora.filter(b => String(b.idServicio) === String(svc.id)).map(b => b.carro);
             const fullList = Array.from(new Set(activeList.concat(historyList)));
@@ -2397,6 +2509,8 @@ input::-webkit-credentials-auto-fill-button {
         };
 
         window.updateCarrosString = function(svc) {
+            if (!svc) return;
+            if (!Array.isArray(svc.units)) svc.units = [];
             const activeList = svc.units.map(u => u.name);
             const historyList = globalBitacora.filter(b => String(b.idServicio) === String(svc.id)).map(b => b.carro);
             const fullList = Array.from(new Set(activeList.concat(historyList)));
@@ -2878,8 +2992,10 @@ input::-webkit-credentials-auto-fill-button {
             
             const unitName = `${u} (${c})`;
             const svc = activeServices.at(currentModalIndex);
+            if (!svc) return;
+            if (!Array.isArray(svc.units)) svc.units = [];
             
-            if (svc.units.some(unit => String(unit.name) === unitName)) {
+            if (svc.units.some(unit => unit && String(unit.name) === unitName)) {
                 window.showSysModal("Unidad Duplicada", "Esta unidad de apoyo ya está en el acto.", "fa-exclamation-circle text-amber-500", null, true);
                 return;
             }
@@ -2947,10 +3063,18 @@ input::-webkit-credentials-auto-fill-button {
         
         window.addUnitToService = async function(name) {
             const svc = activeServices.at(currentModalIndex);
-            if (!svc || svc.units.some(u => String(u.name) === String(name))) return;
+            if (!svc) return;
+            if (!Array.isArray(svc.units)) svc.units = [];
+            if (svc.units.some(u => u && String(u.name) === String(name))) return;
             
             const allActiveUnitsMap = new Map();
-            activeServices.forEach(s => s.units.forEach(u => allActiveUnitsMap.set(u.name, s)));
+            if (Array.isArray(activeServices)) {
+                activeServices.forEach(s => {
+                    if (s && Array.isArray(s.units)) {
+                        s.units.forEach(u => { if (u && u.name) allActiveUnitsMap.set(u.name, s); });
+                    }
+                });
+            }
             if (allActiveUnitsMap.has(name)) {
                 return;
             }
@@ -3031,28 +3155,64 @@ input::-webkit-credentials-auto-fill-button {
             window.showToast(`Solicitud 6-6 enviada para ${unit.name}`);
         };
 
-        window.finishService = function() {
-            const svc = activeServices.at(currentModalIndex); if(!svc) return;
-            document.getElementById('finish-obs').value = '';
-            document.getElementById('finish-modal').classList.remove('hidden');
-            document.getElementById('finish-modal').classList.add('flex');
+        window.toggleInlineFinishPanel = function(show) {
+            const panel = document.getElementById('inline-finish-panel');
+            if (!panel) return;
+            const isCurrentlyHidden = panel.classList.contains('hidden');
+            const shouldShow = show !== undefined ? show : isCurrentlyHidden;
+
+            if (shouldShow) {
+                const obsEl = document.getElementById('inline-finish-obs');
+                if (obsEl) obsEl.value = '';
+                const errEl = document.getElementById('inline-finish-error');
+                if (errEl) errEl.classList.add('hidden');
+                panel.classList.remove('hidden');
+                panel.classList.add('flex');
+            } else {
+                panel.classList.add('hidden');
+                panel.classList.remove('flex');
+            }
         };
 
-        window.closeFinishModal = function() { document.getElementById('finish-modal').classList.add('hidden'); document.getElementById('finish-modal').classList.remove('flex'); };
-        
-        window.confirmFinishService = async function(btn) {
-            const svc = activeServices.at(currentModalIndex); if(!svc) return;
-            
-            // VALIDACIÓN: No permite cerrar si hay carros sin liberar o en 6-8
-            if (svc.units.length > 0) {
-                const errorDiv = document.getElementById('finish-error-msg');
-                if(errorDiv) { errorDiv.classList.remove('hidden'); errorDiv.classList.add('animate-pulse'); setTimeout(() => errorDiv.classList.remove('animate-pulse'), 500); }
+        window.confirmFinishServiceInline = function(btn) {
+            const svc = activeServices.at(currentModalIndex);
+            if (!svc) return;
+
+            if (svc.units && svc.units.length > 0) {
+                const errorDiv = document.getElementById('inline-finish-error');
+                if (errorDiv) {
+                    errorDiv.classList.remove('hidden');
+                    errorDiv.classList.add('animate-pulse');
+                    setTimeout(() => errorDiv.classList.remove('animate-pulse'), 500);
+                }
                 return;
             }
-            
-            const obs = document.getElementById('finish-obs').value;
+
+            const obs = document.getElementById('inline-finish-obs')?.value || '';
+            const originalText = btn ? btn.innerText : 'CONFIRMAR';
+            if (btn) { btn.innerText = 'CERRANDO...'; btn.disabled = true; }
+
+            window.executeFinishServiceProcess(svc, obs, () => {
+                if (btn) { btn.innerText = originalText; btn.disabled = false; }
+            });
+        };
+
+        window.finishService = function() {
+            window.toggleInlineFinishPanel(true);
+        };
+
+        window.closeFinishModal = function() { 
+            if (window.toggleInlineFinishPanel) window.toggleInlineFinishPanel(false);
+            const modal = document.getElementById('finish-modal');
+            if (modal) {
+                modal.classList.add('hidden'); 
+                modal.classList.remove('flex'); 
+            }
+        };
+        
+        window.executeFinishServiceProcess = async function(svc, obs, onComplete) {
+            if (!svc) return;
             const currentUser = JSON.parse(localStorage.getItem('adminUser')) || new Object({ nombre: 'Operador' });
-            const originalText = btn.innerHTML; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cerrando.'; btn.disabled = true;
 
             try {
                 // 1. FINALIZAR DESPACHO
@@ -3069,7 +3229,6 @@ input::-webkit-credentials-auto-fill-button {
                 if (pToRelease.length > 0) {
                     pToRelease.forEach(p => {
                         p.enServicio = "0";
-                        // Utilizamos el p.ID seguro extraido desde el snapshot
                         window.queueFirebaseWrite('update', 'personal', String(p.ID || p.idRegistro), new Object({ enServicio: "0" }));
                     });
                     localStorage.setItem('db_personal', JSON.stringify(personnelData));
@@ -3086,10 +3245,40 @@ input::-webkit-credentials-auto-fill-button {
                 }
 
                 // 4. LIMPIAR LOCALMENTE
-                activeServices.splice(currentModalIndex, 1); localStorage.setItem('activeServices', JSON.stringify(activeServices));
-                window.closeFinishModal(); window.minimizeServiceView(); window.updateFloatingDock();
+                if (currentModalIndex >= 0 && activeServices.at(currentModalIndex)?.id === svc.id) {
+                    activeServices.splice(currentModalIndex, 1);
+                } else {
+                    const idx = activeServices.findIndex(s => String(s.id) === String(svc.id));
+                    if (idx >= 0) activeServices.splice(idx, 1);
+                }
+                localStorage.setItem('activeServices', JSON.stringify(activeServices));
+
+                if (window.toggleInlineFinishPanel) window.toggleInlineFinishPanel(false);
+                window.closeFinishModal(); 
+                window.minimizeServiceView(); 
+                window.updateFloatingDock();
                 window.notifyLocalIframes();
-            } catch (e) { console.error(e); } finally { btn.innerHTML = originalText; btn.disabled = false; }
+            } catch (e) { 
+                console.error(e); 
+            } finally { 
+                if (onComplete) onComplete(); 
+            }
+        };
+
+        window.confirmFinishService = async function(btn) {
+            const svc = activeServices.at(currentModalIndex); if(!svc) return;
+            
+            if (svc.units.length > 0) {
+                const errorDiv = document.getElementById('finish-error-msg');
+                if(errorDiv) { errorDiv.classList.remove('hidden'); errorDiv.classList.add('animate-pulse'); setTimeout(() => errorDiv.classList.remove('animate-pulse'), 500); }
+                return;
+            }
+            
+            const obs = document.getElementById('finish-obs').value;
+            const originalText = btn.innerHTML; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cerrando.'; btn.disabled = true;
+            window.executeFinishServiceProcess(svc, obs, () => {
+                btn.innerHTML = originalText; btn.disabled = false;
+            });
         };
 
         window.mapFirebaseEmergencyToService = function(docData, docId) {

@@ -248,10 +248,39 @@ class SisBomViewModel: ObservableObject {
                 ((!myId.isEmpty && idReg.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myId.lowercased()) ||
                  (!myName.isEmpty && opName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myName.lowercased()))
             
+            let wasActive = self.isCentralActive
             self.isCentralActive = isMeActive
             self.centralOperatorName = opName
             
             if isMeActive {
+                if !wasActive {
+                    let activeName = opName.isEmpty ? myName : opName
+                    let alertId = String(Int64(Date().timeIntervalSince1970 * 1000))
+                    
+                    let dateFormatter = DateFormatter()
+                    dateFormatter.dateFormat = "dd-MM-yyyy"
+                    let dateStr = dateFormatter.string(from: Date())
+                    
+                    let timeFormatter = DateFormatter()
+                    timeFormatter.dateFormat = "HH:mm"
+                    let timeStr = timeFormatter.string(from: Date())
+                    
+                    let safeCuerpo = (self.currentUser?.cuerpoId ?? "").replacingOccurrences(of: " ", with: "_")
+                    
+                    let alertData: [String: Any] = [
+                        "idAlerta": alertId,
+                        "razonAlerta": "OPERADOR DE CENTRAL ACTIVO",
+                        "mensajeAlerta": "\(activeName) ha iniciado sesión como Operador Central de Alarmas.",
+                        "duracion": "1",
+                        "aQuienAlerta": "TC",
+                        "fechaAlerta": dateStr,
+                        "horaAlerta": timeStr,
+                        "emisorAlerta": activeName,
+                        "idRegistroEmisor": myId,
+                        "cuerpoId": safeCuerpo
+                    ]
+                    self.repository.createAlert(alertData: alertData) { _ in }
+                }
                 if self.currentUser?.estado != "0-9" {
                     self.changeStatus(newStatus: "0-9")
                 }
@@ -292,10 +321,10 @@ class SisBomViewModel: ObservableObject {
             for d in list {
                 if !self.knownDispatchIds.contains(d.idServicio) {
                     self.knownDispatchIds.insert(d.idServicio)
-                    if !self.isFirstCheck && d.operadorFinal.isEmpty && self.currentUser?.estado != "0-8" {
-                        self.playSound(soundName: "despacho")
+                        let cleanClave = d.clave.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                        let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
+                        self.playSound(soundName: soundName)
                         self.triggerVibration()
-                    }
                 }
             }
             
@@ -490,6 +519,9 @@ class SisBomViewModel: ObservableObject {
         
         self.pendingStatus = newStatus
         self.lastStatusChangeTime = Date()
+        
+        UserDefaults.standard.set(newStatus, forKey: "LAST_SELF_STATUS_CHANGE")
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "LAST_SELF_STATUS_TIME")
 
         repository.updatePersonalStatus(userId: user.idRegistro, status: newStatus) { [weak self] result in
             guard let self = self else { return }
@@ -641,13 +673,20 @@ class SisBomViewModel: ObservableObject {
         let carrosTexto = vehicleClaves.joined(separator: " / ")
         
         // Create units map with initial state matching despacho.html
-        var unidadesMap: [String: String] = [:]
+        var unidadesMap: [String: [String: String]] = [:]
         for vId in vehicleIds {
-            unidadesMap[vId] = "pending_departure"
+            unidadesMap[vId] = [
+                "estado": "pending_departure",
+                "horaSalida": ""
+            ]
         }
         
+        let safeCuerpo = (currentUser?.cuerpoId ?? "").replacingOccurrences(of: " ", with: "_")
+        
         let dispatchData: [String: Any] = [
+            "id": nextId,
             "idServicio": nextId,
+            "estado": "activa",
             "clave": clave,
             "lugar": lugar,
             "preinforme": preinforme,
@@ -663,7 +702,10 @@ class SisBomViewModel: ObservableObject {
             "unidades": unidadesMap,
             "obacServicio": "",
             "informeObac": "",
-            "fechaTermino": ""
+            "fechaTermino": "",
+            "createdAt": Int64(Date().timeIntervalSince1990 * 1000),
+            "pushSent": false,
+            "cuerpoId": safeCuerpo
         ]
         
         repository.createDispatchNew(dispatchId: nextId, data: dispatchData) { [weak self] result in
@@ -682,7 +724,36 @@ class SisBomViewModel: ObservableObject {
     
     // MARK: - Audio and Vibration System
     
+    private var volumeObservation: NSKeyValueObservation?
+    
+    var hasActiveCDS: Bool {
+        guard let my = currentUser else { return false }
+        let st = my.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return st == "CDS" || st.contains("CDS") || st.contains("COMISION") || st.contains("COMISIÓN") || my.cds == 1
+    }
+    
+    func stopAudio() {
+        if audioPlayer?.isPlaying == true {
+            audioPlayer?.stop()
+        }
+        audioPlayer = nil
+    }
+    
+    private func setupVolumeObserver() {
+        if volumeObservation != nil { return }
+        volumeObservation = AVAudioSession.sharedInstance().observe(\.outputVolume) { [weak self] session, _ in
+            guard let self = self else { return }
+            if self.audioPlayer?.isPlaying == true {
+                DispatchQueue.main.async {
+                    self.stopAudio()
+                }
+            }
+        }
+    }
+    
     func playSound(soundName: String) {
+        if hasActiveCDS { return }
+        setupVolumeObserver()
         // Look up resources in main bundle
         guard let url = Bundle.main.url(forResource: soundName, withExtension: "mp3") ??
                         Bundle.main.url(forResource: soundName, withExtension: "wav") ??
@@ -696,6 +767,7 @@ class SisBomViewModel: ObservableObject {
             try AVAudioSession.sharedInstance().setActive(true)
             
             audioPlayer = try AVAudioPlayer(contentsOf: url)
+            audioPlayer?.volume = 1.0
             audioPlayer?.play()
         } catch {
             print("Sound playing error: \(error.localizedDescription)")
@@ -703,6 +775,7 @@ class SisBomViewModel: ObservableObject {
     }
     
     func triggerVibration() {
+        if hasActiveCDS { return }
         let generator = UIImpactFeedbackGenerator(style: .heavy)
         generator.prepare()
         generator.impactOccurred()
@@ -785,9 +858,17 @@ class SisBomViewModel: ObservableObject {
         options.storageBucket = storageBucket
         
         if let currentApp = FirebaseApp.app() {
+            if currentApp.options.projectID == projectId {
+                print("Firebase already configured for project: \(projectId)")
+                return
+            }
             currentApp.delete { _ in
-                FirebaseApp.configure(options: options)
-                print("Dynamic Firebase re-configured: \(projectId)")
+                DispatchQueue.main.async {
+                    if FirebaseApp.app() == nil {
+                        FirebaseApp.configure(options: options)
+                        print("Dynamic Firebase re-configured: \(projectId)")
+                    }
+                }
             }
         } else {
             FirebaseApp.configure(options: options)

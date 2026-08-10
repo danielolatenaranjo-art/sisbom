@@ -611,7 +611,7 @@ fun DespachoTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
     var showConfirmDialog by remember { mutableStateOf(false) }
 
     val clavesRápidas = listOf("10-0", "10-1", "10-2", "10-3", "10-4", "10-5", "10-6", "10-7", "10-8", "10-9", "10-10", "10-12", "10-15", "9-0")
-    val lugaresSugeridos = listOf("Ruta 90", "El Corte", "Peñuelas", "San Luis", "Manantiales", "La Tuna", "Santa Isabel", "Taulemu", "Porvenir", "Cementerio", "Cruce Principal", "Grinvic", "Chacarillas", "La Dehesa Arriba", "La Dehesa Abajo", "Arica", "Camaron", "Cruce Principal", "Villa Alegre", "Villa La Torre", "Villa Carranza", "Villa San Francisco", "Villa Rucalemu", "Villa San Eduardo", "Villa Eben ezer", "Estadio")
+    val lugaresSugeridos = emptyList<String>()
 
     val scrollState = rememberScrollState()
 
@@ -3171,7 +3171,15 @@ fun AttendanceItemCard(item: AttendanceSheet, viewModel: SisBomViewModel) {
         "FALTA" -> BomberosRed
         "PERMISO" -> AlertAmber
         "LICENCIA" -> InfoBlue
+        "SUSPENDIDO" -> Color(0xFF8B5CF6)
         else -> Color.Gray
+    }
+
+    val rawId = item.idLista.trim()
+    val cleanListId = if (rawId.length > 4 && (rawId.startsWith("202") || rawId.startsWith("203"))) {
+        "#" + rawId.substring(4)
+    } else {
+        "#" + rawId
     }
 
     val isAbono = isAbonoValue(item.userAbono, item.clave)
@@ -3280,6 +3288,7 @@ fun AttendanceItemCard(item: AttendanceSheet, viewModel: SisBomViewModel) {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     DetailRow(label = "Clave", value = item.clave, isDark = isDark)
+                    DetailRow(label = "Nº Lista", value = cleanListId, isDark = isDark)
                     DetailRow(label = "Estado", value = cleanStatus, valueColor = badgeColor, isDark = isDark)
                     DetailRow(label = "Fecha", value = item.fecha, isDark = isDark)
                     DetailRow(label = "Hora", value = item.hora, isDark = isDark)

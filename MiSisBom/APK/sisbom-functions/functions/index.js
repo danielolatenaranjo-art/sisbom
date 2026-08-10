@@ -157,14 +157,20 @@ exports.enviarAlerta = onDocumentCreated(
 
     const aQuien = String(data.aQuienAlerta || "").trim().toUpperCase();
 
+    const dbName = event.params.database || "(default)";
+    const cuerpoId = data.cuerpoId || data.licenseKey || data.cuerpo || (dbName !== "(default)" ? dbName : "");
+    const safeTenant = String(cuerpoId).replace(/[^a-zA-Z0-9-_.~%]/g, "_").trim();
+
     const payload = new Object({
       data: new Object({
         title: String(razon),
         body: String(mensaje),
         type: String(typePush),
         payloadId: String(id),
+        gradoAlerta: String(duracion),
         clave: "",
-        senderId: String(senderId)
+        senderId: String(senderId),
+        cuerpoId: String(safeTenant)
       }),
       android: new Object({
         priority: "high"
@@ -173,11 +179,20 @@ exports.enviarAlerta = onDocumentCreated(
 
     try {
       if (aQuien === "TC" || aQuien === "1") {
-        Reflect.set(payload, "topic", "alertas_generales");
+        const topicName = safeTenant ? `alertas_generales_${safeTenant}` : "alertas_generales";
+        Reflect.set(payload, "topic", topicName);
         await admin.messaging().send(payload);
+        if (topicName !== "alertas_generales") {
+            try {
+                const fbPayload = Object.assign(new Object(), payload, new Object({ topic: "alertas_generales" }));
+                await admin.messaging().send(fbPayload);
+            } catch (_e) {}
+        }
       } else if (aQuien === "CONDUCTORES") {
-        Reflect.set(payload, "topic", "conductores");
+        const topicName = safeTenant ? `conductores_${safeTenant}` : "conductores";
+        Reflect.set(payload, "topic", topicName);
         await admin.messaging().send(payload);
+      }
       } else {
         const targets = aQuien.split(",").map(s => s.trim()).filter(s => s !== "");
         const promises = targets.map(async (t) => {

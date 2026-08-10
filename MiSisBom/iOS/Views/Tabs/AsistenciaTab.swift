@@ -186,8 +186,17 @@ struct AttendanceItemRow: View {
             case "FALTA": return .bomberosRed
             case "PERMISO": return .alertAmber
             case "LICENCIA": return .infoBlue
+            case "SUSPENDIDO": return .purple
             default: return .gray
             }
+        }()
+        
+        let cleanListId: String = {
+            let raw = item.idLista.trimmingCharacters(in: .whitespacesAndNewlines)
+            if raw.count > 4 && (raw.hasPrefix("202") || raw.hasPrefix("203")) {
+                return "#" + String(raw.dropFirst(4))
+            }
+            return "#" + raw
         }()
         
         GlassCard(viewModel: viewModel) {

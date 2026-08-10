@@ -239,6 +239,26 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private val prefChangeListener = SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+        if (key == "fire_user") {
+            p.getString("fire_user", null)?.let { jsonStr ->
+                try {
+                    val freshUser = deserializeUser(jsonStr)
+                    if (freshUser.idRegistro.isNotEmpty()) {
+                        currentUser = freshUser
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        if (key == "cache_dispatches") {
+            p.getString("cache_dispatches", null)?.let { jsonStr ->
+                try {
+                    dispatchesList = deserializeDispatches(jsonStr)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     init {
         // 0. Cargar preferencia de tema visual
         val hasDarkModeKey = prefs.contains("app_dark_mode")
@@ -314,12 +334,27 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             isFirstCheck = false
         }, 5000)
 
-        val lastSeenVersion = prefs.getString("last_seen_version", "")
-        if (lastSeenVersion != appVersionName) {
-            showChangelogDialog = true
-        }
+        prefs.registerOnSharedPreferenceChangeListener(prefChangeListener)
+    }
 
-        // 4. Verificar actualizaciones OTA a distancia (Removido por requerimiento)
+    fun refreshFromCacheAndFirebase() {
+        prefs.getString("fire_user", null)?.let { jsonStr ->
+            try {
+                val freshUser = deserializeUser(jsonStr)
+                if (freshUser.idRegistro.isNotEmpty()) {
+                    currentUser = freshUser
+                }
+            } catch (_: Exception) {}
+        }
+        prefs.getString("cache_dispatches", null)?.let { jsonStr ->
+            try {
+                dispatchesList = deserializeDispatches(jsonStr)
+            } catch (_: Exception) {}
+        }
+        val userId = currentUser?.idRegistro ?: ""
+        if (userId.isNotEmpty()) {
+            startFirebaseSync(userId)
+        }
     }
 
     fun activateLicense(key: String, onComplete: (Boolean) -> Unit = {}) {
@@ -658,11 +693,27 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                             ((myId.isNotEmpty() && idReg.trim().lowercase() == myId.lowercase()) ||
                                     (myName.isNotEmpty() && opName.trim().lowercase() == myName.lowercase()))
 
+                    val wasActive = isCentralActive
                     isCentralActive = isMeActive
                     prefs.edit().putBoolean("IS_CENTRAL_MODE", isMeActive).apply()
                     centralOperatorName = opName
 
                     if (isMeActive) {
+                        if (!wasActive) {
+                            val activeName = if (opName.isNotEmpty()) opName else myName
+                            val alertId = System.currentTimeMillis().toString()
+                            val alertObj = Alert(
+                                idAlerta = alertId,
+                                razonAlerta = "OPERADOR DE CENTRAL ACTIVO",
+                                mensajeAlerta = "$activeName ha iniciado sesión como Operador Central de Alarmas.",
+                                duracion = "1",
+                                aQuienAlerta = "TC",
+                                fechaAlerta = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()).format(java.util.Date()),
+                                horaAlerta = java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date()),
+                                quienAlerta = activeName
+                            )
+                            repository.createAlert(alertObj, {}, {})
+                        }
                         if (currentUser?.estado != "0-9") {
                             changeStatus("0-9")
                         }
@@ -720,7 +771,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     list.forEach { d ->
                         if (!knownDispatchIds.contains(d.idServicio)) {
                             knownDispatchIds.add(d.idServicio)
-                            if (!isFirstCheck && d.operadorFinal.isEmpty() && currentUser?.estado != "0-8" && !isCentralActive) {
+                            val hasCDS = currentUser?.hasActiveCDS() == true
+                            if (!isFirstCheck && d.operadorFinal.isEmpty() && currentUser?.estado != "0-8" && !hasCDS && !isCentralActive) {
                                 if (d.idServicio.isNotEmpty()) {
                                     if (!PlayedSoundsTracker.hasPlayed(d.idServicio)) {
                                         PlayedSoundsTracker.markPlayed(d.idServicio)
@@ -728,9 +780,13 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                                         val inService = currentUser?.let { it.enServicio.isNotEmpty() && it.enServicio != "0" && !it.enServicio.startsWith("-") } ?: false
                                         if (!isTooOld && !isAirplaneMode && !inService) {
                                             var cleanClave = d.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
-                                            val possibleSound = "c$cleanClave"
-                                            val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
-                                            val soundToPlay = if (resId != 0) possibleSound else "despacho"
+                                            val soundToPlay = if (cleanClave.contains("llamado") || cleanClave.contains("comandancia")) {
+                                                "llamado_comandancia"
+                                            } else {
+                                                val possibleSound = if (cleanClave == "9_0" || cleanClave == "9.0") "c9_0" else "c$cleanClave"
+                                                val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
+                                                if (resId != 0) possibleSound else if (cleanClave == "9_0" || cleanClave == "9.0") "c10_9" else "despacho"
+                                            }
                                             
                                             SoundPlayer.playSound(context, soundToPlay)
                                             SoundPlayer.triggerVibration(context, true)
@@ -803,7 +859,9 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                             if (!isFirstCheck) {
                                 val dateStr = a.fechaAlerta.ifEmpty { a.fechaOrden }
                                 val isTooOld = TimeValidation.isTooOld(dateStr, a.horaAlerta)
-                                if (!isTooOld && !isAirplaneMode) {
+                                val hasCDS = currentUser?.hasActiveCDS() == true
+                                val is08 = currentUser?.estado == "0-8" || currentUser?.estado == "10-8"
+                                if (!isTooOld && !isAirplaneMode && !is08 && !hasCDS) {
                                     if (a.duracion == "C") {
                                         SoundPlayer.playSound(context, "alerta")
                                     } else {
@@ -1008,6 +1066,11 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         
         pendingStatus = newStatus
         lastStatusChangeTime = System.currentTimeMillis()
+        
+        prefs.edit()
+            .putString("LAST_SELF_STATUS_CHANGE", newStatus)
+            .putLong("LAST_SELF_STATUS_TIME", System.currentTimeMillis())
+            .apply()
 
         ensureFreshSession {
             repository.updatePersonalStatus(user.idRegistro, newStatus,

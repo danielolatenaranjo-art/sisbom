@@ -29,11 +29,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 FirebaseApp.configure(options: options)
             }
         } else if FirebaseApp.app() == nil {
-            // Fallback initialization for fresh install to prevent crashes prior to license activation
-            let fallbackOptions = FirebaseOptions(googleAppID: "1:1234567890:ios:fallback0000000", gcmSenderID: "1234567890")
-            fallbackOptions.apiKey = "AIzaSyFallbackKeyForInitialSetup00"
-            fallbackOptions.projectID = "sisbom-fallback"
-            FirebaseApp.configure(options: fallbackOptions)
+            // Valid initialization for fresh install to prevent crashes prior to license activation
+            let defaultOptions = FirebaseOptions(googleAppID: "1:39449538456:ios:b2f806e0a0e9fc927485ed", gcmSenderID: "39449538456")
+            defaultOptions.apiKey = "AIzaSyBA61BksAK7FcCh0va-fP-sAFjjrk1gSiw"
+            defaultOptions.projectID = "sisbom-de5f8"
+            defaultOptions.storageBucket = "sisbom-de5f8.firebasestorage.app"
+            FirebaseApp.configure(options: defaultOptions)
         }
         
         UNUserNotificationCenter.current().delegate = self

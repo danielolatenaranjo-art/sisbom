@@ -9,8 +9,7 @@ struct DespachoTab: View {
     @State private var selectedVehicles: Set<String> = []
     @State private var showConfirmDialog: Bool = false
     
-    let clavesRapidas = ["10-0", "10-1", "10-2", "10-3", "10-4", "10-5", "10-6", "10-7", "10-8", "10-9", "10-10", "10-12", "10-15", "9-0"]
-    let lugaresSugeridos = ["Ruta 90", "El Corte", "Peñuelas", "San Luis", "Manantiales", "La Tuna", "Santa Isabel", "Taulemu", "Porvenir", "Cementerio", "Cruce Principal", "Grinvic", "Chacarillas", "La Dehesa Arriba", "La Dehesa Abajo", "Arica", "Camaron", "Cruce Principal", "Villa Alegre", "Villa La Torre", "Villa Carranza", "Villa San Francisco", "Villa Rucalemu", "Villa San Eduardo", "Villa Eben ezer", "Estadio"]
+    let lugaresSugeridos: [String] = []
 
     var body: some View {
         let isDark = viewModel.isDarkMode

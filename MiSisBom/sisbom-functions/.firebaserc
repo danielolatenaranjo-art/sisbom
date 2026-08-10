@@ -1,0 +1,16 @@
+{
+  "projects": {
+    "default": "sisbom-de5f8",
+    "central": "sisbom-central"
+  },
+  "targets": {
+    "sisbom-de5f8": {
+      "hosting": {
+        "main": [
+          "sisbom"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

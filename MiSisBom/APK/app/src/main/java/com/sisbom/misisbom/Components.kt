@@ -376,6 +376,20 @@ object SoundPlayer {
             mediaPlayer?.release()
             mediaPlayer = null
 
+            // Forzar volumen al 100% en todos los canales de audio (Alarma, Notificación y Multimedia)
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            if (audioManager != null) {
+                try {
+                    audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                    val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+                    val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                    val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
+                    audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
+                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
+                } catch (_: Exception) {}
+            }
+
             val cleanName = soundName.substringBefore(".").trim().lowercase()
             val resId = context.resources.getIdentifier(cleanName, "raw", context.packageName)
 
@@ -389,6 +403,7 @@ object SoundPlayer {
                     val afd = context.resources.openRawResourceFd(resId)
                     setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                     afd.close()
+                    setVolume(1.0f, 1.0f)
                     prepare()
                     setOnCompletionListener {
                         it.release()
@@ -400,7 +415,7 @@ object SoundPlayer {
                 }
             } else {
                 if (toneGenerator == null) {
-                    toneGenerator = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100)
+                    toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
                 }
                 val toneType = when {
                     cleanName.startsWith("c10") -> ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK
@@ -439,11 +454,35 @@ object SoundPlayer {
         } catch (_: Exception) {}
     }
 
+    fun isPlaying(): Boolean {
+        return try {
+            mediaPlayer?.isPlaying == true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun stop(context: Context? = null) {
+        try {
+            if (mediaPlayer?.isPlaying == true) {
+                mediaPlayer?.stop()
+            }
+            mediaPlayer?.release()
+            mediaPlayer = null
+            toneGenerator?.release()
+            toneGenerator = null
+
+            context?.let { ctx ->
+                val vibrator = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+                vibrator?.cancel()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun release() {
-        mediaPlayer?.release()
-        mediaPlayer = null
-        toneGenerator?.release()
-        toneGenerator = null
+        stop()
     }
 }
 

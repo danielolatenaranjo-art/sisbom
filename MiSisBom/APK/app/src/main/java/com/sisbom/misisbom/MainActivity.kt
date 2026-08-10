@@ -91,6 +91,15 @@ object PlayedSoundsTracker {
 
 object NotificationHelper {
 
+    fun clearAllNotifications(context: Context) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancelAll()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val notificationManager =
@@ -361,14 +370,21 @@ object NotificationHelper {
         val isAirplaneMode = prefs.getBoolean("MODO_AVION", false)
 
         val cachedUser = prefs.getString("fire_user", null)
-        val userStatus = if (cachedUser != null) {
+        val (userStatus, hasCDS) = if (cachedUser != null) {
             try {
-                org.json.JSONObject(cachedUser).optString("estado", "").trim().uppercase()
-            } catch (_: Exception) { "" }
-        } else { "" }
+                val json = org.json.JSONObject(cachedUser)
+                val st = json.optString("estado", "").trim().uppercase()
+                val cdsVal = json.opt("cds")
+                val isCds = when (cdsVal) {
+                    is Number -> cdsVal.toInt() == 1
+                    is String -> cdsVal.equals("SI", ignoreCase = true) || cdsVal == "1" || cdsVal.uppercase().contains("CDS")
+                    else -> false
+                } || st == "CDS" || st.contains("CDS") || st.contains("COMISION") || st.contains("COMISIÓN")
+                Pair(st, isCds)
+            } catch (_: Exception) { Pair("", false) }
+        } else { Pair("", false) }
 
         val isExcluded = userStatus.contains("SUSPENDIDO") || 
-                         userStatus == "CDS" || 
                          userStatus.contains("LICENCIA") || 
                          userStatus == "PERMISO"
 
@@ -390,7 +406,7 @@ object NotificationHelper {
             return
         }
 
-        if (isFromFCM && MainActivity.isAppInForeground) return
+        if (type != "STATUS_CHANGE" && isFromFCM && MainActivity.isAppInForeground) return
         // Do NOT block dispatches when user is 0-8 (isUnavailable)
         if (type == "DISPATCH" && is08) {
             // Let it proceed
@@ -402,6 +418,7 @@ object NotificationHelper {
         val isCentral = prefs.getBoolean("IS_CENTRAL_MODE", false)
 
         val channelId = when (type) {
+            "STATUS_CHANGE" -> "sisbom_alertas_normal_v10"
             "DISPATCH" -> {
                 if (isCentral) "sisbom_actions_v1"
                 else if (is08) "sisbom_dispatch_silent_v1"
@@ -466,9 +483,10 @@ object NotificationHelper {
         }
 
         val is09 = userStatus == "0-9"
+        val isCDS = hasCDS
 
         var playLoud = (type == "DISPATCH" || is1210 || is66 || isOrden || isGrade3) && !isCentral
-        if (is08 && !is1030) {
+        if ((is08 || isCDS) && !is1030) {
             playLoud = false
         }
         if ((is1210 || is66) && !is09) {
@@ -490,28 +508,36 @@ object NotificationHelper {
             } catch (_: Exception) {}
 
             val soundToPlay = if (is1210 || is66) {
-                "importante"
+                "alerta"
             } else if (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
-                var detectedKey = claveOpt.trim().replace("-", "_").replace(" ", "_").lowercase()
-                if (detectedKey.isEmpty()) {
-                    val fullText = "$title $message".lowercase()
-                    val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15", "10_30")
-                    for (k in keys) {
-                        if (fullText.contains(k.replace("_", "-")) || fullText.contains(k)) {
-                            detectedKey = k
-                            break
+                var detectedKey = claveOpt.trim().replace("-", "_").replace(".", "_").replace(" ", "_").lowercase()
+                val fullText = "$title $message".lowercase()
+
+                if (detectedKey.contains("llamado") || detectedKey.contains("comandancia") || fullText.contains("llamado comandancia")) {
+                    "llamado_comandancia"
+                } else {
+                    if (detectedKey == "9_0" || detectedKey == "9.0" || fullText.contains("9-0") || fullText.contains("9_0")) {
+                        detectedKey = "9_0"
+                    }
+                    if (detectedKey.isEmpty()) {
+                        val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15", "10_30", "9_0")
+                        for (k in keys) {
+                            if (fullText.contains(k.replace("_", "-")) || fullText.contains(k)) {
+                                detectedKey = k
+                                break
+                            }
                         }
                     }
-                }
-                if (detectedKey.isNotEmpty()) {
-                    val possibleSound = "c$detectedKey"
-                    val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
-                    if (resId != 0) possibleSound else "despacho"
-                } else {
-                    "despacho"
+                    if (detectedKey.isNotEmpty()) {
+                        val possibleSound = if (detectedKey == "9_0") "c9_0" else if (detectedKey.startsWith("c9")) detectedKey else "c$detectedKey"
+                        val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
+                        if (resId != 0) possibleSound else if (detectedKey == "9_0") "c10_9" else "despacho"
+                    } else {
+                        "despacho"
+                    }
                 }
             } else if (isOrden || isGrade3) {
-                "importante"
+                "alerta"
             } else {
                 "alerta"
             }
@@ -572,23 +598,28 @@ object NotificationHelper {
         )
 
         val largeIcon = try {
-            val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-            val key = prefs.getString("saas_license_key", "") ?: ""
-            var resId = 0
-            if (key.isNotEmpty()) {
-                val formattedKey = key.lowercase().replace("-", "_")
-                resId = context.resources.getIdentifier("logo_$formattedKey", "drawable", context.packageName)
+            val clientFile = java.io.File(context.filesDir, "client_logo.png")
+            if (clientFile.exists() && clientFile.length() > 0) {
+                BitmapFactory.decodeFile(clientFile.absolutePath)
+            } else {
+                val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val key = prefs.getString("saas_license_key", "") ?: ""
+                var resId = 0
+                if (key.isNotEmpty()) {
+                    val formattedKey = key.lowercase().replace("-", "_")
+                    resId = context.resources.getIdentifier("logo_$formattedKey", "drawable", context.packageName)
+                }
+                val finalRes = if (resId != 0) resId else R.drawable.logo
+                BitmapFactory.decodeResource(context.resources, finalRes)
             }
-            val finalRes = if (resId != 0) resId else R.drawable.logo
-            BitmapFactory.decodeResource(context.resources, finalRes)
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             null
         }
 
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification_firefighter)
             .apply {
-                if (type == "DISPATCH" && largeIcon != null) {
+                if (largeIcon != null) {
                     setLargeIcon(largeIcon)
                 }
             }
@@ -938,6 +969,10 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         isAppInForeground = true
+        NotificationHelper.clearAllNotifications(this)
+        if (::viewModel.isInitialized) {
+            viewModel.refreshFromCacheAndFirebase()
+        }
     }
 
     override fun onPause() {
@@ -953,7 +988,7 @@ class MainActivity : ComponentActivity() {
         if (cacheVersion < 1) {
             val editor = prefsTemp.edit()
             editor.remove("cache_attendance")
-            prefsTemp.all.keys.forEach { key ->
+            prefsTemp.all.keys.toList().forEach { key ->
                 if (key.startsWith("cached_asistencias_")) {
                     editor.remove(key)
                 }
@@ -1016,6 +1051,22 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
+    }
+
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.action == android.view.KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                android.view.KeyEvent.KEYCODE_VOLUME_DOWN,
+                android.view.KeyEvent.KEYCODE_VOLUME_UP,
+                android.view.KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                    if (SoundPlayer.isPlaying()) {
+                        SoundPlayer.stop(this)
+                        return true
+                    }
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun handleIntent(intent: Intent?) {
@@ -1372,6 +1423,34 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val senderId = message.data["senderId"] ?: ""
         if (senderId.isNotEmpty() && userId.isNotEmpty() && senderId.trim().lowercase() == userId.trim().lowercase()) {
+            return
+        }
+
+        if (type == "STATUS_CHANGE") {
+            val newStatus = message.data["newStatus"] ?: ""
+            if (newStatus.isNotEmpty()) {
+                val cachedUser = prefs.getString("fire_user", null)
+                if (cachedUser != null) {
+                    try {
+                        val json = org.json.JSONObject(cachedUser)
+                        json.put("estado", newStatus)
+                        prefs.edit().putString("fire_user", json.toString()).apply()
+                        val isUnavailable = (newStatus == "0-8" || newStatus == "10-8")
+                        prefs.edit().putString("IS_UNAVAILABLE", isUnavailable.toString()).apply()
+                    } catch (_: Exception) {}
+                }
+            }
+
+            val lastSelfStatus = prefs.getString("LAST_SELF_STATUS_CHANGE", "") ?: ""
+            val lastSelfTime = prefs.getLong("LAST_SELF_STATUS_TIME", 0L)
+            val isSelfChange = newStatus.isNotEmpty() &&
+                    (newStatus.trim().uppercase() == lastSelfStatus.trim().uppercase()) &&
+                    (System.currentTimeMillis() - lastSelfTime < 20000)
+
+            if (!isSelfChange) {
+                SoundPlayer.triggerVibration(this, false)
+                NotificationHelper.sendNotification(this, title, body, payloadId, userId, "STATUS_CHANGE", true, clave, "1", false)
+            }
             return
         }
 
