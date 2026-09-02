@@ -40,6 +40,7 @@ jobs:
       - name: Build iOS Application
         run: |
           cd MiSisBom/iOS
+          set -o pipefail
           xcodebuild build \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
@@ -50,19 +51,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO > xcodebuild.log 2>&1 || (echo "XCODEBUILD FAILED" && exit 1)
-          
-      - name: Push Build Error Log
-        if: failure()
-        run: |
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-          git checkout -B build-error-log
-          cp MiSisBom/iOS/xcodebuild.log ./build-error.log || true
-          git add build-error.log
-          git commit -m "build error log [skip ci]" || true
-          git push -f origin build-error-log || true
+            ENABLE_USER_SCRIPT_SANDBOXING=NO 2>&1 | tee build.log
 
       - name: Create Clean IPA Artifact
         run: |

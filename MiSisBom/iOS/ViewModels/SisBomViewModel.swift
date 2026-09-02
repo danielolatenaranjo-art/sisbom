@@ -5,6 +5,7 @@ import FirebaseFirestore
 import FirebaseMessaging
 import FirebaseAuth
 import AVFoundation
+import AudioToolbox
 import UIKit
 
 // Screen definitions matching Android enum classes
