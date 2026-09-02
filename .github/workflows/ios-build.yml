@@ -46,15 +46,17 @@ jobs:
             -skipPackagePluginValidation \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO > xcodebuild.log 2>&1 || true
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO > xcodebuild.log 2>&1 || true
+          
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat xcodebuild.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
           
           if grep -q "\*\* BUILD SUCCEEDED \*\*" xcodebuild.log; then
-            echo "## Build Succeeded :white_check_mark:" >> $GITHUB_STEP_SUMMARY
+            echo "Build Succeeded!"
           else
-            echo "## Build Failed :x:" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            grep -C 3 -E "(error:|fatal error:|\*\* BUILD FAILED \*\*)" xcodebuild.log >> $GITHUB_STEP_SUMMARY || tail -n 100 xcodebuild.log >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "Build Failed!"
             exit 1
           fi
 
