@@ -717,7 +717,7 @@ class SisBomViewModel: ObservableObject {
             ]
         }
         
-        let safeCuerpo = (currentUser?.cuerpoId ?? "").replacingOccurrences(of: " ", with: "_")
+        let safeCuerpo = (UserDefaults.standard.string(forKey: "saas_cuerpo") ?? "").replacingOccurrences(of: " ", with: "_")
         
         let dispatchData: [String: Any] = [
             "id": nextId,
@@ -739,7 +739,7 @@ class SisBomViewModel: ObservableObject {
             "obacServicio": "",
             "informeObac": "",
             "fechaTermino": "",
-            "createdAt": Int64(Date().timeIntervalSince1990 * 1000),
+            "createdAt": Int64(Date().timeIntervalSince1970 * 1000),
             "pushSent": false,
             "cuerpoId": safeCuerpo
         ]
@@ -765,7 +765,7 @@ class SisBomViewModel: ObservableObject {
     var hasActiveCDS: Bool {
         guard let my = currentUser else { return false }
         let st = my.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return st == "CDS" || st.contains("CDS") || st.contains("COMISION") || st.contains("COMISIÓN") || my.cds == 1
+        return st == "CDS" || st.contains("CDS") || st.contains("COMISION") || st.contains("COMISIÓN")
     }
     
     func stopAudio() {
