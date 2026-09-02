@@ -40,7 +40,7 @@ jobs:
           xcodebuild clean build \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
-            -destination 'generic/platform=iOS' \
+            -sdk iphoneos \
             -configuration Release \
             -skipMacroValidation \
             -skipPackagePluginValidation \

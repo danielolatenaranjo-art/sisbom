@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 struct ActividadTab: View {
     @ObservedObject var viewModel: SisBomViewModel
@@ -374,8 +375,6 @@ struct DispatchItemCard: View {
         )
     }
 }
-
-import WebKit
 
 struct IncidentMapPreview: View {
     let lat: Double
