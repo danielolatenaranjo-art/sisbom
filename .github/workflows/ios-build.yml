@@ -36,8 +36,9 @@ jobs:
 
       - name: Build iOS Application
         run: |
+          set -o pipefail
           cd MiSisBom/iOS
-          xcodebuild clean build \
+          xcodebuild build \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
             -sdk iphoneos \
@@ -47,14 +48,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO > build.log 2>&1 || (echo "=== LAST 150 LINES OF BUILD LOG ==="; tail -n 150 build.log; exit 1)
-
-      - name: Upload Build Log Artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: XcodeBuild-Log
-          path: MiSisBom/iOS/build.log
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
       - name: Create Clean IPA Artifact
         run: |

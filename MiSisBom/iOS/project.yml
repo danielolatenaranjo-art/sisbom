@@ -16,9 +16,7 @@ targets:
       - path: SisBomApp.swift
       - path: Assets.xcassets
       - path: Resources
-        buildPhase: resources
       - path: GoogleService-Info.plist
-        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom
