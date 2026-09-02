@@ -40,7 +40,6 @@ jobs:
       - name: Build iOS Application
         run: |
           cd MiSisBom/iOS
-          set -o pipefail
           xcodebuild build \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
@@ -51,7 +50,20 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO 2>&1 | tee build.log
+            ENABLE_USER_SCRIPT_SANDBOXING=NO > build.log 2>&1 || true
+
+          if grep -q "\*\* BUILD SUCCEEDED \*\*" build.log; then
+            echo "Build Succeeded!"
+          else
+            echo "=== EXTRACTED COMPILER ERRORS ==="
+            grep -E "(error:|fatal error:)" build.log || tail -n 50 build.log
+            ERR_MSG=$(grep -E "(error:|fatal error:)" build.log | head -n 5 | tr '\n' ' ')
+            if [ -z "$ERR_MSG" ]; then
+              ERR_MSG=$(tail -n 20 build.log | tr '\n' ' ')
+            fi
+            echo "::error title=Xcode Compilation Error::$ERR_MSG"
+            exit 1
+          fi
 
       - name: Create Clean IPA Artifact
         run: |
