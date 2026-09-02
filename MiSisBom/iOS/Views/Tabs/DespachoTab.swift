@@ -9,6 +9,7 @@ struct DespachoTab: View {
     @State private var selectedVehicles: Set<String> = []
     @State private var showConfirmDialog: Bool = false
     
+    let clavesRapidas = ["10-0", "10-1", "10-2", "10-3", "10-4", "10-5", "10-6", "10-7", "10-8", "10-9", "10-10", "10-12", "10-15", "9-0"]
     let lugaresSugeridos: [String] = []
 
     var body: some View {
