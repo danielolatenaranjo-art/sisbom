@@ -1,11 +1,11 @@
-$url = "https://github.com/danielolatenaranjo-art/sisbom/actions/runs/33589362722"
+$url = "https://github.com/danielolatenaranjo-art/sisbom/actions/runs/33590270506"
 $req = Invoke-WebRequest -Uri $url -UseBasicParsing
 $content = $req.Content
 
 $lines = $content -split "`n"
 $found = $false
 for ($i = 0; $i -lt $lines.Count; $i++) {
-    if ($lines[$i] -match 'Build Failed') {
+    if ($lines[$i] -match 'Build Succeeded' -or $lines[$i] -match 'Build Failed' -or $lines[$i] -match 'xcodebuild') {
         $found = $true
         $start = [Math]::Max(0, $i - 2)
         $end = [Math]::Min($lines.Count - 1, $i + 60)
@@ -16,6 +16,7 @@ for ($i = 0; $i -lt $lines.Count; $i++) {
     }
 }
 if (-not $found) {
-    Write-Output "Build Failed section not found in summary, printing first 20 lines with 'error':"
-    $lines | Select-String -Pattern 'error' | Select-Object -First 20 | ForEach-Object { Write-Output $_.Line.Trim() }
+    Write-Output "SUMMARY NOT MATCHED, SEARCHING FOR CODE BLOCKS OR ERROR STRINGS:"
+    $codeMatches = $lines | Select-String -Pattern '(error:|fatal error:|BUILD FAILED)'
+    $codeMatches | Select-Object -First 30 | ForEach-Object { Write-Output $_.Line.Trim() }
 }

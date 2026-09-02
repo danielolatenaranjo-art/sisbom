@@ -7,6 +7,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-ios:
     name: Build iOS App
@@ -49,16 +52,23 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             ENABLE_USER_SCRIPT_SANDBOXING=NO > xcodebuild.log 2>&1 || true
           
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat xcodebuild.log >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          
           if grep -q "\*\* BUILD SUCCEEDED \*\*" xcodebuild.log; then
             echo "Build Succeeded!"
           else
             echo "Build Failed!"
             exit 1
           fi
+
+      - name: Report Build Error Log
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B build-error-log
+          cp MiSisBom/iOS/xcodebuild.log ./build-error.log
+          git add build-error.log
+          git commit -m "chore(ci): build error log [skip ci]" || true
+          git push -f origin build-error-log || true
 
       - name: Create Clean IPA Artifact
         run: |
