@@ -15,7 +15,6 @@ targets:
       - path: Services
       - path: SisBomApp.swift
       - path: Assets.xcassets
-      - path: Resources
       - path: GoogleService-Info.plist
     settings:
       base:
