@@ -55,20 +55,11 @@ jobs:
           if grep -q "\*\* BUILD SUCCEEDED \*\*" xcodebuild.log; then
             echo "Build Succeeded!"
           else
-            echo "Build Failed!"
+            echo "==================== BUILD FAILED LOG ===================="
+            tail -n 150 xcodebuild.log
+            echo "=========================================================="
             exit 1
           fi
-
-      - name: Report Build Error Log
-        if: failure()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B build-error-log
-          cp MiSisBom/iOS/xcodebuild.log ./build-error.log
-          git add build-error.log
-          git commit -m "chore(ci): build error log [skip ci]" || true
-          git push -f origin build-error-log || true
 
       - name: Create Clean IPA Artifact
         run: |
