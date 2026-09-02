@@ -394,15 +394,12 @@
             this.style.height = (this.scrollHeight < 120 ? this.scrollHeight : 120) + "px";
         }, false);
 
-        // CONFIGURACIÓN FIREBASE
-        const firebaseConfig = {
-            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-            authDomain: "sisbom-de5f8.firebaseapp.com",
-            projectId: "sisbom-de5f8",
-            storageBucket: "sisbom-de5f8.firebasestorage.app",
-            messagingSenderId: "39449538456",
-            appId: "1:39449538456:web:64f767264356ae587485ed"
-        };
+        // CONFIGURACIÓN FIREBASE DINÁMICA
+        let firebaseConfig = {};
+        try {
+            const saved = localStorage.getItem("firebaseConfig");
+            if (saved) firebaseConfig = JSON.parse(saved);
+        } catch(e) {}
 
         const CACHE_KEY = "sisbom_alertas_cache_v2";
         let fbDb = null;
@@ -1616,7 +1613,7 @@
                             Documento Oficial - Generado por SisBom
                         </div>
 
-                        <script>
+                        <` + `script>
                             window.onload = () => { 
                                 const clientName = parent.localStorage.getItem('saas_client_name') || 'CUERPO DE BOMBEROS';
                                 document.querySelectorAll('.dynamic-print-name').forEach(el => {
@@ -1631,7 +1628,7 @@
                             window.onafterprint = () => {
                                 parent.document.body.removeChild(window.frameElement);
                             };
-                        <\/script>
+                        <` + `/script>
     
 </body>
                     </html>

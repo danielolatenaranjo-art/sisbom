@@ -812,15 +812,12 @@
             }
         });
 
-        // --- CONFIGURACIÓN DE FIREBASE ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-            authDomain: "sisbom-de5f8.firebaseapp.com",
-            projectId: "sisbom-de5f8",
-            storageBucket: "sisbom-de5f8.firebasestorage.app",
-            messagingSenderId: "39449538456",
-            appId: "1:39449538456:web:64f767264356ae587485ed"
-        };
+        // --- CONFIGURACIÓN DE FIREBASE DINÁMICA ---
+        let firebaseConfig = {};
+        try {
+            const saved = localStorage.getItem("firebaseConfig");
+            if (saved) firebaseConfig = JSON.parse(saved);
+        } catch(e) {}
 
         let fbDb = null;
         window.fbDoc = null;
@@ -875,7 +872,7 @@
             }
             try {
                 const { initializeApp } = await import("./libs/firebase-app.js");
-                const { getAuth, signInAnonymously, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                const { getAuth, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
                 const { getFirestore, doc, setDoc, updateDoc, deleteDoc, collection, getDocs, writeBatch, onSnapshot, getDoc, deleteField } = await import("./libs/firebase-firestore.js");
 
                 window.fbDoc = doc;
@@ -907,8 +904,7 @@
                         await signInWithEmailAndPassword(auth, email, storedPassSecure);
                         console.log("Firebase conectado con credenciales en fallback (Type B).");
                     } else {
-                        await signInAnonymously(auth);
-                        console.log("Firebase conectado de forma anónima en fallback (Type B).");
+                        console.warn("Sin credenciales en fallback Personal Comandancia.");
                     }
                 } catch(authErr) {
                     console.warn("Error authenticating fallback Firebase (Type B):", authErr);
@@ -2545,14 +2541,17 @@
                     <style>
                         @page { size: A4 portrait; margin: 12mm; }
                         body { font-family: "Segoe UI", sans-serif; font-size: 11px; padding: 0; margin: 0; color: #1e293b; background: white; }
-                        .header { border-bottom: 3px solid #B91C1C; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-                        .header h1 { font-size: 22px; margin: 0; text-transform: uppercase; color: #B91C1C; letter-spacing: -0.5px; }
-                        .header p { font-size: 12px; color: #64748b; margin-top: 4px; font-weight: 600; }
-                        .bombero-info { font-size: 16px; font-weight: 800; margin-bottom: 16px; color: #1e293b; text-transform: uppercase; }
+                        .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2.5px solid #dc2626; padding-bottom: 8px; margin-bottom: 16px; }
+                        .logo { width: 52px; height: 52px; object-fit: contain; margin-right: 14px; }
+                        .title-box { flex: 1; }
+                        .title { font-size: 17px; font-weight: 900; margin: 0; color: #dc2626; text-transform: uppercase; letter-spacing: 0.5px; }
+                        .subtitle { font-size: 10px; font-weight: 800; color: #64748b; margin: 2px 0 0 0; text-transform: uppercase; letter-spacing: 0.8px; }
+                        .badge { border: 2px solid #ca8a04; color: #ca8a04; padding: 3px 10px; border-radius: 6px; font-weight: 900; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; text-align: center; }
+                        .bombero-info { font-size: 14px; font-weight: 800; margin-bottom: 14px; color: #1e293b; text-transform: uppercase; }
                         table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10px; table-layout: fixed; word-wrap: break-word; }
                         th { background: #f1f5f9; padding: 6px; border-bottom: 2px solid #cbd5e1; text-align: left; color: #475569; font-weight: bold; text-transform: uppercase; }
                         td { padding: 6px; border-bottom: 1px solid #e2e8f0; vertical-align: top; text-transform: uppercase; }
-                        .footer { text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 12px; margin-top: 20px; font-weight: 600; }
+                        .footer { text-align: center; font-size: 9px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; margin-top: 16px; font-weight: 600; text-transform: uppercase; }
                         .stats-container { display: flex; gap: 24px; margin-bottom: 20px; background-color: #f8fafc; padding: 14px 20px; border: 1px solid #e2e8f0; border-radius: 8px; align-items: center; flex-wrap: wrap; }
                         .stat-item { display: flex; flex-direction: column; gap: 2px; }
                         .stat-label { color: #64748b; font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -2565,25 +2564,26 @@
                 </head>
                 <body>
                     <div class="header">
-                        <div>
-                            <h1>${titleSuffix}</h1>
-                            <p>Impreso por: ${printedBy} • ${printedDate}</p>
+                        <img src="./Logo.png" class="logo" alt="Logo">
+                        <div class="title-box">
+                            <h1 class="title">${localStorage.getItem('client_name') || 'BOMBEROS PLACILLA'}</h1>
+                            <p class="subtitle">${titleSuffix}</p>
                         </div>
-                        <img src="./Logo.png" style="height: 50px;">
+                        <div class="badge">OFICIAL</div>
                     </div>
                     <div class="bombero-info">Bombero: ${bomberoName}</div>
                     ${printStats}
                     ${printContent}
                     <div class="footer">Documento Oficial Generado por SisBom</div>
                     
-                    <script>
+                    <` + `script>
                         window.onload = () => { 
                             setTimeout(() => { window.print(); }, 500);
                         };
                         window.onafterprint = () => {
                             parent.document.body.removeChild(window.frameElement);
                         };
-                    <\/script>
+                    <` + `/script>
     
 </body>
                 </html>

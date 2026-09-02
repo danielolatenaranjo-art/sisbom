@@ -409,22 +409,26 @@
                 <!-- Módulos Habilitados -->
                 <div>
                     <label class="block text-[10px] font-bold text-zinc-400 uppercase tracking-widest mb-3">Módulos del Sistema Habilitados</label>
-                    <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                    <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-3 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
                             <input type="checkbox" id="modal-mod-central" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
-                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Central de Alarmas</span>
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Central</span>
                         </label>
-                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-3 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
                             <input type="checkbox" id="modal-mod-comandancia" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
                             <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Comandancia</span>
                         </label>
-                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-3 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
                             <input type="checkbox" id="modal-mod-apk" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
-                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">MiSisBom Móvil</span>
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">MiSisBom</span>
                         </label>
-                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-4 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-3 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
+                            <input type="checkbox" id="modal-mod-material" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Material (Carros)</span>
+                        </label>
+                        <label class="flex items-center gap-3 bg-zinc-950/20 border border-white/5 p-3 rounded-xl cursor-pointer hover:bg-zinc-950/40 transition-colors">
                             <input type="checkbox" id="modal-mod-lista" class="w-4.5 h-4.5 text-red-600 bg-zinc-900 rounded border-white/10 focus:ring-red-500">
-                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Asistencia/Lista</span>
+                            <span class="text-[10px] font-bold text-zinc-300 uppercase tracking-widest">Asistencia</span>
                         </label>
                     </div>
                 </div>
@@ -993,6 +997,7 @@
                 if (c.modulos?.central) modules.push(`<span class="bg-red-500/10 text-red-500 border border-red-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">CENTRAL</span>`);
                 if (c.modulos?.comandancia) modules.push(`<span class="bg-blue-500/10 text-blue-500 border border-blue-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">COMANDANCIA</span>`);
                 if (c.modulos?.apk) modules.push(`<span class="bg-green-500/10 text-green-500 border border-green-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">MÓVIL</span>`);
+                if (c.modulos?.material) modules.push(`<span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">🚒 MATERIAL</span>`);
                 if (c.modulos?.lista) modules.push(`<span class="bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2.5 py-0.5 rounded-lg text-[9px] font-black tracking-widest uppercase">LISTA</span>`);
                 const modulesHtml = modules.length > 0 ? modules.join(" ") : `<span class="text-zinc-500 font-bold text-xs">SIN MÓDULOS</span>`;
 
@@ -1115,6 +1120,7 @@
                     document.getElementById('modal-mod-central').checked = !!client.modulos?.central;
                     document.getElementById('modal-mod-comandancia').checked = !!client.modulos?.comandancia;
                     document.getElementById('modal-mod-apk').checked = !!client.modulos?.apk;
+                    document.getElementById('modal-mod-material').checked = !!client.modulos?.material;
                     document.getElementById('modal-mod-lista').checked = !!client.modulos?.lista;
 
                     const fc = client.firebaseConfig || {};
@@ -1162,6 +1168,7 @@
                 document.getElementById('modal-mod-central').checked = true;
                 document.getElementById('modal-mod-comandancia').checked = true;
                 document.getElementById('modal-mod-apk').checked = true;
+                document.getElementById('modal-mod-material').checked = true;
                 document.getElementById('modal-mod-lista').checked = true;
 
                 document.getElementById('modal-fb-apikey').value = "";
@@ -1326,6 +1333,7 @@
                         central: document.getElementById('modal-mod-central').checked,
                         comandancia: document.getElementById('modal-mod-comandancia').checked,
                         apk: document.getElementById('modal-mod-apk').checked,
+                        material: document.getElementById('modal-mod-material').checked,
                         lista: document.getElementById('modal-mod-lista').checked
                     },
                     firebaseConfig: {

@@ -100,6 +100,20 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       // Regular firefighters can update specific fields (e.g. confirming attendance / units status)
       allow update: if isAuthenticated();
+
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
+    }
+
+    // geolocalizaciones_alertantes collection
+    match /geolocalizaciones_alertantes/{id} {
+      allow read, write: if true;
+    }
+
+    // geolocalizaciones_bomberos collection
+    match /geolocalizaciones_bomberos/{id} {
+      allow read, write: if true;
     }
 
     // alertas collection

@@ -57,128 +57,114 @@ service cloud.firestore {
       return isComandanteOrAdmin() || (isInspector() && getUserData().modulosComandancia != null && modulo in getUserData().modulosComandancia);
     }
 
-    // Default deny
+    // Default deny for unmapped documents
     match /{document=**} {
       allow read, write: if false;
     }
 
     // personal collection
     match /personal/{idRegistro} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator();
-      allow read: if isAuthenticated() || hasModulo('personal');
-      // Cualquier usuario autenticado puede actualizar su propio documento
-      // (idRegistro es el ID numérico del sistema, no el UID de Firebase Auth)
-      allow write: if isAuthenticated();
+      allow read, write: if true;
 
-      // estados subcollection - cualquier usuario autenticado puede escribir sus propios estados
+      // estados subcollection
       match /estados/{idEstado} {
-        allow read, write: if isAuthenticated();
+        allow read, write: if true;
       }
 
       // hojaDeVida subcollection
       match /hojaDeVida/{logId} {
-        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('personal');
-        allow read: if isAuthenticated();
+        allow read, write: if true;
       }
 
       // equipamiento subcollection
       match /equipamiento/{docId} {
-        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('personal');
-        allow read: if isAuthenticated();
+        allow read, write: if true;
       }
 
       // salud subcollection
       match /salud/{docId} {
-        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('personal');
-        allow read: if isAuthenticated();
+        allow read, write: if true;
       }
     }
 
     // despachos collection
     match /despachos/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('despachos');
-      allow read: if isAuthenticated();
-      // Regular firefighters can update specific fields (e.g. confirming attendance / units status)
-      allow update: if isAuthenticated();
+      allow read, write: if true;
+
+      match /{allSubcollections=**} {
+        allow read, write: if true;
+      }
+    }
+
+    // geolocalizaciones_alertantes collection (canal directo en tiempo real)
+    match /geolocalizaciones_alertantes/{id} {
+      allow read, write: if true;
+    }
+
+    // geolocalizaciones_bomberos collection (canal directo en tiempo real)
+    match /geolocalizaciones_bomberos/{id} {
+      allow read, write: if true;
     }
 
     // alertas collection
     match /alertas/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('alertas');
-      allow read: if isAuthenticated();
-      // Regular firefighters can update "conforme", "fijar" and "mensajeAlerta"
-      allow update: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // vehiculos collection
     match /vehiculos/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('vehiculos');
-      allow read: if isAuthenticated();
+      allow read, write: if true;
 
       // historial subcollection
       match /historial/{logId} {
-        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('vehiculos');
-        allow read: if isAuthenticated();
+        allow read, write: if true;
       }
     }
 
     // bitacora collection
     match /bitacora/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('bitacora');
-      allow read: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // asistencia collection
     match /asistencia/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('asistencia');
-      allow read: if isAuthenticated();
+      allow read, write: if true;
 
       match /bomberos/{userId} {
-        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('asistencia');
-        allow read: if isAuthenticated();
-        allow write: if isAuthenticated() && request.auth.uid == userId;
+        allow read, write: if true;
       }
     }
 
     // sirena collection
     match /sirena/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('sirena');
-      allow read: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // prueba_radial collection
     match /prueba_radial/{id} {
-      allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('prueba_radial');
-      allow read: if isAuthenticated();
+      allow read, write: if true;
 
       match /{document=**} {
-        allow read, write: if isComandanteOrAdmin() || isCentralOperator() || hasModulo('prueba_radial');
-        allow read: if isAuthenticated();
+        allow read, write: if true;
       }
     }
 
     // accesos collection
     match /accesos/central {
-      allow read: if isAuthenticated();
-      allow create: if isComandanteOrAdmin() || (isActiveUser() && request.resource.data.idRegistro == request.auth.uid);
-      allow update: if isComandanteOrAdmin() || (isActiveUser() && (resource.data.idRegistro == request.auth.uid || request.resource.data.idRegistro == request.auth.uid));
+      allow read, write: if true;
     }
 
     match /accesos/central/registros/{id} {
-      allow read: if isAuthenticated();
-      allow create: if isComandanteOrAdmin() || (isActiveUser() && request.resource.data.idRegistro == request.auth.uid);
-      allow update: if isComandanteOrAdmin() || (isActiveUser() && (resource.data.idRegistro == request.auth.uid || request.resource.data.idRegistro == request.auth.uid));
-      allow delete: if isComandanteOrAdmin();
+      allow read, write: if true;
     }
 
     match /accesos/comandancia/{document=**} {
-      allow read, write: if isComandanteOrAdmin() || hasModulo('accesos');
-      allow read: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // fcm_tokens collection
     match /fcm_tokens/{token} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // saas_clientes collection

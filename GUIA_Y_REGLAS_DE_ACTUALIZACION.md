@@ -103,58 +103,115 @@ Este documento establece las reglas obligatorias, estándares de diseño y el pr
 
 ---
 
-### 4. ⏱️ `Asistencia.apk` (Tablet / Tótem de Cuartel)
-* **Función Principal:** Registro de guardia y asistencia presencial en el cuartel mediante QR, RUT, PIN o Biometría.
+---
+
+### 4. 🚒 `SisBomCar.apk` (Tablet / Consola Táctica de a bordo de la unidad)
+* **Función Principal:** Consola de a bordo montada en el vehículo bomberil (CarPlay / Tablet táctica).
+* **Deprecación:** Sustituye definitivamente a `MiMaterialMayor.apk`.
+* **Regla de Equivalencia:** Funciona **exactamente como la tarjeta individual de la unidad en `materialMayor.html`**:
+  * **Salidas 6-13 / 6-14 extraordinarias:** Se registran con ID correlativo numérico entero en `bitacora` (`idSalida: "1"`, `"2"`, `"14"`).
+  * **Ciclo Operativo Táctico:**
+    1. **`pending_departure`**: Botón **`🚒 6-0 EN TRAYECTO`** (requiere conductor y OBAC; si faltan, abre modal para asignarlos).
+    2. **`en_trayecto` (6-0)**: Botón **`📍 6-3 EN EL LUGAR`**.
+    3. **`en_lugar` (6-3)**: Botones **`🔄 6-9 RETORNO`**, **`🚒 6-13 10-X`** y **`🏥 6-15 SALUD`**.
+    4. **`retorno` (6-9)**: Botón **`🏢 6-10 EN CUARTEL`**.
+    5. **`en_cuartel` (6-10)**: Botón **`🏁 6-8 FIN DE SERVICIO`** (abre diálogo de Odómetro final en KM, actualiza `bitacora` con `hora68`/`fecha68` y libera la unidad a `0-9` o `0-8`).
+
+---
+
+### 5. ⏱️ `Lista.apk` (Tablet / Tótem de Cuartel)
+* **Función Principal:** Registro de asistencia presencial y guardias de los bomberos.
+* **Deprecación:** Sustituye definitivamente a `Asistencia.apk`.
 * **Reglas de Actualización:**
   * **Modo Kiosco / Pantalla Encendida:** La app debe mantener la pantalla encendida permanentemente (*Keep Screen On*) y evitar salidas accidentales mediante gestos.
   * **Modo Offline con Sincronización:** Si el Wi-Fi del cuartel se cae, la app DEBE guardar las marcas de asistencia de forma local en la memoria de la Tablet y sincronizarlas automáticamente cuando la red se restablezca.
   * **Velocidad de Marcación:** El proceso de registro de un bombero no debe tomar más de 2 segundos.
-  * **Interfaz de Alto Impacto:** Botones grandes, legibles a distancia y respuesta sonora/visual clara para marcar llegada o salida.
+  * **Estandarización de Abono:** Debe escribir `abono: "SÍ"` / `"NO"` y `esAbono: 1` / `0`.
+
+---
+
+## 🗄️ Diccionario Canónico de Campos (Esquemas Firestore)
+
+### 1. `bitacora` (Historial y Salidas Operativas)
+* **ID de documento:** Correlativo entero como String (`"1"`, `"2"`, ..., `"14"`).
+* **Campos:**
+  - `idSalida`, `id`, `ID`, `idRegistro` (`String`): ID numérico correlativo.
+  - `idServicio` (`String`): ID de despacho central o `""` si es salida extraordinaria.
+  - `carro`, `idCarro` (`String`): Código del carro (ej: `"B1"`).
+  - `clave` (`String`): `"10-2"`, `"6-13"`, `"6-14"`.
+  - `lugar` (`String`): Dirección o destino.
+  - `preInforme` (`String`): Pre-informe / motivo.
+  - `informe63` (`String`): Informe radial 6-3.
+  - `observacion` (`String`): Observación de cierre.
+  - `conductor` (`String`): `"1 - CRISTIAN LOPEZ MELLA"`.
+  - `obac` (`String`): `"2 - JUAN MARTINEZ CORNEJO"`.
+  - `cuantosBomberos` (`String`): Conteo de dotación (`"0"`, `"4"`).
+  - `tripulantes` (`String`): Resumen de dotación.
+  - `tripulantesNombres` (`String`): Nombres concatenados.
+  - `tripulantesDetalle` (`Array[Map]`): Lista de objetos bomberos.
+  - `fecha60`, `hora60`, `fecha63`, `hora63`, `fecha69`, `hora69`, `fecha610`, `hora610`, `fecha68`, `hora68` (`String`): Tiempos en `dd-MM-yyyy` y `HH:mm`.
+  - `km` (`String`): Odómetro final en kilómetros.
+  - `estadoMovil` (`String`): `"en trayecto"`, `"en el lugar"`, `"retorno"`, `"en cuartel"`, `"en servicio"`.
+  - `timestamp` (`Number`): Epoch ms.
+* **Subcolección:** `bitacora/{idSalida}/tripulantes/{idRegistroBombero}`.
+
+### 2. `despachos` (Servicios Activos y Finalizados)
+* **ID de documento:** Correlativo entero como String (`"34"`, `"35"`, `"41"`).
+* **Campos Principales:** `id`, `ID`, `idRegistro`, `idServicio`, `clave`, `claveApoyo`, `lugar`, `preinforme`, `informeObac`, `estado`, `fechaDespacho`, `horaDespacho`, `fechaTermino`, `horaTermino`, `fecha67`, `hora67`, `operadorInicial`, `operadorFinal`, `carros`, `carrosTexto`, `geo`, `geolocalizacionAlertante`, `pushSent`, `visibleMovil`, `solicitarConfirmacion`.
+* **Mapa Anidado `unidades.<carro>`:**
+  ```json
+  "unidades": {
+    "B1": {
+      "estado": "en_lugar",
+      "conductor": "1 - CRISTIAN LOPEZ MELLA",
+      "driverRad": "1",
+      "obac": "2 - JUAN MARTINEZ CORNEJO",
+      "obacRad": "2",
+      "count": "0",
+      "cuantosBomberos": "0",
+      "tripulantes": ["CRISTIAN LOPEZ MELLA"],
+      "tripulantesNombres": "1 CRISTIAN LOPEZ MELLA",
+      "tripulantesDetalle": [],
+      "horaSalida": "09:06",
+      "hora60": "09:06", "fecha60": "01-09-2026",
+      "hora63": "09:12", "fecha63": "01-09-2026",
+      "hora69": "", "fecha69": "",
+      "hora610": "", "fecha610": "",
+      "hora68": "", "fecha68": "",
+      "km": "0",
+      "gps": { "lat": -34.6368, "lng": -71.1199, "speed": 0, "heading": 0, "hora": "14:42:11", "fecha": "30-08-2026", "timestamp": 1788115331232 }
+    }
+  }
+  ```
+
+### 3. `vehiculos` (Material Mayor)
+* **ID de documento:** Código del carro (`"B1"`).
+* **Campos:** `idCarro`, `estado` (`0-9`, `0-8`, `6-13`, `6-14`), `enServicio` (`0` o clave), `conductor`, `obac`, `aCargo`, `lugar`, `notas`, `kmActual`, `lat`, `lng`, `heading`, `speed`, `lastUpdate`, `solicitudConductorTimestamp`, `solicitudPersonalTimestamp`.
+
+### 4. `asistencia` (Listas y Guardias)
+* **ID de documento:** `idLista` (`"2026156"`).
+* **Campos:** `idLista`, `idServicio`, `clave`, `evento`, `fecha`, `hora`, `lugar`, `obac`, `listaPor`, `aprobadoPor`, `fechaAprobacion`, `abono` (`"SÍ"`/`"NO"`), `esAbono` (`1`/`0`), `bomberos` (`Array[Map]`).
+
+### 5. `personal` (Padrón de Voluntarios)
+* **ID de documento:** `idRegistro` (`"114"`).
+* **Campos:** `idRegistro`, `idRadial`, `nombreBombero`, `cargo`, `compania`, `estado` (`0-9`, `0-8`, `CDS`), `enServicio`, `conductor` (`"SI"`/`"NO"`), `activo` (`"SI"`/`"NO"`), `autorizadoAdmin`, `contrasena`, `deviceId`, `lat`, `lng`, `gpsTimestamp`, `estadosHistorico`.
 
 ---
 
 ## 🔄 Guía Paso a Paso para Construir una Actualización
 
 ### Paso 1: Regla General Estricta de Versionado Semántico (`MAJOR.MINOR.PATCH`)
-Cada vez que se prepare una actualización, se debe seguir la siguiente regla estricta de incremento:
-
-* **Corrección de Errores / Hotfix (`PATCH` → `X.X.+1`):** 
-  * Aplicable a solución de bugs, parches de estabilidad o correcciones menores. 
-  * *Ejemplo:* Si la versión actual es `1.0.0`, se debe compilar como **`1.0.1`**.
-* **Novedad / Funcionalidad Nueva (`MINOR` → `X.+1.0`):** 
-  * Aplicable a nuevas características, nuevas pantallas o funciones agregadas. 
-  * *Ejemplo:* De `1.0.1` se pasa a **`1.1.0`**.
-* **Cambio Radical / App Renovada (`MAJOR` → `+1.0.0`):** 
-  * Aplicable a rediseños completos, reconstrucción de arquitectura o cambios radicales. 
-  * *Ejemplo:* De `1.2.5` se pasa a **`2.0.0`**.
+* **`PATCH` (X.X.+1):** Hotfixes y solución de bugs.
+* **`MINOR` (X.+1.0):** Nuevas pantallas o funciones.
+* **`MAJOR` (+1.0.0):** Cambios de arquitectura o rediseños completos.
 
 📌 **INDEPENDENCIA DE VERSIÓN POR APLICACIÓN:**  
-Cada aplicación del ecosistema (`SisBom.exe`, `MiSisBom`, `Asistencia.apk`) mantiene su **propio historial de versión totalmente independiente**. Un parche en `MiSisBom` incrementa únicamente la versión de `MiSisBom` sin afectar o forzar la actualización de versión en `SisBom.exe` ni en `Asistencia.apk`.
-
-⚠️ **REGLA DE SINCRONIZACIÓN INTERNA DE VERSIÓN:**  
-Al incrementar la versión de una app específica, es **OBLIGATORIO** actualizar el nuevo número en **TODOS los archivos pertenecientes a esa aplicación**, por ejemplo:
-- **Si se actualiza `SisBom.exe` (Central y Comandancia):** Sincronizar versión en `main.py`, `build.py`, `package.json`, footers HTML y changelog de SisBom Desktop.
-- **Si se actualiza `MiSisBom` (iOS & Android):** Sincronizar simultáneamente la misma versión en `build.gradle.kts` (`versionName` y `versionCode`) (Android), `Info.plist` / `project.yml` (iOS), vistas de ajustes/acerca de y `SisBomViewModel`.
-- **Si se actualiza `Asistencia.apk`:** Sincronizar versión en `build.gradle` y pantallas del tótem.
-
-### Paso 2: Lista de Comprobación Pre-Release (Checklist)
-Antes de compilar la versión final:
-- [ ] ¿Se probaron las notificaciones/tonos de alarma?
-- [ ] ¿La conexión a Firestore se recupera tras cortar y reconectar el Wi-Fi?
-- [ ] ¿Se verificó que los roles de usuario sigan funcionando correctamente?
-- [ ] ¿La interfaz se adapta a distintas resoluciones de pantalla?
-- [ ] ¿Se generaron los ejecutables (`build.py` para `.exe`) y los paquetes móviles sin advertencias críticas?
-
-### Paso 3: Registro de Cambios (`CHANGELOG.md`)
-Toda actualización debe ir acompañada de una breve nota con:
-* **Fecha y Versión**
-* **Novedades / Mejoras**
-* **Errores Corregidos**
-* **Módulos Afectados** (Central, Comandancia, MiSisBom o Asistencia)
+Cada aplicación del ecosistema (`SisBom.exe`, `MiSisBom`, `SisBomCar.apk`, `Lista.apk`, `SaaS.exe`) mantiene su propio historial de versión independiente.
 
 ---
 
 ## 📌 Reglas de Preservación de Código (Para Desarrolladores e IA)
-1. **No alterar contratos de datos en Firestore** sin crear un script de migración previo.
-2. **No remover librerías de respaldo (fallback)** en las conexiones de red en Python (`SisBom`).
+1. **No alterar contratos de datos en Firestore** sin verificar el Diccionario Canónico de Campos.
+2. **Uso Exclusivo de Proyecto de Pruebas:** Prohibido conectar o modificar el proyecto de producción de clientes (`sisbom-de5f8`). Usar únicamente `pruebas-sisbom`.
 3. **Mantener comentarios explicativos** en secciones críticas de despacho, audio y sincronización.
+

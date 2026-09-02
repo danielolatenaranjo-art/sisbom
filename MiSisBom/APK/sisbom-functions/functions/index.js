@@ -1,4 +1,4 @@
-const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated, onDocumentDeleted, onDocumentWritten } = require("firebase-functions/v2/firestore");
 const { onRequest } = require("firebase-functions/v2/https");
 const { setGlobalOptions } = require("firebase-functions");
 const admin = require("firebase-admin");
@@ -35,7 +35,10 @@ async function cleanChatMessage(rawMsg) {
 
   try {
     const db = admin.firestore();
-    const snap = await db.collection("personal").where("idRegistro", "==", senderId).get();
+    let snap = await db.collection("personal").where("idRegistro", "==", senderId).get();
+    if (snap.empty && !isNaN(Number(senderId))) {
+      snap = await db.collection("personal").where("idRegistro", "==", Number(senderId)).get();
+    }
     if (!snap.empty) {
       const userData = snap.docs[0].data();
       const nombre = userData.nombreBombero || "Bombero";
@@ -47,6 +50,48 @@ async function cleanChatMessage(rawMsg) {
   }
 
   return `ID ${senderId}: ${cleanText}`;
+}
+
+async function resolveTargetToIdRegistro(rawId) {
+  const db = admin.firestore();
+  const trimmed = String(rawId).trim();
+  if (!trimmed) return null;
+
+  try {
+    // 1. Search by idRadial (string direct, uppercase, lowercase)
+    let snap = await db.collection("personal").where("idRadial", "==", trimmed).get();
+    if (snap.empty && trimmed.toUpperCase() !== trimmed) {
+      snap = await db.collection("personal").where("idRadial", "==", trimmed.toUpperCase()).get();
+    }
+    if (snap.empty && trimmed.toLowerCase() !== trimmed) {
+      snap = await db.collection("personal").where("idRadial", "==", trimmed.toLowerCase()).get();
+    }
+    if (snap.empty && !isNaN(Number(trimmed))) {
+      // 2. Search by idRadial (number)
+      snap = await db.collection("personal").where("idRadial", "==", Number(trimmed)).get();
+    }
+    if (!snap.empty) {
+      const regId = snap.docs[0].data().idRegistro;
+      if (regId) return String(regId).trim();
+    }
+
+    // 3. Search by idRegistro directly (string direct, uppercase, lowercase, number)
+    snap = await db.collection("personal").where("idRegistro", "==", trimmed).get();
+    if (snap.empty && trimmed.toUpperCase() !== trimmed) {
+      snap = await db.collection("personal").where("idRegistro", "==", trimmed.toUpperCase()).get();
+    }
+    if (snap.empty && !isNaN(Number(trimmed))) {
+      snap = await db.collection("personal").where("idRegistro", "==", Number(trimmed)).get();
+    }
+    if (!snap.empty) {
+      const regId = snap.docs[0].data().idRegistro;
+      if (regId) return String(regId).trim();
+    }
+  } catch (e) {
+    console.error("Error resolving ID in personal:", e);
+  }
+
+  return trimmed;
 }
 
 function formatFirefighterName(name) {
@@ -62,31 +107,44 @@ function formatFirefighterName(name) {
   return first;
 }
 
-// 1. DESPACHOS
-exports.enviarDespacho = onDocumentCreated(
-  "despachos/{id}",
+// 1. DESPACHOS - Solo se notifica cuando un despacho pasa a ser activo por primera vez
+exports.enviarDespacho = onDocumentWritten(
+  { document: "despachos/{id}" },
   async (event) => {
-    const data = event.data ? event.data.data() : null;
+    const afterData = event.data.after ? event.data.after.data() : null;
+    const beforeData = event.data.before ? event.data.before.data() : null;
 
-    if (!data) return null;
+    if (!afterData) return null;
 
     const id = event.params.id;
 
-    if (data.pushSent) {
-      console.log("Push ya enviado, ignorando:", id);
+    // Si ya fue enviado previamente o antes ya estaba como pushSent, JAMÁS volver a enviar
+    if (afterData.pushSent === true || (beforeData && beforeData.pushSent === true)) {
       return null;
     }
 
-    const clave = data.clave || "10-0";
-    const claveApoyo = data.claveApoyo || "";
-    const lugar = data.lugar || "Sin ubicación";
+    // Solo se debe enviar push si el despacho está activo y visible para los móviles
+    const estado = String(afterData.estado || "").toLowerCase();
+    if (estado === "cancelada" || afterData.visibleMovil !== true) {
+      return null;
+    }
+
+    // Si antes ya existía y ya era visibleMovil == true, es una simple modificación/edición: NO ENVIAR PUSH
+    if (beforeData && beforeData.visibleMovil === true) {
+      console.log("Modificación de despacho existente, omitiendo push para no sonar:", id);
+      return null;
+    }
+
+    const clave = afterData.clave || "10-0";
+    const claveApoyo = afterData.claveApoyo || "";
+    const lugar = afterData.lugar || "Sin ubicación";
 
     let unidadesTexto = "Unidades en despacho";
-    if (data.carrosTexto && data.carrosTexto !== "") {
-        unidadesTexto = data.carrosTexto;
-    } else if (data.unidades) {
+    if (afterData.carrosTexto && afterData.carrosTexto !== "") {
+        unidadesTexto = afterData.carrosTexto;
+    } else if (afterData.unidades) {
       try {
-        const unidades = Object.keys(data.unidades);
+        const unidades = Object.keys(afterData.unidades);
         if (unidades.length > 0) {
           unidadesTexto = unidades.join(" / ");
         }
@@ -97,9 +155,10 @@ exports.enviarDespacho = onDocumentCreated(
 
     const titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${lugar}` : `${clave} en ${lugar}`;
 
-    const payload = new Object({
+    // Direct topic dispatch (each Fire Department has its own isolated Firebase project)
+    const payload = {
       topic: "despachos",
-      data: new Object({
+      data: {
         title: String(titleText),
         body: String(unidadesTexto),
         type: "DISPATCH",
@@ -107,24 +166,24 @@ exports.enviarDespacho = onDocumentCreated(
         clave: String(clave),
         claveApoyo: String(claveApoyo),
         lugar: String(lugar)
-      }),
-      android: new Object({
+      },
+      android: {
         priority: "high"
-      })
-    });
+      }
+    };
 
     try {
       await admin.messaging().send(payload);
-      console.log("PUSH ENVIADO:", id);
+      console.log("PUSH DE DESPACHO ENVIADO EXITOSAMENTE AL TOPIC despachos:", id, titleText);
 
-      await event.data.ref.update(new Object({
+      await event.data.after.ref.update({
         pushSent: true,
         pushSentAt: Date.now()
-      }));
+      });
 
       return null;
     } catch (error) {
-      console.error("Error enviando push:", error);
+      console.error("Error enviando push de despacho:", error);
       return null;
     }
   }
@@ -157,76 +216,41 @@ exports.enviarAlerta = onDocumentCreated(
 
     const aQuien = String(data.aQuienAlerta || "").trim().toUpperCase();
 
-    const dbName = event.params.database || "(default)";
-    const cuerpoId = data.cuerpoId || data.licenseKey || data.cuerpo || (dbName !== "(default)" ? dbName : "");
-    const safeTenant = String(cuerpoId).replace(/[^a-zA-Z0-9-_.~%]/g, "_").trim();
-
-    const payload = new Object({
-      data: new Object({
+    const payload = {
+      data: {
         title: String(razon),
         body: String(mensaje),
         type: String(typePush),
         payloadId: String(id),
-        gradoAlerta: String(duracion),
         clave: "",
-        senderId: String(senderId),
-        cuerpoId: String(safeTenant)
-      }),
-      android: new Object({
+        senderId: String(senderId)
+      },
+      android: {
         priority: "high"
-      })
-    });
+      }
+    };
 
     try {
       if (aQuien === "TC" || aQuien === "1") {
-        const topicName = safeTenant ? `alertas_generales_${safeTenant}` : "alertas_generales";
-        Reflect.set(payload, "topic", topicName);
+        payload.topic = "alertas_generales";
         await admin.messaging().send(payload);
-        if (topicName !== "alertas_generales") {
-            try {
-                const fbPayload = Object.assign(new Object(), payload, new Object({ topic: "alertas_generales" }));
-                await admin.messaging().send(fbPayload);
-            } catch (_e) {}
-        }
       } else if (aQuien === "CONDUCTORES") {
-        const topicName = safeTenant ? `conductores_${safeTenant}` : "conductores";
-        Reflect.set(payload, "topic", topicName);
+        payload.topic = "conductores";
         await admin.messaging().send(payload);
-      }
       } else {
         const targets = aQuien.split(",").map(s => s.trim()).filter(s => s !== "");
         const promises = targets.map(async (t) => {
             const rawId = t.split(" ").at(0).trim();
-            let finalTopic = rawId; // Valor por defecto
-
-            try {
-                const db = admin.firestore();
-                // MAGIA: Busca si "rawId" es un idRadial
-                const snapRadial = await db.collection("personal").where("idRadial", "==", rawId).get();
-                if (!snapRadial.empty) {
-                    const regId = snapRadial.docs.at(0).data().idRegistro;
-                    if (regId) finalTopic = String(regId).trim();
-                } else {
-                    // Por seguridad, busca si también ingresaron un idRegistro directo
-                    const snapReg = await db.collection("personal").where("idRegistro", "==", rawId).get();
-                    if (!snapReg.empty) {
-                        const regId2 = snapReg.docs.at(0).data().idRegistro;
-                        if (regId2) finalTopic = String(regId2).trim();
-                    }
-                }
-            } catch (e) {
-                console.log("Error buscando ID:", e);
-            }
+            const resolvedId = await resolveTargetToIdRegistro(rawId) || rawId;
 
             // Exclude sender from direct push
-            if (senderId && finalTopic.trim() === senderId.trim()) {
-                console.log("Excluyendo remitente de push directo:", finalTopic);
+            if (senderId && resolvedId.trim() === senderId.trim()) {
+                console.log("Excluyendo remitente de push directo:", resolvedId);
                 return null;
             }
 
-            // Eliminar espacios en blanco por seguridad de FCM (No se borran guiones)
-            const safeTopic = finalTopic.replace(new RegExp(" ", "g"), "");
-            const userPayload = Object.assign(new Object(), payload, new Object({ topic: "usuario_" + safeTopic }));
+            const safeTopic = resolvedId.replace(/\s+/g, "");
+            const userPayload = Object.assign({}, payload, { topic: "usuario_" + safeTopic });
             return admin.messaging().send(userPayload).catch(e => console.log(e));
         });
         await Promise.all(promises);
@@ -243,8 +267,8 @@ exports.enviarAlerta = onDocumentCreated(
 exports.actualizarChat = onDocumentUpdated(
   "alertas/{id}",
   async (event) => {
-    const newData = event.data.after.data();
-    const oldData = event.data.before.data();
+    const newData = event.data.after ? event.data.after.data() : null;
+    const oldData = event.data.before ? event.data.before.data() : null;
     
     if (!newData || !oldData) return null;
     if (String(newData.duracion).trim().toUpperCase() !== "C") return null; 
@@ -261,55 +285,38 @@ exports.actualizarChat = onDocumentUpdated(
     const ultimoMensaje = await cleanChatMessage(ultimoMensajeRaw);
     const aQuien = String(newData.aQuienAlerta || "").trim().toUpperCase();
 
-    const payload = new Object({
-      data: new Object({
+    const payload = {
+      data: {
         title: String(razon),
         body: String(ultimoMensaje),
         type: "CHAT",
         payloadId: String(id),
         clave: "",
         senderId: String(senderId)
-      }),
-      android: new Object({
+      },
+      android: {
         priority: "high"
-      })
-    });
+      }
+    };
 
     try {
       if (aQuien === "TC" || aQuien === "1") {
-        Reflect.set(payload, "topic", "alertas_generales");
+        payload.topic = "alertas_generales";
         await admin.messaging().send(payload);
       } else {
         const targets = aQuien.split(",").map(s => s.trim()).filter(s => s !== "");
         const promises = targets.map(async (t) => {
             const rawId = t.split(" ").at(0).trim();
-            let finalTopic = rawId;
-
-            try {
-                const db = admin.firestore();
-                const snapRadial = await db.collection("personal").where("idRadial", "==", rawId).get();
-                if (!snapRadial.empty) {
-                    const regId = snapRadial.docs.at(0).data().idRegistro;
-                    if (regId) finalTopic = String(regId).trim();
-                } else {
-                    const snapReg = await db.collection("personal").where("idRegistro", "==", rawId).get();
-                    if (!snapReg.empty) {
-                        const regId2 = snapReg.docs.at(0).data().idRegistro;
-                        if (regId2) finalTopic = String(regId2).trim();
-                    }
-                }
-            } catch (e) {
-                console.log("Error buscando ID:", e);
-            }
+            const resolvedId = await resolveTargetToIdRegistro(rawId) || rawId;
 
             // Exclude sender from direct push
-            if (senderId && finalTopic.trim() === senderId.trim()) {
-                console.log("Excluyendo remitente de push directo:", finalTopic);
+            if (senderId && resolvedId.trim() === senderId.trim()) {
+                console.log("Excluyendo remitente de push directo:", resolvedId);
                 return null;
             }
 
-            const safeTopic = finalTopic.replace(new RegExp(" ", "g"), "");
-            const userPayload = Object.assign(new Object(), payload, new Object({ topic: "usuario_" + safeTopic }));
+            const safeTopic = resolvedId.replace(/\s+/g, "");
+            const userPayload = Object.assign({}, payload, { topic: "usuario_" + safeTopic });
             return admin.messaging().send(userPayload).catch(e => console.log(e));
         });
         await Promise.all(promises);
@@ -322,7 +329,7 @@ exports.actualizarChat = onDocumentUpdated(
   }
 );
 
-// 4. ACTUALIZACIONES DE DESPACHOS (SOLICITUDES 12-10 / 6-6)
+// 4. ACTUALIZACIONES DE DESPACHOS (SOLICITUDES 12-10 / 6-6 Y CAMBIOS DE SERVICIO)
 exports.actualizarDespacho = onDocumentUpdated(
   "despachos/{id}",
   async (event) => {
@@ -334,6 +341,8 @@ exports.actualizarDespacho = onDocumentUpdated(
     const id = event.params.id;
     const oldUnidades = oldData.unidades || {};
     const newUnidades = newData.unidades || {};
+    const clave = String(newData.clave || "10-0");
+    const lugar = String(newData.lugar || "Sin ubicación");
 
     for (const unitName of Object.keys(newUnidades)) {
       const oldUnit = oldUnidades[unitName] || {};
@@ -348,24 +357,27 @@ exports.actualizarDespacho = onDocumentUpdated(
       if (new1210At && (new1210At !== old1210At || (new1210Ts > 0 && new1210Ts !== old1210Ts))) {
         console.log(`Nueva solicitud 12-10 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
+          topic: "conductores",
           data: {
-            title: "SOLICITUD 12-10",
-            body: `Se solicita Conductor para la unidad ${unitName}`,
+            title: `SOLICITUD 12-10: ${unitName}`,
+            body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`,
             type: "DISPATCH_UPDATE",
+            solicitudTipo: "12-10",
+            unitName: String(unitName),
             payloadId: String(id),
-            clave: String(newData.clave || ""),
-            lugar: String(newData.lugar || "")
+            clave: String(clave),
+            lugar: String(lugar),
+            timestamp: String(new1210Ts || Date.now())
           },
           android: {
             priority: "high"
-          },
-          topic: "conductores"
+          }
         };
         try {
           await admin.messaging().send(payload);
           console.log(`Notificación 12-10 enviada para ${unitName}`);
         } catch (e) {
-          console.error(`Error enviando notificación 12-10:`, e);
+          console.error("Error enviando notificación 12-10:", e);
         }
       }
 
@@ -378,28 +390,32 @@ exports.actualizarDespacho = onDocumentUpdated(
       if (new66At && (new66At !== old66At || (new66Ts > 0 && new66Ts !== old66Ts))) {
         console.log(`Nueva solicitud 6-6 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
+          topic: "alertas_generales",
           data: {
-            title: "SOLICITUD 6-6",
-            body: `Se solicita Personal para la unidad ${unitName}`,
+            title: `SOLICITUD 6-6: ${unitName}`,
+            body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`,
             type: "DISPATCH_UPDATE",
+            solicitudTipo: "6-6",
+            unitName: String(unitName),
             payloadId: String(id),
-            clave: String(newData.clave || ""),
-            lugar: String(newData.lugar || "")
+            clave: String(clave),
+            lugar: String(lugar),
+            timestamp: String(new66Ts || Date.now())
           },
           android: {
             priority: "high"
-          },
-          topic: "alertas_generales"
+          }
         };
         try {
           await admin.messaging().send(payload);
           console.log(`Notificación 6-6 enviada para ${unitName}`);
         } catch (e) {
-          console.error(`Error enviando notificación 6-6:`, e);
+          console.error("Error enviando notificación 6-6:", e);
         }
       }
     }
 
+    // General dispatch modifications are handled silently (no push or siren)
     return null;
   }
 );
@@ -564,7 +580,7 @@ exports.validateLicense = onRequest({ cors: true }, async (req, res) => {
     }
 
     // Hardware verification (sanity check - bypass for mobile modules)
-    if (hwid && assignedModule !== "apk" && assignedModule !== "lista") {
+    if (hwid && assignedModule !== "apk" && assignedModule !== "lista" && assignedModule !== "material") {
       const hwids = clientData.hardwareUUIDs || [];
       if (!hwids.includes(hwid)) {
         return res.status(403).json({
@@ -677,67 +693,49 @@ exports.syncTokenTopicsOnUpdate = onDocumentUpdated(
   }
 );
 
-// 6. NOTIFICAR INICIO DE SESIÓN DE OPERADOR DE CENTRAL EN TIEMPO REAL (SOLO AL CAMBIAR OPERADOR EN FIRESTORE)
-exports.notificarOperadorCentral = onDocumentWritten(
-  { database: "{database}", document: "accesos/central" },
+// 7. PUSH DE CAMBIO DE ESTADO DESDE LA CENTRAL (CON VIBRACIÓN Y NOTIFICACIÓN VISUAL)
+exports.actualizarEstadoPersonal = onDocumentUpdated(
+  "personal/{id}",
   async (event) => {
-    const newData = event.data.after ? event.data.after.data() : null;
     const oldData = event.data.before ? event.data.before.data() : null;
+    const newData = event.data.after ? event.data.after.data() : null;
+    if (!oldData || !newData) return null;
 
-    if (!newData) return null;
+    const oldEstado = (oldData.estado || "").trim().toUpperCase();
+    const newEstado = (newData.estado || "").trim().toUpperCase();
 
-    const newEstado = String(newData.estado || "").toLowerCase();
-    const oldEstado = oldData ? String(oldData.estado || "").toLowerCase() : "";
+    if (oldEstado === newEstado) return null; // No hubo cambio de estado
 
-    const newOperator = String(newData.nombreBombero || newData.operador || "").trim();
-    const oldOperator = oldData ? String(oldData.nombreBombero || oldData.operador || "").trim() : "";
+    const idRegistro = (newData.idRegistro || event.params.id || "").toString().trim();
+    if (!idRegistro) return null;
 
-    const newId = String(newData.idRegistro || "").trim();
-    const oldId = oldData ? String(oldData.idRegistro || "").trim() : "";
+    const safeTopic = idRegistro.replace(/\s+/g, "");
 
-    const isNowActive = newEstado === "activo" && (newOperator || newId);
-    const wasActiveSameUser = oldEstado === "activo" && ((newId && newId === oldId) || (newOperator && newOperator === oldOperator));
-
-    if (isNowActive && !wasActiveSameUser) {
-      const dbName = event.params.database || "(default)";
-      const cuerpoId = newData.cuerpoId || newData.licenseKey || newData.cuerpo || (dbName !== "(default)" ? dbName : "");
-      const safeTenant = String(cuerpoId).replace(/[^a-zA-Z0-9-_.~%]/g, "_").trim();
-
-      const topicName = safeTenant ? `alertas_generales_${safeTenant}` : "alertas_generales";
-      const opName = newOperator || `ID ${newId}`;
-
-      const payload = new Object({
-        topic: topicName,
-        data: new Object({
-          title: "OPERADOR DE CENTRAL ACTIVO",
-          body: `${opName} ha iniciado sesión como Operador Central de Alarmas.`,
-          type: "STATUS_CHANGE",
-          gradoAlerta: "1",
-          cuerpoId: String(safeTenant)
-        }),
-        android: new Object({
-          priority: "high"
-        })
-      });
-
-      try {
-        await admin.messaging().send(payload);
-        console.log(`NOTIFICACION PUSH OPERADOR CENTRAL ENVIADA: ${opName} en topic ${topicName}`);
-
-        if (topicName !== "alertas_generales") {
-          try {
-            const fbPayload = Object.assign(new Object(), payload, new Object({ topic: "alertas_generales" }));
-            await admin.messaging().send(fbPayload);
-          } catch (_e) {}
-        }
-      } catch (e) {
-        console.error("Error enviando push de operador central:", e);
+    const payload = {
+      topic: `usuario_${safeTopic}`,
+      data: {
+        title: "ESTADO ACTUALIZADO",
+        body: `Tu estado ha sido cambiado a ${newEstado} por la Central`,
+        type: "STATUS_CHANGE",
+        newStatus: String(newEstado),
+        idRegistro: String(idRegistro)
+      },
+      android: {
+        priority: "high"
       }
-    }
+    };
 
-    return null;
+    try {
+      await admin.messaging().send(payload);
+      console.log(`Push de cambio de estado enviado a topic usuario_${safeTopic}: ${newEstado}`);
+      return null;
+    } catch (e) {
+      console.error("Error enviando push de cambio de estado:", e);
+      return null;
+    }
   }
 );
+
 
 
 

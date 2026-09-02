@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cuerpo de Bomberos - Ubicación de Emergencia</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        body, input, button, p, span, div, h1, h2, h3 {
+            text-transform: uppercase !important;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        :root {
+            --bg-dark: #070a12;
+            --card-bg: rgba(15, 23, 42, 0.95);
+            --red-brand: #ef4444;
+            --red-glow: rgba(239, 68, 68, 0.4);
+            --green-brand: #22c55e;
+        }
+        body {
+            background-color: var(--bg-dark);
+            background-image: radial-gradient(circle at top center, rgba(239, 68, 68, 0.15) 0%, #070a12 70%);
+            color: #f8fafc;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            overflow-x: hidden;
+        }
+        .pulse-radar {
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+            animation: pulse-ring 1.8s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 26px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        .pulse-success {
+            box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
+            animation: pulse-success-ring 2s infinite;
+        }
+        @keyframes pulse-success-ring {
+            0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(34, 197, 94, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+        }
+        #mini-map {
+            height: 240px;
+            width: 100%;
+            border-radius: 1rem;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6 flex flex-col justify-between items-center">
+
+    <!-- CABECERA -->
+    <header class="w-full max-w-md flex flex-col items-center text-center mt-2 mb-4">
+        <div class="w-20 h-20 bg-red-950/60 border-2 border-red-500 rounded-full flex items-center justify-center p-3 mb-2 shadow-xl">
+            <img src="./Logo.png" alt="Bomberos" class="w-full h-full object-contain filter drop-shadow" onerror="this.style.display='none'; document.getElementById('alt-fire-icon').classList.remove('hidden');">
+            <i id="alt-fire-icon" class="fas fa-fire-extinguisher text-3xl text-red-500 hidden"></i>
+        </div>
+        <h1 id="header-org-name" class="text-xl font-black tracking-wider text-red-500">CUERPO DE BOMBEROS DE PLACILLA</h1>
+        <h2 class="text-[11px] font-bold tracking-widest text-slate-400 mt-0.5">SISTEMA DE GEOLOCALIZACIÓN DE EMERGENCIAS</h2>
+    </header>
+
+    <!-- TARJETA PRINCIPAL -->
+    <main class="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-2xl backdrop-blur flex flex-col items-center text-center my-auto">
+        
+        <!-- ESTADO 1: INICIAL (LISTO PARA COMPARTIR) -->
+        <div id="state-initial" class="w-full flex flex-col items-center">
+            <div class="w-24 h-24 bg-red-600/20 border-2 border-red-500/50 rounded-full flex items-center justify-center text-red-500 text-4xl mb-6 pulse-radar">
+                <i class="fas fa-location-crosshairs"></i>
+            </div>
+            
+            <h3 class="text-lg font-black text-white mb-2">UBICACIÓN DEL INCIDENTE</h3>
+            <p class="text-xs font-medium text-slate-300 mb-6 leading-relaxed">
+                Presione el botón a continuación para enviar sus coordenadas satelitales (GPS) a la Central de Alarmas.
+            </p>
+
+            <button id="btn-share-geo" onclick="solicitarGeolocalizacion()" class="w-full py-4 px-6 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-sm tracking-widest rounded-xl shadow-lg shadow-red-600/40 transition-all flex items-center justify-center gap-3">
+                <i class="fas fa-location-arrow text-lg animate-bounce"></i>
+                <span>COMPARTIR MI UBICACIÓN</span>
+            </button>
+            
+            <p class="text-[10px] text-slate-500 mt-4 font-bold">
+                <i class="fas fa-shield-halved mr-1"></i> Conexión Segura con Central 132
+            </p>
+        </div>
+
+        <!-- ESTADO 2: OBTENIENDO GPS -->
+        <div id="state-loading" class="w-full flex-col items-center py-8 hidden">
+            <div class="w-20 h-20 border-4 border-slate-800 border-t-red-500 rounded-full animate-spin mb-6"></div>
+            <h3 class="text-base font-black text-white mb-2">OBTENIENDO COORDENADAS GPS...</h3>
+            <p class="text-xs font-medium text-slate-400">Por favor acepte el permiso de ubicación en su pantalla.</p>
+        </div>
+
+        <!-- ESTADO 3: ÉXITO (UBICACIÓN TRANSMITIDA) -->
+        <div id="state-success" class="w-full flex-col items-center hidden">
+            <div class="w-16 h-16 bg-green-500/20 border-2 border-green-500 rounded-full flex items-center justify-center text-green-500 text-3xl mb-4 pulse-success">
+                <i class="fas fa-check"></i>
+            </div>
+
+            <h3 class="text-lg font-black text-green-400 mb-1">¡UBICACIÓN RECIBIDA!</h3>
+            <p class="text-xs font-bold text-slate-300 mb-4">
+                La Central de Alarmas ha recibido sus coordenadas exactas. Las unidades de emergencia están en camino.
+            </p>
+
+            <!-- CONTENEDOR MAPA -->
+            <div id="mini-map" class="mb-4 border border-slate-700 shadow-inner"></div>
+
+            <div class="w-full bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-left flex flex-col gap-1 mb-4">
+                <div class="flex justify-between items-center">
+                    <span class="text-[10px] text-slate-400 font-bold">PRECISIÓN GPS:</span>
+                    <span id="geo-accuracy" class="text-xs font-black text-green-400">± 0 METROS</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <span class="text-[10px] text-slate-400 font-bold">HORA RECEPCIÓN:</span>
+                    <span id="geo-timestamp" class="text-xs font-black text-slate-200">--:--:--</span>
+                </div>
+            </div>
+
+            <div class="bg-red-500/10 border border-red-500/30 p-3 rounded-xl text-center w-full">
+                <p class="text-xs font-black text-red-400 leading-tight">
+                    <i class="fas fa-phone-volume mr-1"></i> MANTENGA SU TELÉFONO DESPEJADO POR SI LA CENTRAL LO CONTACTA.
+                </p>
+            </div>
+        </div>
+
+        <!-- ESTADO 4: ERROR / PERMISO DENEGADO -->
+        <div id="state-error" class="w-full flex-col items-center hidden">
+            <div class="w-16 h-16 bg-amber-500/20 border-2 border-amber-500 rounded-full flex items-center justify-center text-amber-500 text-3xl mb-4">
+                <i class="fas fa-triangle-exclamation"></i>
+            </div>
+
+            <h3 class="text-base font-black text-amber-400 mb-2">NO SE PUDO OBTENER GPS</h3>
+            <p id="geo-error-msg" class="text-xs font-medium text-slate-300 mb-6 leading-relaxed">
+                El acceso a la ubicación fue denegado o no está disponible. Asegúrese de activar el GPS en su teléfono y permitir el permiso de ubicación en el navegador.
+            </p>
+
+            <button onclick="solicitarGeolocalizacion()" class="w-full py-3 px-6 bg-slate-800 hover:bg-slate-700 active:scale-95 text-white font-black text-xs tracking-widest rounded-xl transition-all border border-slate-700 flex items-center justify-center gap-2">
+                <i class="fas fa-rotate-right"></i>
+                <span>REINTENTAR AHORA</span>
+            </button>
+        </div>
+
+    </main>
+
+    <!-- PIE DE PÁGINA -->
+    <footer class="w-full max-w-md text-center text-[10px] text-slate-500 font-bold mt-4">
+        SISBOM CENTRAL DE EMERGENCIAS • 132
+    </footer>
+
+    <!-- FIREBASE SDK & LÓGICA DE GEOLOCALIZACIÓN -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Parámetros de URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const dispatchId = urlParams.get('id') || urlParams.get('despacho') || 'DIRECT_ALERT';
+        const callerPhone = urlParams.get('phone') || '';
+        const orgParam = urlParams.get('org') || urlParams.get('cuerpo') || 'SISBOM';
+
+        // Configuración oficial Firebase Multi-Tenant Dinámica
+        const KNOWN_PROJECTS = {
+            'pruebas-sisbom': {
+                projectId: "pruebas-sisbom",
+                appId: "1:306101642399:web:0f26dd8b37eb90ce91aeaa",
+                storageBucket: "pruebas-sisbom.firebasestorage.app",
+                apiKey: "AIzaSyDyQc_gHlHocYJ5x8Wj0EZdSGSvbt8d9og",
+                authDomain: "pruebas-sisbom.firebaseapp.com",
+                messagingSenderId: "306101642399"
+            },
+            'sisbom-de5f8': {
+                projectId: "sisbom-de5f8",
+                appId: "1:39449538456:web:64f767264356ae587485ed",
+                storageBucket: "sisbom-de5f8.firebasestorage.app",
+                apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
+                authDomain: "sisbom-de5f8.firebaseapp.com",
+                messagingSenderId: "39449538456"
+            }
+        };
+
+        let firebaseConfig = null;
+        try {
+            const cfgParam = urlParams.get('cfg');
+            if (cfgParam) {
+                firebaseConfig = JSON.parse(atob(decodeURIComponent(cfgParam)));
+            } else {
+                const pParam = urlParams.get('p') || urlParams.get('project');
+                if (pParam && KNOWN_PROJECTS[pParam]) {
+                    firebaseConfig = KNOWN_PROJECTS[pParam];
+                }
+            }
+        } catch (e) {
+            console.warn("Error parseando cfg dinámico:", e);
+        }
+
+        if (!firebaseConfig) {
+            const pParam = urlParams.get('p') || urlParams.get('project') || 'sisbom-de5f8';
+            firebaseConfig = KNOWN_PROJECTS[pParam] || KNOWN_PROJECTS['sisbom-de5f8'];
+        }
+
+        // Branding dinámico
+        const orgTitle = orgParam.toUpperCase().includes('CUERPO') || orgParam.toUpperCase().includes('BOMBEROS')
+            ? orgParam.toUpperCase() 
+            : `CUERPO DE BOMBEROS DE ${orgParam.toUpperCase()}`;
+        const headerEl = document.getElementById('header-org-name');
+        if (headerEl) headerEl.innerText = orgTitle;
+
+        let map = null;
+        let userMarker = null;
+        let accuracyCircle = null;
+        let fbDb = null;
+        let auth = null;
+        let activeWatchId = null;
+        let isDisconnectedByCentral = false;
+
+        function listenToCentralDisconnection() {
+            if (!fbDb || !dispatchId || dispatchId === 'DIRECT_ALERT') return;
+            try {
+                onSnapshot(doc(fbDb, 'geolocalizaciones_alertantes', String(dispatchId)), (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        if (data && (data.estado === 'desconectado' || data.desconectado === true)) {
+                            handleCentralDisconnection();
+                        }
+                    }
+                });
+            } catch(e) {
+                console.warn("Error escuchando estado de desconexión en geo.html:", e);
+            }
+        }
+
+        function handleCentralDisconnection() {
+            if (isDisconnectedByCentral) return;
+            isDisconnectedByCentral = true;
+            if (activeWatchId !== null) {
+                navigator.geolocation.clearWatch(activeWatchId);
+                activeWatchId = null;
+            }
+            const stateSuccess = document.getElementById('state-success');
+            if (stateSuccess) {
+                stateSuccess.innerHTML = `
+                    <div class="w-16 h-16 bg-blue-500/20 border-2 border-blue-500 rounded-full flex items-center justify-center text-blue-400 text-3xl mb-4">
+                        <i class="fas fa-satellite-dish"></i>
+                    </div>
+                    <h3 class="text-lg font-black text-white mb-2">RASTREO FINALIZADO</h3>
+                    <p class="text-xs font-bold text-slate-300 mb-4 leading-relaxed">
+                        La Central de Alarmas ha registrado su última ubicación y ha finalizado la transmisión en tiempo real para preservar su batería.
+                    </p>
+                    <div class="bg-red-500/10 border border-red-500/30 p-3.5 rounded-xl text-center w-full">
+                        <p class="text-xs font-black text-red-400 leading-tight">
+                            <i class="fas fa-truck-fire mr-1.5"></i> LAS UNIDADES DE BOMBEROS CONTINÚAN EN CAMINO A SU EMERGENCIA.
+                        </p>
+                    </div>
+                `;
+            }
+        }
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            fbDb = getFirestore(app);
+            signInAnonymously(auth).then(() => {
+                console.log("Autenticación anónima establecida en geo.html para proyecto:", firebaseConfig.projectId);
+                listenToCentralDisconnection();
+            }).catch(err => {
+                console.warn("Fallo auth anónima (usando reglas públicas):", err);
+                listenToCentralDisconnection();
+            });
+            console.log("Firebase conectado en geo.html a:", firebaseConfig.projectId);
+        } catch (e) {
+            console.warn("Error iniciando Firebase en geo.html:", e);
+        }
+
+        window.solicitarGeolocalizacion = function() {
+            if (!navigator.geolocation) {
+                mostrarError("Su navegador no soporta geolocalización GPS.");
+                return;
+            }
+
+            document.getElementById('state-initial').classList.add('hidden');
+            document.getElementById('state-error').classList.add('hidden');
+            document.getElementById('state-loading').classList.remove('hidden');
+            document.getElementById('state-loading').classList.add('flex');
+
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0
+            };
+
+            navigator.geolocation.getCurrentPosition(
+                async (pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    const accuracy = Math.round(pos.coords.accuracy || 0);
+                    const now = new Date();
+                    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+
+                    console.log("GPS Obtenido:", lat, lng, "Precisión:", accuracy, "m");
+
+                    await transmitirCoordenadas(lat, lng, accuracy, timeStr);
+
+                    document.getElementById('state-loading').classList.add('hidden');
+                    document.getElementById('state-loading').classList.remove('flex');
+                    document.getElementById('state-success').classList.remove('hidden');
+                    document.getElementById('state-success').classList.add('flex');
+
+                    document.getElementById('geo-accuracy').innerText = `± ${accuracy} METROS`;
+                    document.getElementById('geo-timestamp').innerText = timeStr;
+
+                    setTimeout(() => {
+                        initMap(lat, lng, accuracy);
+                    }, 100);
+
+                    iniciarSeguimientoContinuo();
+                },
+                (err) => {
+                    console.error("Error GPS:", err);
+                    let msg = "No pudimos obtener su ubicación. Verifique que el GPS esté encendido y que haya permitido el acceso a la ubicación.";
+                    if (err.code === 1) msg = "Permiso de ubicación denegado. Active el permiso en los ajustes de su navegador.";
+                    else if (err.code === 2) msg = "Señal GPS no disponible. Asegúrese de estar al aire libre o con buena cobertura.";
+                    else if (err.code === 3) msg = "Tiempo de espera agotado buscando señal satelital.";
+                    mostrarError(msg);
+                },
+                options
+            );
+        };
+
+        let lastFirestoreWriteTime = 0;
+        let lastTransmittedLat = null;
+        let lastTransmittedLng = null;
+
+        function getDistanceMeters(lat1, lon1, lat2, lon2) {
+            const R = 6371e3; // Metros
+            const φ1 = lat1 * Math.PI / 180;
+            const φ2 = lat2 * Math.PI / 180;
+            const Δφ = (lat2 - lat1) * Math.PI / 180;
+            const Δλ = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+                      Math.cos(φ1) * Math.cos(φ2) *
+                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        async function transmitirCoordenadas(lat, lng, accuracy, timeStr, forzar = false) {
+            const now = Date.now();
+            
+            // Si no es forzado (primera vez), verificar que haya pasado al menos 1 minuto (60000ms) y que se haya movido más de 25m
+            if (!forzar && lastFirestoreWriteTime > 0) {
+                const tiempoTranscurrido = now - lastFirestoreWriteTime;
+                const distanciaMovida = (lastTransmittedLat !== null && lastTransmittedLng !== null)
+                    ? getDistanceMeters(lastTransmittedLat, lastTransmittedLng, lat, lng)
+                    : 999;
+                
+                if (tiempoTranscurrido < 60000 || distanciaMovida < 25) {
+                    console.log("GPS local actualizado, omitiendo escritura Firestore (rate limit 1 min)");
+                    return;
+                }
+            }
+
+            lastFirestoreWriteTime = now;
+            lastTransmittedLat = lat;
+            lastTransmittedLng = lng;
+
+            const geoData = {
+                lat: parseFloat(Number(lat).toFixed(6)),
+                lng: parseFloat(Number(lng).toFixed(6)),
+                accuracy: accuracy,
+                hora: timeStr,
+                timestamp: now,
+                telefono: callerPhone,
+                estado: "CONFIRMADO_ALERTANTE"
+            };
+
+            localStorage.setItem('sisbom_last_alertante_geo_' + dispatchId, JSON.stringify(geoData));
+
+            if (fbDb && dispatchId) {
+                try {
+                    const updatePayload = {
+                        geolocalizacionAlertante: geoData,
+                        ubicacionGps: { lat: lat, lng: lng, accuracy: accuracy },
+                        lugar: `COORD: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+                        ultimaActualizacionGps: now
+                    };
+
+                    await setDoc(doc(fbDb, 'despachos', String(dispatchId)), updatePayload, { merge: true });
+                    await setDoc(doc(fbDb, 'geolocalizaciones_alertantes', String(dispatchId)), geoData, { merge: true });
+                    console.log("🛰️ Coordenadas guardadas exitosamente en Firestore para despacho:", dispatchId);
+                } catch (e) {
+                    console.error("Fallo guardado en Firestore:", e);
+                }
+            }
+        }
+
+        function initMap(lat, lng, accuracy) {
+            if (map) {
+                map.setView([lat, lng], 16);
+                if (userMarker) userMarker.setLatLng([lat, lng]);
+                if (accuracyCircle) {
+                    accuracyCircle.setLatLng([lat, lng]);
+                    accuracyCircle.setRadius(accuracy);
+                }
+                return;
+            }
+
+            try {
+                map = L.map('mini-map', {
+                    zoomControl: false,
+                    attributionControl: false
+                }).setView([lat, lng], 16);
+
+                L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+                    maxZoom: 20,
+                    attribution: 'Google Maps'
+                }).addTo(map);
+
+                const customIcon = L.divIcon({
+                    className: 'custom-pin',
+                    html: `<div style="background-color: #ef4444; width: 22px; height: 22px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 12px rgba(239,68,68,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px;"><i class="fas fa-exclamation"></i></div>`,
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11]
+                });
+
+                userMarker = L.marker([lat, lng], { icon: customIcon }).addTo(map)
+                    .bindPopup("<b style='font-size:11px;'>SU UBICACIÓN</b><br><span style='font-size:9px;'>TRANSMITIDA A LA CENTRAL</span>").openPopup();
+
+                accuracyCircle = L.circle([lat, lng], {
+                    radius: accuracy,
+                    color: '#22c55e',
+                    fillColor: '#22c55e',
+                    fillOpacity: 0.15,
+                    weight: 1
+                }).addTo(map);
+
+            } catch (e) {
+                console.error("Error iniciando mapa Leaflet:", e);
+            }
+        }
+
+        function iniciarSeguimientoContinuo() {
+            if (!navigator.geolocation || isDisconnectedByCentral) return;
+            if (activeWatchId !== null) navigator.geolocation.clearWatch(activeWatchId);
+            activeWatchId = navigator.geolocation.watchPosition((pos) => {
+                if (isDisconnectedByCentral) return;
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
+                const accuracy = Math.round(pos.coords.accuracy || 0);
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+                
+                document.getElementById('geo-accuracy').innerText = `± ${accuracy} METROS`;
+                document.getElementById('geo-timestamp').innerText = timeStr;
+                
+                // Actualizar mapa visual en el teléfono
+                initMap(lat, lng, accuracy);
+
+                // Transmisión con rate-limiting (máximo 1 vez cada minuto si se mueve)
+                transmitirCoordenadas(lat, lng, accuracy, timeStr, false);
+            }, null, { enableHighAccuracy: true, maximumAge: 10000 });
+        }
+
+        function mostrarError(mensaje) {
+            document.getElementById('state-initial').classList.add('hidden');
+            document.getElementById('state-loading').classList.add('hidden');
+            document.getElementById('state-loading').classList.remove('flex');
+            document.getElementById('state-success').classList.add('hidden');
+            
+            document.getElementById('geo-error-msg').innerText = mensaje;
+            document.getElementById('state-error').classList.remove('hidden');
+            document.getElementById('state-error').classList.add('flex');
+        }
+    </script>
+</body>
+</html>

@@ -18,45 +18,70 @@ struct ActividadTab: View {
         
         let activeDispatches = viewModel.dispatchesList.filter { $0.operadorFinal.isEmpty }
         
+        ScrollView {
             VStack(spacing: 16) {
                 // Central Operator Status Card
                 GlassCard(viewModel: viewModel) {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(viewModel.centralOperatorName.isEmpty ? Color.gray.opacity(0.15) : Color.goGreen.opacity(0.15))
-                                .frame(width: 40, height: 40)
-                            
-                            Image(systemName: viewModel.centralOperatorName.isEmpty ? "building.2.crop.circle" : "antenna.radiowaves.left.and.right")
-                                .font(.system(size: 18))
-                                .foregroundColor(viewModel.centralOperatorName.isEmpty ? .textSecondary : .goGreen)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("OPERADOR CENTRAL DE ALARMAS")
-                                .font(.system(size: 9, weight: .black))
-                                .foregroundColor(isDark ? Color.textSecondaryDark : .textSecondary)
-                            
-                            if !viewModel.centralOperatorName.isEmpty {
-                                Text("EN CONSOLA: \(viewModel.centralOperatorName.uppercased())")
-                                    .font(.system(size: 13, weight: .black))
-                                    .foregroundColor(isDark ? .white : .textDark)
-                            } else {
-                                Text("CENTRAL CERRADA / SIN OPERADOR")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundColor(isDark ? Color.textSecondaryDark : .textSecondary)
+                    VStack(spacing: 0) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(viewModel.centralOperatorName.isEmpty ? Color.gray.opacity(0.15) : Color.goGreen.opacity(0.15))
+                                    .frame(width: 40, height: 40)
+                                
+                                Image(systemName: viewModel.centralOperatorName.isEmpty ? "building.2.crop.circle" : "antenna.radiowaves.left.and.right")
+                                    .font(.system(size: 18))
+                                    .foregroundColor(viewModel.centralOperatorName.isEmpty ? .textSecondary : .goGreen)
                             }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("OPERADOR CENTRAL DE ALARMAS")
+                                    .font(.system(size: 9, weight: .black))
+                                    .foregroundColor(isDark ? Color.textSecondaryDark : .textSecondary)
+                                
+                                if !viewModel.centralOperatorName.isEmpty {
+                                    Text("EN CONSOLA: \(viewModel.centralOperatorName.uppercased())")
+                                        .font(.system(size: 13, weight: .black))
+                                        .foregroundColor(isDark ? .white : .textDark)
+                                } else {
+                                    Text("CENTRAL CERRADA / SIN OPERADOR")
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundColor(isDark ? Color.textSecondaryDark : .textSecondary)
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            Text(viewModel.centralOperatorName.isEmpty ? "CERRADA" : "ACTIVO")
+                                .font(.system(size: 9, weight: .black))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .foregroundColor(viewModel.centralOperatorName.isEmpty ? (isDark ? Color.textSecondaryDark : .textSecondary) : .goGreen)
+                                .background(viewModel.centralOperatorName.isEmpty ? (isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.05)) : Color.goGreen.opacity(0.15))
+                                .cornerRadius(8)
                         }
                         
-                        Spacer()
+                        let isComandante = (user?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "COMANDANTE") && ["1", "01", "2", "02", "3", "03"].contains(user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+                        let canCloseOp = !viewModel.centralOperatorName.isEmpty && (viewModel.isCentralActive || (!viewModel.centralOperatorId.isEmpty && viewModel.centralOperatorId == user?.idRegistro) || isComandante)
                         
-                        Text(viewModel.centralOperatorName.isEmpty ? "CERRADA" : "ACTIVO")
-                            .font(.system(size: 9, weight: .black))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .foregroundColor(viewModel.centralOperatorName.isEmpty ? (isDark ? Color.textSecondaryDark : .textSecondary) : .goGreen)
-                            .background(viewModel.centralOperatorName.isEmpty ? (isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.05)) : Color.goGreen.opacity(0.15))
-                            .cornerRadius(8)
+                        if canCloseOp {
+                            Button(action: {
+                                viewModel.closeCentralOperatorSession()
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 14))
+                                    Text("CERRAR TURNO DE CENTRAL")
+                                        .font(.system(size: 11, weight: .bold))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 36)
+                                .background(Color.bomberosRed)
+                                .cornerRadius(8)
+                            }
+                            .padding(.top, 10)
+                        }
                     }
                     .padding(14)
                 }
@@ -244,7 +269,13 @@ struct DispatchItemCard: View {
                     .foregroundColor(isDark ? Color(red: 0.8, green: 0.84, blue: 0.88) : Color(red: 0.28, green: 0.33, blue: 0.41))
                     .lineLimit(2)
                 
-                Spacer().frame(height: 12)
+                if let lat = dispatch.lat, let lng = dispatch.lng, lat != 0, lng != 0 {
+                    Spacer().frame(height: 10)
+                    IncidentMapPreview(lat: lat, lng: lng, clave: dispatch.clave, isDark: isDark)
+                    Spacer().frame(height: 10)
+                } else {
+                    Spacer().frame(height: 12)
+                }
                 
                 // Pre-informe and vehicles subcard
                 VStack(alignment: .leading, spacing: 8) {
@@ -341,5 +372,179 @@ struct DispatchItemCard: View {
             RoundedRectangle(cornerRadius: 14)
                 .stroke(cardBorderColor, lineWidth: 1.5)
         )
+    }
+}
+
+import WebKit
+
+struct IncidentMapPreview: View {
+    let lat: Double
+    let lng: Double
+    let clave: String
+    let isDark: Bool
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            IncidentWebView(lat: lat, lng: lng, clave: clave, isDark: isDark)
+                .frame(height: 160)
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.1), lineWidth: 1)
+                )
+
+            Text("RADIO 500M")
+                .font(.system(size: 9, weight: .black))
+                .foregroundColor(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(Color.black.opacity(0.75))
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                )
+                .padding(8)
+        }
+    }
+}
+
+struct IncidentWebView: UIViewRepresentable {
+    let lat: Double
+    let lng: Double
+    let clave: String
+    let isDark: Bool
+
+    func makeUIView(context: Context) -> WKWebView {
+        let webView = WKWebView()
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.isScrollEnabled = false
+        webView.scrollView.bounces = false
+        loadMap(in: webView)
+        return webView
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        loadMap(in: uiView)
+    }
+
+    private func loadMap(in webView: WKWebView) {
+        let cleanKey = clave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let pinColor: String
+        switch cleanKey {
+        case "10-0": pinColor = "#dc2626"
+        case "10-1": pinColor = "#ea580c"
+        case "10-2": pinColor = "#b45309"
+        case "10-3", "10-8": pinColor = "#0284c7"
+        case "10-4": pinColor = "#e11d48"
+        case "10-5": pinColor = "#7c3aed"
+        case "10-6": pinColor = "#0d9488"
+        case "10-7": pinColor = "#eab308"
+        case "10-9": pinColor = "#c2410c"
+        case "10-10": pinColor = "#0369a1"
+        case "10-11": pinColor = "#2563eb"
+        case "10-12": pinColor = "#4f46e5"
+        case "10-14": pinColor = "#059669"
+        default: pinColor = "#dc2626"
+        }
+
+        let html = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            <style>
+                html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0f172a; overflow: hidden; }
+                .leaflet-control-attribution { display: none !important; }
+                .incident-pin {
+                    background: \(pinColor);
+                    width: 22px;
+                    height: 22px;
+                    border-radius: 50%;
+                    border: 2.5px solid #ffffff;
+                    box-shadow: 0 0 14px rgba(0, 0, 0, 0.8), 0 0 6px \(pinColor);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }
+                .pulse-ring {
+                    position: absolute;
+                    width: 44px;
+                    height: 44px;
+                    top: -11px;
+                    left: -11px;
+                    border-radius: 50%;
+                    border: 2px solid \(pinColor);
+                    animation: pulse 2s infinite ease-out;
+                    pointer-events: none;
+                }
+                @keyframes pulse {
+                    0% { transform: scale(0.5); opacity: 1; }
+                    100% { transform: scale(1.5); opacity: 0; }
+                }
+            </style>
+        </head>
+        <body>
+            <div id="map"></div>
+            <script>
+                var map = L.map('map', {
+                    zoomControl: false,
+                    attributionControl: false,
+                    dragging: false,
+                    touchZoom: false,
+                    doubleClickZoom: false,
+                    scrollWheelZoom: false,
+                    boxZoom: false,
+                    keyboard: false
+                }).setView([\(lat), \(lng)], 16);
+
+                var satLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                    maxZoom: 20,
+                    subdomains: ['0', '1', '2', '3']
+                });
+
+                var esriLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    maxZoom: 19
+                });
+
+                var fallbackDone = false;
+                satLayer.on('tileerror', function() {
+                    if (!fallbackDone) {
+                        fallbackDone = true;
+                        try {
+                            map.removeLayer(satLayer);
+                            esriLayer.addTo(map);
+                        } catch(e){}
+                    }
+                });
+
+                satLayer.addTo(map);
+
+                L.circle([\(lat), \(lng)], {
+                    radius: 400,
+                    color: '\(pinColor)',
+                    fillColor: '\(pinColor)',
+                    fillOpacity: 0.14,
+                    weight: 2,
+                    dashArray: '4, 4'
+                }).addTo(map);
+
+                var iconHtml = '<div style="position:relative;"><div class="pulse-ring"></div><div class="incident-pin"></div></div>';
+                var icon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-incident-marker',
+                    iconSize: [22, 22],
+                    iconAnchor: [11, 11]
+                });
+                L.marker([\(lat), \(lng)], { icon: icon }).addTo(map);
+            </script>
+        </body>
+        </html>
+        """
+        webView.loadHTMLString(html, baseURL: URL(string: "https://sisbom.com"))
     }
 }

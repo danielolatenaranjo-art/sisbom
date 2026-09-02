@@ -35,7 +35,10 @@ async function cleanChatMessage(rawMsg) {
 
   try {
     const db = admin.firestore();
-    const snap = await db.collection("personal").where("idRegistro", "==", senderId).get();
+    let snap = await db.collection("personal").where("idRegistro", "==", senderId).get();
+    if (snap.empty && !isNaN(Number(senderId))) {
+      snap = await db.collection("personal").where("idRegistro", "==", Number(senderId)).get();
+    }
     if (!snap.empty) {
       const userData = snap.docs[0].data();
       const nombre = userData.nombreBombero || "Bombero";
@@ -47,6 +50,48 @@ async function cleanChatMessage(rawMsg) {
   }
 
   return `ID ${senderId}: ${cleanText}`;
+}
+
+async function resolveTargetToIdRegistro(rawId) {
+  const db = admin.firestore();
+  const trimmed = String(rawId).trim();
+  if (!trimmed) return null;
+
+  try {
+    // 1. Search by idRadial (string direct, uppercase, lowercase)
+    let snap = await db.collection("personal").where("idRadial", "==", trimmed).get();
+    if (snap.empty && trimmed.toUpperCase() !== trimmed) {
+      snap = await db.collection("personal").where("idRadial", "==", trimmed.toUpperCase()).get();
+    }
+    if (snap.empty && trimmed.toLowerCase() !== trimmed) {
+      snap = await db.collection("personal").where("idRadial", "==", trimmed.toLowerCase()).get();
+    }
+    if (snap.empty && !isNaN(Number(trimmed))) {
+      // 2. Search by idRadial (number)
+      snap = await db.collection("personal").where("idRadial", "==", Number(trimmed)).get();
+    }
+    if (!snap.empty) {
+      const regId = snap.docs[0].data().idRegistro;
+      if (regId) return String(regId).trim();
+    }
+
+    // 3. Search by idRegistro directly (string direct, uppercase, lowercase, number)
+    snap = await db.collection("personal").where("idRegistro", "==", trimmed).get();
+    if (snap.empty && trimmed.toUpperCase() !== trimmed) {
+      snap = await db.collection("personal").where("idRegistro", "==", trimmed.toUpperCase()).get();
+    }
+    if (snap.empty && !isNaN(Number(trimmed))) {
+      snap = await db.collection("personal").where("idRegistro", "==", Number(trimmed)).get();
+    }
+    if (!snap.empty) {
+      const regId = snap.docs[0].data().idRegistro;
+      if (regId) return String(regId).trim();
+    }
+  } catch (e) {
+    console.error("Error resolving ID in personal:", e);
+  }
+
+  return trimmed;
 }
 
 function formatFirefighterName(name) {
@@ -62,37 +107,44 @@ function formatFirefighterName(name) {
   return first;
 }
 
-// 1. DESPACHOS (AISLAMIENTO TOTAL POR CUERPO DE BOMBEROS Y BASE DE DATOS TENANT)
+// 1. DESPACHOS - Solo se notifica cuando un despacho pasa a ser activo por primera vez
 exports.enviarDespacho = onDocumentWritten(
-  { database: "{database}", document: "despachos/{id}" },
+  { document: "despachos/{id}" },
   async (event) => {
-    const data = event.data.after ? event.data.after.data() : null;
+    const afterData = event.data.after ? event.data.after.data() : null;
+    const beforeData = event.data.before ? event.data.before.data() : null;
 
-    if (!data) return null;
+    if (!afterData) return null;
 
     const id = event.params.id;
 
-    if (data.pushSent === true) {
-      console.log("Push ya enviado previamente para este despacho, ignorando:", id);
+    // Si ya fue enviado previamente o antes ya estaba como pushSent, JAMÁS volver a enviar
+    if (afterData.pushSent === true || (beforeData && beforeData.pushSent === true)) {
       return null;
     }
 
-    const estado = String(data.estado || "").toLowerCase();
-    if (estado === "pre-despacho" || estado === "cancelada") {
-      console.log("Despacho en borrador/pre-despacho o cancelado, omitiendo push:", id);
+    // Solo se debe enviar push si el despacho está activo y visible para los móviles
+    const estado = String(afterData.estado || "").toLowerCase();
+    if (estado === "cancelada" || afterData.visibleMovil !== true) {
       return null;
     }
 
-    const clave = data.clave || "10-0";
-    const claveApoyo = data.claveApoyo || "";
-    const lugar = data.lugar || "Sin ubicación";
+    // Si antes ya existía y ya era visibleMovil == true, es una simple modificación/edición: NO ENVIAR PUSH
+    if (beforeData && beforeData.visibleMovil === true) {
+      console.log("Modificación de despacho existente, omitiendo push para no sonar:", id);
+      return null;
+    }
+
+    const clave = afterData.clave || "10-0";
+    const claveApoyo = afterData.claveApoyo || "";
+    const lugar = afterData.lugar || "Sin ubicación";
 
     let unidadesTexto = "Unidades en despacho";
-    if (data.carrosTexto && data.carrosTexto !== "") {
-        unidadesTexto = data.carrosTexto;
-    } else if (data.unidades) {
+    if (afterData.carrosTexto && afterData.carrosTexto !== "") {
+        unidadesTexto = afterData.carrosTexto;
+    } else if (afterData.unidades) {
       try {
-        const unidades = Object.keys(data.unidades);
+        const unidades = Object.keys(afterData.unidades);
         if (unidades.length > 0) {
           unidadesTexto = unidades.join(" / ");
         }
@@ -103,46 +155,31 @@ exports.enviarDespacho = onDocumentWritten(
 
     const titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${lugar}` : `${clave} en ${lugar}`;
 
-    const dbName = event.params.database || "(default)";
-    const cuerpoId = data.cuerpoId || data.licenseKey || data.cuerpo || (dbName !== "(default)" ? dbName : "");
-    const safeTenant = String(cuerpoId).replace(/[^a-zA-Z0-9-_.~%]/g, "_").trim();
-
-    // Topic aislado por cuerpo de bomberos / base de datos para evitar que le suene a otros cuerpos distintos
-    const primaryTopic = safeTenant ? `despachos_${safeTenant}` : "despachos";
-
-    const payload = new Object({
-      topic: primaryTopic,
-      data: new Object({
+    // Direct topic dispatch (each Fire Department has its own isolated Firebase project)
+    const payload = {
+      topic: "despachos",
+      data: {
         title: String(titleText),
         body: String(unidadesTexto),
         type: "DISPATCH",
         payloadId: String(id),
         clave: String(clave),
         claveApoyo: String(claveApoyo),
-        lugar: String(lugar),
-        cuerpoId: String(safeTenant)
-      }),
-      android: new Object({
+        lugar: String(lugar)
+      },
+      android: {
         priority: "high"
-      })
-    });
+      }
+    };
 
     try {
       await admin.messaging().send(payload);
-      console.log(`PUSH DE DESPACHO ENVIADO EXITOSAMENTE AL TOPIC ${primaryTopic}:`, id, titleText);
+      console.log("PUSH DE DESPACHO ENVIADO EXITOSAMENTE AL TOPIC despachos:", id, titleText);
 
-      // Si es un cuerpo específico, también enviar respando al topic genérico despachos
-      if (primaryTopic !== "despachos") {
-        try {
-          const fallbackPayload = Object.assign(new Object(), payload, new Object({ topic: "despachos" }));
-          await admin.messaging().send(fallbackPayload);
-        } catch (_e) {}
-      }
-
-      await event.data.after.ref.update(new Object({
+      await event.data.after.ref.update({
         pushSent: true,
         pushSentAt: Date.now()
-      }));
+      });
 
       return null;
     } catch (error) {
@@ -179,61 +216,41 @@ exports.enviarAlerta = onDocumentCreated(
 
     const aQuien = String(data.aQuienAlerta || "").trim().toUpperCase();
 
-    const payload = new Object({
-      data: new Object({
+    const payload = {
+      data: {
         title: String(razon),
         body: String(mensaje),
         type: String(typePush),
         payloadId: String(id),
         clave: "",
         senderId: String(senderId)
-      }),
-      android: new Object({
+      },
+      android: {
         priority: "high"
-      })
-    });
+      }
+    };
 
     try {
       if (aQuien === "TC" || aQuien === "1") {
-        Reflect.set(payload, "topic", "alertas_generales");
+        payload.topic = "alertas_generales";
         await admin.messaging().send(payload);
       } else if (aQuien === "CONDUCTORES") {
-        Reflect.set(payload, "topic", "conductores");
+        payload.topic = "conductores";
         await admin.messaging().send(payload);
       } else {
         const targets = aQuien.split(",").map(s => s.trim()).filter(s => s !== "");
         const promises = targets.map(async (t) => {
             const rawId = t.split(" ").at(0).trim();
-            let finalTopic = rawId; // Valor por defecto
-
-            try {
-                const db = admin.firestore();
-                // MAGIA: Busca si "rawId" es un idRadial
-                const snapRadial = await db.collection("personal").where("idRadial", "==", rawId).get();
-                if (!snapRadial.empty) {
-                    const regId = snapRadial.docs.at(0).data().idRegistro;
-                    if (regId) finalTopic = String(regId).trim();
-                } else {
-                    // Por seguridad, busca si también ingresaron un idRegistro directo
-                    const snapReg = await db.collection("personal").where("idRegistro", "==", rawId).get();
-                    if (!snapReg.empty) {
-                        const regId2 = snapReg.docs.at(0).data().idRegistro;
-                        if (regId2) finalTopic = String(regId2).trim();
-                    }
-                }
-            } catch (e) {
-                console.log("Error buscando ID:", e);
-            }
+            const resolvedId = await resolveTargetToIdRegistro(rawId) || rawId;
 
             // Exclude sender from direct push
-            if (senderId && finalTopic.trim() === senderId.trim()) {
-                console.log("Excluyendo remitente de push directo:", finalTopic);
+            if (senderId && resolvedId.trim() === senderId.trim()) {
+                console.log("Excluyendo remitente de push directo:", resolvedId);
                 return null;
             }
 
-            // Eliminar espacios en blanco por seguridad de FCM (No se borran guiones)
-            const safeTopic = finalTopic.replace(new RegExp(" ", "g"), "");
-            const userPayload = Object.assign(new Object(), payload, new Object({ topic: "usuario_" + safeTopic }));
+            const safeTopic = resolvedId.replace(/\s+/g, "");
+            const userPayload = Object.assign({}, payload, { topic: "usuario_" + safeTopic });
             return admin.messaging().send(userPayload).catch(e => console.log(e));
         });
         await Promise.all(promises);
@@ -250,8 +267,8 @@ exports.enviarAlerta = onDocumentCreated(
 exports.actualizarChat = onDocumentUpdated(
   "alertas/{id}",
   async (event) => {
-    const newData = event.data.after.data();
-    const oldData = event.data.before.data();
+    const newData = event.data.after ? event.data.after.data() : null;
+    const oldData = event.data.before ? event.data.before.data() : null;
     
     if (!newData || !oldData) return null;
     if (String(newData.duracion).trim().toUpperCase() !== "C") return null; 
@@ -268,55 +285,38 @@ exports.actualizarChat = onDocumentUpdated(
     const ultimoMensaje = await cleanChatMessage(ultimoMensajeRaw);
     const aQuien = String(newData.aQuienAlerta || "").trim().toUpperCase();
 
-    const payload = new Object({
-      data: new Object({
+    const payload = {
+      data: {
         title: String(razon),
         body: String(ultimoMensaje),
         type: "CHAT",
         payloadId: String(id),
         clave: "",
         senderId: String(senderId)
-      }),
-      android: new Object({
+      },
+      android: {
         priority: "high"
-      })
-    });
+      }
+    };
 
     try {
       if (aQuien === "TC" || aQuien === "1") {
-        Reflect.set(payload, "topic", "alertas_generales");
+        payload.topic = "alertas_generales";
         await admin.messaging().send(payload);
       } else {
         const targets = aQuien.split(",").map(s => s.trim()).filter(s => s !== "");
         const promises = targets.map(async (t) => {
             const rawId = t.split(" ").at(0).trim();
-            let finalTopic = rawId;
-
-            try {
-                const db = admin.firestore();
-                const snapRadial = await db.collection("personal").where("idRadial", "==", rawId).get();
-                if (!snapRadial.empty) {
-                    const regId = snapRadial.docs.at(0).data().idRegistro;
-                    if (regId) finalTopic = String(regId).trim();
-                } else {
-                    const snapReg = await db.collection("personal").where("idRegistro", "==", rawId).get();
-                    if (!snapReg.empty) {
-                        const regId2 = snapReg.docs.at(0).data().idRegistro;
-                        if (regId2) finalTopic = String(regId2).trim();
-                    }
-                }
-            } catch (e) {
-                console.log("Error buscando ID:", e);
-            }
+            const resolvedId = await resolveTargetToIdRegistro(rawId) || rawId;
 
             // Exclude sender from direct push
-            if (senderId && finalTopic.trim() === senderId.trim()) {
-                console.log("Excluyendo remitente de push directo:", finalTopic);
+            if (senderId && resolvedId.trim() === senderId.trim()) {
+                console.log("Excluyendo remitente de push directo:", resolvedId);
                 return null;
             }
 
-            const safeTopic = finalTopic.replace(new RegExp(" ", "g"), "");
-            const userPayload = Object.assign(new Object(), payload, new Object({ topic: "usuario_" + safeTopic }));
+            const safeTopic = resolvedId.replace(/\s+/g, "");
+            const userPayload = Object.assign({}, payload, { topic: "usuario_" + safeTopic });
             return admin.messaging().send(userPayload).catch(e => console.log(e));
         });
         await Promise.all(promises);
@@ -329,7 +329,7 @@ exports.actualizarChat = onDocumentUpdated(
   }
 );
 
-// 4. ACTUALIZACIONES DE DESPACHOS (SOLICITUDES 12-10 / 6-6)
+// 4. ACTUALIZACIONES DE DESPACHOS (SOLICITUDES 12-10 / 6-6 Y CAMBIOS DE SERVICIO)
 exports.actualizarDespacho = onDocumentUpdated(
   "despachos/{id}",
   async (event) => {
@@ -341,6 +341,8 @@ exports.actualizarDespacho = onDocumentUpdated(
     const id = event.params.id;
     const oldUnidades = oldData.unidades || {};
     const newUnidades = newData.unidades || {};
+    const clave = String(newData.clave || "10-0");
+    const lugar = String(newData.lugar || "Sin ubicación");
 
     for (const unitName of Object.keys(newUnidades)) {
       const oldUnit = oldUnidades[unitName] || {};
@@ -355,24 +357,27 @@ exports.actualizarDespacho = onDocumentUpdated(
       if (new1210At && (new1210At !== old1210At || (new1210Ts > 0 && new1210Ts !== old1210Ts))) {
         console.log(`Nueva solicitud 12-10 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
+          topic: "conductores",
           data: {
-            title: "SOLICITUD 12-10",
-            body: `Se solicita Conductor para la unidad ${unitName}`,
+            title: `SOLICITUD 12-10: ${unitName}`,
+            body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`,
             type: "DISPATCH_UPDATE",
+            solicitudTipo: "12-10",
+            unitName: String(unitName),
             payloadId: String(id),
-            clave: String(newData.clave || ""),
-            lugar: String(newData.lugar || "")
+            clave: String(clave),
+            lugar: String(lugar),
+            timestamp: String(new1210Ts || Date.now())
           },
           android: {
             priority: "high"
-          },
-          topic: "conductores"
+          }
         };
         try {
           await admin.messaging().send(payload);
           console.log(`Notificación 12-10 enviada para ${unitName}`);
         } catch (e) {
-          console.error(`Error enviando notificación 12-10:`, e);
+          console.error("Error enviando notificación 12-10:", e);
         }
       }
 
@@ -385,25 +390,57 @@ exports.actualizarDespacho = onDocumentUpdated(
       if (new66At && (new66At !== old66At || (new66Ts > 0 && new66Ts !== old66Ts))) {
         console.log(`Nueva solicitud 6-6 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
+          topic: "alertas_generales",
           data: {
-            title: "SOLICITUD 6-6",
-            body: `Se solicita Personal para la unidad ${unitName}`,
+            title: `SOLICITUD 6-6: ${unitName}`,
+            body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`,
             type: "DISPATCH_UPDATE",
+            solicitudTipo: "6-6",
+            unitName: String(unitName),
             payloadId: String(id),
-            clave: String(newData.clave || ""),
-            lugar: String(newData.lugar || "")
+            clave: String(clave),
+            lugar: String(lugar),
+            timestamp: String(new66Ts || Date.now())
           },
           android: {
             priority: "high"
-          },
-          topic: "alertas_generales"
+          }
         };
         try {
           await admin.messaging().send(payload);
           console.log(`Notificación 6-6 enviada para ${unitName}`);
         } catch (e) {
-          console.error(`Error enviando notificación 6-6:`, e);
+          console.error("Error enviando notificación 6-6:", e);
         }
+      }
+    }
+
+    // Alarma 10-30 Declarada (Escalamiento de emergencia)
+    const oldClave = String(oldData.clave || "").trim();
+    const newClave = String(newData.clave || "").trim();
+    if (newClave === "10-30" && oldClave !== "10-30") {
+      console.log(`Alarma escalada a 10-30 en despacho ${id}`);
+      const payload = {
+        topic: "despachos",
+        data: {
+          title: "ALARMA 10-30 DECLARADA",
+          body: `10-30 • ${lugar}`,
+          type: "DISPATCH_UPDATE",
+          payloadId: String(id),
+          clave: "10-30",
+          lugar: String(lugar),
+          timestamp: String(Date.now()),
+          gradoAlerta: "3"
+        },
+        android: {
+          priority: "high"
+        }
+      };
+      try {
+        await admin.messaging().send(payload);
+        console.log(`Push de 10-30 enviado exitosamente para despacho ${id}`);
+      } catch (e) {
+        console.error("Error enviando notificación 10-30:", e);
       }
     }
 
@@ -571,7 +608,7 @@ exports.validateLicense = onRequest({ cors: true }, async (req, res) => {
     }
 
     // Hardware verification (sanity check - bypass for mobile modules)
-    if (hwid && assignedModule !== "apk" && assignedModule !== "lista") {
+    if (hwid && assignedModule !== "apk" && assignedModule !== "lista" && assignedModule !== "material") {
       const hwids = clientData.hardwareUUIDs || [];
       if (!hwids.includes(hwid)) {
         return res.status(403).json({

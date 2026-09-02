@@ -19,7 +19,7 @@
         ::placeholder { text-transform: uppercase !important; }
 
         /* Reglas base del sistema SisBom */
-        html { font-size: 16px; }
+        html { font-size: 14px; }
         body { font-family: 'Segoe UI', sans-serif; background-color: transparent; color: #334155; -webkit-font-smoothing: antialiased; }
         
         /* Animación para el spinner de carga (Minimalista y Pequeño) */
@@ -49,6 +49,25 @@
         /* Pestañas de Navegación Superiores (IGUALITARIAS) */
         .nav-scroller { overflow-x: auto; white-space: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; width: 100%; display: flex; }
         .nav-scroller::-webkit-scrollbar { display: none; }
+
+        .custom-tab-scrollbar {
+            overflow-x: auto !important;
+            scrollbar-width: thin !important;
+            scrollbar-color: #cbd5e1 transparent !important;
+        }
+        .custom-tab-scrollbar::-webkit-scrollbar {
+            height: 6px !important;
+        }
+        .custom-tab-scrollbar::-webkit-scrollbar-track {
+            background: transparent !important;
+        }
+        .custom-tab-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1 !important;
+            border-radius: 9999px !important;
+        }
+        .custom-tab-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8 !important;
+        }
         
         .tab-btn { 
             display: inline-flex; flex: 1; justify-content: center; align-items: center; gap: 0.5rem; padding: 0.75rem 0.5rem; 
@@ -233,8 +252,13 @@
                     <h4 class="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-2">
                         <i class="fas fa-list-check text-blue-600"></i> Reporte Individual de Radios
                     </h4>
-                    <div class="flex items-center gap-3">
-                        <span class="text-xs bg-slate-100 text-slate-500 px-4 py-1.5 font-bold uppercase tracking-widest hidden sm:inline-block" style="border-radius: 1rem;">Acumulado del Ciclo</span>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="inline-flex bg-slate-100 p-1 border border-slate-200 shadow-inner" style="border-radius: 1rem;" id="radio-period-filter-group">
+                            <button type="button" onclick="window.setRadioPeriodFilter('ciclo')" id="radio-filter-ciclo" class="px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-all bg-white text-blue-600 shadow-sm focus:outline-none" style="border-radius: 0.75rem;">Ciclo</button>
+                            <button type="button" onclick="window.setRadioPeriodFilter('mes')" id="radio-filter-mes" class="px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-all text-slate-500 hover:text-slate-700 focus:outline-none" style="border-radius: 0.75rem;">Mes</button>
+                            <button type="button" onclick="window.setRadioPeriodFilter('semana')" id="radio-filter-semana" class="px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-all text-slate-500 hover:text-slate-700 focus:outline-none" style="border-radius: 0.75rem;">Semana</button>
+                            <button type="button" onclick="window.setRadioPeriodFilter('dia')" id="radio-filter-dia" class="px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-all text-slate-500 hover:text-slate-700 focus:outline-none" style="border-radius: 0.75rem;">Día</button>
+                        </div>
                         <button onclick="printReport('radio-report-container', 'Reporte Individual de Radios 11-5 - SisBom')" class="text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
                             <i class="fas fa-print"></i> Imprimir
                         </button>
@@ -275,10 +299,10 @@
                         </h4>
                         <div class="flex items-center gap-3">
                             <select id="disp-period-filter" class="text-[10px] sm:text-xs bg-slate-100 text-slate-600 font-bold uppercase tracking-widest px-2 sm:px-4 py-1.5 shadow-sm border border-slate-200 focus:outline-none focus:ring-1 focus:ring-bomberos-red cursor-pointer" style="border-radius: 1rem;" onchange="window.changeDispPeriod(this.value)">
-                                <option value="ciclo">TODO EL CICLO</option>
-                                <option value="mes">ESTE MES</option>
-                                <option value="semana">ESTA SEMANA</option>
-                                <option value="dia">HOY</option>
+                                <option value="ciclo">ANUAL (TODO EL CICLO)</option>
+                                <option value="mes">MENSUAL (ESTE MES)</option>
+                                <option value="semana">SEMANAL (ESTA SEMANA)</option>
+                                <option value="dia">DIARIO (HOY)</option>
                             </select>
                             <button onclick="printReport('disponibilidad-report-container', 'Ranking de Disponibilidad - SisBom')" class="text-xs bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200 px-4 py-2 font-bold uppercase tracking-widest transition-colors flex items-center gap-2 shadow-sm focus:outline-none" style="border-radius: 1rem;">
                                 <i class="fas fa-print"></i> Imprimir
@@ -308,7 +332,15 @@
                     <i class="fas fa-times text-lg"></i> <span class="hidden sm:inline uppercase">Cerrar</span>
                 </button>
             </div>
-            <div class="nav-scroller border-b border-slate-200 flex bg-white shrink-0 px-4 pt-4 shadow-sm" style="z-index: 10;" id="modal-115-tabs"></div>
+            <div class="relative flex items-center bg-white border-b border-slate-200 shrink-0 px-3 py-1 shadow-sm" style="z-index: 10;">
+                <button type="button" onclick="window.scrollModalTabs('left')" class="h-8 w-8 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-800 shadow-sm shrink-0 mr-1.5 focus:outline-none transition-colors" title="Ver días anteriores">
+                    <i class="fas fa-chevron-left text-xs"></i>
+                </button>
+                <div class="flex-1 flex overflow-x-auto px-1 pt-2 pb-1 gap-1 custom-tab-scrollbar" style="scroll-behavior: smooth;" id="modal-115-tabs"></div>
+                <button type="button" onclick="window.scrollModalTabs('right')" class="h-8 w-8 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-full flex items-center justify-center text-slate-500 hover:text-slate-800 shadow-sm shrink-0 ml-1.5 focus:outline-none transition-colors" title="Ver días siguientes">
+                    <i class="fas fa-chevron-right text-xs"></i>
+                </button>
+            </div>
             <div class="flex-1 overflow-y-auto p-4 lg:p-6 bg-slate-100" id="modal-115-content"></div>
         </div>
     </div>
@@ -321,6 +353,15 @@
     <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
 
     <script type="module">
+        import { initializeApp } from "./libs/firebase-app.js";
+        import { getFirestore, collection as rawCollection, getDocs as rawGetDocs, doc as rawDoc, getDoc as rawGetDoc } from "./libs/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword } from "./libs/firebase-auth.js";
+
+        window.rawFbCollection = rawCollection;
+        window.rawFbGetDocs = rawGetDocs;
+        window.rawFbDoc = rawDoc;
+        window.rawFbGetDoc = rawGetDoc;
+
         let fbDb = null;
         window.DB = new Object({ despachos: new Array(), bitacora: new Array(), pruebas: new Array(), asistencias: new Array(), sirena: new Array(), personal: new Array(), vehiculos: new Array() });
         window.currentView = 'despachos';
@@ -392,10 +433,9 @@
                 const storedUser = localStorage.getItem('authUserId');
                 const storedPassSecure = localStorage.getItem('authPasswordSecure');
                 if (storedUser && storedPassSecure) {
-                    const authModule = await import("./libs/firebase-auth.js");
                     const authToUse = window.fbAuth || (window.parent && window.parent.fbAuth);
                     if (authToUse) {
-                        await authModule.signInWithEmailAndPassword(authToUse, storedUser + "@sisbom.com", storedPassSecure);
+                        await signInWithEmailAndPassword(authToUse, storedUser + "@sisbom.com", storedPassSecure);
                         console.log("Reconexión automática exitosa tras pérdida de permisos.");
                         return true;
                     }
@@ -406,145 +446,268 @@
             return false;
         };
 
+        let fbGetDocs = null;
+        let fbCollection = null;
+        let fbDoc = null;
+        let fbGetDoc = null;
+        let fbAuth = null;
+
         window.initFirebase = async function() {
-            if (window.parent && window.parent.fbDb) {
+            if (window.parent && window.parent !== window && window.parent.fbDb && window.parent.fbGetDocs && window.parent.fbCollection) {
                 fbDb = window.parent.fbDb;
-                window.fbCollection = window.parent.fbCollection;
-                window.fbGetDocs = window.parent.fbGetDocs;
-                window.fbAuth = window.parent.fbAuth; // IMPORTANTÍSIMO PARA RECONEXIÓN
+                fbCollection = window.parent.fbCollection;
+                fbGetDocs = window.parent.fbGetDocs;
+                fbDoc = window.parent.fbDoc;
+                fbGetDoc = window.parent.fbGetDoc;
+                fbAuth = window.parent.fbAuth;
                 return;
             }
+            if (fbDb && fbGetDocs && fbCollection) return;
             try {
-                const { initializeApp } = await import("./libs/firebase-app.js");
-                const { getFirestore, collection, getDocs } = await import("./libs/firebase-firestore.js");
-                const { getAuth, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
-                
-                const firebaseConfig = {
-                    apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-                    authDomain: "sisbom-de5f8.firebaseapp.com",
-                    projectId: "sisbom-de5f8",
-                    storageBucket: "sisbom-de5f8.firebasestorage.app",
-                    messagingSenderId: "39449538456",
-                    appId: "1:39449538456:web:64f767264356ae587485ed"
-                };
-
-                let configToUse = firebaseConfig;
+                let configToUse = {};
                 try {
-                    const dynamicConfigStr = localStorage.getItem('saas_firebase_config');
+                    const dynamicConfigStr = localStorage.getItem('firebaseConfig') || localStorage.getItem('saas_firebase_config');
                     if (dynamicConfigStr) configToUse = JSON.parse(dynamicConfigStr);
                 } catch (e) {}
                 
                 const app = initializeApp(configToUse);
                 fbDb = getFirestore(app);
-                window.fbCollection = collection;
-                window.fbGetDocs = getDocs;
-                window.fbAuth = getAuth(app);
+                fbCollection = rawCollection;
+                fbGetDocs = rawGetDocs;
+                fbDoc = rawDoc;
+                fbGetDoc = rawGetDoc;
+                fbAuth = getAuth(app);
 
-                // Auto login fallback
                 const storedUser = localStorage.getItem('authUserId');
                 const storedPassSecure = localStorage.getItem('authPasswordSecure');
                 if (storedUser && storedPassSecure) {
-                    await signInWithEmailAndPassword(window.fbAuth, storedUser + "@sisbom.com", storedPassSecure);
+                    await signInWithEmailAndPassword(fbAuth, storedUser + "@sisbom.com", storedPassSecure);
                 }
             } catch(e) {
                 console.error("Error inicializando Firebase:", e);
             }
         };
 
-        window.fetchAllData = async function(force = false, isRetry = false) {
-            window.toggleLoader(true);
-            try {
-                if (!fbDb) await window.initFirebase();
-                if (!fbDb) throw new Error("Sin conexión a la base de datos.");
+        const chunkArray = (arr, size) => {
+            const res = [];
+            for (let i = 0; i < arr.length; i += size) res.push(arr.slice(i, i + size));
+            return res;
+        };
 
+        window.fetchAllData = async function(force = false, isRetry = false) {
+            if (force) window.toggleLoader(true);
+            try {
+                if (!fbDb || !fbGetDocs || !fbCollection) await window.initFirebase();
+                if (!fbDb || !fbGetDocs || !fbCollection) throw new Error("Sin conexión a la base de datos.");
+
+                const getDocsFn = fbGetDocs;
+                const getCollFn = fbCollection;
+
+                // 1. Descarga ultra-rápida en paralelo de las 7 colecciones principales (Header / Raíz)
                 const results = await Promise.all([
-                    window.fbGetDocs(window.fbCollection(fbDb, 'despachos')),
-                    window.fbGetDocs(window.fbCollection(fbDb, 'bitacora')),
-                    window.fbGetDocs(window.fbCollection(fbDb, 'prueba_radial')),
-                    window.fbGetDocs(window.fbCollection(fbDb, 'sirena')),
-                    window.fbGetDocs(window.fbCollection(fbDb, 'personal')),
-                    window.fbGetDocs(window.fbCollection(fbDb, 'vehiculos')),
-                    window.fbGetDocs(window.fbCollection(fbDb, 'asistencia'))
+                    getDocsFn(getCollFn(fbDb, 'despachos')),
+                    getDocsFn(getCollFn(fbDb, 'bitacora')),
+                    getDocsFn(getCollFn(fbDb, 'prueba_radial')),
+                    getDocsFn(getCollFn(fbDb, 'sirena')),
+                    getDocsFn(getCollFn(fbDb, 'personal')),
+                    getDocsFn(getCollFn(fbDb, 'vehiculos')),
+                    getDocsFn(getCollFn(fbDb, 'asistencia'))
                 ]);
 
                 window.DB.despachos = []; results[0].forEach(d => { let obj = d.data(); obj.idServicio = d.id; window.DB.despachos.push(obj); });
                 window.DB.bitacora = []; results[1].forEach(d => { let obj = d.data(); obj.idSalida = d.id; window.DB.bitacora.push(obj); });
                 window.DB.sirena = []; results[3].forEach(d => { let obj = d.data(); obj.idToqueSirena = d.id; window.DB.sirena.push(obj); });
-                window.DB.personal = []; results[4].forEach(d => { let obj = d.data(); obj.idRegistro = d.id; window.DB.personal.push(obj); });
                 window.DB.vehiculos = []; results[5].forEach(d => { let obj = d.data(); obj.idCarro = d.id; window.DB.vehiculos.push(obj); });
 
-                const estadosPromises = window.DB.personal.map(p => {
-                    return window.fbGetDocs(window.fbCollection(fbDb, `personal/${p.idRegistro}/estados`))
-                    .then(subSnap => {
-                        const subList = [];
-                        subSnap.forEach(doc => subList.push(doc.data()));
-                        p.estadosHistorico = subList;
-                    }).catch(err => { p.estadosHistorico = []; });
-                });
-                await Promise.all(estadosPromises);
-
-                // 1. Cargar base de datos local db_backup.json para usar caché de listas aprobadas
-                let localAsistencias = [];
-                try {
-                    const localRes = await fetch('../asistencias/db_backup.json');
-                    if (localRes.ok) {
-                        const localData = await localRes.json();
-                        localAsistencias = localData.asistencia || [];
+                // Mapas de subcolecciones ya existentes en memoria local / IndexedDB
+                const existingAsisMap = new Map();
+                (window.DB.asistencias || []).forEach(a => {
+                    if (a.idLista && a.idRegistro) {
+                        const sId = String(a.idLista);
+                        if (!existingAsisMap.has(sId)) existingAsisMap.set(sId, []);
+                        existingAsisMap.get(sId).push(a);
                     }
-                } catch (err) {
-                    console.warn("No se pudo cargar la base de datos local db_backup.json:", err);
+                });
+
+                const existingPruebasMap = new Map();
+                (window.DB.pruebas || []).forEach(p => {
+                    if (p.id115 && p.idRadial) {
+                        const sId = String(p.id115);
+                        if (!existingPruebasMap.has(sId)) existingPruebasMap.set(sId, []);
+                        existingPruebasMap.get(sId).push(p);
+                    }
+                });
+
+                const existingEstadosMap = new Map();
+                (window.DB.personal || []).forEach(p => {
+                    if (p.idRegistro && Array.isArray(p.estadosHistorico) && p.estadosHistorico.length > 0) {
+                        existingEstadosMap.set(String(p.idRegistro), p.estadosHistorico);
+                    }
+                });
+
+                // --- 2. PERSONAL Y ESTADOS HISTÓRICOS (DIFERENCIAL) ---
+                const rawPersonal = [];
+                results[4].forEach(d => { let obj = d.data(); obj.idRegistro = d.id; rawPersonal.push(obj); });
+
+                const activePersonal = rawPersonal.filter(p => p.activo !== 0 && p.activo !== '0' && p.activo !== false && String(p.activo).toUpperCase() !== 'NO');
+                const missingPersonal = activePersonal.filter(p => force || !existingEstadosMap.has(String(p.idRegistro)));
+                
+                if (missingPersonal.length > 0) {
+                    const personalChunks = chunkArray(missingPersonal, 25);
+                    for (const chunk of personalChunks) {
+                        await Promise.all(chunk.map(async p => {
+                            try {
+                                const subSnap = await getDocsFn(getCollFn(fbDb, `personal/${p.idRegistro}/estados`));
+                                const subList = [];
+                                subSnap.forEach(doc => subList.push(doc.data()));
+                                p.estadosHistorico = subList;
+                                existingEstadosMap.set(String(p.idRegistro), subList);
+                            } catch(err) {
+                                p.estadosHistorico = [];
+                            }
+                        }));
+                    }
                 }
 
-                // 2. Procesar las asistencias (híbrido local/Firebase)
+                rawPersonal.forEach(p => {
+                    if (existingEstadosMap.has(String(p.idRegistro))) {
+                        p.estadosHistorico = existingEstadosMap.get(String(p.idRegistro));
+                    } else if (!p.estadosHistorico) {
+                        p.estadosHistorico = [];
+                    }
+                });
+                window.DB.personal = rawPersonal;
+
+                // --- 3. ASISTENCIAS (DIFERENCIAL INTELIGENTE) ---
                 const asistenciasData = [];
-                const asisPromises = [];
-                
-                results[6].forEach(d => {
-                    const docId = d.id;
-                    const data = d.data();
-                    const isApproved = (data.aprobadoPor && data.aprobadoPor.trim() !== '');
-                    
-                    // Buscar si ya la tenemos en el JSON local con bomberos
-                    const localGroup = localAsistencias.find(g => String(g.idLista) === String(docId));
-                    if (isApproved && localGroup && localGroup.firefighters && localGroup.firefighters.length > 0) {
-                        // La lista está aprobada y ya la tenemos en caché local, no consultamos Firebase
-                        const header = Object.assign({ idLista: docId }, data);
-                        localGroup.firefighters.forEach(b => {
+                const asisDocs = [];
+                results[6].forEach(d => asisDocs.push({ id: String(d.id), data: d.data() || {} }));
+
+                const missingAsisDocs = asisDocs.filter(d => force || !existingAsisMap.has(d.id));
+
+                if (missingAsisDocs.length > 0) {
+                    const asisChunks = chunkArray(missingAsisDocs, 30);
+                    for (const chunk of asisChunks) {
+                        await Promise.all(chunk.map(async item => {
+                            const docId = item.id;
+                            const header = Object.assign({ idLista: docId }, item.data);
+                            try {
+                                const subSnap = await getDocsFn(getCollFn(fbDb, `asistencia/${docId}/bomberos`));
+                                const bList = [];
+                                subSnap.forEach(b => {
+                                    const bData = b.data();
+                                    if (!bData.idRegistro) bData.idRegistro = b.id;
+                                    bList.push(Object.assign({}, header, bData));
+                                });
+                                if (bList.length > 0) {
+                                    existingAsisMap.set(docId, bList);
+                                } else {
+                                    existingAsisMap.set(docId, [header]);
+                                }
+                            } catch (err) {
+                                existingAsisMap.set(docId, [header]);
+                            }
+                        }));
+                    }
+                }
+
+                asisDocs.forEach(item => {
+                    const docId = item.id;
+                    const header = Object.assign({ idLista: docId }, item.data);
+                    if (existingAsisMap.has(docId)) {
+                        existingAsisMap.get(docId).forEach(b => {
                             asistenciasData.push(Object.assign({}, header, b));
                         });
                     } else {
-                        // Es pendiente o no está en caché local, consultamos Firebase
-                        asisPromises.push(
-                            window.fbGetDocs(window.fbCollection(fbDb, `asistencia/${docId}/bomberos`))
-                            .then(subSnap => {
-                                const header = Object.assign({ idLista: docId }, data);
-                                const bomberos = [];
-                                subSnap.forEach(b => bomberos.push(b.data()));
-                                if (bomberos.length === 0) asistenciasData.push(header);
-                                else bomberos.forEach(b => asistenciasData.push(Object.assign({}, header, b)));
-                            }).catch(()=> { asistenciasData.push(Object.assign({ idLista: docId }, data)); })
-                        );
+                        asistenciasData.push(header);
                     }
                 });
-                await Promise.all(asisPromises);
                 window.DB.asistencias = asistenciasData;
 
+                // --- 4. PRUEBAS RADIALES (DIFERENCIAL INTELIGENTE) ---
                 const pruebasData = [];
-                const pruebasPromises = [];
-                results[2].forEach(d => {
-                    pruebasPromises.push(
-                        window.fbGetDocs(window.fbCollection(fbDb, `prueba_radial/${d.id}/bomberos`))
-                        .then(subSnap => {
-                            const header = Object.assign({ id115: d.id }, d.data());
-                            const bomberos = [];
-                            subSnap.forEach(b => bomberos.push(b.data()));
-                            if (bomberos.length === 0) pruebasData.push(header);
-                            else bomberos.forEach(b => pruebasData.push(Object.assign({}, header, b)));
-                        }).catch(()=> { pruebasData.push(Object.assign({ id115: d.id }, d.data())); })
-                    );
+                const pruebasDocs = [];
+                results[2].forEach(d => pruebasDocs.push({ id: String(d.id), data: d.data() || {} }));
+
+                const missingPruebasDocs = pruebasDocs.filter(d => force || !existingPruebasMap.has(d.id));
+
+                if (missingPruebasDocs.length > 0) {
+                    const pruebasChunks = chunkArray(missingPruebasDocs, 30);
+                    for (const chunk of pruebasChunks) {
+                        await Promise.all(chunk.map(async item => {
+                            const docId = item.id;
+                            const header = Object.assign({ id115: docId }, item.data);
+                            try {
+                                const subSnap = await getDocsFn(getCollFn(fbDb, `prueba_radial/${docId}/bomberos`));
+                                const bList = [];
+                                subSnap.forEach(b => {
+                                    const bData = b.data();
+                                    if (!bData.idRadial) bData.idRadial = b.id;
+                                    bList.push(Object.assign({}, header, bData));
+                                });
+                                if (bList.length > 0) {
+                                    existingPruebasMap.set(docId, bList);
+                                } else {
+                                    existingPruebasMap.set(docId, [header]);
+                                }
+                            } catch (err) {
+                                existingPruebasMap.set(docId, [header]);
+                            }
+                        }));
+                    }
+                }
+
+                pruebasDocs.forEach(item => {
+                    const docId = item.id;
+                    const header = Object.assign({ id115: docId }, item.data);
+                    if (existingPruebasMap.has(docId)) {
+                        existingPruebasMap.get(docId).forEach(b => {
+                            pruebasData.push(Object.assign({}, header, b));
+                        });
+                    } else {
+                        pruebasData.push(header);
+                    }
                 });
-                await Promise.all(pruebasPromises);
                 window.DB.pruebas = pruebasData;
+
+                // Reconstruir lista agrupada con bomberos para disco local y persistencia
+                const asisGrouped = [];
+                asisDocs.forEach(item => {
+                    const docId = item.id;
+                    const header = Object.assign({}, item.data, { idLista: docId });
+                    const bList = existingAsisMap.get(docId) || [];
+                    header.bomberos = bList.map(b => {
+                        const clean = Object.assign({}, b);
+                        delete clean.idLista;
+                        return clean;
+                    });
+                    asisGrouped.push(header);
+                });
+                localStorage.setItem('sisbom_asistencia_cache', JSON.stringify(asisGrouped));
+                localStorage.setItem('db_asistencia', JSON.stringify(asisGrouped));
+                localStorage.setItem('sisbom_db_asistencia', JSON.stringify(asisGrouped));
+
+                const pruebasGrouped = [];
+                pruebasDocs.forEach(item => {
+                    const docId = item.id;
+                    const header = Object.assign({}, item.data, { id115: docId });
+                    const bList = existingPruebasMap.get(docId) || [];
+                    header.bomberos = bList.map(b => {
+                        const clean = Object.assign({}, b);
+                        delete clean.id115;
+                        return clean;
+                    });
+                    pruebasGrouped.push(header);
+                });
+                localStorage.setItem('sisbom_prueba_radial_cache', JSON.stringify(pruebasGrouped));
+                localStorage.setItem('db_prueba_radial', JSON.stringify(pruebasGrouped));
+                localStorage.setItem('sisbom_db_prueba_radial', JSON.stringify(pruebasGrouped));
+
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                    window.pywebview.api.save_local_db('comandancia/db_asistencia.json', JSON.stringify(asisGrouped)).catch(e=>{});
+                    window.pywebview.api.save_local_db('comandancia/db_prueba_radial.json', JSON.stringify(pruebasGrouped)).catch(e=>{});
+                    window.pywebview.api.save_local_db('comandancia/db_personal.json', JSON.stringify(rawPersonal)).catch(e=>{});
+                }
 
                 await window.IDB.saveAll(window.DB);
                 window.refreshDashboard();
@@ -552,53 +715,167 @@
 
             } catch(e) {
                 console.error("Error al obtener datos:", e);
-                
-                // DETECCIÓN DE PÉRDIDA DE PERMISOS (TOKEN EXPIRADO TRAS OFFLINE)
                 const errorStr = String(e).toLowerCase();
                 if (errorStr.includes('permission') || errorStr.includes('missing') || errorStr.includes('denied') || e.code === 'permission-denied') {
                     if (!isRetry) {
                         console.warn("Permisos denegados detectados. Intentando auto-reconexión de sesión...");
                         const reconnected = await window.reconnectAuth();
                         if (reconnected) {
-                            return window.fetchAllData(force, true); // Reintento silencioso
+                            return window.fetchAllData(force, true);
                         }
                     }
                 }
-                
-                window.showToast("ERROR AL SINCRONIZAR. REVISE SU CONEXIÓN.", "error");
+                if (force) window.showToast("ERROR AL SINCRONIZAR. REVISE SU CONEXIÓN.", "error");
             } finally {
                 window.toggleLoader(false);
+            }
+        };
+
+        window.loadFromLocalStorage = async function() {
+            try {
+                // 1. Cargar primero desde IndexedDB si tiene los datos expandidos con subcolecciones
+                try {
+                    await window.IDB.init();
+                    const idbData = await window.IDB.loadAll();
+                    if (idbData && idbData.personal && idbData.personal.length > 0) {
+                        const hasAsis = idbData.asistencias && idbData.asistencias.some(a => !!a.idRegistro && !!a.estado);
+                        const hasPruebas = idbData.pruebas && idbData.pruebas.some(p => !!p.idRadial && !!p.calidad);
+                        const hasEstados = idbData.personal && idbData.personal.some(p => Array.isArray(p.estadosHistorico) && p.estadosHistorico.length > 0);
+                        if (hasAsis && hasPruebas) {
+                            window.DB = idbData;
+                            return true;
+                        }
+                    }
+                } catch(idbErr) {
+                    console.warn("IDB read warning:", idbErr);
+                }
+
+                // 2. Cargar desde JSONs locales
+                const parseJson = (key) => {
+                    try {
+                        const raw = localStorage.getItem(key);
+                        return raw ? JSON.parse(raw) : null;
+                    } catch(e) { return null; }
+                };
+
+                const getCollection = async (lsKeys, jsonFile) => {
+                    for (const k of lsKeys) {
+                        const data = parseJson(k);
+                        if (Array.isArray(data) && data.length > 0) return data;
+                    }
+                    try {
+                        const res = await fetch(jsonFile);
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (Array.isArray(data) && data.length > 0) return data;
+                        }
+                    } catch(e) {}
+                    return [];
+                };
+
+                const localPersonal = await getCollection(['db_personal', 'sisbom_db_personal', 'sisbom_personal_cache'], './db_personal.json');
+                if (localPersonal.length > 0) window.DB.personal = localPersonal;
+
+                const localVehiculos = await getCollection(['db_vehiculos', 'sisbom_db_vehiculos', 'sisbom_vehiculos_cache_v3'], './db_vehiculos.json');
+                if (localVehiculos.length > 0) window.DB.vehiculos = localVehiculos;
+
+                const localDespachos = await getCollection(['db_despachos', 'sisbom_db_despachos', 'sisbom_despachos_cache_v3'], './db_despachos.json');
+                if (localDespachos.length > 0) window.DB.despachos = localDespachos;
+
+                const localBitacora = await getCollection(['db_bitacora', 'sisbom_db_bitacora'], './db_bitacora.json');
+                if (localBitacora.length > 0) window.DB.bitacora = localBitacora;
+
+                const localSirena = await getCollection(['db_sirena', 'sisbom_db_sirena', 'sirena_data_cache'], './db_sirena.json');
+                if (localSirena.length > 0) window.DB.sirena = localSirena;
+
+                const localPruebas = await getCollection(['db_prueba_radial', 'sisbom_db_prueba_radial', 'sisbom_prueba_radial_cache'], './db_prueba_radial.json');
+                if (localPruebas.length > 0) {
+                    const flatPruebas = [];
+                    localPruebas.forEach(p => {
+                        const header = {
+                            id115: p.id115,
+                            id115_num: p.id115_num,
+                            fecha115: p.fecha115,
+                            hora115: p.hora115,
+                            dia: p.dia,
+                            mes: p.mes,
+                            anio: p.anio,
+                            turno: p.turno,
+                            totalPersonal: p.totalPersonal,
+                            timestamp: p.timestamp
+                        };
+                        if (Array.isArray(p.bomberos) && p.bomberos.length > 0) {
+                            p.bomberos.forEach(b => flatPruebas.push(Object.assign({}, header, b)));
+                        } else {
+                            flatPruebas.push(header);
+                        }
+                    });
+                    window.DB.pruebas = flatPruebas;
+                }
+
+                const localAsistencias = await getCollection(['db_asistencia', 'sisbom_db_asistencia', 'sisbom_asistencia_cache'], './db_asistencia.json');
+                if (localAsistencias.length > 0) {
+                    const flatAsis = [];
+                    localAsistencias.forEach(a => {
+                        const header = Object.assign({}, a);
+                        const bList = a.firefighters || a.bomberos || [];
+                        if (Array.isArray(bList) && bList.length > 0) {
+                            bList.forEach(b => {
+                                const bObj = Object.assign({}, header, b);
+                                if (!bObj.idRegistro && b.id) bObj.idRegistro = b.id;
+                                flatAsis.push(bObj);
+                            });
+                        } else {
+                            flatAsis.push(header);
+                        }
+                    });
+                    window.DB.asistencias = flatAsis;
+                }
+
+                if (window.DB.personal.length > 0 && (window.DB.asistencias.length > 0 || window.DB.pruebas.length > 0)) {
+                    window.IDB.saveAll(window.DB).catch(e => console.warn("Seed IDB warning:", e));
+                }
+
+                return (window.DB.personal.length > 0);
+            } catch(e) {
+                console.warn("Error en loadFromLocalStorage:", e);
+                return false;
             }
         };
 
         window.onload = async () => {
             if (window.stopLoadingData) return; 
             
-            const savedYear = localStorage.getItem('selectedCycleYear');
-            if(savedYear) window.selectedCycleYear = parseInt(savedYear, 10);
+            const savedYear = localStorage.getItem('selectedCycleYear') || '2026';
+            window.selectedCycleYear = parseInt(savedYear, 10) || 2026;
             
-            try {
-                await window.IDB.init();
-                const localData = await window.IDB.loadAll();
-                
-                if (localData && (localData.despachos.length > 0 || localData.personal.length > 0)) {
-                    window.DB = localData;
-                    window.refreshDashboard();
-                } else {
-                    await window.fetchAllData(false);
-                }
-            } catch(e) {
-                console.error("IDB fallo", e);
-                await window.fetchAllData(false);
-            }
+            // 1. Carga ultra-rápida inmediata desde almacenamiento local en memoria (0 ms)
+            await window.loadFromLocalStorage();
+            window.refreshDashboard();
+            window.toggleLoader(false);
+
+            // 2. Sincronización diferencial inteligente en segundo plano sin bloquear interfaz
+            setTimeout(() => {
+                window.fetchAllData(false).catch(err => console.warn("Background differential sync error:", err));
+            }, 300);
         };
 
         window.handleCycleChange = function(year) {
-            window.selectedCycleYear = parseInt(year, 10);
+            window.selectedCycleYear = parseInt(year, 10) || new Date().getFullYear();
             window.refreshDashboard();
         };
+        window.changeYear = window.handleCycleChange;
 
-        window.loadData = async function(force) {
+        window.loadData = async function(force = false) {
+            if (!force) {
+                await window.loadFromLocalStorage();
+                window.refreshDashboard();
+                return;
+            }
+            if (force && window.parent && typeof window.parent.syncDatabaseIncremental === 'function') {
+                window.parent.syncDatabaseIncremental(true, true);
+                return;
+            }
             await window.fetchAllData(force);
         };
 
@@ -692,6 +969,8 @@
 
         window.switchView = function(viewName) {
             window.currentView = viewName;
+            window.radioTierFilter = null;
+            window.asistenciaTierFilter = null;
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById(`tab-${viewName}`).classList.add('active');
             document.getElementById('tableSearch').value = '';
@@ -888,11 +1167,7 @@
                         const m = parseInt(parts.at(1), 10);
                         const y = parseInt(parts.at(2), 10);
                         
-                        let recordCycleYear = y; 
-                        
-                        if (window.currentView === 'asistencias' && m === 12) {
-                            recordCycleYear = y + 1;
-                        }
+                        let recordCycleYear = (m === 12) ? y + 1 : y; 
 
                         if(recordCycleYear === selectedCycleYear) {
                             
@@ -1094,82 +1369,204 @@
             container.innerHTML = html;
         };
 
+        window.asistenciaTierFilter = null;
+        window.setAsistenciaTierFilter = function(tierKey) {
+            if (window.asistenciaTierFilter === tierKey) {
+                window.asistenciaTierFilter = null;
+            } else {
+                window.asistenciaTierFilter = tierKey;
+            }
+            window.renderAsistenciaTable();
+        };
+
+        window.isAbonoList = function(list) {
+            if (!list) return false;
+            const ab = list.abono !== undefined ? list.abono : list.esAbono;
+            if (ab === 1 || ab === '1' || ab === true || ab === 'true') return true;
+            const abStr = String(ab || '').toUpperCase().trim();
+            if (abStr === 'SI' || abStr === 'SÍ' || (abStr.startsWith('S') && abStr !== 'SIN' && !abStr.startsWith('SALIDA') && !abStr.startsWith('SER'))) return true;
+            const cl = String(list.clave || '').toUpperCase();
+            const ev = String(list.evento || list.motivo || '').toUpperCase();
+            if (cl.includes('ABONO') || ev.includes('ABONO')) return true;
+            return false;
+        };
+
         window.renderAsistenciaTable = function() {
             const container = document.getElementById('asistencia-report-container');
             const stats = new Object();
             
             const validLists = window.groupedDataCache.filter(list => {
-                const isAnulada = list.anulada == 1 || String(list.anulada).toUpperCase() === 'SI';
+                const isAnulada = list.anulada == 1 || String(list.anulada).toUpperCase() === 'SI' || String(list.anulada).toUpperCase() === 'SÍ';
                 const isAprobada = list.aprobadoPor && String(list.aprobadoPor).trim() !== '';
                 return !isAnulada && isAprobada;
             });
-            
+
+            // Conteo total de listas obligatorias y de abono del ciclo
+            let totalObligatoriasCiclo = 0;
+            let totalAbonosCiclo = 0;
+
             validLists.forEach(list => {
-                const isAbono = list.abono == 1 || String(list.abono).toUpperCase() === 'SÍ' || String(list.abono).toUpperCase() === 'SI' || String(list.clave).toUpperCase().includes('ABONO');
+                if (window.isAbonoList(list)) {
+                    totalAbonosCiclo++;
+                } else {
+                    totalObligatoriasCiclo++;
+                }
+            });
+
+            // Inicializar a todos los bomberos activos
+            const activePersonnel = (window.DB.personal || []).filter(p => {
+                const isInactive = (parseInt(p.activo) === 0 || String(p.activo).toUpperCase() === 'NO' || p.activo === false);
+                const rad = String(p.idRadial || '').trim().toUpperCase();
+                const reg = String(p.idRegistro || '').trim().toUpperCase();
+                return !isInactive && rad !== 'C1' && reg !== 'C1';
+            });
+
+            activePersonnel.forEach(p => {
+                const id = String(p.idRegistro).trim();
+                const ordenEnLista = parseInt(p.ordenEnLista, 10) || 9999;
+                Reflect.set(stats, id, new Object({
+                    id: id,
+                    radial: p.idRadial || 'S/R',
+                    nombre: window.formatShortName(p.nombreBombero),
+                    foto: p.foto || './Logo.png',
+                    orden: ordenEnLista,
+                    obligatoriasAsistidas: 0,
+                    abonosAsistidos: 0,
+                    totalAsistidas: 0,
+                    p: 0
+                }));
+            });
+
+            // Contabilizar asistencias de cada lista válida
+            validLists.forEach(list => {
+                const isAbono = window.isAbonoList(list);
 
                 list._details.forEach(d => {
                     const id = String(d.idRegistro || d.idRadial || '').trim();
-                    if (!id || id.toUpperCase() === 'C1') return; 
-                    
-                    let person = window.DB.personal.find(p => String(p.idRegistro).trim() === id);
-                    if (!person) person = window.DB.personal.find(p => String(p.idRadial).trim().toLowerCase() === id.toLowerCase());
+                    if (!id) return; 
 
-                    if (person && String(person.idRadial).trim().toUpperCase() === 'C1') return; 
-                    
-                    if (!Reflect.has(stats, id)) {
-                        Reflect.set(stats, id, new Object({
-                            id: id,
-                            nombre: person ? window.formatShortName(person.nombreBombero) : 'DESCONOCIDO',
-                            foto: person && person.foto ? person.foto : './Logo.png',
-                            orden: parseInt(d.ordenEnLista, 10) || 9999,
-                            attended: 0,
-                            mandatory: 0,
-                            abonosAsistidos: 0,
-                            obligatoriasAsistidas: 0
-                        }));
+                    if (id === String(list.idLista || '').trim() || (id.length >= 7 && id.startsWith('2026'))) return;
+
+                    let personStat = Reflect.get(stats, id);
+                    if (!personStat) {
+                        const foundKey = Object.keys(stats).find(k => {
+                            const p = Reflect.get(stats, k);
+                            return (p.radial && p.radial.toUpperCase() === id.toUpperCase()) || (p.id && p.id.toUpperCase() === id.toUpperCase());
+                        });
+                        if (foundKey) personStat = Reflect.get(stats, foundKey);
                     }
-                    
-                    if (d.ordenEnLista && Reflect.get(stats, id).orden === 9999) Reflect.get(stats, id).orden = parseInt(d.ordenEnLista, 10);
+
+                    if (!personStat) return;
 
                     const st = String(d.estado || '').toUpperCase().trim();
                     const isPresent = st === 'A' || st === 'ASISTE' || st === 'CDS';
-                    
-                    if (isAbono) {
-                        if (isPresent) Reflect.get(stats, id).abonosAsistidos++;
-                    } else {
-                        Reflect.get(stats, id).mandatory++;
-                        if (isPresent) Reflect.get(stats, id).obligatoriasAsistidas++;
+
+                    if (isPresent) {
+                        if (isAbono) {
+                            personStat.abonosAsistidos++;
+                        } else {
+                            personStat.obligatoriasAsistidas++;
+                        }
                     }
                 });
             });
 
-            const list = Object.values(stats).map(item => {
-                const effectiveAttended = Math.min(item.mandatory, item.obligatoriasAsistidas + item.abonosAsistidos);
-                item.attended = effectiveAttended;
-                item.p = item.mandatory > 0 ? (effectiveAttended / item.mandatory * 100) : (item.abonosAsistidos > 0 ? 100 : 0);
+            const getTier = (pct) => {
+                if (pct >= 76) return '76-100';
+                if (pct >= 51) return '51-75';
+                if (pct >= 31) return '31-50';
+                if (pct >= 11) return '11-30';
+                return '0-10';
+            };
+
+            const tierData = new Object({
+                '76-100': { label: '76% O MÁS', title: 'MUY ALTO RENDIMIENTO', count: 0, icon: 'fa-circle-check', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', bar: 'bg-emerald-500' },
+                '51-75': { label: '51% A 75%', title: 'ALTO RENDIMIENTO', count: 0, icon: 'fa-user-check', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', bar: 'bg-blue-500' },
+                '31-50': { label: '31% A 50%', title: 'RENDIMIENTO MEDIO', count: 0, icon: 'fa-user-clock', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', bar: 'bg-amber-500' },
+                '11-30': { label: '11% A 30%', title: 'BAJA ASISTENCIA', count: 0, icon: 'fa-user-minus', bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', bar: 'bg-orange-500' },
+                '0-10': { label: '0% A 10%', title: 'MUY BAJA / CRÍTICA', count: 0, icon: 'fa-circle-xmark', bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', bar: 'bg-rose-500' }
+            });
+
+            const allList = Object.values(stats).map(item => {
+                item.totalAsistidas = item.obligatoriasAsistidas + item.abonosAsistidos;
+                item.p = totalObligatoriasCiclo > 0 ? ((item.totalAsistidas / totalObligatoriasCiclo) * 100) : 0;
+                item.tier = getTier(item.p);
+                if (Reflect.has(tierData, item.tier)) {
+                    Reflect.get(tierData, item.tier).count++;
+                }
                 return item;
             });
 
-            list.sort((a, b) => {
+            allList.sort((a, b) => {
                 if (b.p !== a.p) return b.p - a.p;
                 return a.orden - b.orden;
             });
 
-            if(list.length === 0) {
+            if(allList.length === 0) {
                 container.innerHTML = `<div class="p-6 text-center text-slate-500 font-bold bg-slate-50">NO HAY INFORMACIÓN DE ASISTENCIA REGISTRADA PARA ESTE CICLO.</div>`;
                 return;
             }
 
-            const mid = Math.ceil(list.length / 2);
+            const totalStaff = allList.length || 1;
+            const filteredList = window.asistenciaTierFilter ? allList.filter(item => item.tier === window.asistenciaTierFilter) : allList;
 
-            const rowMaker = (item, index, isLeft) => {
-                const pValue = item.p.toFixed(2);
+            const tierCardsHtml = `
+                <div class="p-6 bg-slate-50/60 border-b border-slate-200 print-hide">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
+                        <div>
+                            <h5 class="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                                <i class="fas fa-chart-simple text-blue-600"></i> Distribución de Rendimiento de Asistencia
+                            </h5>
+                            <p class="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                                Obligatorias: ${totalObligatoriasCiclo} | Abonos: ${totalAbonosCiclo} | Total Listas: ${validLists.length}
+                            </p>
+                        </div>
+                        ${window.asistenciaTierFilter ? `
+                            <button onclick="window.setAsistenciaTierFilter(null)" class="text-[11px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1 font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5" style="border-radius: 0.5rem;">
+                                <i class="fas fa-filter-circle-xmark"></i> Mostrar Todos (${allList.length})
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                        ${Object.keys(tierData).map(k => {
+                            const td = Reflect.get(tierData, k);
+                            const pctOfStaff = Math.round((td.count / totalStaff) * 100);
+                            const isActive = window.asistenciaTierFilter === k;
+                            const ringClass = isActive ? 'ring-2 ring-blue-600 shadow-md border-blue-500 scale-[1.02]' : 'border-slate-200 hover:border-slate-300 hover:shadow-sm';
+                            return `
+                                <div onclick="window.setAsistenciaTierFilter('${k}')" class="cursor-pointer transition-all duration-200 p-3.5 bg-white border ${ringClass} flex flex-col justify-between" style="border-radius: 1rem;">
+                                    <div class="flex items-center justify-between gap-1 mb-1.5">
+                                        <span class="text-[10px] font-black tracking-wider uppercase ${td.text} ${td.bg} px-2 py-0.5 border ${td.border}" style="border-radius: 0.375rem;">${td.label}</span>
+                                        <i class="fas ${td.icon} ${td.text} text-xs"></i>
+                                    </div>
+                                    <div class="flex items-baseline justify-between mt-1">
+                                        <span class="text-2xl font-black text-slate-800">${td.count}</span>
+                                        <span class="text-[11px] font-bold text-slate-400 uppercase">${pctOfStaff}%</span>
+                                    </div>
+                                    <div class="mt-1 text-[10px] font-bold ${td.text} uppercase tracking-wider truncate">${td.title}</div>
+                                    <div class="w-full bg-slate-100 h-1.5 mt-2 overflow-hidden" style="border-radius: 9999px;">
+                                        <div class="${td.bar} h-full" style="width: ${pctOfStaff}%;"></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
+
+            const rowMaker = (item, index, isLeft, origIndex) => {
+                const pReal = item.p.toFixed(2);
+                const isOver100 = item.p > 100;
+                const pDisplay = isOver100 ? `100% <span class="text-[10px] font-bold text-purple-700 block sm:inline">(${pReal}%)</span>` : `${pReal}%`;
                 const p = item.p;
-                const rank = isLeft ? index + 1 : index + 1 + mid;
+                const rank = origIndex + 1;
                 
-                let pClass = 'text-green-600 bg-green-50 border-green-200';
-                if (p < 30) pClass = 'text-red-600 bg-red-50 border-red-200';
-                else if (p < 40) pClass = 'text-yellow-600 bg-yellow-50 border-yellow-200';
+                let pClass = 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                if (p >= 100) pClass = 'text-purple-700 bg-purple-50 border-purple-200';
+                else if (p < 11) pClass = 'text-rose-700 bg-rose-50 border-rose-200';
+                else if (p < 31) pClass = 'text-orange-700 bg-orange-50 border-orange-200';
+                else if (p < 51) pClass = 'text-amber-700 bg-amber-50 border-amber-200';
+                else if (p < 76) pClass = 'text-blue-700 bg-blue-50 border-blue-200';
 
                 let rankBadge = `<span class="w-6 h-6 bg-slate-100 text-slate-400 font-black flex items-center justify-center border border-slate-200 shadow-sm" style="font-size: 11px; border-radius: 9999px;">${rank}</span>`;
                 if (rank === 1) rankBadge = `<div class="w-7 h-7 bg-yellow-100 border border-yellow-300 text-yellow-600 flex items-center justify-center text-xs shadow-sm drop-shadow-sm" style="border-radius: 9999px;" title="1° LUGAR"><i class="fas fa-trophy"></i></div>`;
@@ -1178,48 +1575,111 @@
 
                 return `
                 <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100 relative">
-                    <td class="py-3 px-2 text-center align-middle print-rank" style="width: 50px;"><div class="flex justify-center">${rankBadge}</div></td>
-                    <td class="py-3 px-2 font-black text-slate-300 text-center align-middle" style="width: 32px; font-size: 11px;">${item.orden === 9999 ? '-' : item.orden}</td>
+                    <td class="py-3 px-1 text-center align-middle print-rank" style="width: 44px;"><div class="flex justify-center">${rankBadge}</div></td>
+                    <td class="py-3 px-1 font-black text-slate-300 text-center align-middle" style="width: 32px; font-size: 11px;">${item.orden === 9999 ? '-' : item.orden}</td>
                     <td class="py-3 px-2 overflow-hidden">
-                        <div class="flex items-center gap-3">
-                            <img src="${item.foto}" class="w-9 h-9 object-cover shadow-sm border border-slate-200 flex-shrink-0 hidden sm:block print-hide" style="border-radius: 9999px;">
+                        <div class="flex items-center gap-2">
+                            <img src="${item.foto}" class="w-8 h-8 object-cover shadow-sm border border-slate-200 flex-shrink-0 hidden sm:block print-hide" style="border-radius: 9999px;">
                             <div class="min-w-0 flex-1">
                                 <div class="font-bold text-slate-800 text-xs leading-tight truncate print-text" title="${item.nombre}">${item.nombre}</div>
-                                <div class="font-bold text-slate-400 mt-1 tracking-wider uppercase truncate print-hide" style="font-size: 10px;">REG: ${item.id}</div>
+                                <div class="font-bold text-slate-400 mt-0.5 tracking-wider uppercase truncate print-hide" style="font-size: 9px;">RAD: ${item.radial}</div>
                             </div>
                         </div>
                     </td>
-                    <td class="py-3 px-2 text-center align-middle">
-                        <div class="flex flex-col items-center justify-center">
-                            <span class="text-sm font-black text-slate-700 leading-none print-text">${item.attended}</span>
-                            <span class="font-bold text-slate-400 mt-1 whitespace-nowrap print-hide" style="font-size: 10px;">DE ${item.mandatory}</span>
-                        </div>
+                    <td class="py-3 px-1 text-center align-middle" style="width: 75px;">
+                        <span class="text-xs font-black text-slate-700">${item.obligatoriasAsistidas}</span>
+                        <span class="text-[9px] font-bold text-slate-400 block -mt-0.5">/ ${totalObligatoriasCiclo}</span>
                     </td>
-                    <td class="py-3 px-2 text-center align-middle">
-                        <span class="inline-block px-3 py-1 text-xs font-black tracking-widest border shadow-sm print-pill ${pClass}" style="border-radius: 0.5rem;">${pValue}%</span>
+                    <td class="py-3 px-1 text-center align-middle" style="width: 55px;">
+                        <span class="inline-block px-1.5 py-0.5 text-[10px] font-black rounded ${item.abonosAsistidos > 0 ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'text-slate-400'}">+${item.abonosAsistidos}</span>
+                    </td>
+                    <td class="py-3 px-1 text-center align-middle" style="width: 55px;">
+                        <span class="text-xs font-black text-slate-900">${item.totalAsistidas}</span>
+                    </td>
+                    <td class="py-3 px-1 text-center align-middle" style="width: 75px;">
+                        <span class="inline-block px-2 py-1 text-xs font-black tracking-wider border shadow-sm print-pill ${pClass}" style="border-radius: 0.5rem;" title="Porcentaje Total (Real: ${pReal}%)">${pDisplay}</span>
                     </td>
                 </tr>`;
             };
-
-            const col1 = list.slice(0, mid).map((item, i) => rowMaker(item, i, true)).join('');
-            const col2 = list.slice(mid).map((item, i) => rowMaker(item, i, false)).join('');
 
             const tableTemplate = (tbodyContent) => `
                 <table class="w-full text-left border-collapse table-fixed min-w-full">
                     <thead class="bg-slate-50 shadow-sm z-10 sticky top-0">
                         <tr>
-                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200 print-rank" style="font-size: 11px; width: 50px;">TOP</th>
-                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 11px; width: 32px;">LISTA</th>
-                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="font-size: 11px; width: 40%;">BOMBERO</th>
-                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 11px; width: 20%;">TOTAL</th>
-                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 11px; width: 20%;">REND.</th>
+                            <th class="py-4 px-1 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200 print-rank" style="font-size: 10px; width: 44px;">TOP</th>
+                            <th class="py-4 px-1 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 10px; width: 32px;">ORD</th>
+                            <th class="py-4 px-2 font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="font-size: 10px;">BOMBERO</th>
+                            <th class="py-4 px-1 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 10px; width: 75px;">OBLIG.</th>
+                            <th class="py-4 px-1 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 10px; width: 55px;">ABONOS</th>
+                            <th class="py-4 px-1 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 10px; width: 55px;">TOTAL</th>
+                            <th class="py-4 px-1 font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="font-size: 10px; width: 75px;">% TOTAL</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-slate-100">${tbodyContent}</tbody>
                 </table>
             `;
 
-            container.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+            let tableGridHtml = '';
+            if (filteredList.length === 0) {
+                tableGridHtml = `<div class="p-8 text-center text-slate-400 font-bold uppercase tracking-wider text-xs bg-white">No hay bomberos en el rango seleccionado.</div>`;
+            } else {
+                const mid = Math.ceil(filteredList.length / 2);
+                const col1 = filteredList.slice(0, mid).map((item, i) => rowMaker(item, i, true, allList.indexOf(item))).join('');
+                const col2 = filteredList.slice(mid).map((item, i) => rowMaker(item, i, false, allList.indexOf(item))).join('');
+                tableGridHtml = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0 bg-white"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+            }
+
+            // Generador de filas para la tabla de impresión en página completa A4
+            const fullTableRowMaker = (item, idx) => {
+                const pReal = item.p.toFixed(2);
+                const isOver100 = item.p > 100;
+                const pDisplay = isOver100 ? `100% (${pReal}%)` : `${pReal}%`;
+                const p = item.p;
+                const rank = idx + 1;
+                
+                let rateStyle = 'background-color: #dcfce7; color: #15803d; border: 1px solid #86efac;';
+                if (p >= 100) rateStyle = 'background-color: #f3e8ff; color: #7e22ce; border: 1px solid #d8b4fe;';
+                else if (p < 11) rateStyle = 'background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;';
+                else if (p < 31) rateStyle = 'background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74;';
+                else if (p < 51) rateStyle = 'background-color: #fef3c7; color: #b45309; border: 1px solid #fcd34d;';
+                else if (p < 76) rateStyle = 'background-color: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;';
+
+                return `
+                <tr class="border-b border-slate-100">
+                    <td class="py-1 px-1.5 text-center font-bold text-slate-400" style="width: 5%; font-size: 8.5px;">${rank}</td>
+                    <td class="py-1 px-1.5 text-center font-bold text-slate-400" style="width: 5%; font-size: 8.5px;">${item.orden === 9999 ? '-' : item.orden}</td>
+                    <td class="py-1 px-2 font-black text-slate-800 uppercase print-text" style="width: 42%; font-size: 9.5px;">${item.nombre}</td>
+                    <td class="py-1 px-2 text-center font-bold text-slate-700" style="width: 14%; font-size: 9px;">${item.obligatoriasAsistidas} / ${totalObligatoriasCiclo}</td>
+                    <td class="py-1 px-2 text-center font-bold text-indigo-700" style="width: 10%; font-size: 9px;">+${item.abonosAsistidos}</td>
+                    <td class="py-1 px-2 text-center font-black text-slate-900" style="width: 10%; font-size: 9px;">${item.totalAsistidas}</td>
+                    <td class="py-1 px-2 text-center" style="width: 14%;">
+                        <span class="inline-block px-2 py-0.5 font-black text-[9px] rounded print-pill" style="${rateStyle}">${pDisplay}</span>
+                    </td>
+                </tr>`;
+            };
+
+            const fullTableRows = filteredList.map(fullTableRowMaker).join('');
+
+            const fullPrintTableHtml = `
+                <div class="print-only-table hidden">
+                    <table class="w-full text-left border-collapse table-fixed">
+                        <thead class="bg-slate-100 border-b-2 border-slate-300">
+                            <tr>
+                                <th class="py-1.5 px-1.5 text-[8.5px] font-black text-slate-600 uppercase text-center" style="width: 5%;">TOP</th>
+                                <th class="py-1.5 px-1.5 text-[8.5px] font-black text-slate-600 uppercase text-center" style="width: 5%;">ORD</th>
+                                <th class="py-1.5 px-2 text-[8.5px] font-black text-slate-600 uppercase" style="width: 42%;">BOMBERO / PERSONAL</th>
+                                <th class="py-1.5 px-2 text-[8.5px] font-black text-slate-600 uppercase text-center" style="width: 14%;">OBLIGATORIAS</th>
+                                <th class="py-1.5 px-2 text-[8.5px] font-black text-slate-600 uppercase text-center" style="width: 10%;">ABONOS</th>
+                                <th class="py-1.5 px-2 text-[8.5px] font-black text-slate-600 uppercase text-center" style="width: 10%;">TOTAL</th>
+                                <th class="py-1.5 px-2 text-[8.5px] font-black text-slate-600 uppercase text-center" style="width: 14%;">% TOTAL</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100">${fullTableRows}</tbody>
+                    </table>
+                </div>
+            `;
+
+            container.innerHTML = tierCardsHtml + `<div class="screen-only-grid">${tableGridHtml}</div>` + fullPrintTableHtml;
         };
 
         window.renderRadioGlobalSummary = function(dist) {
@@ -1268,6 +1728,91 @@
             `;
         };
 
+        window.radioTierFilter = null;
+        window.setRadioTierFilter = function(tierKey) {
+            if (window.radioTierFilter === tierKey) {
+                window.radioTierFilter = null;
+            } else {
+                window.radioTierFilter = tierKey;
+            }
+            window.renderRadioPersonnelTable();
+        };
+
+        window.radioPeriodFilter = 'ciclo';
+
+        window.matchesRadioPeriod = function(list) {
+            if (window.radioPeriodFilter === 'ciclo' || !window.radioPeriodFilter) return true;
+
+            const dNorm = list._normalizedDate || window.normalizeDate(list.fecha115 || list.fecha);
+            if (!dNorm) return false;
+
+            const parts = dNorm.split('-');
+            if (parts.length !== 3) return false;
+            const d = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10) - 1; // 0-indexed
+            const y = parseInt(parts[2], 10);
+
+            const now = new Date();
+            const todayD = now.getDate();
+            const todayM = now.getMonth();
+            const todayY = now.getFullYear();
+
+            if (window.radioPeriodFilter === 'dia') {
+                return d === todayD && m === todayM && y === todayY;
+            }
+
+            if (window.radioPeriodFilter === 'mes') {
+                return m === todayM && y === todayY;
+            }
+
+            if (window.radioPeriodFilter === 'semana') {
+                const listDate = new Date(y, m, d);
+                const diffTime = now.getTime() - listDate.getTime();
+                const diffDays = diffTime / (1000 * 3600 * 24);
+                return diffDays >= 0 && diffDays <= 7;
+            }
+
+            return true;
+        };
+
+        window.setRadioPeriodFilter = function(period) {
+            window.radioPeriodFilter = period || 'ciclo';
+            
+            const periods = ['ciclo', 'mes', 'semana', 'dia'];
+            periods.forEach(p => {
+                const btn = document.getElementById('radio-filter-' + p);
+                if (btn) {
+                    if (p === window.radioPeriodFilter) {
+                        btn.className = "px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-all bg-white text-blue-600 shadow-sm focus:outline-none";
+                    } else {
+                        btn.className = "px-3 py-1.5 text-xs font-black uppercase tracking-wider transition-all text-slate-500 hover:text-slate-700 focus:outline-none";
+                    }
+                }
+            });
+            
+            window.renderRadioPersonnelTable();
+
+            if (window.currentView === 'pruebas') {
+                window.renderTrendChart();
+
+                const qualityDist = { '11-1': 0, '11-2': 0, 'X': 0, '0-8': 0 };
+                window.groupedDataCache.forEach(mGroup => {
+                    mGroup._lists.forEach(group => {
+                        if (!window.matchesRadioPeriod(group)) return;
+                        group._details.forEach(d => {
+                            if(d.idRadial && String(d.idRadial).trim().toUpperCase() !== 'C1' && String(d.idRegistro).trim().toUpperCase() !== 'C1') {
+                                let q = String(d.calidad || 'X').trim().toUpperCase();
+                                if (q === '') q = 'X';
+                                Reflect.set(qualityDist, q, (Reflect.get(qualityDist, q) || 0) + 1);
+                            }
+                        });
+                    });
+                });
+                window.renderPieChart(qualityDist);
+                window.renderRadioGlobalSummary(qualityDist);
+            }
+        };
+
         window.renderRadioPersonnelTable = function() {
             const container = document.getElementById('radio-report-container');
             const radioPersonnel = window.DB.personal.filter(p => p.radio && String(p.radio).trim() !== '' && String(p.idRadial).trim().toUpperCase() !== 'C1' && String(p.idRegistro).trim().toUpperCase() !== 'C1');
@@ -1275,11 +1820,20 @@
             
             radioPersonnel.forEach(p => { 
                 const rid = String(p.idRadial).trim(); 
-                if(rid) Reflect.set(stats, rid, new Object({ name: `${p.idRadial} • ${window.formatShortName(p.nombreBombero)}`, idRadial: rid, c11_1: 0, c11_2: 0, cX: 0, c0_8: 0, total: 0 })); 
+                if(rid) Reflect.set(stats, rid, new Object({ 
+                    name: `${p.idRadial} • ${window.formatShortName(p.nombreBombero)}`, 
+                    idRadial: rid, 
+                    c11_1: 0, 
+                    c11_2: 0, 
+                    cX: 0, 
+                    c0_8: 0, 
+                    total: 0 
+                })); 
             });
 
             window.groupedDataCache.forEach(monthGroup => {
                 monthGroup._lists.forEach(list => {
+                    if (!window.matchesRadioPeriod(list)) return;
                     list._details.forEach(r => {
                         const rid = String(r.idRadial).trim();
                         if(rid.toUpperCase() === 'C1' || String(r.idRegistro).trim().toUpperCase() === 'C1') return;
@@ -1296,11 +1850,98 @@
                 });
             });
 
-            const list = Object.values(stats).sort((a,b) => {
+            const getTier = (pct) => {
+                if (pct >= 76) return '76-100';
+                if (pct >= 51) return '51-75';
+                if (pct >= 31) return '31-50';
+                if (pct >= 11) return '11-30';
+                return '0-10';
+            };
+
+            const tierData = new Object({
+                '76-100': { label: '76% A 100%', title: 'MUY ALTA / CONSTANTE', count: 0, icon: 'fa-circle-check', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200', bar: 'bg-emerald-500' },
+                '51-75': { label: '51% A 75%', title: 'ALTA / REGULAR', count: 0, icon: 'fa-user-check', bg: 'bg-blue-50', text: 'text-blue-700', border: 'border-blue-200', bar: 'bg-blue-500' },
+                '31-50': { label: '31% A 50%', title: 'MEDIA / OCASIONAL', count: 0, icon: 'fa-user-clock', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200', bar: 'bg-amber-500' },
+                '11-30': { label: '11% A 30%', title: 'BAJA RESPUESTA', count: 0, icon: 'fa-user-minus', bg: 'bg-orange-50', text: 'text-orange-700', border: 'border-orange-200', bar: 'bg-orange-500' },
+                '0-10': { label: '0% A 10%', title: 'MUY BAJA / NULA', count: 0, icon: 'fa-circle-xmark', bg: 'bg-rose-50', text: 'text-rose-700', border: 'border-rose-200', bar: 'bg-rose-500' }
+            });
+
+            let total11_1 = 0, total11_2 = 0, totalX = 0, total0_8 = 0, totalResp = 0;
+
+            const allList = Object.values(stats).map(item => {
+                const t = item.total;
+                item.respRate = t ? Math.round(((item.c11_1 + item.c11_2) / t) * 100) : 0;
+                item.tier = getTier(item.respRate);
+                if (Reflect.has(tierData, item.tier)) {
+                    Reflect.get(tierData, item.tier).count++;
+                }
+                total11_1 += item.c11_1;
+                total11_2 += item.c11_2;
+                totalX += item.cX;
+                total0_8 += item.c0_8;
+                totalResp += item.total;
+                return item;
+            });
+
+            const pctG11_1 = totalResp ? Math.round((total11_1 / totalResp) * 100) : 0;
+            const pctG11_2 = totalResp ? Math.round((total11_2 / totalResp) * 100) : 0;
+            const pctGX = totalResp ? Math.round((totalX / totalResp) * 100) : 0;
+            const pctG0_8 = totalResp ? Math.round((total0_8 / totalResp) * 100) : 0;
+            const pctGResp = totalResp ? Math.round(((total11_1 + total11_2) / totalResp) * 100) : 0;
+
+            allList.sort((a,b) => {
+                if (b.respRate !== a.respRate) return b.respRate - a.respRate;
                 const numA = parseInt(String(a.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
                 const numB = parseInt(String(b.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
                 return numA - numB;
             });
+
+            const totalStaff = allList.length || 1;
+            const filteredList = window.radioTierFilter ? allList.filter(item => item.tier === window.radioTierFilter) : allList;
+
+            const tierCardsHtml = `
+                <div class="p-6 bg-slate-50/60 border-b border-slate-200 print-hide">
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-4">
+                        <div>
+                            <h5 class="text-xs font-black text-slate-700 uppercase tracking-widest flex items-center gap-2">
+                                <i class="fas fa-chart-simple text-blue-600"></i> Patrones de Respuesta Radial
+                            </h5>
+                            <p class="text-[11px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                                Haga clic en cualquier rango para filtrar el personal en el reporte
+                            </p>
+                        </div>
+                        ${window.radioTierFilter ? `
+                            <button onclick="window.setRadioTierFilter(null)" class="text-[11px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-3 py-1 font-bold uppercase tracking-wider transition-colors flex items-center gap-1.5" style="border-radius: 0.5rem;">
+                                <i class="fas fa-filter-circle-xmark"></i> Mostrar Todos (${allList.length})
+                            </button>
+                        ` : ''}
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                        ${Object.keys(tierData).map(k => {
+                            const td = Reflect.get(tierData, k);
+                            const pctOfStaff = Math.round((td.count / totalStaff) * 100);
+                            const isActive = window.radioTierFilter === k;
+                            const ringClass = isActive ? 'ring-2 ring-blue-600 shadow-md border-blue-500 scale-[1.02]' : 'border-slate-200 hover:border-slate-300 hover:shadow-sm';
+                            return `
+                                <div onclick="window.setRadioTierFilter('${k}')" class="cursor-pointer transition-all duration-200 p-3.5 bg-white border ${ringClass} flex flex-col justify-between" style="border-radius: 1rem;">
+                                    <div class="flex items-center justify-between gap-1 mb-1.5">
+                                        <span class="text-[10px] font-black tracking-wider uppercase ${td.text} ${td.bg} px-2 py-0.5 border ${td.border}" style="border-radius: 0.375rem;">${td.label}</span>
+                                        <i class="fas ${td.icon} ${td.text} text-xs"></i>
+                                    </div>
+                                    <div class="flex items-baseline justify-between mt-1">
+                                        <span class="text-2xl font-black text-slate-800">${td.count}</span>
+                                        <span class="text-[11px] font-bold text-slate-400 uppercase">${pctOfStaff}%</span>
+                                    </div>
+                                    <div class="mt-1 text-[10px] font-bold ${td.text} uppercase tracking-wider truncate">${td.title}</div>
+                                    <div class="w-full bg-slate-100 h-1.5 mt-2 overflow-hidden" style="border-radius: 9999px;">
+                                        <div class="${td.bar} h-full" style="width: ${pctOfStaff}%;"></div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                </div>
+            `;
 
             const rowMaker = (item) => {
                 const t = item.total; 
@@ -1308,37 +1949,131 @@
                 const p2 = t ? Math.round((item.c11_2/t)*100):0; 
                 const pX = t ? Math.round((item.cX/t)*100):0; 
                 const p8 = t ? Math.round((item.c0_8/t)*100):0;
+                const respRate = item.respRate;
                 
+                let rateClass = 'text-emerald-700 bg-emerald-50 border-emerald-200';
+                if (respRate < 11) rateClass = 'text-rose-700 bg-rose-50 border-rose-200';
+                else if (respRate < 31) rateClass = 'text-orange-700 bg-orange-50 border-orange-200';
+                else if (respRate < 51) rateClass = 'text-amber-700 bg-amber-50 border-amber-200';
+                else if (respRate < 76) rateClass = 'text-blue-700 bg-blue-50 border-blue-200';
+
                 return `
                 <tr class="hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0">
-                    <td class="py-3 px-4 font-bold text-slate-700 text-xs truncate print-text" style="max-width: 150px;" title="${item.name}">${item.name}</td>
-                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-green-700 leading-none">${p1}%</span><span class="text-xs font-bold text-green-500 mt-1 print-hide">(${item.c11_1})</span></div></td>
-                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-yellow-700 leading-none">${p2}%</span><span class="text-xs font-bold text-yellow-500 mt-1 print-hide">(${item.c11_2})</span></div></td>
-                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-red-700 leading-none">${pX}%</span><span class="text-xs font-bold text-red-500 mt-1 print-hide">(${item.cX})</span></div></td>
-                    <td class="py-3 px-2 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-sm font-black text-slate-600 leading-none">${p8}%</span><span class="text-xs font-bold text-slate-400 mt-1 print-hide">(${item.c0_8})</span></div></td>
+                    <td class="py-2.5 px-3 font-bold text-slate-700 text-xs truncate print-text" style="max-width: 140px;" title="${item.name}">${item.name}</td>
+                    <td class="py-2.5 px-1 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-xs font-black text-green-700 leading-none">${p1}%</span><span class="text-[10px] font-bold text-green-500 mt-0.5 print-hide">(${item.c11_1})</span></div></td>
+                    <td class="py-2.5 px-1 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-xs font-black text-yellow-700 leading-none">${p2}%</span><span class="text-[10px] font-bold text-yellow-500 mt-0.5 print-hide">(${item.c11_2})</span></div></td>
+                    <td class="py-2.5 px-1 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-xs font-black text-red-700 leading-none">${pX}%</span><span class="text-[10px] font-bold text-red-500 mt-0.5 print-hide">(${item.cX})</span></div></td>
+                    <td class="py-2.5 px-1 text-center align-middle"><div class="flex flex-col items-center justify-center"><span class="text-xs font-black text-slate-600 leading-none">${p8}%</span><span class="text-[10px] font-bold text-slate-400 mt-0.5 print-hide">(${item.c0_8})</span></div></td>
+                    <td class="py-2.5 px-2 text-center align-middle">
+                        <span class="inline-block px-2.5 py-1 text-xs font-black tracking-wider border shadow-sm print-pill ${rateClass}" style="border-radius: 0.5rem;">${respRate}%</span>
+                    </td>
                 </tr>`;
             };
-
-            const mid = Math.ceil(list.length / 2);
-            const col1 = list.slice(0, mid).map(rowMaker).join('');
-            const col2 = list.slice(mid).map(rowMaker).join('');
 
             const tableTemplate = (tbodyContent) => `
                 <table class="w-full text-left border-collapse table-fixed">
                     <thead class="bg-slate-50 shadow-sm z-10 sticky top-0">
                         <tr>
-                            <th class="py-4 px-4 text-xs font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="width: 40%;">BOMBERO</th>
-                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">11-1</th>
-                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">11-2</th>
-                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">X</th>
-                            <th class="py-4 px-2 text-xs font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 15%;">0-8</th>
+                            <th class="py-2.5 px-3 text-[11px] font-bold text-slate-500 uppercase tracking-widest border-b border-slate-200" style="width: 32%;">BOMBERO</th>
+                            <th class="py-2.5 px-1 text-[11px] font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 13%;">11-1</th>
+                            <th class="py-2.5 px-1 text-[11px] font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 13%;">11-2</th>
+                            <th class="py-2.5 px-1 text-[11px] font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 13%;">X</th>
+                            <th class="py-2.5 px-1 text-[11px] font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 13%;">0-8</th>
+                            <th class="py-2.5 px-2 text-[11px] font-bold text-slate-500 uppercase tracking-widest text-center border-b border-slate-200" style="width: 16%;">RESP.</th>
                         </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-slate-100">${tbodyContent}</tbody>
                 </table>
             `;
 
-            container.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+            let tableGridHtml = '';
+            if (filteredList.length === 0) {
+                tableGridHtml = `<div class="p-8 text-center text-slate-400 font-bold uppercase tracking-wider text-xs bg-white">No hay bomberos en el rango seleccionado (${window.radioTierFilter}%).</div>`;
+            } else {
+                const mid = Math.ceil(filteredList.length / 2);
+                const col1 = filteredList.slice(0, mid).map(rowMaker).join('');
+                const col2 = filteredList.slice(mid).map(rowMaker).join('');
+                tableGridHtml = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-0 bg-white"><div style="overflow-x: hidden;" class="lg:border-r-2 lg:border-slate-100 lg:pr-4">${tableTemplate(col1)}</div><div style="overflow-x: hidden;" class="lg:pl-4">${tableTemplate(col2)}</div></div>`;
+            }
+
+            // Generador de filas para la tabla de impresión de 40 bomberos en 2 columnas de 20 filas cada una
+            const printCol1 = filteredList.slice(0, 20);
+            const printCol2 = filteredList.slice(20, 40);
+
+            const printRowMaker = (item) => {
+                const t = item.total;
+                const p1 = t ? Math.round((item.c11_1/t)*100) : 0;
+                const p2 = t ? Math.round((item.c11_2/t)*100) : 0;
+                const pX = t ? Math.round((item.cX/t)*100) : 0;
+                const p8 = t ? Math.round((item.c0_8/t)*100) : 0;
+                const respRate = item.respRate;
+
+                let rateStyle = 'background-color: #dcfce7; color: #15803d; border: 1px solid #86efac;';
+                if (respRate < 11) rateStyle = 'background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;';
+                else if (respRate < 31) rateStyle = 'background-color: #ffedd5; color: #c2410c; border: 1px solid #fdba74;';
+                else if (respRate < 51) rateStyle = 'background-color: #fef3c7; color: #b45309; border: 1px solid #fcd34d;';
+                else if (respRate < 76) rateStyle = 'background-color: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;';
+
+                return `
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                    <td style="padding: 3.5px 4px; font-weight: 800; font-size: 9.2px; color: #0f172a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 44%; text-transform: uppercase; text-align: left; padding-left: 8px;">${item.name}</td>
+                    <td style="padding: 3.5px 4px; text-align: center; font-weight: 800; font-size: 9px; color: #16a34a; width: 11%;">${p1}%</td>
+                    <td style="padding: 3.5px 4px; text-align: center; font-weight: 800; font-size: 9px; color: #ca8a04; width: 11%;">${p2}%</td>
+                    <td style="padding: 3.5px 4px; text-align: center; font-weight: 800; font-size: 9px; color: #dc2626; width: 11%;">${pX}%</td>
+                    <td style="padding: 3.5px 4px; text-align: center; font-weight: 800; font-size: 9px; color: #64748b; width: 11%;">${p8}%</td>
+                    <td style="padding: 3.5px 4px; text-align: center; width: 12%;">
+                        <span style="display: inline-block; padding: 1.5px 6px; font-weight: 900; font-size: 8.5px; border-radius: 4px; min-width: 36px; ${rateStyle}">${respRate}%</span>
+                    </td>
+                </tr>`;
+            };
+
+            const printTableColHtml = (items) => `
+                <table style="width: 100%; border-collapse: collapse; table-layout: fixed;">
+                    <thead>
+                        <tr style="background-color: #f1f5f9; border-bottom: 1.5px solid #cbd5e1;">
+                            <th style="padding: 4px 4px; font-size: 8.5px; font-weight: 900; color: #334155; text-align: left; padding-left: 8px; width: 44%;">BOMBERO</th>
+                            <th style="padding: 4px 4px; font-size: 8.5px; font-weight: 900; color: #334155; text-align: center; width: 11%;">11-1</th>
+                            <th style="padding: 4px 4px; font-size: 8.5px; font-weight: 900; color: #334155; text-align: center; width: 11%;">11-2</th>
+                            <th style="padding: 4px 4px; font-size: 8.5px; font-weight: 900; color: #334155; text-align: center; width: 11%;">X</th>
+                            <th style="padding: 4px 4px; font-size: 8.5px; font-weight: 900; color: #334155; text-align: center; width: 11%;">0-8</th>
+                            <th style="padding: 4px 4px; font-size: 8.5px; font-weight: 900; color: #334155; text-align: center; width: 12%;">RESP.</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${items.map(printRowMaker).join('')}
+                    </tbody>
+                </table>
+            `;
+
+            const print2ColsTableHtml = `
+                <div class="print-2cols-table hidden">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%;">
+                        <div style="border: 1.5px solid #cbd5e1; border-radius: 7px; overflow: hidden; background: white;">${printTableColHtml(printCol1)}</div>
+                        <div style="border: 1.5px solid #cbd5e1; border-radius: 7px; overflow: hidden; background: white;">${printTableColHtml(printCol2)}</div>
+                    </div>
+                </div>
+            `;
+
+            const periodTitles = {
+                'ciclo': 'TOTALES DEL CICLO',
+                'mes': 'TOTALES DEL MES ACTUAL',
+                'semana': 'TOTALES DE LA ÚLTIMA SEMANA',
+                'dia': 'TOTALES DE HOY'
+            };
+            const currentPeriodTitle = periodTitles[window.radioPeriodFilter] || 'TOTALES DEL CICLO';
+
+            const totalsFooterHtml = `
+                <div class="p-2.5 bg-slate-50 border border-slate-300 rounded-lg flex flex-wrap items-center justify-between gap-1 text-[9px] font-black uppercase text-slate-600 print-totals-strip mt-2">
+                    <span class="text-slate-800">${currentPeriodTitle}:</span>
+                    <span class="text-green-700">11-1: <strong>${total11_1}</strong> (${pctG11_1}%)</span>
+                    <span class="text-yellow-700">11-2: <strong>${total11_2}</strong> (${pctG11_2}%)</span>
+                    <span class="text-red-700">X (SIN RESP.): <strong>${totalX}</strong> (${pctGX}%)</span>
+                    <span class="text-slate-700">0-8 (PERM.): <strong>${total0_8}</strong> (${pctG0_8}%)</span>
+                    <span class="text-slate-900 border-l border-slate-300 pl-2.5">TOTAL EVALUACIONES: <strong>${totalResp}</strong></span>
+                </div>
+            `;
+
+            container.innerHTML = tierCardsHtml + `<div class="screen-only-grid">${tableGridHtml}</div>` + print2ColsTableHtml + totalsFooterHtml;
         };
 
         window.renderChartsGeneric = function(data, dateField, catField) { 
@@ -1349,10 +2084,12 @@
                 const cat = Reflect.get(item, catField) || 'SIN CLASIFICAR'; 
                 Reflect.set(dist, cat, (Reflect.get(dist, cat) || 0) + 1); 
                 
-                const parts = Reflect.get(item, dateField).split('-'); 
+                const normD = window.normalizeDate(Reflect.get(item, dateField));
+                const parts = normD.split('-'); 
                 if(parts.length >= 2) { 
-                    const m = parseInt(parts.at(1), 10) - 1; 
-                    if(m >= 0 && m < 12) Reflect.set(trend, m, Reflect.get(trend, m) + 1); 
+                    const m = parseInt(parts.at(1), 10); 
+                    const cycleIdx = (m === 12) ? 0 : m; // 12 -> 0 (Dic), 1 -> 1 (Ene) ... 11 -> 11 (Nov)
+                    if(cycleIdx >= 0 && cycleIdx < 12) trend[cycleIdx]++; 
                 } 
             }); 
             
@@ -1448,6 +2185,7 @@
 
                 window.groupedDataCache.forEach(monthGroup => {
                     monthGroup._lists.forEach(group => {
+                        if (!window.matchesRadioPeriod(group)) return;
                         group._details.forEach(d => {
                             const rid = String(d.idRadial).trim();
                             if(rid.toUpperCase() === 'C1' || String(d.idRegistro).trim().toUpperCase() === 'C1') return;
@@ -1469,6 +2207,18 @@
                     return numA - numB;
                 });
 
+                const trendTitle = document.getElementById('chart-trend-title');
+                if (trendTitle) {
+                    const periodNames = {
+                        'ciclo': 'Acumulado',
+                        'mes': 'Mes Actual',
+                        'semana': 'Última Semana',
+                        'dia': 'Hoy'
+                    };
+                    const pName = periodNames[window.radioPeriodFilter] || 'Acumulado';
+                    trendTitle.innerHTML = `<i class="fas fa-chart-bar text-slate-500"></i> Rendimiento por Personal (${pName})`;
+                }
+
                 window.chartsInstance.trend = new Chart(ctx, new Object({
                     type: 'bar',
                     data: new Object({
@@ -1482,12 +2232,13 @@
                     }),
                     options: new Object({
                         responsive: true, maintainAspectRatio: false,
+                        animation: false,
                         plugins: new Object({ 
-                            legend: new Object({ display: true, position: 'bottom', labels: new Object({ boxWidth: 12, padding: 15, font: new Object({ size: 10, weight: 'bold' }) }) }),
+                            legend: new Object({ display: true, position: 'bottom', labels: new Object({ boxWidth: 12, padding: 12, font: new Object({ size: 10, weight: 'bold' }) }) }),
                             tooltip: new Object({ mode: 'index', intersect: false })
                         }),
                         scales: new Object({
-                            x: new Object({ stacked: true, grid: new Object({ display: false }), ticks: new Object({ font: new Object({ size: 10, weight: 'bold' }), maxRotation: 90, minRotation: 45 }) }),
+                            x: new Object({ stacked: true, grid: new Object({ display: false }), ticks: new Object({ font: new Object({ size: 9, weight: 'bold' }), maxRotation: 90, minRotation: 45 }) }),
                             y: new Object({ stacked: true, beginAtZero: true, grid: new Object({ borderDash: new Array(4, 4), color: '#e2e8f0' }), ticks: new Object({ precision: 0 }) })
                         })
                     })
@@ -1498,10 +2249,12 @@
                 if(!trend) { 
                     trend = new Array(12).fill(0); 
                     data.forEach(item => { 
-                        const parts = Reflect.get(item, dateField).split('-'); 
+                        const normD = window.normalizeDate(Reflect.get(item, dateField));
+                        const parts = normD.split('-'); 
                         if(parts.length >= 2) { 
-                            const m = parseInt(parts.at(1), 10) - 1; 
-                            if(m >= 0 && m < 12) Reflect.set(trend, m, Reflect.get(trend, m) + 1); 
+                            const m = parseInt(parts.at(1), 10); 
+                            const cycleIdx = (m === 12) ? 0 : m; // 12 -> 0 (Dic), 1 -> 1 (Ene) ... 11 -> 11 (Nov)
+                            if(cycleIdx >= 0 && cycleIdx < 12) trend[cycleIdx]++; 
                         } 
                     }); 
                 } 
@@ -1509,7 +2262,7 @@
                 window.chartsInstance.trend = new Chart(ctx, new Object({ 
                     type: 'bar', 
                     data: new Object({ 
-                        labels: new Array('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'), 
+                        labels: new Array('DICIEMBRE','ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE'), 
                         datasets: new Array(new Object({ label: 'Registros', data: trend, backgroundColor: '#B91C1C', borderRadius: 8, borderSkipped: false })) 
                     }), 
                     options: new Object({ 
@@ -1535,9 +2288,10 @@
         };
 
         window.openDrilldownMonth = function(monthIndex) {
-            const monthNames = new Array('ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE');
+            const monthNames = new Array('DICIEMBRE','ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE');
             const monthName = monthNames.at(monthIndex);
-            const monthStr = String(monthIndex + 1).padStart(2, '0');
+            const targetMonth = (monthIndex === 0) ? 12 : monthIndex;
+            const monthStr = String(targetMonth).padStart(2, '0');
 
             const monthData = window.groupedDataCache.filter(item => {
                 const parts = item._normalizedDate.split('-');
@@ -1582,11 +2336,12 @@
         window.openDrilldownDay = function(dayStr) {
             const dayData = window.groupedDataCache.filter(item => item._normalizedDate === dayStr);
             const parts = dayStr.split('-');
-            const mStr = parts.at(1);
+            const m = parseInt(parts.at(1), 10);
+            const cycleIndex = (m === 12) ? 0 : m;
             
             let html = `
                 <div class="mb-5 sticky top-0 bg-slate-50/90 backdrop-blur-sm z-10 pb-2 pt-1">
-                    <button onclick="openDrilldownMonth(parseInt('${mStr}', 10) - 1)" class="font-bold text-slate-500 hover:text-bomberos-red transition-colors flex items-center gap-2 bg-white px-4 py-2 border border-slate-200 shadow-sm w-fit focus:outline-none uppercase" style="border-radius: 1rem; font-size: 11px;">
+                    <button onclick="openDrilldownMonth(${cycleIndex})" class="font-bold text-slate-500 hover:text-bomberos-red transition-colors flex items-center gap-2 bg-white px-4 py-2 border border-slate-200 shadow-sm w-fit focus:outline-none uppercase" style="border-radius: 1rem; font-size: 11px;">
                         <i class="fas fa-arrow-left"></i> Volver a los días
                     </button>
                 </div>
@@ -1706,66 +2461,137 @@
                         const numB = parseInt(String(b.idRadial).replace(new RegExp('\\D', 'g'), ''), 10) || 9999;
                         return numA - numB;
                     });
-                    
-                    const listItemsHTML = sortedRadios.map(d => {
+
+                    const totalEvaluados = sortedRadios.length || 1;
+                    const pct11_1 = Math.round((count11_1 / totalEvaluados) * 100);
+                    const pct11_2 = Math.round((count11_2 / totalEvaluados) * 100);
+                    const pctX = Math.round((countX / totalEvaluados) * 100);
+                    const pct08 = Math.round((count08 / totalEvaluados) * 100);
+
+                    // Renderizar filas individuales
+                    const renderRow = (d) => {
                         let qual = String(d.calidad || 'X').trim().toUpperCase();
                         if (qual === '') qual = 'X';
                         
-                        let bgClass = 'bg-slate-50', textClass = 'text-slate-500';
-                        if(qual === '11-1') { bgClass = 'bg-green-50'; textClass = 'text-green-700'; }
-                        else if(qual === '11-2') { bgClass = 'bg-yellow-50'; textClass = 'text-yellow-700'; }
-                        else if(qual === 'X') { bgClass = 'bg-red-50'; textClass = 'text-red-700'; }
-                        else if(qual.includes('0-8')) { bgClass = 'bg-slate-100'; textClass = 'text-slate-600'; }
+                        let bgStyle = 'background-color: #f8fafc; color: #64748b; border: 1px solid #cbd5e1;';
+                        if(qual === '11-1') bgStyle = 'background-color: #dcfce7; color: #15803d; border: 1px solid #86efac;';
+                        else if(qual === '11-2') bgStyle = 'background-color: #fef9c3; color: #a16207; border: 1px solid #fde047;';
+                        else if(qual === 'X') bgStyle = 'background-color: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5;';
+                        else if(qual.includes('0-8')) bgStyle = 'background-color: #f1f5f9; color: #475569; border: 1px solid #cbd5e1;';
                         
                         let person = window.DB.personal.find(p => String(p.idRadial).trim().toLowerCase() === String(d.idRadial).trim().toLowerCase());
                         if(!person) person = window.DB.personal.find(p => String(p.idRegistro).trim() === String(d.idRadial).trim());
+                        if(!person && d.idRegistro) person = window.DB.personal.find(p => String(p.idRegistro).trim() === String(d.idRegistro).trim());
                         
                         const foto = person && person.foto ? person.foto : './Logo.png';
-                        const nombre = person ? window.formatShortName(person.nombreBombero) : window.formatShortName(d.idRadial || 'DESCONOCIDO');
-                        const regInfo = person && person.idRegistro ? `REG: ${person.idRegistro}` : `ID: ${d.idRadial}`;
+                        const nombre = person ? window.formatShortName(person.nombreBombero) : window.formatShortName(d.nombreBombero || d.idRadial || 'DESCONOCIDO');
+                        const radialTag = d.idRadial ? d.idRadial.toUpperCase() : (person && person.idRadial ? person.idRadial.toUpperCase() : 'R-?');
                         
                         return `
                         <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                            <td class="py-3 px-4 overflow-hidden print-p-2">
-                                <div class="flex items-center gap-4">
-                                    <img src="${foto}" class="w-10 h-10 object-cover shadow-sm border border-slate-200 flex-shrink-0 print-hide" style="border-radius: 9999px;">
-                                    <div class="min-w-0 flex-1">
-                                        <div class="font-bold text-slate-800 text-xs leading-tight truncate print-text uppercase" title="${nombre}">${nombre}</div>
-                                        <div class="text-[10px] font-bold text-slate-400 mt-1 tracking-wider uppercase truncate print-hide" title="${regInfo}">${regInfo}</div>
+                            <td class="py-1 px-1.5 overflow-hidden print-p-1" style="width: 50%;">
+                                <div class="flex items-center gap-1.5 min-w-0">
+                                    <span class="inline-block px-1 py-0.5 bg-slate-100 text-slate-700 font-black rounded text-[9px] shrink-0 border border-slate-200 print-tag">${radialTag}</span>
+                                    <span class="font-bold text-slate-800 text-[10px] leading-tight truncate print-text uppercase" title="${nombre}">${nombre}</span>
+                                </div>
+                            </td>
+                            <td class="py-1 px-1 text-center align-middle overflow-hidden print-p-1" style="width: 22%;">
+                                <span class="inline-block w-full py-0.5 font-black tracking-wider rounded text-[9px] shadow-none truncate print-pill" style="${bgStyle}">${qual}</span>
+                            </td>
+                            <td class="py-1 px-1.5 text-[9px] font-semibold text-slate-600 truncate align-middle uppercase print-text print-p-1" style="width: 28%;" title="${d.lugar || ''}">${d.lugar || '-'}</td>
+                        </tr>`;
+                    };
+
+                    const half = Math.ceil(sortedRadios.length / 2);
+                    const col1 = sortedRadios.slice(0, half);
+                    const col2 = sortedRadios.slice(half);
+
+                    const col1HTML = col1.map(renderRow).join('');
+                    const col2HTML = col2.map(renderRow).join('');
+
+                    return `
+                        <div class="flex flex-col border border-slate-200 overflow-hidden shadow-sm bg-white print-test-container mb-0" style="border-radius: 1rem;">
+                            <!-- Encabezado de la Prueba con Gráfico de Barras y Estadísticas -->
+                            <div class="bg-slate-50 p-3 sm:p-4 border-b border-slate-200 flex flex-col gap-2.5 shrink-0 print-header-box">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-black text-slate-800 text-xs sm:text-sm flex items-center gap-2 uppercase tracking-wide">
+                                        <i class="far fa-clock text-bomberos-red print-hide"></i> PRUEBA DE LAS ${horaStr} HRS
+                                    </span>
+                                    <span class="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full uppercase">
+                                        EVALUADOS: ${sortedRadios.length} RADIOS
+                                    </span>
+                                </div>
+
+                                <!-- Gráfico de Tarjetas Superiores (11-1, 11-2, X, 0-8) -->
+                                <div class="grid grid-cols-4 gap-1.5 sm:gap-2 w-full print-stat-grid">
+                                    <div class="bg-green-50 border border-green-300 py-1.5 px-2 rounded-lg flex flex-col items-center justify-center text-center shadow-sm">
+                                        <span class="text-[9px] font-black text-green-700">11-1 (${pct11_1}%)</span>
+                                        <span class="text-base sm:text-lg font-black text-green-800 leading-none mt-0.5">${count11_1}</span>
+                                    </div>
+                                    <div class="bg-yellow-50 border border-yellow-300 py-1.5 px-2 rounded-lg flex flex-col items-center justify-center text-center shadow-sm">
+                                        <span class="text-[9px] font-black text-yellow-700">11-2 (${pct11_2}%)</span>
+                                        <span class="text-base sm:text-lg font-black text-yellow-800 leading-none mt-0.5">${count11_2}</span>
+                                    </div>
+                                    <div class="bg-red-50 border border-red-300 py-1.5 px-2 rounded-lg flex flex-col items-center justify-center text-center shadow-sm">
+                                        <span class="text-[9px] font-black text-red-700">X (${pctX}%)</span>
+                                        <span class="text-base sm:text-lg font-black text-red-800 leading-none mt-0.5">${countX}</span>
+                                    </div>
+                                    <div class="bg-slate-100 border border-slate-300 py-1.5 px-2 rounded-lg flex flex-col items-center justify-center text-center shadow-sm">
+                                        <span class="text-[9px] font-black text-slate-700">0-8 (${pct08}%)</span>
+                                        <span class="text-base sm:text-lg font-black text-slate-800 leading-none mt-0.5">${count08}</span>
                                     </div>
                                 </div>
-                            </td>
-                            <td class="py-3 px-4 text-center align-middle overflow-hidden print-p-2">
-                                <span class="inline-block w-full px-3 py-1.5 font-bold tracking-widest ${bgClass} ${textClass} border border-current border-opacity-20 shadow-sm truncate print-pill" style="border-radius: 0.5rem; font-size: 11px;">${qual}</span>
-                            </td>
-                            <td class="py-3 px-4 text-xs text-slate-500 truncate align-middle uppercase print-text print-p-2" title="${d.lugar || ''}">${d.lugar || '-'}</td>
-                        </tr>`;
-                    }).join('');
-                    
-                    return `
-                        <div class="flex flex-col border border-slate-200 overflow-hidden shadow-sm bg-white h-full" style="border-radius: 1.5rem;">
-                            <div class="bg-slate-50 p-5 border-b border-slate-200 flex flex-col gap-4 shrink-0">
-                                <span class="font-bold text-slate-700 text-sm flex items-center gap-2 pl-1 uppercase">
-                                    <i class="far fa-clock text-bomberos-red print-hide"></i> PRUEBA DE LAS ${horaStr}
-                                </span>
-                                <div class="grid grid-cols-4 gap-3 w-full print-hide">
-                                    <div class="bg-white border border-green-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-green-600 mb-1">11-1</span><span class="text-xl font-black text-green-700 leading-none">${count11_1}</span></div>
-                                    <div class="bg-white border border-yellow-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-yellow-600 mb-1">11-2</span><span class="text-xl font-black text-yellow-700 leading-none">${count11_2}</span></div>
-                                    <div class="bg-white border border-red-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-red-500 mb-1">X</span><span class="text-xl font-black text-red-700 leading-none">${countX}</span></div>
-                                    <div class="bg-white border border-slate-200 py-3 flex flex-col items-center justify-center text-center shadow-sm" style="border-radius: 1rem;"><span class="text-xs font-bold text-slate-500 mb-1">0-8</span><span class="text-xl font-black text-slate-700 leading-none">${count08}</span></div>
+
+                                <!-- Barra Visual de Progreso Multicolores (Gráfico de Barras Horizontal) -->
+                                <div class="w-full bg-slate-200 rounded-full h-3 flex overflow-hidden border border-slate-300 print-progress-bar shadow-inner">
+                                    <div style="width: ${pct11_1}%; background-color: #16a34a;" class="h-full flex items-center justify-center text-[7.5px] text-white font-black" title="11-1: ${count11_1}">${pct11_1 > 8 ? pct11_1 + '%' : ''}</div>
+                                    <div style="width: ${pct11_2}%; background-color: #ca8a04;" class="h-full flex items-center justify-center text-[7.5px] text-white font-black" title="11-2: ${count11_2}">${pct11_2 > 8 ? pct11_2 + '%' : ''}</div>
+                                    <div style="width: ${pctX}%; background-color: #dc2626;" class="h-full flex items-center justify-center text-[7.5px] text-white font-black" title="X: ${countX}">${pctX > 8 ? pctX + '%' : ''}</div>
+                                    <div style="width: ${pct08}%; background-color: #64748b;" class="h-full flex items-center justify-center text-[7.5px] text-white font-black" title="0-8: ${count08}">${pct08 > 8 ? pct08 + '%' : ''}</div>
                                 </div>
                             </div>
-                            <div class="border-t border-slate-200 bg-white flex-1 overflow-x-hidden w-full">
-                                <table class="w-full text-left border-collapse table-fixed min-w-full print-table">
-                                    <thead class="bg-white border-b border-slate-200 shadow-sm z-10 sticky top-0">
-                                        <tr>
-                                            <th class="py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest print-p-2" style="width: 50%;">PERSONAL</th>
-                                            <th class="py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center print-p-2" style="width: 25%;">CALIDAD</th>
-                                            <th class="py-4 px-4 text-xs font-bold text-slate-400 uppercase tracking-widest text-center print-p-2" style="width: 25%;">UBICACIÓN</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-slate-100">${listItemsHTML}</tbody>
-                                </table>
+
+                            <!-- Tabla de 40 Radios dividida en 2 Columnas de 20 Radios cada una -->
+                            <div class="p-2 bg-white">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-2 w-full print-radio-columns">
+                                    <!-- Columna 1 (Radios 1 a 20) -->
+                                    <div class="border border-slate-200 rounded-lg overflow-hidden">
+                                        <table class="w-full text-left border-collapse table-fixed min-w-full print-table">
+                                            <thead class="bg-slate-50 border-b border-slate-200">
+                                                <tr>
+                                                    <th class="py-1 px-1.5 text-[8.5px] font-black text-slate-500 uppercase tracking-wider" style="width: 50%;">PERSONAL</th>
+                                                    <th class="py-1 px-1 text-[8.5px] font-black text-slate-500 uppercase tracking-wider text-center" style="width: 22%;">CALIDAD</th>
+                                                    <th class="py-1 px-1.5 text-[8.5px] font-black text-slate-500 uppercase tracking-wider text-center" style="width: 28%;">UBICACIÓN</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-slate-100">${col1HTML}</tbody>
+                                        </table>
+                                    </div>
+
+                                    <!-- Columna 2 (Radios 21 a 40) -->
+                                    <div class="border border-slate-200 rounded-lg overflow-hidden">
+                                        <table class="w-full text-left border-collapse table-fixed min-w-full print-table">
+                                            <thead class="bg-slate-50 border-b border-slate-200">
+                                                <tr>
+                                                    <th class="py-1 px-1.5 text-[8.5px] font-black text-slate-500 uppercase tracking-wider" style="width: 50%;">PERSONAL</th>
+                                                    <th class="py-1 px-1 text-[8.5px] font-black text-slate-500 uppercase tracking-wider text-center" style="width: 22%;">CALIDAD</th>
+                                                    <th class="py-1 px-1.5 text-[8.5px] font-black text-slate-500 uppercase tracking-wider text-center" style="width: 28%;">UBICACIÓN</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-slate-100">${col2HTML || '<tr><td colspan="3" class="text-center py-2 text-slate-400 text-xs">-</td></tr>'}</tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Fila Inferior de Totales de Respuesta -->
+                            <div class="px-3 py-1.5 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-[8px] font-black uppercase text-slate-600 print-totals-strip">
+                                <span class="text-slate-800">TOTALES DE RESPUESTA:</span>
+                                <span class="text-green-700">11-1: <strong>${count11_1}</strong> (${pct11_1}%)</span>
+                                <span class="text-yellow-700">11-2: <strong>${count11_2}</strong> (${pct11_2}%)</span>
+                                <span class="text-red-700">X (SIN RESP.): <strong>${countX}</strong> (${pctX}%)</span>
+                                <span class="text-slate-700">0-8 (PERM.): <strong>${count08}</strong> (${pct08}%)</span>
+                                <span class="text-slate-900 border-l border-slate-300 pl-2">TOTAL EVALUADOS: <strong>${sortedRadios.length} RADIOS</strong></span>
                             </div>
                         </div>`;
                 }).join('');
@@ -1776,12 +2602,21 @@
                 panelsHTML += `
                     <div id="${dayId}" class="day-panel hidden h-full flex flex-col">
                         ${btnImprimirHTML}
-                        <div id="${dayId}-content" class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch flex-1 pb-4">
+                        <div id="${dayId}-content" class="w-full flex-1 pb-4 grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                             ${listsHTML}
                         </div>
                     </div>
                 `;
             });
+
+            if (tabsContainer) {
+                tabsContainer.onwheel = (e) => {
+                    if (e.deltaY !== 0) {
+                        e.preventDefault();
+                        tabsContainer.scrollLeft += e.deltaY * 1.2;
+                    }
+                };
+            }
 
             tabsContainer.innerHTML = tabsHTML;
             contentContainer.innerHTML = panelsHTML;
@@ -1793,6 +2628,13 @@
                 const firstId = `panel-${monthData._safeID}-${sortedDays.at(0).replace(new RegExp('-', 'g'), '')}`;
                 window.switchDayTab(firstId);
             }
+        };
+
+        window.scrollModalTabs = function(direction) {
+            const tabs = document.getElementById('modal-115-tabs');
+            if (!tabs) return;
+            const amount = direction === 'left' ? -350 : 350;
+            tabs.scrollBy({ left: amount, behavior: 'smooth' });
         };
 
         window.closeMonthModal = function() {
@@ -1814,6 +2656,7 @@
             if(activeTab) {
                 activeTab.classList.add('text-bomberos-red', 'border-bomberos-red', 'bg-red-50');
                 activeTab.classList.remove('text-slate-500', 'border-transparent');
+                activeTab.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
             }
         };
 
@@ -1836,6 +2679,101 @@
                 }
             } catch(e) {}
 
+            const clientName = localStorage.getItem('client_name') || 'BOMBEROS PLACILLA';
+            let subTitle = 'REPORTE OFICIAL DE ESTADÍSTICAS';
+            if (title.toUpperCase().includes('PRUEBAS RADIALES') || title.toUpperCase().includes('11-5')) {
+                subTitle = 'REPORTE OFICIAL PRUEBAS RADIALES 11-5';
+            } else if (title.toUpperCase().includes('ASISTENCIA')) {
+                subTitle = 'REPORTE OFICIAL DE ASISTENCIA';
+            } else if (title.toUpperCase().includes('DISPONIBILIDAD')) {
+                subTitle = 'REPORTE OFICIAL DE DISPONIBILIDAD';
+            } else if (title.toUpperCase().includes('DESPACHO')) {
+                subTitle = 'REPORTE OFICIAL DE DESPACHO';
+            } else if (title.toUpperCase().includes('BITÁCORA') || title.toUpperCase().includes('BITACORA')) {
+                subTitle = 'REPORTE OFICIAL DE MATERIAL MAYOR';
+            }
+
+            let printChartHtml = '';
+            if (containerId === 'radio-report-container' && window.chartsInstance && window.chartsInstance.trend) {
+                try {
+                    const chartBase64 = window.chartsInstance.trend.toBase64Image('image/png', 1.0);
+                    const periodBadgeMap = {
+                        'ciclo': `CICLO ${window.selectedCycleYear}`,
+                        'mes': 'MES ACTUAL',
+                        'semana': 'ÚLTIMA SEMANA',
+                        'dia': 'HOY'
+                    };
+                    const periodTitleMap = {
+                        'ciclo': 'ACUMULADO',
+                        'mes': 'MES ACTUAL',
+                        'semana': 'ÚLTIMA SEMANA',
+                        'dia': 'HOY'
+                    };
+                    const currentFilter = window.radioPeriodFilter || 'ciclo';
+                    const badgeText = periodBadgeMap[currentFilter] || `CICLO ${window.selectedCycleYear}`;
+                    const periodText = periodTitleMap[currentFilter] || 'ACUMULADO';
+
+                    printChartHtml = `
+                        <div class="print-chart-box" style="background: white !important; border: 1.5px solid #cbd5e1 !important; border-radius: 8px !important; padding: 8px 12px 6px 12px !important; margin-bottom: 10px !important; box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;">
+                            <div style="font-size: 10.5px; font-weight: 900; color: #1e293b; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                                <span style="display: flex; align-items: center; gap: 6px;"><i class="fas fa-chart-bar text-slate-500"></i> RENDIMIENTO POR PERSONAL (${periodText})</span>
+                                <span style="font-size: 9px; font-weight: 800; color: #475569; background: #f1f5f9; padding: 2px 8px; border-radius: 5px; border: 1px solid #cbd5e1;">${badgeText}</span>
+                            </div>
+                            <img src="${chartBase64}" style="width: 100%; height: 325px; object-fit: fill; display: block; margin: 0 auto;" alt="Rendimiento por Personal">
+                        </div>
+                    `;
+                } catch(e) {
+                    console.error("Error exporting trend chart:", e);
+                }
+            }
+
+            let finalContentHtml = contentHTML;
+            const isDailyTestReport = containerId.includes('panel-') && containerId.endsWith('-content');
+            
+            let topHeaderHtml = `
+                <div class="header">
+                    <img src="./Logo.png" class="logo" alt="Logo">
+                    <div class="title-box">
+                        <h1 class="title">${clientName}</h1>
+                        <p class="subtitle">${subTitle}</p>
+                    </div>
+                    <div class="badge">OFICIAL</div>
+                </div>
+            `;
+
+            let printFooterHtml = `
+                <div style="margin-top: 5px; text-align: center; font-size: 7px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 2px; text-transform: uppercase;">
+                    DOCUMENTO INTERNO OFICIAL - SISBOM • IMPRESO POR: ${printedBy} • ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}
+                </div>
+            `;
+
+            if (isDailyTestReport) {
+                topHeaderHtml = '';
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = contentHTML;
+                const testContainers = tempDiv.querySelectorAll('.print-test-container');
+                testContainers.forEach(testCard => {
+                    const pageHeader = document.createElement('div');
+                    pageHeader.className = 'header';
+                    pageHeader.innerHTML = `
+                        <img src="./Logo.png" class="logo" alt="Logo">
+                        <div class="title-box">
+                            <h1 class="title">${clientName}</h1>
+                            <p class="subtitle">${subTitle}</p>
+                        </div>
+                        <div class="badge">OFICIAL</div>
+                    `;
+                    testCard.insertBefore(pageHeader, testCard.firstChild);
+                    
+                    const pageFooter = document.createElement('div');
+                    pageFooter.style.cssText = "margin-top: 5px; text-align: center; font-size: 7px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 2px; text-transform: uppercase;";
+                    pageFooter.innerText = `DOCUMENTO INTERNO OFICIAL - SISBOM • IMPRESO POR: ${printedBy} • ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`;
+                    testCard.appendChild(pageFooter);
+                });
+                finalContentHtml = tempDiv.innerHTML;
+                printFooterHtml = '';
+            }
+
             const iframe = document.createElement('iframe');
             iframe.style.position = 'fixed';
             iframe.style.right = '0';
@@ -1852,60 +2790,58 @@
                 <html>
                 <head>
                     <title>${title}</title>
-                    <script src="./libs/tailwind.min.js"><\/script>
-                    <script>if(!window.tailwind) document.write('<script src="https://cdn.tailwindcss.com"><\\/script>')<\/script>
                     <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
                     <style>
-                        @page { size: letter portrait; margin: 10mm; }
-                        body { font-family: "Segoe UI", sans-serif; font-size: 12px; padding: 0; margin: 0; background-color: white; text-transform: uppercase; }
+                        @page { size: A4 portrait; margin: 7mm 8mm; }
+                        * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+                        body { font-family: "Segoe UI", Helvetica, Arial, sans-serif; font-size: 8.5px; padding: 0; margin: 0; background-color: white; color: #0f172a; text-transform: uppercase; }
                         
-                        /* Optimizaciones estructurales de grilla */
-                        .lg\\:grid-cols-2 { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+                        .screen-only-grid { display: none !important; }
+                        .print-only-table { display: block !important; width: 100% !important; }
+                        .print-2cols-table { display: block !important; width: 100% !important; }
                         
-                        table { width: 100%; border-collapse: collapse; margin-bottom: 5px; }
-                        th { background-color: transparent !important; color: #475569; font-size: 11px !important; font-weight: bold; border-bottom: 1px solid #cbd5e1; text-align: left; padding: 2px 4px !important; }
-                        td { padding: 2px 4px !important; border-bottom: 1px solid #f1f5f9; font-size: 12px !important; vertical-align: middle; line-height: 1.1 !important; height: auto !important; }
+                        /* Cabecera Oficial Unificada */
+                        .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2.5px solid #dc2626; padding-bottom: 6px; margin-bottom: 8px; }
+                        .logo { width: 50px; height: 50px; object-fit: contain; margin-right: 12px; }
+                        .title-box { flex: 1; }
+                        .title { font-size: 17px; font-weight: 900; margin: 0; color: #dc2626; text-transform: uppercase; letter-spacing: 0.5px; line-height: 1.1; }
+                        .subtitle { font-size: 10px; color: #64748b; margin: 2px 0 0 0; text-transform: uppercase; letter-spacing: 0.8px; font-weight: 800; }
+                        .badge { border: 2px solid #ca8a04; color: #ca8a04; padding: 2.5px 12px; border-radius: 6px; font-weight: 900; font-size: 11.5px; text-transform: uppercase; letter-spacing: 1px; text-align: center; }
                         
-                        .text-sm { font-size: 12px !important; }
-                        .text-xs { font-size: 10px !important; }
+                        /* Gráfico de Barras y Tarjetas Métricas */
+                        .print-chart-box { background-color: white !important; border: 1.5px solid #cbd5e1 !important; border-radius: 8px !important; padding: 8px 12px 6px 12px !important; margin-bottom: 10px !important; }
                         
-                        /* Limpieza Estrema para Entrar 60 Filas */
-                        .print-hide, table img { display: none !important; }
+                        /* Contenedor de Pruebas Radiales de Día (Modal) */
+                        .print-test-container { page-break-inside: avoid !important; page-break-after: always; margin-bottom: 0 !important; border: 1px solid #cbd5e1 !important; border-radius: 6px !important; }
+                        .print-test-container:last-child { page-break-after: auto; }
+                        .print-header-box { background-color: #f8fafc !important; padding: 4px 6px !important; border-bottom: 1px solid #cbd5e1 !important; }
+                        .print-radio-columns { display: grid !important; grid-template-columns: 1fr 1fr !important; gap: 5px !important; }
+                        
+                        /* Estilos de Tabla */
+                        table { width: 100% !important; border-collapse: collapse !important; table-layout: fixed !important; }
+                        th { background-color: #f1f5f9 !important; color: #334155 !important; font-size: 8.5px !important; font-weight: 900 !important; border-bottom: 1.5px solid #cbd5e1 !important; padding: 4px 4px !important; }
+                        td { padding: 3.5px 4px !important; border-bottom: 1px solid #f1f5f9 !important; font-size: 9px !important; vertical-align: middle !important; line-height: 1.15 !important; }
+                        
+                        .print-tag { padding: 0.5px 2px !important; font-size: 7.5px !important; font-weight: 800 !important; border-radius: 2px !important; background: #e2e8f0 !important; }
+                        .print-pill { padding: 1.5px 6px !important; font-size: 8.5px !important; font-weight: 900 !important; border-radius: 4px !important; text-align: center !important; display: inline-block !important; }
+                        .print-text { font-size: 9.2px !important; font-weight: 800 !important; color: black !important; }
+                        
+                        /* Franja Inferior de Totales */
+                        .print-totals-strip { background-color: #f8fafc !important; border: 1.5px solid #cbd5e1 !important; border-radius: 7px !important; padding: 6px 12px !important; font-size: 9px !important; font-weight: 900 !important; display: flex !important; justify-content: space-between !important; align-items: center !important; margin-top: 5px !important; }
+                        
+                        .print-hide { display: none !important; }
                         .shadow-sm, .shadow-md, .shadow-inner { box-shadow: none !important; }
-                        .rounded-full, .rounded-xl, .rounded-2xl { border-radius: 0 !important; }
-                        .bg-slate-50, .bg-white { background-color: transparent !important; }
-                        .print-pill { padding: 1px 4px !important; font-size: 11px !important; border: none !important; background: transparent !important; color: black !important; font-weight: bold !important; }
-                        .print-text { font-size: 12px !important; font-weight: bold !important; color: black !important; }
-                        .print-rank { width: 30px !important; padding: 0 !important; font-size: 10px !important; }
-                        .border-b { border-bottom: 1px solid #e2e8f0 !important; }
-                        
-                        tr { page-break-inside: avoid; height: 18px !important; }
-                        
-                        thead { display: table-header-group !important; position: static !important; }
-                        .sticky { position: static !important; top: auto !important; }
-                        
-                        [style*="max-height"] { max-height: none !important; }
-                        [style*="overflow-y: auto"], [style*="overflow-x: hidden"] { overflow: visible !important; }
                     </style>
                 </head>
                 <body class="bg-white">
-                    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 5px; margin-bottom: 10px;">
-                        <div>
-                            <h1 style="font-size: 16px; font-weight: 800; color: #000; margin: 0; text-transform: uppercase; letter-spacing: -0.02em;">${title}</h1>
-                            <p style="font-size: 10px; color: #555; font-weight: 700; margin-top: 2px; text-transform: uppercase;">GENERADO POR: ${printedBy} • ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}</p>
-                        </div>
-                        <img src="./Logo.png" style="width: 40px; height: 40px; object-fit: contain;">
-                    </div>
-                    
-                    <div>${contentHTML}</div>
-                    
-                    <div style="margin-top: 15px; text-align: center; font-size: 9px; color: #999; border-top: 1px solid #eee; padding-top: 5px; text-transform: uppercase;">
-                        DOCUMENTO INTERNO - SISBOM
-                    </div>
-                    <script>
-                        window.onload = () => { setTimeout(() => { window.print(); }, 1000); };
+                    ${topHeaderHtml}
+                    ${printChartHtml}
+                    <div>${finalContentHtml}</div>
+                    ${printFooterHtml}
+                    <` + `script>
+                        window.onload = () => { setTimeout(() => { window.print(); }, 800); };
                         window.onafterprint = () => { parent.document.body.removeChild(window.frameElement); };
-                    <\/script>
+                    <` + `/script>
                 </body>
                 </html>
             `);
@@ -2195,9 +3131,9 @@
                         if(!person) person = window.DB.personal.find(p => String(p.idRadial).trim().toLowerCase() === lookupId.toLowerCase());
                         
                         const foto = person && person.foto ? person.foto : './Logo.png';
-                        const nombre = person ? window.formatShortName(person.nombreBombero) : window.formatShortName(d.idRegistro || 'DESCONOCIDO');
-                        const radialInfo = person && person.idRadial ? `<span class="mx-1 text-slate-300">&bull;</span> <span class="text-bomberos-red">RAD: ${person.idRadial}</span>` : '';
-                        const regInfo = person && person.idRegistro ? `REG: ${person.idRegistro}` : `ID: ${d.idRegistro}`;
+                        const nombre = person ? window.formatShortName(person.nombreBombero) : window.formatShortName(d.nombreBombero || d.idRegistro || 'DESCONOCIDO');
+                        const radialInfo = person && person.idRadial ? `<span class="mx-1 text-slate-300">&bull;</span> <span class="text-bomberos-red">RAD: ${person.idRadial}</span>` : (d.idRadial ? `<span class="mx-1 text-slate-300">&bull;</span> <span class="text-bomberos-red">RAD: ${d.idRadial}</span>` : '');
+                        const regInfo = person && person.idRegistro ? `REG: ${person.idRegistro}` : `ID: ${d.idRegistro || '-'}`;
                         
                         return `
                         <div class="flex justify-between items-center p-3 border border-slate-200 bg-white shadow-sm hover:border-slate-300 hover:shadow transition-all break-inside-avoid" style="border-radius: 1rem;">
@@ -2219,7 +3155,7 @@
                     const obacFmt = window.getFormattedName(row.obac, 'exact');
                     const listaPorFmt = window.getFormattedName(row.listaPor, 'exact');
 
-                    const esAbono = row.abono == 1 || String(row.abono).toUpperCase() === 'SÍ' || String(row.abono).toUpperCase() === 'SI' || String(row.clave).toUpperCase().includes('ABONO');
+                    const esAbono = window.isAbonoList(row);
 
                     detailTableHTML = `
                         <div class="w-full bg-slate-50 border-bomberos-red p-6 sm:p-8 flex flex-col relative shadow-inner" style="border-left-width: 4px;">
@@ -2311,10 +3247,10 @@
             const now = new Date();
             
             const personnel = window.DB.personal || [];
-            let minTimestamp = new Date(year, 0, 1, 0, 0, 0).getTime();
+            let cycleStartTs = new Date(year - 1, 11, 1, 0, 0, 0).getTime();
             let allTimestamps = [];
             
-            const activePersonnel = personnel.filter(p => p.activo !== 0 && p.activo !== '0' && p.activo !== false && String(p.activo).toUpperCase() !== 'NO');
+            const activePersonnel = personnel.filter(p => p.activo !== 0 && p.activo !== '0' && p.activo !== false && String(p.activo).toUpperCase() !== 'NO' && String(p.idRadial || '').toUpperCase() !== 'C1' && String(p.idRegistro || '').toUpperCase() !== 'C1');
 
             activePersonnel.forEach(p => {
                 (p.estadosHistorico || []).forEach(r => {
@@ -2324,20 +3260,25 @@
                         const timeParts = r.hora.split(':');
                         if (parts.length === 3) ts = new Date(parts[2], parts[1]-1, parts[0], timeParts[0]||0, timeParts[1]||0).getTime();
                     }
-                    if (ts && new Date(ts).getFullYear() === year) {
-                        allTimestamps.push(ts);
+                    if (ts) {
+                        const d = new Date(ts);
+                        const m = d.getMonth() + 1;
+                        const y = d.getFullYear();
+                        const evCycle = (m === 12) ? y + 1 : y;
+                        if (evCycle === year) allTimestamps.push(ts);
                     }
                 });
             });
 
+            let minTimestamp = cycleStartTs;
             if (allTimestamps.length > 0) {
                 const earliestInYear = Math.min(...allTimestamps);
                 const d = new Date(earliestInYear);
                 d.setHours(0,0,0,0);
-                minTimestamp = Math.max(new Date(year, 0, 1).getTime(), d.getTime());
+                minTimestamp = Math.max(cycleStartTs, d.getTime());
             }
 
-            const endTimestamp = (year === now.getFullYear()) ? now.getTime() : new Date(year, 11, 31, 23, 59, 59).getTime();
+            const endTimestamp = (year === now.getFullYear() || (year === now.getFullYear() + 1 && now.getMonth() === 11)) ? now.getTime() : new Date(year, 10, 30, 23, 59, 59).getTime();
 
             if (activePersonnel.length === 0 || minTimestamp >= endTimestamp) {
                 document.getElementById('disponibilidad-report-container').innerHTML = `<div class="p-6 text-center text-slate-500 font-bold bg-slate-50">NO HAY INFORMACIÓN SUFICIENTE PARA ESTE CICLO.</div>`;
@@ -2379,7 +3320,7 @@
                 timelines.forEach(p => {
                     let st = '0-8';
                     if (p.history.length === 0) {
-                        st = p.currentState; 
+                        st = (p.currentState === '0-9' || p.currentState === 'OPERADOR') ? '0-9' : '0-8'; 
                     } else {
                         let lastEv = null;
                         for(let i=0; i<p.history.length; i++) {
@@ -2387,7 +3328,7 @@
                             else break;
                         }
                         if (lastEv) st = lastEv.estado;
-                        else st = p.history[0].estado;
+                        else st = (p.currentState === '0-9' || p.currentState === 'OPERADOR') ? '0-9' : (p.history[0].estado || '0-8');
                     }
 
                     if (st === '0-9' || st === 'OPERADOR') count09++;
@@ -2403,21 +3344,25 @@
             const pMode = window.dispPeriod || 'ciclo';
 
             if (pMode === 'dia') {
-                rankStartTs = new Date(year, now.getMonth(), now.getDate(), 0, 0, 0).getTime();
-                rankEndTs = (year === now.getFullYear()) ? now.getTime() : new Date(year, now.getMonth(), now.getDate(), 23, 59, 59).getTime();
+                rankStartTs = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0).getTime();
+                rankEndTs = now.getTime();
             } else if (pMode === 'semana') {
                 const temp = new Date(now);
                 const day = temp.getDay() || 7; 
-                if (day !== 1) temp.setHours(-24 * (day - 1));
-                rankStartTs = new Date(year, temp.getMonth(), temp.getDate(), 0, 0, 0).getTime();
-                rankEndTs = (year === now.getFullYear()) ? now.getTime() : new Date(year, temp.getMonth(), temp.getDate() + 6, 23, 59, 59).getTime();
+                if (day !== 1) temp.setDate(temp.getDate() - (day - 1));
+                temp.setHours(0, 0, 0, 0);
+                rankStartTs = temp.getTime();
+                rankEndTs = now.getTime();
             } else if (pMode === 'mes') {
-                rankStartTs = new Date(year, now.getMonth(), 1, 0, 0, 0).getTime();
-                rankEndTs = (year === now.getFullYear()) ? now.getTime() : new Date(year, now.getMonth() + 1, 0, 23, 59, 59).getTime();
+                rankStartTs = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0).getTime();
+                rankEndTs = now.getTime();
+            } else {
+                rankStartTs = minTimestamp;
+                rankEndTs = endTimestamp;
             }
 
             // Asegurar que el rango no sea menor al inicio del sistema ni invertido
-            rankStartTs = Math.max(rankStartTs, minTimestamp);
+            if (pMode === 'ciclo') rankStartTs = minTimestamp;
             if (rankEndTs < rankStartTs) rankEndTs = rankStartTs;
 
             // Reflejar estado en el selector UI
@@ -2426,7 +3371,7 @@
 
             // Calculos exactos de milisegundos para Ranking Individual
             timelines.forEach(p => {
-                let trackStart = Math.max(rankStartTs, p.firstTs); // BASE EXACTA EN EL PERIODO
+                let trackStart = rankStartTs;
                 let currentT = trackStart;
                 let currentSt = '0-8';
                 
@@ -2442,9 +3387,9 @@
                         else break;
                     }
                     if (lastEv) currentSt = lastEv.estado;
-                    else currentSt = '0-8'; // Si no hay evento previo, asume 0-8 hasta su primer registro
+                    else currentSt = (p.history[0].estado || (p.currentState === '0-9' || p.currentState === 'OPERADOR' ? '0-9' : '0-8'));
                 } else {
-                    currentSt = p.currentState;
+                    currentSt = (p.currentState === '0-9' || p.currentState === 'OPERADOR') ? '0-9' : '0-8';
                 }
 
                 p.history.forEach(ev => {
@@ -2473,11 +3418,12 @@
                 const d = new Date(s.ts);
                 const h = d.getHours();
                 const day = (d.getDay() + 6) % 7;
-                const m = d.getMonth();
+                const m = d.getMonth() + 1; // 1=Ene ... 12=Dic
+                const cycleM = (m === 12) ? 0 : m; // 12 -> 0 (Dic), 1 -> 1 (Ene) ... 11 -> 11 (Nov)
 
                 hrAvgs[h] += s.count; hrCounts[h]++;
                 dayAvgs[day] += s.count; dayCounts[day]++;
-                monAvgs[m] += s.count; monCounts[m]++;
+                monAvgs[cycleM] += s.count; monCounts[cycleM]++;
             });
 
             for(let i=0; i<24; i++) hrAvgs[i] = hrCounts[i] ? Math.round(hrAvgs[i]/hrCounts[i]) : 0;
@@ -2544,7 +3490,7 @@
             window.chartsInstance.dispMes = new Chart(ctxMes, new Object({
                 type: 'bar',
                 data: new Object({
-                    labels: new Array('ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV','DIC'),
+                    labels: new Array('DIC','ENE','FEB','MAR','ABR','MAY','JUN','JUL','AGO','SEP','OCT','NOV'),
                     datasets: new Array(new Object({ label: 'Bomberos 0-9 (Prom.)', data: avgMon09, backgroundColor: '#B91C1C', borderRadius: 8, borderSkipped: false }))
                 }),
                 options: new Object({
@@ -2581,7 +3527,7 @@
             const mid = Math.ceil(list.length / 2);
 
             const rowMaker = (item, index, isLeft) => {
-                const rank = isLeft ? index + 1 : index + 1 + mid;
+                const rank = list.indexOf(item) + 1;
                 const p = item.percent;
                 const pValue = p.toFixed(2);
                 
@@ -2656,6 +3602,22 @@
         };
 
     </script>
+
+    <!-- MODAL DE DETALLE DE PRUEBAS RADIALES (11-5) -->
+    <div id="modal-115" class="hidden fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white border border-slate-200 shadow-2xl flex flex-col w-full max-w-6xl max-h-[90vh] overflow-hidden" style="border-radius: 1.5rem;">
+            <div class="p-6 border-b border-slate-200 flex justify-between items-center bg-white shrink-0">
+                <h3 id="modal-115-title" class="text-base font-black text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                    <i class="far fa-calendar-alt text-bomberos-red"></i> DETALLE 11-5
+                </h3>
+                <button onclick="window.closeMonthModal()" class="text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 w-10 h-10 flex items-center justify-center transition-colors shadow-sm focus:outline-none" style="border-radius: 9999px;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="modal-115-tabs" class="flex border-b border-slate-200 bg-slate-50/50 px-6 overflow-x-auto shrink-0 gap-2"></div>
+            <div id="modal-115-content" class="flex-1 overflow-y-auto p-6 custom-scrollbar bg-slate-50/30"></div>
+        </div>
+    </div>
 
     <!-- Right-click block injected for definitive release V1.1.4 -->
     <script>

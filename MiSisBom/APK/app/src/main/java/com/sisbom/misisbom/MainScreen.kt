@@ -9,6 +9,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -732,27 +733,29 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
 
     val activeIndex = visibleTabs.indexOf(viewModel.currentTab)
 
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .background(Color.Transparent)
-            .padding(start = 16.dp, end = 16.dp, bottom = 16.dp, top = 8.dp)
+            .padding(start = 14.dp, end = 14.dp, bottom = 12.dp, top = 6.dp)
     ) {
-        // Contenedor flotante tipo píldora translúcida con Glassmorphism
+        // Contenedor flotante tipo píldora Glassmorphism premium
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(64.dp)
-                .shadow(elevation = 8.dp, shape = RoundedCornerShape(24.dp))
+                .height(68.dp)
+                .shadow(elevation = 12.dp, shape = RoundedCornerShape(28.dp), spotColor = if (isDark) Color.Black else Color(0x33000000))
                 .background(
-                    if (isDark) Color(0xFF070202).copy(alpha = 0.98f) else Color.White.copy(alpha = 0.98f),
-                    RoundedCornerShape(24.dp)
+                    if (isDark) Color(0xFF0F172A).copy(alpha = 0.95f) else Color.White.copy(alpha = 0.95f),
+                    RoundedCornerShape(28.dp)
                 )
                 .border(
                     1.dp,
-                    if (isDark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.35f),
-                    RoundedCornerShape(24.dp)
+                    if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFE2E8F0),
+                    RoundedCornerShape(28.dp)
                 ),
             contentAlignment = Alignment.CenterStart
         ) {
@@ -764,12 +767,12 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
                 val tabWidth = totalWidth / tabCount
 
                 if (activeIndex != -1) {
-                    // Animación del slider Material 3
+                    // Píldora activa con física de resorte (Spring)
                     val indicatorOffset by androidx.compose.animation.core.animateDpAsState(
-                        targetValue = tabWidth * activeIndex + (tabWidth - 56.dp) / 2,
+                        targetValue = tabWidth * activeIndex + (tabWidth - 60.dp) / 2,
                         animationSpec = androidx.compose.animation.core.spring(
-                            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioNoBouncy,
-                            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                            dampingRatio = 0.78f,
+                            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
                         ),
                         label = "PointerOffset"
                     )
@@ -777,10 +780,15 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
                     Box(
                         modifier = Modifier
                             .offset(x = indicatorOffset, y = 8.dp)
-                            .size(width = 56.dp, height = 32.dp)
+                            .size(width = 60.dp, height = 52.dp)
                             .background(
-                                color = if (isDark) Color(0xFFEF4444).copy(alpha = 0.18f) else Color(0xFFB91C1C).copy(alpha = 0.12f),
-                                shape = RoundedCornerShape(16.dp)
+                                color = if (isDark) Color(0xFFEF4444).copy(alpha = 0.16f) else Color(0xFFDC2626).copy(alpha = 0.10f),
+                                shape = RoundedCornerShape(20.dp)
+                            )
+                            .border(
+                                1.dp,
+                                if (isDark) Color(0xFFEF4444).copy(alpha = 0.35f) else Color(0xFFDC2626).copy(alpha = 0.25f),
+                                RoundedCornerShape(20.dp)
                             )
                     )
                 }
@@ -814,6 +822,24 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
                             else -> 0
                         }
 
+                        val iconScale by androidx.compose.animation.core.animateFloatAsState(
+                            targetValue = if (isSelected) 1.15f else 1.0f,
+                            animationSpec = androidx.compose.animation.core.spring(
+                                dampingRatio = 0.7f,
+                                stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
+                            ),
+                            label = "IconScale"
+                        )
+
+                        val itemColor by androidx.compose.animation.animateColorAsState(
+                            targetValue = if (isSelected) {
+                                if (isDark) Color(0xFFF87171) else Color(0xFFDC2626)
+                            } else {
+                                if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            },
+                            label = "ItemColor"
+                        )
+
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center,
@@ -823,23 +849,26 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
                                 .clickable(
                                     interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                                     indication = null,
-                                    onClick = { viewModel.currentTab = tab }
+                                    onClick = {
+                                        if (!isSelected) {
+                                            haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove)
+                                            viewModel.currentTab = tab
+                                        }
+                                    }
                                 )
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
-                                modifier = Modifier.height(32.dp)
+                                modifier = Modifier.height(28.dp)
                             ) {
                                 Box(contentAlignment = Alignment.TopEnd) {
                                     Icon(
                                         imageVector = icon,
                                         contentDescription = label,
-                                        tint = if (isSelected) {
-                                            if (isDark) Color(0xFFF87171) else BomberosRed
-                                        } else {
-                                            if (isDark) Color(0xFF94A3B8) else TextSecondary
-                                        },
-                                        modifier = Modifier.size(22.dp)
+                                        tint = itemColor,
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .graphicsLayer(scaleX = iconScale, scaleY = iconScale)
                                     )
                                     if (badgeCount > 0) {
                                         Box(
@@ -848,7 +877,7 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
                                                 .offset(x = 6.dp, y = (-2).dp)
                                                 .size(9.dp)
                                                 .background(Color(0xFFEF4444), CircleShape)
-                                                .border(1.dp, if (isDark) Color(0xFF0F172A) else Color.White, CircleShape)
+                                                .border(1.5.dp, if (isDark) Color(0xFF0F172A) else Color.White, CircleShape)
                                         ) {}
                                     }
                                 }
@@ -856,13 +885,10 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = label,
-                                color = if (isSelected) {
-                                    if (isDark) Color(0xFFF87171) else BomberosRed
-                                } else {
-                                    if (isDark) Color(0xFF94A3B8) else TextSecondary
-                                },
-                                fontSize = 9.sp,
-                                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold
+                                color = itemColor,
+                                fontSize = if (isSelected) 9.5.sp else 9.sp,
+                                fontWeight = if (isSelected) FontWeight.Black else FontWeight.SemiBold,
+                                letterSpacing = if (isSelected) 0.3.sp else 0.sp
                             )
                         }
                     }
@@ -1337,6 +1363,51 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
                             fontWeight = FontWeight.Black
                         )
                     }
+                }
+            }
+        }
+
+        // Sección: TURNO DE CENTRAL DE ALARMAS
+        val isOpActive = viewModel.centralOperatorName.isNotEmpty()
+        val isComandanteOp = user.cargo.trim().uppercase() == "COMANDANTE" && listOf("1", "01", "2", "02", "3", "03").contains(user.idRadial.trim())
+        val canCloseOp = isOpActive && (viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro) || isComandanteOp)
+
+        if (canCloseOp) {
+            Spacer(modifier = Modifier.height(24.dp))
+            Text(
+                text = "TURNO CENTRAL DE ALARMAS",
+                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.5.sp
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Button(
+                onClick = {
+                    viewModel.closeCentralOperatorSession()
+                    onClose()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Cerrar Turno",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "CERRAR TURNO DE CENTRAL",
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
                 }
             }
         }

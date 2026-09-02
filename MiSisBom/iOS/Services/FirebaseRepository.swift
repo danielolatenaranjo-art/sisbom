@@ -60,6 +60,24 @@ class FirebaseRepository {
                 if data["idServicio"] == nil {
                     data["idServicio"] = doc.documentID
                 }
+                if data["lat"] == nil {
+                    if let geo = data["geo"] as? [String: Any], let lat = geo["lat"] as? Double {
+                        data["lat"] = lat
+                    } else if let gps = data["ubicacionGps"] as? [String: Any], let lat = gps["lat"] as? Double {
+                        data["lat"] = lat
+                    } else if let alertGeo = data["alertanteGeo"] as? [String: Any], let lat = alertGeo["lat"] as? Double {
+                        data["lat"] = lat
+                    }
+                }
+                if data["lng"] == nil {
+                    if let geo = data["geo"] as? [String: Any], let lng = (geo["lng"] ?? geo["lon"]) as? Double {
+                        data["lng"] = lng
+                    } else if let gps = data["ubicacionGps"] as? [String: Any], let lng = (gps["lng"] ?? gps["lon"]) as? Double {
+                        data["lng"] = lng
+                    } else if let alertGeo = data["alertanteGeo"] as? [String: Any], let lng = (alertGeo["lng"] ?? alertGeo["lon"]) as? Double {
+                        data["lng"] = lng
+                    }
+                }
                 guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
                 return try? JSONDecoder().decode(Dispatch.self, from: jsonData)
             }
@@ -221,6 +239,16 @@ class FirebaseRepository {
     
     func updateVehicleService(vehicleId: String, enServicio: String, completion: @escaping (Result<Void, Error>) -> Void) {
         db.collection("moviles").document(vehicleId).updateData(["enServicio": enServicio]) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func updateCentralSession(updates: [String: Any], completion: @escaping (Result<Void, Error>) -> Void) {
+        db.collection("accesos").document("central").updateData(updates) { error in
             if let error = error {
                 completion(.failure(error))
             } else {

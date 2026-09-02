@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body {
+            width: 100%; height: 100%;
+            background: #0f172a;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #map {
+            position: absolute;
+            top: 0; bottom: 0; left: 0; right: 0;
+            width: 100%; height: 100%;
+            background: #0f172a;
+            z-index: 1;
+        }
+        .leaflet-control-attribution, .leaflet-control-zoom { display: none !important; }
+        
+        .leaflet-container {
+            background: #0f172a !important;
+            outline: none !important;
+        }
+        .leaflet-tile {
+            border: 0 !important;
+            outline: 0 !important;
+            box-shadow: none !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            image-rendering: -webkit-optimize-contrast;
+        }
+        .leaflet-tile-container {
+            contain: paint;
+        }
+
+        .custom-pin-wrap {
+            display: flex; align-items: center; justify-content: center;
+            position: relative; width: 44px; height: 44px;
+        }
+        .custom-pulse-halo {
+            position: absolute; width: 60px; height: 60px; border-radius: 50%;
+            animation: radarPulse 2s infinite ease-out;
+            pointer-events: none;
+        }
+        @keyframes radarPulse {
+            0% { transform: scale(0.35); opacity: 1; }
+            70% { transform: scale(1.3); opacity: 0.25; }
+            100% { transform: scale(1.6); opacity: 0; }
+        }
+        .custom-pin-core {
+            width: 30px; height: 30px; border-radius: 50%;
+            border: 2.5px solid #ffffff;
+            display: flex; align-items: center; justify-content: center;
+            color: white; z-index: 10;
+        }
+
+        .vehicle-gps-wrap {
+            position: relative; width: 40px; height: 40px;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .vehicle-gps-pulse {
+            position: absolute; width: 48px; height: 48px; border-radius: 50%;
+            background: rgba(2, 132, 199, 0.3);
+            border: 1.5px solid rgba(56, 189, 248, 0.8);
+            animation: vehPulse 2s infinite ease-out;
+        }
+        @keyframes vehPulse {
+            0% { transform: scale(0.5); opacity: 1; }
+            100% { transform: scale(1.4); opacity: 0; }
+        }
+        .vehicle-gps-core {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: #0284C7;
+            border: 2.5px solid #ffffff;
+            box-shadow: 0 0 16px rgba(2,132,199,0.9);
+            display: flex; align-items: center; justify-content: center;
+            transition: transform 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="leaflet.js"></script>
+    <script>
+        window._isMapReady = false;
+        window._pendingData = null;
+        window._emergencyCircle = null;
+        window._emergencyMarker = null;
+        window._vehicleMarker = null;
+        window._routePolyline = null;
+        window._routeGlow = null;
+        window._lastRoutedOrigin = null;
+        window._lastRoutedDest = null;
+        window._currentLayerMode = 'street';
+
+        // Capa Calles limpia (Google Roads / CartoDB) sin líneas de cuadrícula
+        var googleRoadsLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+            maxZoom: 20,
+            subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+        });
+
+        var cartoVoyagerLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19,
+            subdomains: 'abcd'
+        });
+
+        var googleSatLayer = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+            maxZoom: 20
+        });
+
+        var esriSatLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19
+        });
+
+        googleRoadsLayer.on('tileerror', function() {
+            try {
+                if (window._tacMap && window._currentLayerMode === 'street') {
+                    window._tacMap.removeLayer(googleRoadsLayer);
+                    cartoVoyagerLayer.addTo(window._tacMap);
+                }
+            } catch(e){}
+        });
+
+        googleSatLayer.on('tileerror', function() {
+            try {
+                if (window._tacMap && window._currentLayerMode === 'satellite') {
+                    window._tacMap.removeLayer(googleSatLayer);
+                    esriSatLayer.addTo(window._tacMap);
+                }
+            } catch(e){}
+        });
+
+        function toggleMapLayer() {
+            if (!window._tacMap) return;
+            if (window._currentLayerMode === 'street') {
+                window._currentLayerMode = 'satellite';
+                try { window._tacMap.removeLayer(googleRoadsLayer); } catch(e){}
+                try { window._tacMap.removeLayer(cartoVoyagerLayer); } catch(e){}
+                googleSatLayer.addTo(window._tacMap);
+            } else {
+                window._currentLayerMode = 'street';
+                try { window._tacMap.removeLayer(googleSatLayer); } catch(e){}
+                try { window._tacMap.removeLayer(esriSatLayer); } catch(e){}
+                googleRoadsLayer.addTo(window._tacMap);
+            }
+        }
+
+        function initTacticalMap() {
+            try {
+                if (window._tacMap) {
+                    try { window._tacMap.remove(); } catch(e){}
+                }
+
+                var map = L.map('map', {
+                    zoomControl: false,
+                    attributionControl: false,
+                    dragging: true,
+                    touchZoom: true,
+                    doubleClickZoom: true,
+                    scrollWheelZoom: true,
+                    boxZoom: false,
+                    fadeAnimation: false,
+                    zoomAnimation: true,
+                    zoomSnap: 1,
+                    zoomDelta: 1
+                });
+                window._tacMap = map;
+
+                // Google Roads por defecto (limpio y sin cuadrículas)
+                googleRoadsLayer.addTo(map);
+                map.setView([-34.637373, -71.125741], 15);
+
+                window._isMapReady = true;
+
+                if (window._pendingData) {
+                    var p = window._pendingData;
+                    window.updateTacticalPositions(p.emLat, p.emLng, p.vLat, p.vLng, p.vHeading, p.pinColor, p.hasEmergency, p.hasVehicle);
+                    window._pendingData = null;
+                }
+
+                setTimeout(function() { if (window._tacMap) window._tacMap.invalidateSize(); }, 150);
+                setTimeout(function() { if (window._tacMap) window._tacMap.invalidateSize(); }, 400);
+                setTimeout(function() { if (window._tacMap) window._tacMap.invalidateSize(); }, 1000);
+            } catch (e) {
+                console.error("TacticalMap init error:", e);
+            }
+        }
+
+        function clearRoute() {
+            var map = window._tacMap;
+            if (!map) return;
+            if (window._routeGlow) { try { map.removeLayer(window._routeGlow); } catch(e){} window._routeGlow = null; }
+            if (window._routePolyline) { try { map.removeLayer(window._routePolyline); } catch(e){} window._routePolyline = null; }
+            window._lastRoutedOrigin = null;
+            window._lastRoutedDest = null;
+        }
+
+        function drawRoute(vLat, vLng, emLat, emLng) {
+            var map = window._tacMap;
+            if (!map) return;
+
+            var origKey = vLat.toFixed(4) + ',' + vLng.toFixed(4);
+            var destKey = emLat.toFixed(4) + ',' + emLng.toFixed(4);
+            if (window._lastRoutedOrigin === origKey && window._lastRoutedDest === destKey && window._routePolyline) {
+                return;
+            }
+            window._lastRoutedOrigin = origKey;
+            window._lastRoutedDest = destKey;
+
+            var url = 'https://router.project-osrm.org/route/v1/driving/' + vLng + ',' + vLat + ';' + emLng + ',' + emLat + '?overview=full&geometries=geojson';
+            
+            fetch(url)
+                .then(function(res) { return res.json(); })
+                .then(function(data) {
+                    if (data && data.routes && data.routes.length > 0) {
+                        var coords = data.routes[0].geometry.coordinates;
+                        var latLngs = coords.map(function(c) { return [c[1], c[0]]; });
+                        
+                        clearRoute();
+
+                        window._routeGlow = L.polyline(latLngs, {
+                            color: '#38BDF8',
+                            weight: 8,
+                            opacity: 0.5,
+                            lineJoin: 'round',
+                            lineCap: 'round'
+                        }).addTo(map);
+
+                        window._routePolyline = L.polyline(latLngs, {
+                            color: '#0284C7',
+                            weight: 5,
+                            opacity: 0.95,
+                            lineJoin: 'round',
+                            lineCap: 'round'
+                        }).addTo(map);
+
+                        map.fitBounds(window._routePolyline.getBounds(), { padding: [80, 80], maxZoom: 16 });
+                    } else {
+                        drawFallbackStraightLine(vLat, vLng, emLat, emLng);
+                    }
+                })
+                .catch(function(err) {
+                    drawFallbackStraightLine(vLat, vLng, emLat, emLng);
+                });
+        }
+
+        function drawFallbackStraightLine(vLat, vLng, emLat, emLng) {
+            var map = window._tacMap;
+            if (!map) return;
+            clearRoute();
+            var line = [[vLat, vLng], [emLat, emLng]];
+            window._routePolyline = L.polyline(line, {
+                color: '#38BDF8',
+                weight: 4,
+                opacity: 0.8,
+                dashArray: '8, 8'
+            }).addTo(map);
+        }
+
+        window.updateTacticalPositions = function(emLat, emLng, vLat, vLng, vHeading, pinColor, hasEmergency, hasVehicle) {
+            if (!window._isMapReady || !window._tacMap) {
+                window._pendingData = {
+                    emLat: emLat, emLng: emLng, vLat: vLat, vLng: vLng,
+                    vHeading: vHeading, pinColor: pinColor,
+                    hasEmergency: hasEmergency, hasVehicle: hasVehicle
+                };
+                return;
+            }
+
+            var map = window._tacMap;
+            var bounds = [];
+
+            // Emergencia
+            if (hasEmergency && emLat && emLng && emLat !== 0) {
+                var emHtml = '<div class="custom-pin-wrap">' +
+                    '<div class="custom-pulse-halo" style="background:' + pinColor + '33; border: 2px solid ' + pinColor + '99;"></div>' +
+                    '<div class="custom-pin-core" style="background:' + pinColor + '; box-shadow: 0 0 16px rgba(0,0,0,0.9), 0 0 10px ' + pinColor + ';">' +
+                        '<svg width="16" height="16" viewBox="0 0 24 24" fill="white">' +
+                            '<path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>' +
+                        '</svg>' +
+                    '</div>' +
+                '</div>';
+
+                var emIcon = L.divIcon({
+                    className: 'custom-pin-icon',
+                    html: emHtml,
+                    iconSize: [44, 44],
+                    iconAnchor: [22, 22]
+                });
+
+                if (window._emergencyMarker) {
+                    window._emergencyMarker.setLatLng([emLat, emLng]);
+                    window._emergencyMarker.setIcon(emIcon);
+                } else {
+                    window._emergencyMarker = L.marker([emLat, emLng], { icon: emIcon }).addTo(map);
+                }
+                bounds.push([emLat, emLng]);
+            } else {
+                if (window._emergencyMarker) { try { map.removeLayer(window._emergencyMarker); } catch(e){} window._emergencyMarker = null; }
+                clearRoute();
+            }
+
+            // Carro Bomba (GPS Live)
+            if (hasVehicle && vLat && vLng && vLat !== 0) {
+                var vehHtml = '<div class="vehicle-gps-wrap">' +
+                    '<div class="vehicle-gps-pulse"></div>' +
+                    '<div class="vehicle-gps-core" style="transform: rotate(' + (vHeading || 0) + 'deg);">' +
+                        '<svg width="14" height="14" viewBox="0 0 24 24" fill="white">' +
+                            '<path d="M12 2L4.5 20.29l.71.71L12 18l6.79 3 .71-.71z"/>' +
+                        '</svg>' +
+                    '</div>' +
+                '</div>';
+
+                var vehIcon = L.divIcon({
+                    className: 'veh-pin-icon',
+                    html: vehHtml,
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 20]
+                });
+
+                if (window._vehicleMarker) {
+                    window._vehicleMarker.setLatLng([vLat, vLng]);
+                    window._vehicleMarker.setIcon(vehIcon);
+                } else {
+                    window._vehicleMarker = L.marker([vLat, vLng], { icon: vehIcon }).addTo(map);
+                }
+                bounds.push([vLat, vLng]);
+            } else {
+                if (window._vehicleMarker) { try { map.removeLayer(window._vehicleMarker); } catch(e){} window._vehicleMarker = null; }
+            }
+
+            // Trazado de Ruta inteligente OSRM cuando ambos están presentes
+            if (hasEmergency && hasVehicle && emLat && emLng && vLat && vLng && emLat !== 0 && vLat !== 0) {
+                drawRoute(vLat, vLng, emLat, emLng);
+            } else {
+                clearRoute();
+                if (bounds.length === 2) {
+                    map.fitBounds(bounds, { padding: [100, 100], maxZoom: 16 });
+                } else if (bounds.length === 1) {
+                    map.setView(bounds[0], 16);
+                } else {
+                    map.setView([emLat || -34.637373, emLng || -71.125741], 15);
+                }
+            }
+        };
+
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            initTacticalMap();
+        } else {
+            window.addEventListener('DOMContentLoaded', initTacticalMap);
+        }
+    </script>
+</body>
+</html>

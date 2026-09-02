@@ -67,6 +67,18 @@ struct UserPersonal: Identifiable, Codable, Equatable {
     }
 }
 
+// MARK: - Unit Info Model
+struct UnitInfo: Codable, Equatable {
+    var solicitudConductorAt: String = ""
+    var solicitudConductorTimestamp: Int64 = 0
+    var solicitudPersonalAt: String = ""
+    var solicitudPersonalTimestamp: Int64 = 0
+    var driverRad: String = ""
+    var obacRad: String = ""
+    var count: String = ""
+    var status: String = ""
+}
+
 // MARK: - Dispatch Model
 struct Dispatch: Identifiable, Codable, Equatable {
     var id: String { idServicio }
@@ -88,10 +100,13 @@ struct Dispatch: Identifiable, Codable, Equatable {
     let informeObac: String?
     let fechaTermino: String?
     let operadorInicial: String?
+    let lat: Double?
+    let lng: Double?
+    var unidades: [String: UnitInfo] = [:]
 
     enum CodingKeys: String, CodingKey {
         case idServicio, clave, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal
-        case carrosTexto, source, obacServicio, informeObac, fechaTermino, operadorInicial
+        case carrosTexto, source, obacServicio, informeObac, fechaTermino, operadorInicial, lat, lng, unidades
     }
 
     init(
@@ -110,7 +125,10 @@ struct Dispatch: Identifiable, Codable, Equatable {
         obacServicio: String? = nil,
         informeObac: String? = nil,
         fechaTermino: String? = nil,
-        operadorInicial: String? = nil
+        operadorInicial: String? = nil,
+        lat: Double? = nil,
+        lng: Double? = nil,
+        unidades: [String: UnitInfo] = [:]
     ) {
         self.idServicio = idServicio
         self.clave = clave
@@ -128,6 +146,9 @@ struct Dispatch: Identifiable, Codable, Equatable {
         self.informeObac = informeObac
         self.fechaTermino = fechaTermino
         self.operadorInicial = operadorInicial
+        self.lat = lat
+        self.lng = lng
+        self.unidades = unidades
     }
 
     init(from decoder: Decoder) throws {
@@ -148,6 +169,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
         informeObac = try container.decodeIfPresent(String.self, forKey: .informeObac)
         fechaTermino = try container.decodeIfPresent(String.self, forKey: .fechaTermino)
         operadorInicial = try container.decodeIfPresent(String.self, forKey: .operadorInicial)
+        unidades = try container.decodeIfPresent([String: UnitInfo].self, forKey: .unidades) ?? [:]
 
         // Flexible decoding for 'carros' (can be String or Array/List)
         if let stringCarros = try? container.decode(String.self, forKey: .carros) {

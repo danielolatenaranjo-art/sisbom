@@ -6,8 +6,8 @@ import socket
 import sys
 import os
 import urllib.parse
-import webview
 import json
+import webview
 
 # Import bundled assets. If not generated, show warning
 try:
@@ -265,13 +265,35 @@ class Api:
 
     def save_database_backup(self, backup_data_json):
         try:
-            backup_dir = os.path.join(get_exe_dir(), "asistencias")
+            exe_dir = get_exe_dir()
+            backup_dir = os.path.join(exe_dir, "asistencias")
             os.makedirs(backup_dir, exist_ok=True)
             
             backup_path = os.path.join(backup_dir, "db_backup.json")
             data = json.loads(backup_data_json)
             with open(backup_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=4)
+
+            # Guardar archivos JSON individuales para contingencia y sincronización local
+            central_dir = os.path.join(exe_dir, "central")
+            if os.path.isdir(central_dir):
+                if "prueba_radial" in data and data["prueba_radial"]:
+                    with open(os.path.join(central_dir, "db_prueba_radial.json"), "w", encoding="utf-8") as f:
+                        json.dump(data["prueba_radial"], f, ensure_ascii=False, indent=4)
+                    with open(os.path.join(central_dir, "db_pruebaRadial.json"), "w", encoding="utf-8") as f:
+                        json.dump(data["prueba_radial"], f, ensure_ascii=False, indent=4)
+                if "personal" in data and data["personal"]:
+                    with open(os.path.join(central_dir, "db_personal.json"), "w", encoding="utf-8") as f:
+                        json.dump(data["personal"], f, ensure_ascii=False, indent=4)
+                if "vehiculos" in data and data["vehiculos"]:
+                    with open(os.path.join(central_dir, "db_vehiculos.json"), "w", encoding="utf-8") as f:
+                        json.dump(data["vehiculos"], f, ensure_ascii=False, indent=4)
+                if "bitacora" in data and data["bitacora"]:
+                    with open(os.path.join(central_dir, "db_bitacora.json"), "w", encoding="utf-8") as f:
+                        json.dump(data["bitacora"], f, ensure_ascii=False, indent=4)
+                if "sirena" in data and data["sirena"]:
+                    with open(os.path.join(central_dir, "db_sirena.json"), "w", encoding="utf-8") as f:
+                        json.dump(data["sirena"], f, ensure_ascii=False, indent=4)
                 
             meta_path = os.path.join(backup_dir, ".backup_metadata")
             import datetime
@@ -283,6 +305,38 @@ class Api:
             return True
         except Exception as e:
             print(f"SISBOM BACKUP ERROR: Error al guardar copia de seguridad: {e}", flush=True)
+    def load_local_db(self, filename):
+        try:
+            exe_dir = get_exe_dir()
+            clean_name = filename.replace('/', os.sep).replace('\\', os.sep)
+            
+            # Check direct path
+            candidate_paths = [
+                os.path.join(exe_dir, clean_name),
+                os.path.join(exe_dir, "comandancia", clean_name),
+                os.path.join(exe_dir, "central", clean_name),
+                os.path.join(exe_dir, "asistencias", clean_name)
+            ]
+            for p in candidate_paths:
+                if os.path.isfile(p):
+                    with open(p, "r", encoding="utf-8") as f:
+                        return f.read()
+            return None
+        except Exception as e:
+            print(f"SISBOM DB ERROR: Error al cargar {filename} desde disco: {e}", flush=True)
+            return None
+
+    def save_local_db(self, filename, content_str):
+        try:
+            exe_dir = get_exe_dir()
+            clean_name = filename.replace('/', os.sep).replace('\\', os.sep)
+            file_path = os.path.join(exe_dir, clean_name)
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content_str)
+            return True
+        except Exception as e:
+            print(f"SISBOM DB ERROR: Error al guardar {filename} en disco: {e}", flush=True)
             return False
 
     def on_logout_completed(self):
@@ -296,6 +350,37 @@ class Api:
             self._window.destroy()
         else:
             os._exit(0)
+
+    def send_to_whatsapp(self, text):
+        try:
+            import urllib.parse
+            import subprocess
+            import webbrowser
+            import base64
+
+            # 1. Copiar texto al portapapeles nativo de Windows mediante PowerShell
+            try:
+                encoded_bytes = text.encode('utf-8')
+                b64_str = base64.b64encode(encoded_bytes).decode('ascii')
+                ps_script = f"$bytes = [System.Convert]::FromBase64String('{b64_str}'); $txt = [System.Text.Encoding]::UTF8.GetString($bytes); Set-Clipboard -Value $txt"
+                subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+                               creationflags=0x08000000, timeout=3)
+            except Exception as ep:
+                print(f"SISBOM WHATSAPP CLIPBOARD ERROR: {ep}", flush=True)
+
+            # 2. Intentar lanzar la aplicación de escritorio de WhatsApp mediante protocolo nativo
+            encoded_text = urllib.parse.quote(text)
+            try:
+                os.startfile(f"whatsapp://send?text={encoded_text}")
+                print("SISBOM WHATSAPP: Aplicación de escritorio WhatsApp.exe iniciada con éxito.", flush=True)
+                return True
+            except Exception as ew:
+                print(f"SISBOM WHATSAPP DESKTOP FALLBACK: No se pudo abrir protocolo whatsapp:// ({ew}). Abriendo navegador...", flush=True)
+                webbrowser.open(f"https://web.whatsapp.com/send?text={encoded_text}")
+                return True
+        except Exception as e:
+            print(f"SISBOM WHATSAPP GENERAL ERROR: {e}", flush=True)
+            return False
 
     def trigger_ota_update(self, latest_version, download_url):
         print(f"SISBOM OTA: Iniciando descarga e instalación de actualización V.{latest_version}...", flush=True)
@@ -512,6 +597,77 @@ exit
         except Exception as e:
             print(f"Error checking license: {e}")
             return {"authorized": False, "reason": str(e)}
+
+    def reverse_geocode(self, lat, lng):
+        import urllib.request
+        import json
+        try:
+            url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lng}&zoom=18&addressdetails=1"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    'User-Agent': 'SisBom-Central/1.1.7 (contacto@sisbom.cl)'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if data and 'address' in data:
+                    addr = data['address']
+                    road = addr.get('road') or addr.get('pedestrian') or addr.get('neighbourhood') or addr.get('suburb') or ''
+                    house = addr.get('house_number') or ''
+                    city = addr.get('city') or addr.get('town') or addr.get('village') or addr.get('municipality') or ''
+                    short_addr = road
+                    if road and house:
+                        short_addr = f"{road} {house}"
+                    if short_addr and city:
+                        short_addr += f", {city}"
+                    if not short_addr:
+                        short_addr = ', '.join(data.get('display_name', '').split(',')[:2])
+                    return {'success': True, 'address': short_addr.upper()}
+        except Exception as e:
+            print(f"Error reverse geocode in Python: {e}")
+        
+        # Fallback BigDataCloud client API
+        try:
+            url2 = f"https://api.bigdatacloud.net/data/reverse-geocode-client?latitude={lat}&longitude={lng}&localityLanguage=es"
+            req2 = urllib.request.Request(url2, headers={'User-Agent': 'SisBom-Central/1.1.7'})
+            with urllib.request.urlopen(req2, timeout=5) as response2:
+                data2 = json.loads(response2.read().decode('utf-8'))
+                if data2:
+                    locality = data2.get('locality') or data2.get('city') or ''
+                    street = data2.get('localityInfo', {}).get('informative', [{}])[0].get('name', '')
+                    res = f"{street}, {locality}".strip(', ')
+                    return {'success': True, 'address': res.upper()}
+        except Exception as e2:
+            print(f"Error fallback reverse geocode: {e2}")
+
+        return {'success': False, 'address': ''}
+
+    def search_address(self, query):
+        import urllib.request
+        import urllib.parse
+        import json
+        try:
+            encoded_q = urllib.parse.quote(query)
+            url = f"https://nominatim.openstreetmap.org/search?format=json&countrycodes=cl&limit=1&q={encoded_q}"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    'User-Agent': 'SisBom-Central/1.1.7 (contacto@sisbom.cl)'
+                }
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                data = json.loads(response.read().decode('utf-8'))
+                if data and len(data) > 0:
+                    return {
+                        'success': True,
+                        'lat': float(data[0]['lat']),
+                        'lng': float(data[0]['lon']),
+                        'display_name': data[0].get('display_name', '')
+                    }
+        except Exception as e:
+            print(f"Error search address in Python: {e}")
+        return {'success': False}
 
     def open_window(self, name):
         if name == 'personal':
@@ -810,12 +966,10 @@ def disable_close_button(window):
         user32 = ctypes.windll.user32
         hMenu = user32.GetSystemMenu(hwnd, False)
         if hMenu:
-            # SC_CLOSE = 0xF060, MF_GRAYED = 0x00000001, MF_DISABLED = 0x00000002
-            user32.EnableMenuItem(hMenu, 0xF060, 0x00000001 | 0x00000002)
-            user32.DrawMenuBar(hwnd)
-            print("SISBOM: BOTON 'X' DESACTIVADO EXITOSAMENTE MEDIANTE API WIN32.", flush=True)
-    except Exception as e:
-        print(f"ERROR AL DESACTIVAR EL BOTON DE CIERRE: {e}", flush=True)
+            # SC_CLOSE = 0xF060, MF_BYCOMMAND = 0x00000000, MF_GRAYED = 0x00000001, MF_DISABLED = 0x00000002
+            user32.EnableMenuItem(hMenu, 0xF060, 0x00000000 | 0x00000001 | 0x00000002)
+    except Exception:
+        pass
 
 def main():
     port = find_free_port()
@@ -864,14 +1018,14 @@ def main():
         
     api._window = win
     
-    # Registrar controladores de eventos WinForms para mantener el boton "X" desactivado al minimizar/restaurar
+    # Registrar controladores de eventos WinForms para mantener el boton "X" desactivado de forma limpia
     def setup_event_handlers():
         try:
             win.native.Resize += lambda sender, event: disable_close_button(win)
             win.native.Activated += lambda sender, event: disable_close_button(win)
             disable_close_button(win)
-        except Exception as e:
-            print(f"ERROR AL REGISTRAR EVENTOS WINFORMS: {e}", flush=True)
+        except Exception:
+            pass
 
     win.events.shown += setup_event_handlers
     

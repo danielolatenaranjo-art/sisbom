@@ -370,15 +370,12 @@
             }
         });
 
-        // CONFIGURACIÓN CENTRAL DE FIREBASE
-        const firebaseConfig = {
-            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-            authDomain: "sisbom-de5f8.firebaseapp.com",
-            projectId: "sisbom-de5f8",
-            storageBucket: "sisbom-de5f8.firebasestorage.app",
-            messagingSenderId: "39449538456",
-            appId: "1:39449538456:web:64f767264356ae587485ed"
-        };
+        // CONFIGURACIÓN CENTRAL DE FIREBASE DINÁMICA
+        let firebaseConfig = {};
+        try {
+            const saved = localStorage.getItem("firebaseConfig");
+            if (saved) firebaseConfig = JSON.parse(saved);
+        } catch(e) {}
 
         const CACHE_KEY = "sisbom_vehiculos_cache_v3";
         let fbDb = null;
@@ -452,7 +449,7 @@
                     const app = initializeApp(firebaseConfig);
                     fbDb = getFirestore(app);
                     try {
-                        const { getAuth, signInAnonymously, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                        const { getAuth, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
                         const auth = getAuth(app);
                         const storedUser = localStorage.getItem('authUserId');
                         const storedPassSecure = localStorage.getItem('authPasswordSecure');
@@ -461,8 +458,7 @@
                             await signInWithEmailAndPassword(auth, email, storedPassSecure);
                             console.log("Firebase conectado con credenciales en fallback (Type B).");
                         } else {
-                            await signInAnonymously(auth);
-                            console.log("Firebase conectado de forma anónima en fallback (Type B).");
+                            console.warn("Sin credenciales en fallback Vehículos Comandancia.");
                         }
                     } catch(authErr) {
                         console.warn("Error authenticating fallback Firebase (Type B):", authErr);

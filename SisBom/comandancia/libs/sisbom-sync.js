@@ -5,8 +5,8 @@
     
     // Module-specific collection lists to prevent unauthorized read attempts (Permission Denied)
     const SYNCED_COLLECTIONS = isCentral 
-        ? ['personal', 'vehiculos', 'bitacora', 'despachos', 'alertas', 'sirena', 'prueba_radial']
-        : ['personal', 'vehiculos', 'alertas', 'asistencia', 'despachos', 'bitacora', 'prueba_radial', 'sirena'];
+        ? ['personal', 'vehiculos', 'bitacora', 'despachos', 'alertas', 'sirena', 'prueba_radial', 'grifos']
+        : ['personal', 'vehiculos', 'alertas', 'asistencia', 'despachos', 'bitacora', 'prueba_radial', 'sirena', 'grifos'];
 
     const channel = new BroadcastChannel('sisbom_sync');
     const debounceTimeouts = new Map();
@@ -37,6 +37,8 @@
         };
     }
 
+    const lastSavedContentMap = new Map();
+
     // Debounced function to save collection updates to local physical disk (.json files)
     function queueDiskSave(collPath, dataArray) {
         if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
@@ -50,9 +52,14 @@
                 const fileName = pathPrefix + 'db_' + collPath + '.json';
                 const contentStr = JSON.stringify(dataArray);
                 
+                if (lastSavedContentMap.get(collPath) === contentStr) {
+                    return;
+                }
+                
                 window.pywebview.api.save_local_db(fileName, contentStr)
                     .then(success => {
                         if (success) {
+                            lastSavedContentMap.set(collPath, contentStr);
                             console.log("SisBom Sync: Disk save successful for: " + fileName);
                         } else {
                             console.warn("SisBom Sync: Disk save failed for: " + fileName);
@@ -61,7 +68,7 @@
                     .catch(err => {
                         console.error("SisBom Sync: Disk save exception for: " + fileName, err);
                     });
-            }, 500);
+            }, 1000);
             
             debounceTimeouts.set(collPath, tid);
         }
@@ -84,6 +91,17 @@
                         .then(contentStr => {
                             if (contentStr) {
                                 localStorage.setItem('sisbom_db_' + coll, contentStr);
+                                localStorage.setItem('db_' + coll, contentStr);
+                                if (coll === 'asistencia') localStorage.setItem('sisbom_asistencia_cache', contentStr);
+                                if (coll === 'prueba_radial') localStorage.setItem('sisbom_prueba_radial_cache', contentStr);
+                                if (coll === 'personal') localStorage.setItem('sisbom_personal_cache', contentStr);
+                                if (coll === 'despachos') localStorage.setItem('sisbom_despachos_cache_v3', contentStr);
+                                if (coll === 'vehiculos') {
+                                    try {
+                                        localStorage.setItem('sisbom_vehiculos_cache_v3', JSON.stringify({ vehiculos: JSON.parse(contentStr) }));
+                                    } catch(e){}
+                                }
+                                if (coll === 'sirena') localStorage.setItem('sirena_data_cache', contentStr);
                                 console.log("SisBom Sync: Successfully loaded cache from disk for: " + fileName);
                             }
                         })
@@ -120,6 +138,31 @@
                                 docData.idRegistro = doc.id;
                                 dataArray.push(docData);
                             });
+
+                            // Preservar subcolecciones embebidas
+                            if (collPath === 'asistencia' || collPath === 'prueba_radial' || collPath === 'personal') {
+                                let existingList = [];
+                                try {
+                                    const cachedStr = localStorage.getItem('sisbom_db_' + collPath) || localStorage.getItem('db_' + collPath);
+                                    if (cachedStr) existingList = JSON.parse(cachedStr);
+                                } catch(e){}
+                                if (Array.isArray(existingList) && existingList.length > 0) {
+                                    const existingMap = new Map();
+                                    existingList.forEach(item => {
+                                        const id = item.id || item.idLista || item.id115 || item.idRegistro;
+                                        if (id) existingMap.set(String(id), item);
+                                    });
+                                    dataArray.forEach(item => {
+                                        const id = item.id || item.idLista || item.id115 || item.idRegistro;
+                                        if (id && existingMap.has(String(id))) {
+                                            const old = existingMap.get(String(id));
+                                            if (old.bomberos && (!item.bomberos || item.bomberos.length === 0)) item.bomberos = old.bomberos;
+                                            if (old.firefighters && (!item.firefighters || item.firefighters.length === 0)) item.firefighters = old.firefighters;
+                                            if (old.estadosHistorico && (!item.estadosHistorico || item.estadosHistorico.length === 0)) item.estadosHistorico = old.estadosHistorico;
+                                        }
+                                    });
+                                }
+                            }
                             
                             // Print if the update came from Local Cache or Server
                             const fromCache = snap.metadata ? snap.metadata.fromCache : false;
@@ -181,15 +224,49 @@
                         let dataChanged = false;
                         if (collection === 'personal') { window.DB.personal = data; dataChanged = true; }
                         else if (collection === 'vehiculos') { window.DB.vehiculos = data; dataChanged = true; }
+                        else if (collection === 'bitacora') { window.DB.bitacora = data; dataChanged = true; }
+                        else if (collection === 'sirena') { window.DB.sirena = data; dataChanged = true; }
+                        else if (collection === 'despachos') { window.DB.despachos = data; dataChanged = true; }
+                        else if (collection === 'asistencia') {
+                            const flatAsis = [];
+                            data.forEach(a => {
+                                const header = Object.assign({}, a);
+                                const bList = a.firefighters || a.bomberos || [];
+                                if (Array.isArray(bList) && bList.length > 0) {
+                                    bList.forEach(b => flatAsis.push(Object.assign({}, header, b)));
+                                } else {
+                                    flatAsis.push(header);
+                                }
+                            });
+                            window.DB.asistencias = flatAsis;
+                            dataChanged = true;
+                        } else if (collection === 'prueba_radial') {
+                            const flatPruebas = [];
+                            data.forEach(p => {
+                                const header = {
+                                    id115: p.id115,
+                                    id115_num: p.id115_num,
+                                    fecha115: p.fecha115,
+                                    hora115: p.hora115,
+                                    dia: p.dia,
+                                    mes: p.mes,
+                                    anio: p.anio,
+                                    turno: p.turno,
+                                    totalPersonal: p.totalPersonal,
+                                    timestamp: p.timestamp
+                                };
+                                if (Array.isArray(p.bomberos) && p.bomberos.length > 0) {
+                                    p.bomberos.forEach(b => flatPruebas.push(Object.assign({}, header, b)));
+                                } else {
+                                    flatPruebas.push(header);
+                                }
+                            });
+                            window.DB.pruebas = flatPruebas;
+                            dataChanged = true;
+                        }
                         
-                        if (dataChanged) {
-                            if (typeof window.refreshDashboard === 'function') {
-                                window.refreshDashboard();
-                            }
-                        } else if (['despachos', 'bitacora', 'prueba_radial', 'sirena', 'asistencia'].includes(collection)) {
-                            if (typeof window.fetchAllData === 'function') {
-                                window.fetchAllData(false).catch(e => {});
-                            }
+                        if (dataChanged && typeof window.refreshDashboard === 'function') {
+                            window.refreshDashboard();
                         }
                     }
                 }
@@ -200,7 +277,7 @@
         let realFbOnSnapshot = null;
         Object.defineProperty(window, 'fbOnSnapshot', {
             get() {
-                return function(collectionRef, callback) {
+                return function(collectionRef, callback, errorCallback) {
                     const collPath = getCollectionPath(collectionRef);
                     const isSynced = SYNCED_COLLECTIONS.includes(collPath);
 
@@ -212,7 +289,7 @@
                         activeCallbacks.get(collPath).push(callback);
 
                         // Load initial data from LocalStorage
-                        const cachedDataStr = localStorage.getItem('sisbom_db_' + collPath);
+                        const cachedDataStr = localStorage.getItem('sisbom_db_' + collPath) || localStorage.getItem('db_' + collPath);
                         if (cachedDataStr) {
                             try {
                                 const cachedData = JSON.parse(cachedDataStr);
@@ -235,11 +312,18 @@
                     }
 
                     // Fallback to real fbOnSnapshot for other queries (subcollections)
-                    return realFbOnSnapshot ? realFbOnSnapshot(collectionRef, callback) : null;
+                    if (typeof realFbOnSnapshot === 'function') {
+                        return realFbOnSnapshot(collectionRef, callback, errorCallback);
+                    } else if (window.parent && window.parent.fbOnSnapshot && window.parent.fbOnSnapshot !== window.fbOnSnapshot) {
+                        return window.parent.fbOnSnapshot(collectionRef, callback, errorCallback);
+                    } else if (window.rawFbOnSnapshot) {
+                        return window.rawFbOnSnapshot(collectionRef, callback, errorCallback);
+                    }
+                    return () => {};
                 };
             },
             set(val) {
-                if (val && val !== window.fbOnSnapshot) {
+                if (val && typeof val === 'function') {
                     realFbOnSnapshot = val;
                 }
             },
@@ -255,7 +339,7 @@
                     const isSynced = SYNCED_COLLECTIONS.includes(collPath);
 
                     if (isSynced) {
-                        const cachedDataStr = localStorage.getItem('sisbom_db_' + collPath);
+                        const cachedDataStr = localStorage.getItem('sisbom_db_' + collPath) || localStorage.getItem('db_' + collPath);
                         if (cachedDataStr) {
                             try {
                                 const cachedData = JSON.parse(cachedDataStr);
@@ -265,11 +349,18 @@
                         return createMockSnapshot([]);
                     }
 
-                    return realFbGetDocs ? await realFbGetDocs(collectionRef) : createMockSnapshot([]);
+                    if (typeof realFbGetDocs === 'function') {
+                        return await realFbGetDocs(collectionRef);
+                    } else if (window.parent && window.parent.fbGetDocs && window.parent.fbGetDocs !== window.fbGetDocs) {
+                        return await window.parent.fbGetDocs(collectionRef);
+                    } else if (window.rawFbGetDocs) {
+                        return await window.rawFbGetDocs(collectionRef);
+                    }
+                    return createMockSnapshot([]);
                 };
             },
             set(val) {
-                if (val && val !== window.fbGetDocs) {
+                if (val && typeof val === 'function') {
                     realFbGetDocs = val;
                 }
             },

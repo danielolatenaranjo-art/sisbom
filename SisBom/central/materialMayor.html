@@ -831,8 +831,8 @@
                     if (hasServicio) {
                         // 1. Intentar buscar un viaje activo en bitacora que coincida con el idServicio y carro
                         let matchedTrips = this.bitacoraData.filter(b => 
-                            String(b.carro).trim().toUpperCase() === String(u.idCarro).toUpperCase() &&
-                            String(b.idServicio).trim().toLowerCase() === enServicioRaw.toLowerCase()
+                            String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase() &&
+                            String(b.idServicio || '').trim().toLowerCase() === enServicioRaw.toLowerCase()
                         );
                         
                         if (matchedTrips.length > 0) {
@@ -841,8 +841,8 @@
                         } else {
                             // 2. Intentar buscar cualquier viaje activo para este carro (sin hora68 ni fecha68)
                             matchedTrips = this.bitacoraData.filter(b => 
-                                String(b.carro).trim().toUpperCase() === String(u.idCarro).toUpperCase() &&
-                                (!b.hora68 && !b.fecha68)
+                                String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase() &&
+                                (!b.hora68 && !b.fecha68 && b.estadoMovil !== 'en cuartel')
                             );
                             if (matchedTrips.length > 0) {
                                 matchedTrips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
@@ -852,7 +852,7 @@
                         
                         // 3. Fallback al último viaje en general
                         if (!activeTrip) {
-                            const trips = this.bitacoraData.filter(b => String(b.carro).trim().toUpperCase() === String(u.idCarro).toUpperCase());
+                            const trips = this.bitacoraData.filter(b => String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase());
                             if (trips.length > 0) {
                                 trips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
                                 activeTrip = trips.at(0);
@@ -860,31 +860,33 @@
                         }
                         
                         // 4. Sintetizar un viaje temporal si activeTrip sigue siendo nulo o es un viaje ya terminado (para no perder información)
-                        const isCompleted = activeTrip && (activeTrip.hora68 || activeTrip.fecha68);
+                        const isCompleted = activeTrip && (activeTrip.hora68 || activeTrip.fecha68 || activeTrip.estadoMovil === 'en cuartel');
                         if (!activeTrip || isCompleted) {
-                            const activeSvc = (this.allDespachosData || this.despachosData).find(d => String(d.id).trim().toLowerCase() === enServicioRaw.toLowerCase());
+                            const activeSvc = (this.allDespachosData || this.despachosData).find(d => String(d.idServicio || d.id || d._id).trim().toLowerCase() === enServicioRaw.toLowerCase());
                             if (activeSvc) {
                                 let svcUnit = null;
                                 if (activeSvc.unidades) {
-                                    const carKey = Object.keys(activeSvc.unidades).find(k => k.toUpperCase() === u.idCarro.toUpperCase());
+                                    const carKey = Object.keys(activeSvc.unidades).find(k => 
+                                        k.replace(/-/g, '').toUpperCase() === String(u.idCarro).replace(/-/g, '').toUpperCase()
+                                    );
                                     if (carKey) {
                                         svcUnit = activeSvc.unidades[carKey];
                                     }
                                 }
                                 activeTrip = {
-                                    idSalida: svcUnit ? (svcUnit.bitacoraId || "") : "",
+                                    idSalida: svcUnit ? (svcUnit.bitacoraId || svcUnit.idSalida || "") : "",
                                     idServicio: enServicioRaw,
                                     clave: activeSvc.key || activeSvc.clave,
                                     lugar: activeSvc.location || activeSvc.lugar || "",
                                     carro: u.idCarro,
-                                    conductor: svcUnit ? (svcUnit.driverRad || svcUnit.conductor || "") : "",
-                                    obac: svcUnit ? (svcUnit.obacRad || svcUnit.obac || "") : "",
-                                    cuantosBomberos: svcUnit ? (svcUnit.count || svcUnit.cuantosBomberos || "0") : "0",
-                                    hora60: svcUnit ? (svcUnit.departureTime || "") : "",
+                                    conductor: svcUnit ? (svcUnit.driverRad || svcUnit.conductor || "") : (u.conductor || ""),
+                                    obac: svcUnit ? (svcUnit.obacRad || svcUnit.obac || "") : (u.obac || u.aCargo || ""),
+                                    cuantosBomberos: svcUnit ? (svcUnit.count || svcUnit.cuantosBomberos || "0") : (u.numTripulantes || "0"),
+                                    hora60: svcUnit ? (svcUnit.departureTime || svcUnit.hora60 || svcUnit.salida60At || "") : "",
                                     fecha60: "",
-                                    hora63: "",
-                                    hora69: "",
-                                    hora610: ""
+                                    hora63: svcUnit ? (svcUnit.arrivalTime || svcUnit.hora63 || svcUnit.llegada63At || "") : "",
+                                    hora69: svcUnit ? (svcUnit.time69 || svcUnit.hora69 || svcUnit.retorno69At || "") : "",
+                                    hora610: svcUnit ? (svcUnit.time610 || svcUnit.hora610 || svcUnit.llegada610At || "") : ""
                                 };
                             }
                         }
@@ -909,7 +911,7 @@
                 }
 
                 const grid = document.getElementById('fleet-grid');
-                this.fleetData.sort((a, b) => String(a.idCarro).localeCompare(String(b.idCarro), undefined, new Object({numeric: true, sensitivity: 'base'})));
+                this.fleetData.sort((a, b) => String(a?.idCarro || a?.id || a?.ID || '').localeCompare(String(b?.idCarro || b?.id || b?.ID || ''), undefined, new Object({numeric: true, sensitivity: 'base'})));
 
                 grid.innerHTML = this.fleetData.map(unit => {
                     const statusRaw = String(unit.estado || '1').trim();
@@ -926,35 +928,30 @@
                     const btnBase = "w-full py-2 rounded font-bold shadow-sm transition-colors border cursor-pointer disabled:cursor-not-allowed disabled:opacity-50";
                     const authDisabled = !localStorage.getItem('authUserId') ? 'disabled' : '';
 
-                    if (statusRaw === '0' || statusRaw === '0-8') {
-                        borderColorHex = '#64748b'; // slate-500
-                        statusText = 'Fuera de Servicio (0-8)';
-                        badgeClass = 'text-white bg-slate-500 border-slate-600';
-                        detailsHtml = `<div class="bg-slate-50 p-2 rounded border border-slate-100 italic line-clamp-2 mt-2 text-slate-600" style="font-size: 10px;" title="${unit.notas}">Motivo: ${unit.notas || 'Sin registro'}</div>`;
-                        
-                        actionsHtml = `<button ${authDisabled} onclick="App.updateStatus('${unit.idCarro}', '1', this)" class="${btnBase} bg-white text-green-600 border-green-200 hover:bg-green-50 focus:outline-none" style="font-size: 11px;">Dar Disponible (0-9)</button>`;
-                    } else if (enServicio !== '0' && enServicio !== '') {
-                        if (enServicio === '6-13') {
-                            borderColorHex = '#2563eb'; // blue-600
-                            statusText = 'Trámites (6-13)';
-                            badgeClass = 'text-white bg-blue-600 border-blue-700';
-                        } else if (enServicio === '6-14') {
-                            borderColorHex = '#ca8a04'; // yellow-600
-                            statusText = 'Combustible (6-14)';
-                            badgeClass = 'text-white bg-yellow-600 border-yellow-700';
-                        } else {
-                            borderColorHex = '#dc2626'; // red-600
-                            const displayClave = this.getClaveForTrip(trip || { idServicio: enServicio }) || enServicio;
-                            statusText = `Clave ${displayClave}`;
-                            badgeClass = 'text-white bg-red-600 border-red-700 animate-pulse';
-                        }
+                    if (statusRaw === '0-8') {
+                        // 0-8 Fuera de servicio
+                        borderColorHex = '#dc2626'; // red-600
+                        statusText = '0-8';
+                        badgeClass = 'text-white bg-red-600 border-red-700';
+                        detailsHtml = `
+                            <div class="bg-red-50 rounded border border-red-100 p-2 mt-2">
+                                <span class="font-bold text-red-500 block mb-0.5" style="font-size: 9px;">MOTIVO 0-8:</span>
+                                <p class="text-xs text-red-700 font-medium truncate" title="${unit.Observacion || 'Sin motivo'}">${unit.Observacion || 'Sin motivo'}</p>
+                            </div>
+                        `;
+                        actionsHtml = `<button ${authDisabled} onclick="App.habilitarCarro('${unit.idCarro}', this)" class="${btnBase} bg-slate-900 text-white hover:bg-slate-800 border-slate-800" style="font-size: 11px;"><i class="fas fa-check"></i> HABILITAR</button>`;
+                    } else if (enServicio !== '0') {
+                        // En Servicio
+                        borderColorHex = '#f97316'; // orange-500
+                        statusText = 'En Servicio';
+                        badgeClass = 'text-white bg-orange-500 border-orange-600 animate-pulse';
 
                         if (trip) {
-                            const getTime = (t) => t ? `<span class="font-bold text-slate-800">${t}</span>` : `<span class="text-slate-300">--:--</span>`;
-                            const condName = this.getBomberoLabel(trip.conductor);
-                            const obacName = this.getBomberoLabel(trip.obac);
-                            const countVol = trip.cuantosBomberos || '0';
-                            
+                            const condName = this.getBomberoLabel(trip.conductor || unit.conductor);
+                            const obacName = this.getBomberoLabel(trip.obac || unit.obac || unit.aCargo);
+                            const countVol = trip.cuantosBomberos || trip.tripulantes || unit.numTripulantes || '0';
+                            const getTime = (t) => t ? `<span class="font-bold text-slate-700">${String(t).substring(0, 5)}</span>` : '<span class="text-slate-300">--:--</span>';
+
                             detailsHtml = `
                                 <div class="bg-slate-50 rounded border border-slate-100 p-2 mt-2 space-y-1.5">
                                     <div class="flex justify-between" style="font-size: 10px;"><span class="text-slate-500 font-bold">CONDUCTOR:</span> <span class="font-bold text-slate-700 truncate" style="max-width: 140px;">${condName}</span></div>
@@ -969,11 +966,11 @@
                                 </div>
                             `;
                             
-                            if (!trip.fecha610) {
+                            if (!trip.fecha610 && !trip.hora610) {
                                 let gridCols = 0;
                                 let innerHtml = '';
-                                if (!trip.fecha63) { gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '63', this)" class="${btnBase} bg-[rgba(234,179,8,0.15)] text-yellow-400 border-yellow-500/30 hover:bg-[rgba(234,179,8,0.25)] focus:outline-none" style="font-size: 11px;">6-3</button>`; }
-                                if (!trip.fecha69) { gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '69', this)" class="${btnBase} bg-[rgba(59,130,246,0.15)] text-blue-400 border-blue-500/30 hover:bg-[rgba(59,130,246,0.25)] focus:outline-none" style="font-size: 11px;">6-9</button>`; }
+                                if (!trip.fecha63 && !trip.hora63) { gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '63', this)" class="${btnBase} bg-[rgba(234,179,8,0.15)] text-yellow-400 border-yellow-500/30 hover:bg-[rgba(234,179,8,0.25)] focus:outline-none" style="font-size: 11px;">6-3</button>`; }
+                                if (!trip.fecha69 && !trip.hora69) { gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '69', this)" class="${btnBase} bg-[rgba(59,130,246,0.15)] text-blue-400 border-blue-500/30 hover:bg-[rgba(59,130,246,0.25)] focus:outline-none" style="font-size: 11px;">6-9</button>`; }
                                 gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '610', this)" class="${btnBase} bg-[#1e293b] text-slate-300 border-slate-600 hover:bg-slate-700 focus:outline-none" style="font-size: 11px;">6-10</button>`;
                                 actionsHtml = `<div class="grid grid-cols-${gridCols} gap-2 w-full">${innerHtml}</div>`;
                             } else {
@@ -1027,6 +1024,20 @@
                 }).join('');
             },
 
+            cleanDate(dateStr) {
+                if (!dateStr) return '';
+                const str = String(dateStr).trim();
+                if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                    const p = str.split('-');
+                    return `${p[2]}-${p[1]}-${p[0]}`;
+                }
+                if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(str)) {
+                    const p = str.split('-');
+                    return `${p[0].padStart(2, '0')}-${p[1].padStart(2, '0')}-${p[2]}`;
+                }
+                return str;
+            },
+
             // --- HISTORIAL SECTION ---
             populateDateFilter() {
                 const dateSelect = document.getElementById('filter-date');
@@ -1041,7 +1052,7 @@
                 datesSet.add(todayStr); 
 
                 this.bitacoraData.forEach(log => {
-                    let f = this.cleanDate(log.fecha60);
+                    let f = this.cleanDate(log.fecha60 || log.fecha68 || log.fechaDespacho || log.fecha || log.fecha63 || log.fecha69 || log.fecha610);
                     if (f) {
                         const parts = f.split('-');
                         if (parts.length === 3 && parseInt(parts.at(2)) === currentYear) {
@@ -1077,13 +1088,30 @@
                     return;
                 }
 
-                let filteredLogs = this.bitacoraData.filter(b => this.cleanDate(b.fecha60) === selectedDate);
-                filteredLogs = filteredLogs.filter(b => b.fecha68 && String(b.fecha68).trim() !== '');
+                const now = new Date();
+                const todayStr = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
+
+                let filteredLogs = this.bitacoraData.filter(b => {
+                    const logDate = this.cleanDate(b.fecha60 || b.fecha68 || b.fechaDespacho || b.fecha || b.fecha63 || b.fecha69 || b.fecha610);
+                    return logDate === selectedDate || (!logDate && selectedDate === todayStr);
+                });
+                
+                // Incluir salidas finalizadas o que tengan fecha68 / hora68 / estadoMovil cuartel / 6-8 / 6-10
+                filteredLogs = filteredLogs.filter(b => {
+                    const hasEnd = (b.fecha68 && String(b.fecha68).trim() !== '') || 
+                                   (b.hora68 && String(b.hora68).trim() !== '') || 
+                                   b.estadoMovil === 'en cuartel' || 
+                                   b.estado === 'finalizada' ||
+                                   b.estado === 'disponible' ||
+                                   b.estado === '6-8' ||
+                                   (b.hora610 && String(b.hora610).trim() !== '');
+                    return hasEnd;
+                });
                 
                 const serviceLogs = filteredLogs.filter(b => {
                     const resolvedClave = this.getClaveForTrip(b);
                     const c = String(resolvedClave || '').trim();
-                    return c.startsWith('10-') || c.startsWith('6-') || c === 'ACTO';
+                    return c.startsWith('10-') || c.startsWith('6-') || c === 'ACTO' || c !== '';
                 });
 
                 this.renderListHtml('list-service', serviceLogs);
@@ -1250,6 +1278,10 @@
                             <div class="col-span-2 bg-[rgba(16,185,129,0.15)] text-emerald-400 p-2 rounded border border-emerald-500/30 flex justify-between"><span>6-8 (FIN)</span> <span>${log.hora68 || '--:--'}</span></div>
                         </div>
                     `;
+                    let tripulantesDisplay = log.tripulantesNombres || log.tripulantes || '';
+                    if (!tripulantesDisplay && Array.isArray(log.tripulantesDetalle)) {
+                        tripulantesDisplay = log.tripulantesDetalle.map(p => `${p.idRadial || ''} ${p.nombre || p.nombreBombero || ''}`.trim()).filter(Boolean).join(', ');
+                    }
 
                     content.innerHTML = `
                         <div class="space-y-4 uppercase">
@@ -1269,7 +1301,10 @@
                             <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm grid grid-cols-2 gap-3">
                                 <div><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">OBAC</span><p class="text-xs font-bold text-slate-700 truncate" title="${obacNombre}">${obacNombre}</p></div>
                                 <div><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">CONDUCTOR</span><p class="text-xs font-bold text-slate-700 truncate" title="${conductorNombre}">${conductorNombre}</p></div>
-                                <div class="col-span-2 border-t border-slate-100 pt-2"><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">TRIPULACIÓN TOTAL</span><p class="text-sm font-black text-white">${log.cuantosBomberos || '0'}</p></div>
+                                <div class="col-span-2 border-t border-slate-100 pt-2">
+                                    <span class="font-bold text-slate-400 tracking-widest block mb-1" style="font-size: 9px;">TRIPULACIÓN (${log.cuantosBomberos || '0'} BOMBEROS)</span>
+                                    <div id="modal-tripulantes-list" class="text-xs font-semibold text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">${tripulantesDisplay || 'SIN TRIPULANTES IDENTIFICADOS'}</div>
+                                </div>
                             </div>
 
                             <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
@@ -1283,6 +1318,22 @@
                             </div>
                         </div>
                     `;
+
+                    if (window.fbDb && window.fbGetDocs && window.fbCollection) {
+                        try {
+                            const tripColl = window.fbCollection(window.fbDb, 'bitacora', String(log.idSalida), 'tripulantes');
+                            window.fbGetDocs(tripColl).then(snap => {
+                                if (snap && !snap.empty) {
+                                    const tList = snap.docs.map(d => d.data());
+                                    const names = tList.map(t => `${t.idRadial || ''} ${t.nombreBombero || t.nombre || ''}`.trim()).filter(Boolean).join(', ');
+                                    const listEl = document.getElementById('modal-tripulantes-list');
+                                    if (listEl && names) {
+                                        listEl.innerText = names;
+                                    }
+                                }
+                            }).catch(() => {});
+                        } catch(e) {}
+                    }
                 }
             },
 
@@ -1734,23 +1785,25 @@
             },
 
             getBomberoLabel(id) {
-                if (!id || id === '0') return '---';
-                if (String(id).includes(' - ') || String(id).includes(' – ')) return id;
+                if (!id || id === '0' || id === '---') return '---';
+                if (String(id).includes(' • ') || String(id).includes(' - ') || String(id).includes(' – ')) return id;
                 const cleanId = String(id).trim().toUpperCase();
                 if (cleanId === 'S/I') return 'S/I';
                 if (cleanId === 'GESTION' || cleanId === 'GESTIÓN') return 'GESTIÓN';
                 
-                // NUEVA Prioridad 1: Buscar por ID Radial exacto (se eliminó la búsqueda por idRegistro)
-                let found = this.personalData.find(p => String(p.idRadial).trim().toUpperCase() === cleanId);
+                let found = (this.personalData || []).find(p => 
+                    String(p.idRadial || '').trim().toUpperCase() === cleanId ||
+                    String(p.idRegistro || p.ID || p.id || '').trim() === cleanId
+                );
                 
-                // Prioridad 2: Buscar por coincidencia de nombre (como respaldo)
                 if (!found) {
-                    found = this.personalData.find(p => String(p.nombreBombero).trim().toUpperCase().includes(cleanId));
+                    found = (this.personalData || []).find(p => String(p.nombreBombero || '').trim().toUpperCase().includes(cleanId));
                 }
                 
                 if (found) {
                     const shortName = this.formatShortName(found.nombreBombero);
-                    return `${found.idRadial} • ${shortName}`;
+                    const rad = found.idRadial || cleanId;
+                    return `${rad} • ${shortName}`;
                 }
                 return this.formatShortName(cleanId);
             },

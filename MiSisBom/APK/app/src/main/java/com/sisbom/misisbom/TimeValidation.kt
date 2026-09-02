@@ -24,8 +24,8 @@ object TimeValidation {
             val date = sdf.parse(dateStr) ?: return false
             
             val diffMs = System.currentTimeMillis() - date.time
-            // 2 minutes in milliseconds = 120,000 ms
-            return diffMs > 120000
+            // 5 minutes in milliseconds = 300,000 ms
+            return diffMs > 300000 || diffMs < -180000
         } catch (e: Exception) {
             e.printStackTrace()
             // On parse failure, default to false (not too old) to avoid missing critical alarms

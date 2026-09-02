@@ -1,31 +1,17 @@
 package com.sisbom.misisbom
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import coil.compose.AsyncImage
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.isImeVisible
-import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,6 +31,7 @@ import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Send
@@ -68,6 +55,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -200,52 +188,88 @@ fun ActividadTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
     ) {
         item {
             GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        val isOpActive = viewModel.centralOperatorName.isNotEmpty()
+                        val isComandante = user.cargo.trim().uppercase() == "COMANDANTE" && listOf("1", "01", "2", "02", "3", "03").contains(user.idRadial.trim())
+                        val canCloseOp = isOpActive && (viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro) || isComandante)
+
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .background(if (isOpActive) Color(0x2610B981) else Color.Gray.copy(alpha = 0.15f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isOpActive) Icons.Filled.CheckCircle else Icons.Filled.Info,
+                                contentDescription = null,
+                                tint = if (isOpActive) Color(0xFF10B981) else Color.Gray,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "OPERADOR CENTRAL DE ALARMAS",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                            )
+                            Text(
+                                text = if (isOpActive) "EN CONSOLA: ${viewModel.centralOperatorName.uppercase()}" else "CENTRAL CERRADA / SIN OPERADOR",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (isDark) Color.White else Color(0xFF1E293B)
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .background(if (isOpActive) Color(0x2610B981) else Color.Black.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (isOpActive) "ACTIVO" else "CERRADA",
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Black,
+                                color = if (isOpActive) Color(0xFF10B981) else Color.Gray
+                            )
+                        }
+                    }
+
                     val isOpActive = viewModel.centralOperatorName.isNotEmpty()
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(if (isOpActive) Color(0x2610B981) else Color.Gray.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (isOpActive) Icons.Filled.CheckCircle else Icons.Filled.Info,
-                            contentDescription = null,
-                            tint = if (isOpActive) Color(0xFF10B981) else Color.Gray,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    val isComandante = user.cargo.trim().uppercase() == "COMANDANTE" && listOf("1", "01", "2", "02", "3", "03").contains(user.idRadial.trim())
+                    val canCloseOp = isOpActive && (viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro) || isComandante)
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "OPERADOR CENTRAL DE ALARMAS",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                        )
-                        Text(
-                            text = if (isOpActive) "EN CONSOLA: ${viewModel.centralOperatorName.uppercase()}" else "CENTRAL CERRADA / SIN OPERADOR",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (isDark) Color.White else Color(0xFF1E293B)
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .background(if (isOpActive) Color(0x2610B981) else Color.Black.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                    ) {
-                        Text(
-                            text = if (isOpActive) "ACTIVO" else "CERRADA",
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            color = if (isOpActive) Color(0xFF10B981) else Color.Gray
-                        )
+                    if (canCloseOp) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Button(
+                            onClick = { viewModel.closeCentralOperatorSession() },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFDC2626),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().height(36.dp),
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Color.White
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "CERRAR TURNO DE CENTRAL",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
             }
@@ -297,6 +321,7 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
     val user = viewModel.currentUser ?: return
     val isAttending = user.enServicio == dispatch.idServicio
     val isDark = LocalDarkMode.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     
     val baseState = user.estado.trim().uppercase()
     val inService = user.enServicio.trim() != "0" && user.enServicio.trim().isNotEmpty() && !user.enServicio.trim().startsWith("-")
@@ -320,23 +345,28 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.Top
             ) {
-                Text(
-                    text = titleText,
-                    color = titleColor,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black
-                )
-                Text(
-                    text = cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" },
-                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .background(if (isDark) Color(0x66000000) else Color(0x1A000000), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
+                Column {
+                    Text(
+                        text = titleText,
+                        color = titleColor,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+                val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" },
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(if (isDark) Color(0x66000000) else Color(0x1A000000), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
             val claveText = if (dispatch.clave == "10-12" && dispatch.claveApoyo.isNotEmpty()) {
@@ -358,7 +388,21 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                 fontWeight = FontWeight.SemiBold,
                 lineHeight = 18.sp
             )
-            Spacer(modifier = Modifier.height(12.dp))
+            val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
+            val actualLat = if (hasValidLocation) dispatch.lat!! else -34.637373
+            val actualLng = if (hasValidLocation) dispatch.lng!! else -71.125741
+            Spacer(modifier = Modifier.height(10.dp))
+            IncidentMapPreview(
+                lat = actualLat,
+                lng = actualLng,
+                isPending = !hasValidLocation,
+                clave = dispatch.clave,
+                lugar = dispatch.lugar,
+                isDark = isDark
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            
+            val cleanPreinforme = dispatch.preinforme.trim().replace("---", "").trim()
             
             Box(
                 modifier = Modifier
@@ -368,24 +412,26 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                     .padding(12.dp)
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "PRE-INFORME:",
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = dispatch.preinforme.ifEmpty { "A la espera de pre-informe oficial de primera máquina." },
-                        color = if (isDark) Color.White else TextDark,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    androidx.compose.material3.Divider(
-                        color = if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000),
-                        thickness = 1.dp
-                    )
+                    if (cleanPreinforme.isNotEmpty() && !cleanPreinforme.contains("A la espera", ignoreCase = true)) {
+                        Text(
+                            text = "PRE-INFORME:",
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = cleanPreinforme,
+                            color = if (isDark) Color.White else TextDark,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        androidx.compose.material3.Divider(
+                            color = if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000),
+                            thickness = 1.dp
+                        )
+                    }
                     Text(
                         text = "UNIDADES DESPACHADAS:",
                         color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
@@ -598,6 +644,263 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private fun createIncidentMarkerDrawable(context: android.content.Context, colorInt: Int): android.graphics.drawable.Drawable {
+    val size = 80
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+
+    val paintHalo = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(colorInt, 65)
+        style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paintHalo)
+
+    val paintHaloBorder = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(colorInt, 180)
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 2.5f
+    }
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 5f, paintHaloBorder)
+
+    val paintCore = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = colorInt
+        style = android.graphics.Paint.Style.FILL
+    }
+    canvas.drawCircle(size / 2f, size / 2f, 20f, paintCore)
+
+    val paintCoreBorder = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 3f
+    }
+    canvas.drawCircle(size / 2f, size / 2f, 20f, paintCoreBorder)
+
+    val paintText = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.WHITE
+        textSize = 20f
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        textAlign = android.graphics.Paint.Align.CENTER
+    }
+    val textY = (size / 2f) - ((paintText.descent() + paintText.ascent()) / 2f)
+    canvas.drawText("!", size / 2f, textY, paintText)
+
+    return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
+}
+
+@Composable
+fun IncidentMapPreview(
+    lat: Double,
+    lng: Double,
+    isPending: Boolean = false,
+    clave: String,
+    lugar: String = "",
+    isDark: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val cleanKey = clave.trim().uppercase()
+    val pinColorHex = when (cleanKey) {
+        "10-0" -> "#DC2626"
+        "10-1" -> "#EA580C"
+        "10-2" -> "#B45309"
+        "10-3", "10-8" -> "#0284C7"
+        "10-4" -> "#E11D48"
+        "10-5" -> "#7C3AED"
+        "10-6" -> "#0D9488"
+        "10-7" -> "#EAB308"
+        "10-9" -> "#C2410C"
+        "10-10" -> "#0369A1"
+        "10-11" -> "#2563EB"
+        "10-12" -> "#4F46E5"
+        "10-14" -> "#059669"
+        else -> "#DC2626"
+    }
+    val pinColorInt = android.graphics.Color.parseColor(pinColorHex)
+
+    val finalLat = if (lat == 0.0) -34.637373 else lat
+    val finalLng = if (lng == 0.0) -71.125741 else lng
+    val zoomLevel = if (isPending) 14.5 else 16.0
+
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    val openNavigation: () -> Unit = {
+        if (!isPending && finalLat != 0.0 && finalLng != 0.0) {
+            try {
+                val label = if (lugar.isNotBlank()) "$clave - $lugar" else "Emergencia $clave"
+                val uri = android.net.Uri.parse("geo:$finalLat,$finalLng?q=$finalLat,$finalLng(${android.net.Uri.encode(label)})")
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                context.startActivity(android.content.Intent.createChooser(intent, "Navegar a la emergencia con:"))
+            } catch (_: Exception) {
+                try {
+                    val webUri = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=$finalLat,$finalLng")
+                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, webUri)
+                    context.startActivity(webIntent)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
+    val mapViewRef = remember { mutableStateOf<org.osmdroid.views.MapView?>(null) }
+    val markerRef = remember { mutableStateOf<org.osmdroid.views.overlay.Marker?>(null) }
+    val circleRef = remember { mutableStateOf<org.osmdroid.views.overlay.Polygon?>(null) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            mapViewRef.value?.onDetach()
+            mapViewRef.value = null
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF0F172A))
+            .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x33000000), RoundedCornerShape(14.dp))
+    ) {
+        androidx.compose.ui.viewinterop.AndroidView(
+            factory = { ctx ->
+                org.osmdroid.config.Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE))
+                org.osmdroid.config.Configuration.getInstance().userAgentValue = "MiSisBom/2.1 (Android Bomberos Emergency App)"
+
+                org.osmdroid.views.MapView(ctx).apply {
+                    setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+                    setMultiTouchControls(false)
+                    zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
+                    isTilesScaledToDpi = true
+                    controller.setZoom(zoomLevel)
+                    controller.setCenter(org.osmdroid.util.GeoPoint(finalLat, finalLng))
+                    mapViewRef.value = this
+                }
+            },
+            update = { mapView ->
+                val point = org.osmdroid.util.GeoPoint(finalLat, finalLng)
+                mapView.controller.setCenter(point)
+                mapView.controller.setZoom(zoomLevel)
+
+                if (!isPending) {
+                    // Marcador de incidente
+                    if (markerRef.value == null) {
+                        val marker = org.osmdroid.views.overlay.Marker(mapView).apply {
+                            position = point
+                            setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
+                            icon = createIncidentMarkerDrawable(context, pinColorInt)
+                            setInfoWindow(null)
+                        }
+                        markerRef.value = marker
+                        mapView.overlays.add(marker)
+                    } else {
+                        markerRef.value?.position = point
+                        markerRef.value?.icon = createIncidentMarkerDrawable(context, pinColorInt)
+                    }
+                } else {
+                    markerRef.value?.let {
+                        mapView.overlays.remove(it)
+                        markerRef.value = null
+                    }
+                }
+
+                mapView.invalidate()
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Overlay transparente interactivo
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = if (isPending) 0.55f else 0.05f))
+                .clickable(enabled = !isPending) { openNavigation() }
+        )
+
+        if (isPending) {
+            // Radar loader animado
+            Column(
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Box(
+                    modifier = Modifier.size(50.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .background(Color(0xFF0F172A).copy(alpha = 0.9f), CircleShape)
+                            .border(1.5.dp, Color(0xFFF59E0B), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.LocationOn,
+                            contentDescription = "Buscando ubicación",
+                            tint = Color(0xFFF59E0B),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "ESPERANDO UBICACIÓN DE CENTRAL...",
+                    color = Color(0xFFF1F5F9),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            // Badge superior "UBICACIÓN PENDIENTE"
+            Row(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
+                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(Color(0xFFF59E0B), CircleShape)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "UBICACIÓN PENDIENTE",
+                    color = Color(0xFFFDE68A),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Badge inferior izquierdo: Dirección del incidente
+        if (lugar.isNotBlank()) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+                    .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = lugar.uppercase(),
+                    color = Color(0xFFCBD5E1),
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
         }
     }

@@ -171,15 +171,12 @@
         import { getAuth, signInAnonymously } from "./libs/firebase-auth.js";
         import { getFirestore, doc, updateDoc, collection, getDocs } from "./libs/firebase-firestore.js";
 
-        // CONFIGURACIÓN FIREBASE
-        const firebaseConfig = new Object({
-            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-            authDomain: "sisbom-de5f8.firebaseapp.com",
-            projectId: "sisbom-de5f8",
-            storageBucket: "sisbom-de5f8.firebasestorage.app",
-            messagingSenderId: "39449538456",
-            appId: "1:39449538456:web:64f767264356ae587485ed"
-        });
+        // CONFIGURACIÓN FIREBASE DINÁMICA
+        let firebaseConfig = {};
+        try {
+            const saved = localStorage.getItem("firebaseConfig");
+            if (saved) firebaseConfig = JSON.parse(saved);
+        } catch(e) {}
 
         const CACHE_KEY = "sisbom_accesos_cache_v4";
         let fbDb = null;

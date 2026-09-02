@@ -103,7 +103,9 @@ data class Dispatch(
     val operadorFinal: String = "",
     val unidades: Map<String, Map<String, Any>> = emptyMap(),
     val solicitarConfirmacion: Boolean = false,
-    val estado: String = ""
+    val estado: String = "",
+    val lat: Double? = null,
+    val lng: Double? = null
 )
 
 data class Alert(
@@ -591,6 +593,24 @@ class FirebaseRepository {
             .addOnFailureListener { onFailure(it) }
     }
 
+    fun closeCentralSession(onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {
+        if (isReadOnly) {
+            android.util.Log.w("SisBom", "Write closeCentralSession blocked: Read-Only Mode")
+            onSuccess()
+            return
+        }
+        val now = java.text.SimpleDateFormat("dd-MM-yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        db.collection("accesos").document("central")
+            .update(mapOf(
+                "estado" to "inactivo",
+                "fechaSalida" to now,
+                "operadorActivo" to "",
+                "idRegistro" to ""
+            ))
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener { onFailure(it) }
+    }
+
     fun updateVehicleService(vehicleId: String, enServicio: String, onSuccess: () -> Unit) {
         if (isReadOnly) {
             android.util.Log.w("SisBom", "Write updateVehicleService blocked: Read-Only Mode")
@@ -685,6 +705,55 @@ class FirebaseRepository {
             .set(data)
             .addOnSuccessListener { onSuccess() }
             .addOnFailureListener { onFailure(it) }
+    }
+
+    fun updateFirefighterLocation(
+        serviceId: String,
+        userId: String,
+        idRadial: String,
+        nombre: String,
+        lat: Double,
+        lng: Double,
+        accuracy: Float? = null,
+        isAttending: Boolean = true,
+        onSuccess: (() -> Unit)? = null,
+        onFailure: ((Exception) -> Unit)? = null
+    ) {
+        if (serviceId.isEmpty() || userId.isEmpty()) return
+        val now = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val data = hashMapOf(
+            "idRegistro" to userId,
+            "idRadial" to idRadial,
+            "nombre" to nombre,
+            "asistira" to isAttending,
+            "lat" to lat,
+            "lng" to lng,
+            "accuracy" to (accuracy?.toDouble() ?: 0.0),
+            "hora" to now,
+            "timestamp" to System.currentTimeMillis()
+        )
+        db.collection("despachos").document(serviceId)
+            .collection("asistencias").document(userId)
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
+            .addOnSuccessListener { onSuccess?.invoke() }
+            .addOnFailureListener { onFailure?.invoke(it) }
+    }
+
+    fun removeFirefighterLocation(
+        serviceId: String,
+        userId: String,
+        onSuccess: (() -> Unit)? = null
+    ) {
+        if (serviceId.isEmpty() || userId.isEmpty()) return
+        val data = hashMapOf<String, Any>(
+            "asistira" to false,
+            "enServicio" to "0",
+            "timestamp" to System.currentTimeMillis()
+        )
+        db.collection("despachos").document(serviceId)
+            .collection("asistencias").document(userId)
+            .set(data, com.google.firebase.firestore.SetOptions.merge())
+            .addOnSuccessListener { onSuccess?.invoke() }
     }
 
     fun addStatusHistoryEntry(userId: String, status: String, onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {
@@ -798,6 +867,45 @@ fun formatProfilePhotoUrl(foto: String): String {
                 }
             }
 
+            val geoMap = doc.get("geo") as? Map<*, *>
+            val ubicacionGpsMap = doc.get("ubicacionGps") as? Map<*, *>
+            val coordenadasMap = doc.get("coordenadas") as? Map<*, *>
+            val alertanteGeoMap = doc.get("alertanteGeo") as? Map<*, *>
+
+            val latVal = (geoMap?.get("lat") as? Number)?.toDouble()
+                ?: (geoMap?.get("lat") as? String)?.toDoubleOrNull()
+                ?: (ubicacionGpsMap?.get("lat") as? Number)?.toDouble()
+                ?: (ubicacionGpsMap?.get("lat") as? String)?.toDoubleOrNull()
+                ?: (coordenadasMap?.get("lat") as? Number)?.toDouble()
+                ?: (coordenadasMap?.get("lat") as? String)?.toDoubleOrNull()
+                ?: (doc.get("lat") as? Number)?.toDouble()
+                ?: (doc.get("lat") as? String)?.toDoubleOrNull()
+                ?: (doc.get("latitude") as? Number)?.toDouble()
+                ?: (doc.get("latitude") as? String)?.toDoubleOrNull()
+                ?: (alertanteGeoMap?.get("lat") as? Number)?.toDouble()
+                ?: (alertanteGeoMap?.get("lat") as? String)?.toDoubleOrNull()
+
+            val lngVal = (geoMap?.get("lng") as? Number)?.toDouble()
+                ?: (geoMap?.get("lng") as? String)?.toDoubleOrNull()
+                ?: (geoMap?.get("lon") as? Number)?.toDouble()
+                ?: (geoMap?.get("lon") as? String)?.toDoubleOrNull()
+                ?: (ubicacionGpsMap?.get("lng") as? Number)?.toDouble()
+                ?: (ubicacionGpsMap?.get("lng") as? String)?.toDoubleOrNull()
+                ?: (ubicacionGpsMap?.get("lon") as? Number)?.toDouble()
+                ?: (ubicacionGpsMap?.get("lon") as? String)?.toDoubleOrNull()
+                ?: (coordenadasMap?.get("lng") as? Number)?.toDouble()
+                ?: (coordenadasMap?.get("lng") as? String)?.toDoubleOrNull()
+                ?: (coordenadasMap?.get("lon") as? Number)?.toDouble()
+                ?: (coordenadasMap?.get("lon") as? String)?.toDoubleOrNull()
+                ?: (doc.get("lng") as? Number)?.toDouble()
+                ?: (doc.get("lng") as? String)?.toDoubleOrNull()
+                ?: (doc.get("lon") as? Number)?.toDouble()
+                ?: (doc.get("lon") as? String)?.toDoubleOrNull()
+                ?: (doc.get("longitude") as? Number)?.toDouble()
+                ?: (doc.get("longitude") as? String)?.toDoubleOrNull()
+                ?: (alertanteGeoMap?.get("lng") as? Number)?.toDouble()
+                ?: (alertanteGeoMap?.get("lng") as? String)?.toDoubleOrNull()
+
             Dispatch(
                 idServicio = doc.id,
                 clave = doc.getString("clave") ?: "",
@@ -812,7 +920,9 @@ fun formatProfilePhotoUrl(foto: String): String {
                 operadorFinal = doc.getString("operadorFinal") ?: "",
                 unidades = unidadesMap,
                 solicitarConfirmacion = doc.getBoolean("solicitarConfirmacion") ?: false,
-                estado = doc.getString("estado") ?: ""
+                estado = doc.getString("estado") ?: "",
+                lat = latVal,
+                lng = lngVal
             )
         } catch (e: Exception) {
             null

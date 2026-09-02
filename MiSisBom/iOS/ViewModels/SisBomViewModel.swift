@@ -56,6 +56,7 @@ class SisBomViewModel: ObservableObject {
     @Published var attendanceList: [AttendanceSheet] = []
     @Published var isCentralActive: Bool = false
     @Published var centralOperatorName: String = ""
+    @Published var centralOperatorId: String = ""
     
     // Navigation details
     @Published var selectedDispatchId: String? = nil
@@ -240,16 +241,18 @@ class SisBomViewModel: ObservableObject {
             let estado = data["estado"] as? String ?? ""
             let idReg = data["idRegistro"] as? String ?? ""
             let opName = (data["nombreBombero"] as? String) ?? (data["operador"] as? String) ?? ""
+            let isActive = estado.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "activo"
             
             let myId = self.currentUser?.idRegistro ?? ""
             let myName = self.currentUser?.nombreBombero ?? ""
             
-            let isMeActive = estado.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "activo" &&
+            let isMeActive = isActive &&
                 ((!myId.isEmpty && idReg.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myId.lowercased()) ||
                  (!myName.isEmpty && opName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == myName.lowercased()))
             
             self.isCentralActive = isMeActive
-            self.centralOperatorName = opName
+            self.centralOperatorName = isActive ? opName : ""
+            self.centralOperatorId = isActive ? idReg : ""
             
             if isMeActive {
                 if self.currentUser?.estado != "0-9" {
@@ -290,12 +293,74 @@ class SisBomViewModel: ObservableObject {
             self.saveCache(list, key: "cache_dispatches")
             
             for d in list {
-                if !self.knownDispatchIds.contains(d.idServicio) {
+                let cleanClave = d.clave.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let is1030 = cleanClave == "10-30" || cleanClave == "10_30" || cleanClave.contains("10-30")
+                let trackerKey1030 = "\(d.idServicio)_10_30"
+
+                let userStatus = self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                let isSpecial = userStatus.contains("SUSPENDIDO") || userStatus == "CDS" || userStatus.contains("LICENCIA") || userStatus == "PERMISO"
+                let is09 = userStatus == "0-9" && !isSpecial
+                let isAbsoluteSilence = UserDefaults.standard.bool(forKey: "SILENCIO_ABSOLUTO") || userStatus.contains("ABSOLUTO")
+                let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                let isAttending = !userEnServicio.isEmpty && userEnServicio == d.idServicio
+
+                if is1030 && !self.knownDispatchIds.contains(trackerKey1030) {
+                    self.knownDispatchIds.insert(trackerKey1030)
                     self.knownDispatchIds.insert(d.idServicio)
-                        let cleanClave = d.clave.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                        let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
+                    
+                    // Alarma 10-30: Suena c10_30 para 0-9 (sin asistir o no asistir) y 0-8 (sin silencio absoluto)
+                    if !isSpecial && !isAbsoluteSilence && !isAttending {
+                        self.playSound(soundName: "c10_30")
+                        self.triggerVibration()
+                    }
+                } else if !self.knownDispatchIds.contains(d.idServicio) {
+                    self.knownDispatchIds.insert(d.idServicio)
+                    let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
+                    let is08 = userStatus == "0-8" || isSpecial
+                    
+                    if !is08 && !isAbsoluteSilence {
                         self.playSound(soundName: soundName)
                         self.triggerVibration()
+                    }
+                }
+
+                // 2. Unit-level 12-10 and 6-6 Checks
+                for (unitName, unit) in d.unidades {
+                    let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let isAssignedToThis = userEnServicio == d.idServicio
+                    let hasDeclined = userEnServicio.hasPrefix("-")
+                    let userStatus = self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                    let cargoUpper = self.currentUser?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                    let radialUpper = self.currentUser?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                    let isConductor = (self.currentUser?.conductor ?? 0) == 1 || cargoUpper.contains("CONDUCTOR") || cargoUpper.contains("MAQUINISTA") || radialUpper.hasPrefix("C")
+
+                    // 12-10 Conductor Request
+                    let condTs = unit.solicitudConductorTimestamp
+                    let condAt = unit.solicitudConductorAt
+                    if (condTs > 0 || !condAt.isEmpty) && isConductor && !isAssignedToThis {
+                        let key1210 = "\(d.idServicio)_1210_\(unitName)_\(condTs > 0 ? String(condTs) : condAt)"
+                        if !self.knownDispatchIds.contains(key1210) {
+                            self.knownDispatchIds.insert(key1210)
+                            if is09 && !hasDeclined {
+                                self.playSound(soundName: "alerta")
+                            }
+                            self.triggerVibration()
+                        }
+                    }
+
+                    // 6-6 Personal Request
+                    let persTs = unit.solicitudPersonalTimestamp
+                    let persAt = unit.solicitudPersonalAt
+                    if (persTs > 0 || !persAt.isEmpty) && !isAssignedToThis {
+                        let key66 = "\(d.idServicio)_66_\(unitName)_\(persTs > 0 ? String(persTs) : persAt)"
+                        if !self.knownDispatchIds.contains(key66) {
+                            self.knownDispatchIds.insert(key66)
+                            if is09 && !hasDeclined {
+                                self.playSound(soundName: "alerta")
+                            }
+                            self.triggerVibration()
+                        }
+                    }
                 }
             }
             
@@ -995,5 +1060,33 @@ class SisBomViewModel: ObservableObject {
             }
         }
         return UIImage(named: "logo") ?? UIImage(systemName: "shield.fill") ?? UIImage()
+    }
+
+    func closeCentralOperatorSession() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd-MM-yyyy HH:mm:ss"
+        let nowStr = formatter.string(from: Date())
+        
+        repository.updateCentralSession(
+            updates: [
+                "estado": "inactivo",
+                "fechaSalida": nowStr,
+                "operadorActivo": "",
+                "idRegistro": ""
+            ],
+            completion: { [weak self] result in
+                guard let self = self else { return }
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        self.centralOperatorName = ""
+                        self.centralOperatorId = ""
+                        self.isCentralActive = false
+                    case .failure(let error):
+                        print("Error closing central session: \(error.localizedDescription)")
+                    }
+                }
+            }
+        )
     }
 }

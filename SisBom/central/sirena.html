@@ -640,8 +640,7 @@
                     await signInWithEmailAndPassword(auth, email, storedPassSecure);
                     console.log("Firebase conectado con credenciales en Sirena");
                 } else {
-                    await signInAnonymously(auth);
-                    console.log("Firebase conectado de forma anónima en Sirena");
+                    console.warn("Sin credenciales para autenticar Firebase en Sirena");
                 }
                 window.processSyncQueue();
                 return true;

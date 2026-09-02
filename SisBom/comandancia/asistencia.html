@@ -409,15 +409,12 @@
             }
         });
 
-        // --- CONFIGURACIÓN DE FIREBASE ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-            authDomain: "sisbom-de5f8.firebaseapp.com",
-            projectId: "sisbom-de5f8",
-            storageBucket: "sisbom-de5f8.firebasestorage.app",
-            messagingSenderId: "39449538456",
-            appId: "1:39449538456:web:64f767264356ae587485ed"
-        };
+        // --- CONFIGURACIÓN DE FIREBASE DINÁMICA ---
+        let firebaseConfig = {};
+        try {
+            const saved = localStorage.getItem("firebaseConfig");
+            if (saved) firebaseConfig = JSON.parse(saved);
+        } catch(e) {}
 
         let fbDb = null;
         window.fbDoc = null;
@@ -462,6 +459,15 @@
                 window.fbGetDocs = getDocs;
                 window.fbWriteBatch = writeBatch;
                 window.fbOnSnapshot = onSnapshot;
+
+                window.rawFbDoc = doc;
+                window.rawFbSetDoc = setDoc;
+                window.rawFbUpdateDoc = updateDoc;
+                window.rawFbDeleteDoc = deleteDoc;
+                window.rawFbCollection = collection;
+                window.rawFbGetDocs = getDocs;
+                window.rawFbWriteBatch = writeBatch;
+                window.rawFbOnSnapshot = onSnapshot;
 
                 const app = initializeApp(firebaseConfig);
                 const auth = getAuth(app);
@@ -532,42 +538,53 @@
                 this.initYearFilter(); 
                 this.setupSearch();
 
-                await window.initFirebase();
-
-                // 1. CARGA OPTIMISTA Y COPIA LOCAL DE RESPALDO
+                // 1. CARGA INMEDIATA ULTRARRÁPIDA DESDE ALMACENAMIENTO LOCAL (0 ms)
                 try {
-                    // Cargar db_backup.json local
-                    try {
-                        const localRes = await fetch('../asistencias/db_backup.json');
-                        if (localRes.ok) {
-                            const localData = await localRes.json();
-                            this.localCacheLists = localData.asistencia || [];
-                        }
-                    } catch (err) {
-                        console.warn("No se pudo cargar la base de datos local db_backup.json:", err);
-                    }
-
-                    const cachedData = localStorage.getItem('sisbom_asistencia_cache');
+                    const cachedData = localStorage.getItem('db_asistencia') || localStorage.getItem('sisbom_db_asistencia') || localStorage.getItem('sisbom_asistencia_cache');
                     if (cachedData) {
                         this.groupedLists = JSON.parse(cachedData);
-                        // Rellenar bomberos desde la base de datos local en la caché para las listas aprobadas
-                        this.groupedLists.forEach(g => {
-                            if ((!g.firefighters || g.firefighters.length === 0) && g.aprobadoPor) {
-                                const localG = this.localCacheLists.find(lg => String(lg.idLista) === String(g.idLista));
-                                if (localG && localG.firefighters) {
-                                    g.firefighters = localG.firefighters;
-                                }
-                            }
-                        });
-                        this.renderDashboard();
                     }
-                    const persCached = localStorage.getItem('db_personal');
+                    const persCached = localStorage.getItem('db_personal') || localStorage.getItem('sisbom_db_personal');
                     if(persCached) {
                         this.personnelData = JSON.parse(persCached);
                     }
+                    if (this.groupedLists && this.groupedLists.length > 0) {
+                        this.renderDashboard();
+                    }
                 } catch (e) {
-                    console.warn("No se pudo cargar la caché previa", e);
+                    console.warn("Error en lectura inicial de caché:", e);
                 }
+
+                // Cargar db_backup.json local si está disponible
+                try {
+                    const localRes = await fetch('../asistencias/db_backup.json');
+                    if (localRes.ok) {
+                        const localData = await localRes.json();
+                        this.localCacheLists = localData.asistencia || [];
+                        if ((!this.groupedLists || this.groupedLists.length === 0) && this.localCacheLists.length > 0) {
+                            this.groupedLists = this.localCacheLists;
+                            this.renderDashboard();
+                        }
+                    }
+                } catch (err) {
+                    console.warn("No se pudo cargar db_backup.json:", err);
+                }
+
+                // Rellenar bomberos para listas aprobadas
+                if (this.groupedLists && this.groupedLists.length > 0 && this.localCacheLists && this.localCacheLists.length > 0) {
+                    this.groupedLists.forEach(g => {
+                        if ((!g.firefighters || g.firefighters.length === 0) && g.aprobadoPor) {
+                            const localG = this.localCacheLists.find(lg => String(lg.idLista) === String(g.idLista));
+                            if (localG && localG.firefighters) {
+                                g.firefighters = localG.firefighters;
+                            }
+                        }
+                    });
+                    this.renderDashboard();
+                }
+
+                // 2. Conexión en segundo plano a Firebase
+                await window.initFirebase();
 
                 // 2. CARGA PRINCIPAL DESDE FIRESTORE EN TIEMPO REAL
                 this.loadData();
@@ -671,7 +688,7 @@
                 optionAll.textContent = 'Todos los años';
                 select.appendChild(optionAll);
 
-                for (let y = currentYear + 1; y >= 1963; y--) {
+                for (let y = currentYear; y >= 1963; y--) {
                     const option = document.createElement('option');
                     option.value = y.toString();
                     option.textContent = `Año ${y}`;
@@ -680,6 +697,16 @@
 
                 const savedYear = localStorage.getItem('selectedCycleYear') || String(currentYear);
                 select.value = savedYear;
+
+                window.changeYear = (yr) => {
+                    const s = document.getElementById('yearFilter');
+                    if (s) {
+                        s.value = String(yr);
+                        this.currentPage = 1;
+                        this.renderDashboard();
+                    }
+                };
+                window.handleCycleChange = window.changeYear;
 
                 select.addEventListener('change', () => {
                     this.currentPage = 1; 
@@ -714,7 +741,7 @@
                     this.hideLoader();
                     
                     try {
-                        const cachedData = localStorage.getItem('sisbom_asistencia_cache');
+                        const cachedData = localStorage.getItem('db_asistencia') || localStorage.getItem('sisbom_db_asistencia') || localStorage.getItem('sisbom_asistencia_cache');
                         if (cachedData) {
                             let lists = JSON.parse(cachedData);
                             let localDrafts = [];
@@ -1311,32 +1338,62 @@
                     this.unsubDetail = null;
                 }
 
-                // Subscripción onSnapshot para la subcolección de bomberos
+                // Carga de bomberos para la lista seleccionada
                 if (!this.isCreatingNew) {
-                    if (group.aprobadoPor && group.firefighters && group.firefighters.length > 0) {
-                        // Es una lista aprobada y ya tiene bomberos cargados en la caché local / db_backup, no leemos de Firebase
+                    if (group.firefighters && group.firefighters.length > 0) {
                         this.editableFirefighters = JSON.parse(JSON.stringify(group.firefighters));
                         this.renderFirefightersTable();
                     } else {
-                        // Es pendiente o no está en caché local, cargamos de Firebase
                         this.showLoader("Cargando personal...");
+                    }
+
+                    try {
                         if (!fbDb) await window.initFirebase();
+                        const colRef = window.rawFbCollection ? window.rawFbCollection(fbDb, `asistencia/${idLista}/bomberos`) : window.fbCollection(fbDb, `asistencia/${idLista}/bomberos`);
                         
-                        this.unsubDetail = window.fbOnSnapshot(window.fbCollection(fbDb, `asistencia/${idLista}/bomberos`), (subSnap) => {
-                            let ffs = [];
-                            subSnap.forEach(docSnap => ffs.push(docSnap.data()));
-                            group.firefighters = ffs;
-                            
-                            // Solo actualizamos la tabla si no estamos editando activamente
-                            if (!this.isEditing) {
-                                this.editableFirefighters = JSON.parse(JSON.stringify(group.firefighters));
-                                this.renderFirefightersTable();
+                        // Carga inicial rápida con getDocs
+                        if (window.rawFbGetDocs) {
+                            try {
+                                const subSnap = await window.rawFbGetDocs(colRef);
+                                let ffs = [];
+                                subSnap.forEach(docSnap => ffs.push(docSnap.data()));
+                                if (ffs.length > 0) {
+                                    ffs.sort((a, b) => (parseInt(a.ordenEnLista) || 999) - (parseInt(b.ordenEnLista) || 999));
+                                    group.firefighters = ffs;
+                                    if (!this.isEditing) {
+                                        this.editableFirefighters = JSON.parse(JSON.stringify(ffs));
+                                        this.renderFirefightersTable();
+                                    }
+                                    this.hideLoader();
+                                }
+                            } catch(e) {
+                                console.warn("Error rawFbGetDocs on bomberos:", e);
                             }
-                            this.hideLoader();
-                        }, (error) => {
-                            console.warn("Detail attendance snapshot listener error in Comandancia:", error);
-                            this.hideLoader();
-                        });
+                        }
+
+                        // Suscripción onSnapshot en tiempo real
+                        const onSnapFn = window.rawFbOnSnapshot || window.fbOnSnapshot;
+                        if (typeof onSnapFn === 'function') {
+                            this.unsubDetail = onSnapFn(colRef, (subSnap) => {
+                                let ffs = [];
+                                subSnap.forEach(docSnap => ffs.push(docSnap.data()));
+                                if (ffs.length > 0) {
+                                    ffs.sort((a, b) => (parseInt(a.ordenEnLista) || 999) - (parseInt(b.ordenEnLista) || 999));
+                                    group.firefighters = ffs;
+                                    if (!this.isEditing) {
+                                        this.editableFirefighters = JSON.parse(JSON.stringify(ffs));
+                                        this.renderFirefightersTable();
+                                    }
+                                }
+                                this.hideLoader();
+                            }, (error) => {
+                                console.warn("Detail attendance snapshot listener error in Comandancia:", error);
+                                this.hideLoader();
+                            });
+                        }
+                    } catch (err) {
+                        console.warn("Exception loading attendance bomberos:", err);
+                        this.hideLoader();
                     }
                 } else {
                     this.editableFirefighters = JSON.parse(JSON.stringify(group.firefighters));
@@ -2201,14 +2258,14 @@
                 doc.open();
                 doc.write(printHTML);
                 doc.write(`
-                    <script>
+                    <` + `script>
                         window.onload = () => { 
                             setTimeout(() => { window.print(); }, 500);
                         };
                         window.onafterprint = () => {
                             parent.document.body.removeChild(window.frameElement);
                         };
-                    <\/script>
+                    <` + `/script>
                 `);
                 doc.close();
                 iframe.contentWindow.focus();

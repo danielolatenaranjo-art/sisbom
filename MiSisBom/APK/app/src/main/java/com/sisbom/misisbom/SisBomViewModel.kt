@@ -177,6 +177,7 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
     var isCentralActive by mutableStateOf(false)
     var isSyncingAttendance by mutableStateOf(false)
     var centralOperatorName by mutableStateOf("")
+    var centralOperatorId by mutableStateOf("")
 
     // Navegación local de sub-detalles
     var selectedDispatchId by mutableStateOf<String?>(null)
@@ -689,13 +690,15 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     val myId = currentUser?.idRegistro ?: ""
                     val myName = currentUser?.nombreBombero ?: ""
 
-                    val isMeActive = estado.trim().lowercase() == "activo" &&
+                    val isActive = estado.trim().lowercase() == "activo"
+                    val isMeActive = isActive &&
                             ((myId.isNotEmpty() && idReg.trim().lowercase() == myId.lowercase()) ||
                                     (myName.isNotEmpty() && opName.trim().lowercase() == myName.lowercase()))
 
                     isCentralActive = isMeActive
                     prefs.edit().putBoolean("IS_CENTRAL_MODE", isMeActive).apply()
-                    centralOperatorName = opName
+                    centralOperatorName = if (isActive) opName else ""
+                    centralOperatorId = if (isActive) idReg else ""
 
                     if (isMeActive) {
                         if (currentUser?.estado != "0-9") {
@@ -1076,23 +1079,178 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private var locationListener: android.location.LocationListener? = null
+    private var activeTrackingServiceId: String? = null
+
+    fun startFirefighterGpsTracking(serviceId: String) {
+        stopFirefighterGpsTracking()
+        val user = currentUser ?: return
+        activeTrackingServiceId = serviceId
+
+        if (androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED &&
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            android.util.Log.w("SisBom", "Permisos de ubicación no otorgados para rastreo")
+            return
+        }
+
+        try {
+            val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager ?: return
+            
+            // Coordenadas Cuartel (Placilla por defecto)
+            val cuartelLat = -34.637373
+            val cuartelLng = -71.125741
+
+            // 1. Enviar última posición conocida de inmediato si está disponible
+            val lastGps = try { locationManager.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER) } catch(_: SecurityException) { null }
+            val lastNet = try { locationManager.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER) } catch(_: SecurityException) { null }
+            val bestLast = if (lastGps != null && lastNet != null) {
+                if (lastGps.time > lastNet.time) lastGps else lastNet
+            } else lastGps ?: lastNet
+
+            if (bestLast != null) {
+                repository.updateFirefighterLocation(
+                    serviceId = serviceId,
+                    userId = user.idRegistro,
+                    idRadial = user.idRadial,
+                    nombre = user.nombreBombero,
+                    lat = bestLast.latitude,
+                    lng = bestLast.longitude,
+                    accuracy = bestLast.accuracy,
+                    isAttending = true
+                )
+            }
+
+            // 2. Escuchar cambios cada 30 segundos
+            val listener = object : android.location.LocationListener {
+                override fun onLocationChanged(loc: android.location.Location) {
+                    if (activeTrackingServiceId == null || activeTrackingServiceId != serviceId) {
+                        stopFirefighterGpsTracking()
+                        return
+                    }
+
+                    // Transmitir posición a Firestore
+                    repository.updateFirefighterLocation(
+                        serviceId = serviceId,
+                        userId = user.idRegistro,
+                        idRadial = user.idRadial,
+                        nombre = user.nombreBombero,
+                        lat = loc.latitude,
+                        lng = loc.longitude,
+                        accuracy = loc.accuracy,
+                        isAttending = true
+                    )
+
+                    // Auto-desconexión al Cuartel si está a <= 100 metros
+                    val distResults = FloatArray(1)
+                    android.location.Location.distanceBetween(loc.latitude, loc.longitude, cuartelLat, cuartelLng, distResults)
+                    val distMetros = distResults[0]
+
+                    if (distMetros <= 100f) {
+                        android.util.Log.d("SisBom", "Llegó al cuartel (${distMetros}m). Auto-apagando GPS.")
+                        stopFirefighterGpsTracking()
+                        showSystemToast("Has llegado al Cuartel. GPS desconectado.")
+                    }
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+            }
+            locationListener = listener
+
+            // Registrar cada 15 segundos (15,000 ms) sin umbral de distancia para tracking en tiempo real
+            if (locationManager.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
+                try {
+                    locationManager.requestLocationUpdates(
+                        android.location.LocationManager.GPS_PROVIDER,
+                        15000L,
+                        0f,
+                        listener,
+                        Looper.getMainLooper()
+                    )
+                } catch(_: SecurityException) {}
+            }
+            if (locationManager.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+                try {
+                    locationManager.requestLocationUpdates(
+                        android.location.LocationManager.NETWORK_PROVIDER,
+                        15000L,
+                        0f,
+                        listener,
+                        Looper.getMainLooper()
+                    )
+                } catch(_: SecurityException) {}
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("SisBom", "Error iniciando rastreo GPS: ${e.message}")
+        }
+    }
+
+    fun stopFirefighterGpsTracking() {
+        try {
+            if (locationListener != null) {
+                val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+                locationManager?.removeUpdates(locationListener!!)
+                locationListener = null
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("SisBom", "Error deteniendo rastreo GPS: ${e.message}")
+        }
+        val user = currentUser
+        val svcId = activeTrackingServiceId
+        if (user != null && svcId != null) {
+            repository.removeFirefighterLocation(svcId, user.idRegistro)
+        }
+        activeTrackingServiceId = null
+    }
+
     // TRIPULAR O CANCELAR SERVICIO DESPACHO
     fun attendService(serviceId: String, isAttending: Boolean) {
         val user = currentUser ?: return
         val finalId = if (isAttending) serviceId else "0"
 
         if (isAttending) {
-            if (serviceId != "0") {
-                val isActive = dispatchesList.any { it.idServicio == serviceId }
-                if (!isActive) {
-                    showSystemToast("El despacho ya no está activo.")
-                    return
-                }
-            }
             try {
                 SoundPlayer.release()
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+            startFirefighterGpsTracking(serviceId)
+
+            // Registro inmediato en la subcolección de asistencias del despacho
+            if (serviceId != "0") {
+                try {
+                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    val now = System.currentTimeMillis()
+                    val horaStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(now))
+                    val entry = hashMapOf<String, Any>(
+                        "idRegistro" to user.idRegistro,
+                        "idRadial" to user.idRadial,
+                        "nombre" to user.nombreBombero,
+                        "asistira" to true,
+                        "enServicio" to serviceId,
+                        "hora" to horaStr,
+                        "timestamp" to now
+                    )
+                    db.collection("despachos").document(serviceId).collection("asistencias").document(user.idRegistro)
+                        .set(entry, com.google.firebase.firestore.SetOptions.merge())
+                } catch (_: Exception) {}
+            }
+        } else {
+            stopFirefighterGpsTracking()
+            if (serviceId != "0") {
+                try {
+                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    db.collection("despachos").document(serviceId).collection("asistencias").document(user.idRegistro).delete()
+                } catch (_: Exception) {}
             }
         }
 
@@ -1121,6 +1279,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         val user = currentUser ?: return
         val finalService = "-$serviceId"
         
+        stopFirefighterGpsTracking()
+
         // Actualización optimista
         val updated = user.copy(enServicio = finalService)
         currentUser = updated
@@ -1509,6 +1669,7 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             val j = JSONObject()
             j.put("idServicio", d.idServicio)
             j.put("clave", d.clave)
+            j.put("claveApoyo", d.claveApoyo)
             j.put("lugar", d.lugar)
             j.put("preinforme", d.preinforme)
             j.put("carros", d.carros)
@@ -1517,6 +1678,10 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             j.put("hora67", d.hora67)
             j.put("quienDespacha", d.quienDespacha)
             j.put("operadorFinal", d.operadorFinal)
+            j.put("solicitarConfirmacion", d.solicitarConfirmacion)
+            j.put("estado", d.estado)
+            if (d.lat != null) j.put("lat", d.lat)
+            if (d.lng != null) j.put("lng", d.lng)
             
             val unidadesObj = JSONObject()
             d.unidades.forEach { (carro, innerMap) ->
@@ -1558,9 +1723,13 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                 }
             }
 
+            val latVal = if (j.has("lat") && !j.isNull("lat")) j.optDouble("lat") else null
+            val lngVal = if (j.has("lng") && !j.isNull("lng")) j.optDouble("lng") else null
+
             list.add(Dispatch(
                 idServicio = j.getString("idServicio"),
                 clave = j.optString("clave", ""),
+                claveApoyo = j.optString("claveApoyo", ""),
                 lugar = j.optString("lugar", ""),
                 preinforme = j.optString("preinforme", ""),
                 carros = j.optString("carros", ""),
@@ -1569,7 +1738,11 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                 hora67 = j.optString("hora67", ""),
                 quienDespacha = j.optString("quienDespacha", ""),
                 operadorFinal = j.optString("operadorFinal", ""),
-                unidades = unidadesMap
+                unidades = unidadesMap,
+                solicitarConfirmacion = j.optBoolean("solicitarConfirmacion", false),
+                estado = j.optString("estado", ""),
+                lat = latVal,
+                lng = lngVal
             ))
         }
         return list
@@ -1851,6 +2024,22 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             )
             currentUser = updated
             saveStringToPrefs("fire_user", serializeUser(updated))
+        }
+    }
+
+    fun closeCentralOperatorSession() {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.closeCentralSession(
+                onSuccess = {
+                    centralOperatorName = ""
+                    centralOperatorId = ""
+                    isCentralActive = false
+                    prefs.edit().putBoolean("IS_CENTRAL_MODE", false).apply()
+                },
+                onFailure = { e ->
+                    e.printStackTrace()
+                }
+            )
         }
     }
 }

@@ -252,9 +252,12 @@
                             </div>
                             
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                <div class="bg-blue-50 border border-blue-100 p-3 rounded-lg flex justify-between items-center shadow-sm">
-                                    <span class="f-label text-blue-700 !mb-0">Bomberos Tripulantes</span>
-                                    <span class="font-black text-xl text-blue-800 uppercase" id="det-personal">0</span>
+                                <div class="bg-blue-50 border border-blue-100 p-3 rounded-lg flex flex-col justify-between shadow-sm">
+                                    <div class="flex justify-between items-center">
+                                        <span class="f-label text-blue-700 !mb-0">Bomberos Tripulantes</span>
+                                        <span class="font-black text-xl text-blue-800 uppercase" id="det-personal">0</span>
+                                    </div>
+                                    <div id="det-tripulantes-list" class="mt-2 text-xs font-semibold text-slate-700 bg-white/80 p-2 rounded border border-blue-200/50 hidden"></div>
                                 </div>
                                 <div class="bg-slate-100 border border-slate-200 p-3 rounded-lg flex justify-between items-center shadow-sm">
                                     <span class="f-label text-slate-600 !mb-0">Kilometraje (Odómetro)</span>
@@ -312,15 +315,12 @@
         // CONFIGURACIÓN CENTRAL
         const CACHE_KEY = "sisbom_bitacora_cache_v3"; // SE FORZA EL LIMPIADO DEL CACHÉ VIEJO
         
-        // CONFIGURACIÓN FIREBASE
-        const firebaseConfig = {
-            apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-            authDomain: "sisbom-de5f8.firebaseapp.com",
-            projectId: "sisbom-de5f8",
-            storageBucket: "sisbom-de5f8.firebasestorage.app",
-            messagingSenderId: "39449538456",
-            appId: "1:39449538456:web:64f767264356ae587485ed"
-        };
+        // CONFIGURACIÓN FIREBASE DINÁMICA
+        let firebaseConfig = {};
+        try {
+            const saved = localStorage.getItem("firebaseConfig");
+            if (saved) firebaseConfig = JSON.parse(saved);
+        } catch(e) {}
         
         let fbDb = null;
 
@@ -398,7 +398,7 @@
                 
                 const current = new Date().getFullYear();
                 sel.innerHTML = '<option value="ALL">HISTÓRICO</option>';
-                for(let y = current + 1; y >= 1963; y--) {
+                for(let y = current; y >= 1963; y--) {
                     const opt = document.createElement('option');
                     opt.value = y;
                     opt.innerText = `AÑO ${y}`;
@@ -472,8 +472,8 @@
                         row.idSalida = row.idSalida || d.id;
                         this.bitacoraData.push(row);
                         
-                        // FILTRO: Mostrar solo historial con Kilometraje registrado (Salidas concluidas)
-                        if (row.km && String(row.km).trim() !== '') {
+                        // FILTRO: Mostrar historial con Kilometraje o con 6-8/6-10 registrado
+                        if ((row.km && String(row.km).trim() !== '') || row.hora68 || row.fecha68 || row.estadoMovil === 'en cuartel' || row.hora610) {
                             fbBitacoraMain.push(row);
                         }
                     });
@@ -752,6 +752,37 @@
                 // Mostrar solo cantidad de bomberos (sin sumar OBAC ni conductor)
                 document.getElementById('det-personal').innerText = row.cuantosBomberos || '0';
                 
+                const tListEl = document.getElementById('det-tripulantes-list');
+                let initialTripulantes = row.tripulantesNombres || row.tripulantes || '';
+                if (!initialTripulantes && Array.isArray(row.tripulantesDetalle)) {
+                    initialTripulantes = row.tripulantesDetalle.map(p => `${p.idRadial || ''} ${p.nombre || p.nombreBombero || ''}`.trim()).filter(Boolean).join(', ');
+                }
+                if (tListEl) {
+                    if (initialTripulantes) {
+                        tListEl.innerHTML = `<span class="text-slate-500 font-bold block mb-0.5">Tripulantes:</span> ${initialTripulantes}`;
+                        tListEl.classList.remove('hidden');
+                    } else {
+                        tListEl.classList.add('hidden');
+                    }
+                }
+
+                // Cargar subcolección de tripulantes si está disponible
+                if (fbDb && window.fbGetDocs && window.fbCollection && row.idSalida) {
+                    try {
+                        const tripColl = window.fbCollection(fbDb, 'bitacora', String(row.idSalida), 'tripulantes');
+                        window.fbGetDocs(tripColl).then(snap => {
+                            if (snap && !snap.empty) {
+                                const tList = snap.docs.map(d => d.data());
+                                const names = tList.map(t => `${t.idRadial || ''} ${t.nombreBombero || t.nombre || ''}`.trim()).filter(Boolean).join(', ');
+                                if (tListEl && names) {
+                                    tListEl.innerHTML = `<span class="text-slate-500 font-bold block mb-0.5">Tripulantes:</span> ${names}`;
+                                    tListEl.classList.remove('hidden');
+                                }
+                            }
+                        }).catch(() => {});
+                    } catch(e) {}
+                }
+                
                 const finalKmVal = parseInt(row.km) || 0;
                 const startKmVal = parseInt(row.kmSalida) || 0;
                 const deltaKmVal = Math.max(0, finalKmVal - startKmVal);
@@ -844,12 +875,12 @@
                             body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; padding: 0; margin: 0; color: #1e293b; font-size: 11px; line-height: 1.4; -webkit-print-color-adjust: exact; print-color-adjust: exact; background: #fff;}
                             
                             /* Encabezado */
-                            .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #b91c1c; padding-bottom: 10px; margin-bottom: 15px; }
+                            .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2.5px solid #dc2626; padding-bottom: 8px; margin-bottom: 15px; }
                             .header-left { display: flex; align-items: center; gap: 15px; }
-                            .logo { width: 60px; height: 60px; object-fit: contain; }
-                            .title-container h1 { font-size: 18px; font-weight: 900; color: #1e293b; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
-                            .title-container p { font-size: 10px; font-weight: bold; color: #64748b; margin: 2px 0 0 0; text-transform: uppercase; letter-spacing: 1px; }
-                            .status-badge { border: 2px solid ${docColor}; color: ${docColor}; padding: 4px 12px; border-radius: 6px; font-weight: 900; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; text-align: center; }
+                            .logo { width: 52px; height: 52px; object-fit: contain; }
+                            .title-container h1 { font-size: 17px; font-weight: 900; color: #dc2626; margin: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+                            .title-container p { font-size: 10px; font-weight: 800; color: #64748b; margin: 2px 0 0 0; text-transform: uppercase; letter-spacing: 0.8px; }
+                            .status-badge { border: 2px solid ${docColor}; color: ${docColor}; padding: 3px 10px; border-radius: 6px; font-weight: 900; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; text-align: center; }
 
                             /* Títulos de Sección */
                             .section-title { font-size: 11px; font-weight: 900; color: #fff; background-color: #1e293b; padding: 5px 10px; text-transform: uppercase; letter-spacing: 1px; margin: 15px 0 10px 0; border-radius: 4px; }
@@ -880,7 +911,7 @@
                             <div class="header-left">
                                 <img src="./Logo.png" class="logo" alt="Logo">
                                 <div class="title-container">
-                                    <h1 class="dynamic-print-name">CUERPO DE BOMBEROS</h1>
+                                    <h1 class="dynamic-print-name">${localStorage.getItem('client_name') || 'BOMBEROS PLACILLA'}</h1>
                                     <p>Bitácora Oficial de Material Mayor</p>
                                 </div>
                             </div>
@@ -960,7 +991,7 @@
                             Documento Impreso por: <strong>${printedBy}</strong> &nbsp;|&nbsp; Fecha y Hora Emisión: <strong>${printedDate}</strong> &nbsp;|&nbsp; SisBom Administrativo
                         </div>
 
-                        <script>
+                        <` + `script>
                             window.onload = () => { 
                                 const clientName = parent.localStorage.getItem('saas_client_name') || 'CUERPO DE BOMBEROS';
                                 document.querySelectorAll('.dynamic-print-name').forEach(el => {
@@ -975,7 +1006,7 @@
                             window.onafterprint = () => {
                                 parent.document.body.removeChild(window.frameElement);
                             };
-                        <\/script>
+                        <` + `/script>
     
 </body>
                     </html>

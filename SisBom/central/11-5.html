@@ -318,7 +318,7 @@
     <script type="module">
         import { initializeApp } from "./libs/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithEmailAndPassword } from "./libs/firebase-auth.js";
-        import { getFirestore, doc, setDoc, updateDoc, collection, getDocs, onSnapshot } from "./libs/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, collection, getDocs, onSnapshot, query, orderBy, limit, where } from "./libs/firebase-firestore.js";
 
         const firebaseConfig = null;
 
@@ -329,6 +329,10 @@
         window.fbCollection = collection;
         window.fbGetDocs = getDocs;
         window.fbOnSnapshot = onSnapshot;
+        window.fbQuery = query;
+        window.fbOrderBy = orderBy;
+        window.fbLimit = limit;
+        window.fbWhere = where;
 
         let radiosList = new Array(); 
         let pendingCallback = null;
@@ -373,7 +377,12 @@
             if (val === null || val === undefined) return val;
             if (typeof val === 'function' || (val && val.constructor && val.constructor.name === 'FieldValueImpl')) return val;
             if (Array.isArray(val) || (typeof val === 'object' && typeof val.length === 'number' && Object.prototype.toString.call(val) === '[object Array]')) {
-                return Array.from(val).map(window.sanitizeForFirebase);
+                const ParentArr = (window.parent && window.parent.Array) ? window.parent.Array : Array;
+                const cleanArr = new ParentArr();
+                for (let i = 0; i < val.length; i++) {
+                    cleanArr.push(window.sanitizeForFirebase(val[i]));
+                }
+                return cleanArr;
             }
             if (typeof val === 'object') {
                 const ParentObj = (window.parent && window.parent.Object) ? window.parent.Object : Object;
@@ -527,6 +536,10 @@
                         window.fbCollection = parent.fbCollection;
                         window.fbGetDocs = parent.fbGetDocs;
                         window.fbOnSnapshot = parent.fbOnSnapshot;
+                        window.fbQuery = parent.fbQuery || query;
+                        window.fbOrderBy = parent.fbOrderBy || orderBy;
+                        window.fbLimit = parent.fbLimit || limit;
+                        window.fbWhere = parent.fbWhere || where;
                         console.log("Firebase inherited from parent in 11-5");
                         window.processSyncQueue();
                         return true;
@@ -678,30 +691,65 @@
             });
         };
 
-        // --- SOLUCIÓN DE ID CONSECUTIVO Y OFFLINE ---
+        // --- SOLUCIÓN DE ID CONSECUTIVO Y OFFLINE BLINDADA ---
         window.getNextReportId = async function() {
             let maxId = 0;
-            if (navigator.onLine && window.fbDb && window.fbGetDocs) {
+            
+            // 1. Consultar Firestore si hay conexión activa
+            if (navigator.onLine && window.fbDb && window.fbGetDocs && window.fbCollection) {
                 try {
                     const snap = await window.fbGetDocs(window.fbCollection(window.fbDb, 'prueba_radial'));
-                    snap.forEach(d => {
-                        const data = d.data() || new Object();
-                        const val = parseInt(data.id115) || parseInt(d.id) || 0;
-                        if (!isNaN(val) && val > maxId) maxId = val;
-                    });
+                    if (snap && !snap.empty) {
+                        snap.forEach(d => {
+                            const data = d.data() || new Object();
+                            const val = parseInt(data.id115_num, 10) || parseInt(data.id115, 10) || parseInt(d.id, 10) || 0;
+                            if (!isNaN(val) && val > maxId) maxId = val;
+                        });
+                    }
                 } catch(e) {
                     console.warn("No se pudo obtener el último ID de Firebase", e);
                 }
             }
-            
-            const localMax = parseInt(localStorage.getItem('sisbom_max_115_id')) || 0;
-            if (localMax > maxId) {
-                maxId = localMax;
+
+            // 2. Consultar almacenamiento local y caché
+            try {
+                const keys = ['sisbom_prueba_radial_cache', 'db_prueba_radial', 'sisbom_db_prueba_radial'];
+                for (const k of keys) {
+                    const cached = localStorage.getItem(k);
+                    if (cached) {
+                        const parsed = JSON.parse(cached);
+                        if (Array.isArray(parsed)) {
+                            parsed.forEach(p => {
+                                const val = parseInt(p.id115_num, 10) || parseInt(p.id115, 10) || parseInt(p.id, 10) || 0;
+                                if (!isNaN(val) && val > maxId) maxId = val;
+                            });
+                        }
+                    }
+                }
+            } catch(e){}
+
+            // 3. Consultar archivo local db_prueba_radial.json si pywebview está activo
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.load_local_db) {
+                try {
+                    const rawDisk = await window.pywebview.api.load_local_db('central/db_prueba_radial.json');
+                    if (rawDisk) {
+                        const parsedDisk = JSON.parse(rawDisk);
+                        if (Array.isArray(parsedDisk)) {
+                            parsedDisk.forEach(p => {
+                                const val = parseInt(p.id115_num, 10) || parseInt(p.id115, 10) || parseInt(p.id, 10) || 0;
+                                if (!isNaN(val) && val > maxId) maxId = val;
+                            });
+                        }
+                    }
+                } catch(e){}
+            }
+
+            // Salvaguarda histórica: nunca generar un ID inferior a 106 para la serie continua
+            if (maxId < 106) {
+                maxId = 106;
             }
             
-            const nextId = maxId + 1;
-            localStorage.setItem('sisbom_max_115_id', String(nextId));
-            return nextId;
+            return maxId + 1;
         };
 
         window.loadPersonnelUI = async function() {
@@ -825,95 +873,134 @@
             
             title.innerText = "GUARDANDO REGISTRO";
             loader.classList.add('active'); 
-            status.innerText = "Sincronizando en segundo plano..."; 
+            status.innerText = "Sincronizando y guardando..."; 
             
             if (radiosList.length > 0) {
-                // SE ACTUALIZÓ 'P' A 'CALLES DEL PUEBLO'
                 const placeMap = new Object({ 'C': 'CUARTEL', 'D': 'DOMICILIO', 'L': 'LABORAL', 'P': 'CALLES DEL PUEBLO', 'S': 'SAN FERNANDO' });
-
                 const docId = String(currentReportId);
+                const idNum = parseInt(docId) || Number(docId);
+                const dParts = String(fixedDateStr || '').split('-');
+                const diaNum = parseInt(dParts[0]) || new Date().getDate();
+                const mesNum = parseInt(dParts[1]) || (new Date().getMonth() + 1);
+                const anioNum = parseInt(dParts[2]) || new Date().getFullYear();
+                const hrNum = parseInt(String(fixedTimeStr || '').split(':')[0]) || 9;
+                const turnoStr = hrNum < 14 ? 'MANANA' : 'TARDE';
 
-                // Queue Main Doc
-                window.queueFirebaseWrite('set', 'prueba_radial', docId, new Object({
+                const mainDocData = new Object({
                     id115: docId,
+                    id115_num: idNum,
                     fecha115: fixedDateStr,
                     hora115: fixedTimeStr,
+                    dia: diaNum,
+                    mes: mesNum,
+                    anio: anioNum,
+                    turno: turnoStr,
                     totalPersonal: radiosList.length,
                     timestamp: Date.now()
-                }));
+                });
 
-                // Queue Subdocs and Update Personal
+                const bomberosList = [];
+                const directWritePromises = [];
+
                 radiosList.forEach(r => {
                     let calidad = r.serviceState === '0-8' ? "0-8" : (r.status === 1 ? "11-1" : (r.status === 2 ? "11-2" : "X"));
                     let lugarTexto = r.place === 'O' ? (r.custom ? r.custom.toUpperCase() : "") : (Reflect.get(placeMap, r.place) || "");
                     let respondio = (calidad === '11-1' || calidad === '11-2') ? 'SI' : 'NO';
 
-                    // --- NUEVA LÓGICA: PRESERVAR ESTADOS ESPECIALES ---
-                    // Si el bombero no responde (termina en 0-8), revisamos si originalmente tenía un estado especial.
-                    // Si es así, mantenemos ese estado especial en la base de datos en lugar de forzar un 0-8 puro.
-                    let finalStateToSave = r.serviceState;
+                    // Guardar en prueba_radial el estado actual del bombero durante la prueba
+                    let estadoActual = r.originalState || r.serviceState || '0-9';
                     if (r.serviceState === '0-8') {
                         const specialStates = ['CDS', 'PERMISO', 'LICENCIA', 'SUSPENDIDO', 'OPERADOR'];
                         if (specialStates.includes(r.originalState)) {
-                            finalStateToSave = r.originalState;
+                            estadoActual = r.originalState;
+                        } else {
+                            estadoActual = '0-8';
                         }
+                    } else if (r.serviceState === '0-9') {
+                        estadoActual = '0-9';
                     }
 
                     const safeDocId = String(r.idRegistro || r.id);
-
-                    window.queueFirebaseWrite('set', `prueba_radial/${docId}/bomberos`, safeDocId, new Object({
+                    const bomberoData = new Object({
                         idRadial: r.id,
                         idRegistro: r.idRegistro || "",
                         nombreBombero: r.name,
                         calidad: calidad,
                         lugar: lugarTexto,
-                        estado: finalStateToSave,
+                        estado: estadoActual,
                         respondio: respondio
-                    }));
+                    });
+                    bomberosList.push(bomberoData);
 
-                    if (r.idRegistro) {
-                        const pIdx = personnelData.findIndex(p => String(p.idRegistro) === String(r.idRegistro));
-                        if (pIdx !== -1) {
-                            const originalStateInDb = String(personnelData.at(pIdx).estado || "").trim();
-                            if (originalStateInDb !== finalStateToSave) {
-                                // EL ESTADO CAMBIÓ DURANTE LA PRUEBA, REGISTRAR EN EL HISTORIAL DEL BOMBERO
-                                const now = new Date();
-                                const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
-                                const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-                                const nextIdStr = String(Date.now() + Math.floor(Math.random() * 1000));
+                    const sanitizedBombero = window.sanitizeForFirebase(bomberoData);
+                    const mergeOption = window.sanitizeForFirebase(new Object({ merge: true }));
 
-                                window.queueFirebaseWrite('set', `personal/${r.idRegistro}/estados`, nextIdStr, new Object({
-                                    estado: finalStateToSave,
-                                    fecha: dStr,
-                                    hora: tStr,
-                                    idEstado: nextIdStr,
-                                    timestamp: Date.now()
-                                }));
-                            }
-                            personnelData.at(pIdx).estado = finalStateToSave;
-                        }
-
-                        // Guardar el estado validado (con permisos mantenidos)
-                        window.queueFirebaseWrite('update', 'personal', String(r.idRegistro), new Object({ estado: finalStateToSave }));
+                    // Guardar solo en prueba_radial, NO se modifica la colección personal
+                    if (window.fbDb && window.fbDoc && window.fbSetDoc) {
+                        directWritePromises.push(
+                            window.fbSetDoc(window.fbDoc(window.fbDb, `prueba_radial/${docId}/bomberos`, safeDocId), sanitizedBombero, mergeOption)
+                            .catch(e => {
+                                console.warn("Fallback queue for bombero doc:", safeDocId, e);
+                                window.queueFirebaseWrite('set', `prueba_radial/${docId}/bomberos`, safeDocId, bomberoData);
+                            })
+                        );
+                    } else {
+                        window.queueFirebaseWrite('set', `prueba_radial/${docId}/bomberos`, safeDocId, bomberoData);
                     }
                 });
 
-                localStorage.setItem('db_personal', JSON.stringify(personnelData));
-                
+                const sanitizedMainDoc = window.sanitizeForFirebase(mainDocData);
+                const mergeOption = window.sanitizeForFirebase(new Object({ merge: true }));
+
+                if (window.fbDb && window.fbDoc && window.fbSetDoc) {
+                    directWritePromises.push(
+                        window.fbSetDoc(window.fbDoc(window.fbDb, 'prueba_radial', docId), sanitizedMainDoc, mergeOption)
+                        .catch(e => {
+                            console.warn("Fallback queue for main doc:", docId, e);
+                            window.queueFirebaseWrite('set', 'prueba_radial', docId, mainDocData);
+                        })
+                    );
+                } else {
+                    window.queueFirebaseWrite('set', 'prueba_radial', docId, mainDocData);
+                }
+
+                if (directWritePromises.length > 0) {
+                    try {
+                        await Promise.all(directWritePromises);
+                    } catch(e) {
+                        console.warn("Error en escrituras directas:", e);
+                    }
+                }
+
+                let localPruebas = [];
                 try {
-                    const keys = Object.keys(new Object({ 'despacho': '', 'personal': '' }));
-                    keys.forEach(key => {
-                        const iframe = parent.document.getElementById('frame-' + key);
-                        if (iframe && iframe.contentWindow) {
-                            iframe.contentWindow.dispatchEvent(new Event('storage'));
-                        }
-                    });
+                    const cachedPruebas = localStorage.getItem('sisbom_prueba_radial_cache') || localStorage.getItem('db_prueba_radial');
+                    if (cachedPruebas) localPruebas = JSON.parse(cachedPruebas);
                 } catch(e){}
 
-                status.innerText = "¡Finalizado con Éxito!";
+                const existingIdx = localPruebas.findIndex(p => String(p.id115) === docId);
+                const fullTestRecord = Object.assign({}, mainDocData, { bomberos: bomberosList });
+                if (existingIdx >= 0) {
+                    localPruebas[existingIdx] = fullTestRecord;
+                } else {
+                    localPruebas.push(fullTestRecord);
+                }
+                localStorage.setItem('sisbom_prueba_radial_cache', JSON.stringify(localPruebas));
+                localStorage.setItem('db_prueba_radial', JSON.stringify(localPruebas));
+
+                if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                    window.pywebview.api.save_local_db('central/db_prueba_radial.json', JSON.stringify(localPruebas))
+                        .catch(e => console.warn("Error guardando db_prueba_radial en disco:", e));
+                }
+
+                if (window.parent && window.parent.forceBackup) {
+                    try { window.parent.forceBackup(); } catch(e){}
+                }
+
+                status.innerText = "¡Finalizado y Guardado con Éxito!";
             }
             
-            await new Promise(r => setTimeout(r, 1200)); 
+            await new Promise(r => setTimeout(r, 1000)); 
             window.clearLocalSession(); 
             location.reload();
         };
@@ -1113,7 +1200,10 @@
             return null; 
         };
         
-        window.clearLocalSession = function() { localStorage.removeItem('active_11_5_session'); };
+        window.clearLocalSession = function() { 
+            localStorage.removeItem('active_11_5_session'); 
+            localStorage.removeItem('sisbom_max_115_id');
+        };
         
         window.naturalSort = function(a, b) { return String(a).localeCompare(String(b), undefined, new Object({numeric: true})); };
         

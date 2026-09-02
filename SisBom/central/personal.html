@@ -793,8 +793,10 @@
                         localStorage.setItem('sisbom_sync_queue', JSON.stringify(currentQ));
                     }
                     
-                    if (e && e.code === 'permission-denied') {
-                        if (window.parent && window.parent.authenticateFirebase) {
+                    if (e && (e.code === 'permission-denied' || e.code === 'unauthenticated')) {
+                        if (window.authenticateFirebase) {
+                            window.authenticateFirebase();
+                        } else if (window.parent && window.parent.authenticateFirebase) {
                             window.parent.authenticateFirebase();
                         }
                     }
@@ -969,6 +971,26 @@
                     await setPersistence(auth, browserLocalPersistence);
                 } catch(e) {}
 
+                window.authenticateFirebase = async function() {
+                    if (!navigator.onLine) return false;
+                    const storedUser = localStorage.getItem('authUserId');
+                    const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                    try {
+                        if (storedUser && storedPassSecure) {
+                            const email = storedUser + "@sisbom.com";
+                            await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                            console.log("Firebase re-autenticado en Personal.");
+                            return true;
+                        } else {
+                            console.warn("Sin credenciales en Personal Central.");
+                            return false;
+                        }
+                    } catch(e) {
+                        console.warn("Error re-autenticando en Personal:", e);
+                        return false;
+                    }
+                };
+
                 // INICIAR SESIÓN DE FORMA SEGURA (Evita el robo de token)
                 await new Promise((resolve) => {
                     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -977,17 +999,7 @@
                             console.log("Sesión heredada nativamente de Firebase.");
                             resolve();
                         } else {
-                            const storedUser = localStorage.getItem('authUserId');
-                            const storedPassSecure = localStorage.getItem('authPasswordSecure');
-                            if (storedUser && storedPassSecure) {
-                                try {
-                                    const email = storedUser + "@sisbom.com";
-                                    await signInWithEmailAndPassword(auth, email, storedPassSecure);
-                                    console.log("Firebase conectado con credenciales.");
-                                } catch(e) { console.error("Error auth:", e); }
-                            } else {
-                                try { await signInAnonymously(auth); } catch(e){}
-                            }
+                            await window.authenticateFirebase();
                             resolve();
                         }
                     });
@@ -1321,16 +1333,14 @@
             const storedPassSecure = localStorage.getItem('authPasswordSecure');
 
             try {
-                const { signInAnonymously, signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
+                const { signInWithEmailAndPassword } = await import("./libs/firebase-auth.js");
                 if (storedUser && storedPassSecure) {
                     const email = storedUser + "@sisbom.com";
                     if (!window.fbAuth.currentUser || window.fbAuth.currentUser.email !== email) {
                         await signInWithEmailAndPassword(window.fbAuth, email, storedPassSecure);
                     }
                 } else {
-                    if (!window.fbAuth.currentUser || !window.fbAuth.currentUser.isAnonymous) {
-                        await signInAnonymously(window.fbAuth);
-                    }
+                    console.warn("Sin credenciales para re-autenticar en Personal Central.");
                 }
             } catch (err) {
                 console.error("ERROR RE-AUTHENTICATING IN STANDALONE WINDOW:", err);

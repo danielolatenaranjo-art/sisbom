@@ -109,7 +109,7 @@
                 if (filter) {
                     const currentYear = new Date().getFullYear();
                     let optionsHtml = '';
-                    for (let y = currentYear + 1; y >= 1963; y--) {
+                    for (let y = currentYear; y >= 1963; y--) {
                         optionsHtml += `<option value="${y}">CICLO ${y}</option>`;
                     }
                     filter.innerHTML = optionsHtml;
@@ -179,16 +179,10 @@
         .btn-login-shadow:hover { box-shadow: 0 6px 20px rgba(185,28,28,0.23); }
 
         /* EFECTOS DE SALVAPANTALLAS */
-        #login-screen { transition: background-color 2s ease, opacity 0.5s ease; }
-        #login-screen.screensaver-mode { background-color: #020617; background-image: none !important; }
-        #login-box { transition: all 2s ease; }
-        #login-screen.screensaver-mode #login-box { background-color: transparent; border-color: transparent; box-shadow: none; }
-        #login-form-elements { transition: opacity 1.5s ease, transform 1.5s ease; }
-        #login-screen.screensaver-mode #login-form-elements { opacity: 0; transform: translateY(20px); pointer-events: none; }
-        #main-logo { transition: transform 2s cubic-bezier(0.25, 1, 0.5, 1), filter 2s ease; cursor: pointer; }
-        #login-screen.screensaver-mode #main-logo { transform: scale(3.5) translateY(30px); filter: drop-shadow(0px 0px 30px rgba(255,255,255,0.05)); }
-
-        #login-screen.screensaver-mode #main-logo { transform: scale(3.5) translateY(30px); filter: drop-shadow(0px 0px 30px rgba(255,255,255,0.05)); }
+        #login-screen { transition: background-color 0.5s ease, opacity 0.5s ease; }
+        #login-box { transition: all 0.3s ease; }
+        #login-form-elements { transition: opacity 0.3s ease; }
+        #main-logo { cursor: pointer; }
 
         /* SCROLL WIDGET */
         .widget-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
@@ -311,7 +305,7 @@
                     <div class="w-full text-left">
                         <label for="loginPass" class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 pl-1">Clave de Acceso</label>
                         <div class="relative w-full">
-                            <input type="text" id="loginPass" autocomplete="off" spellcheck="false" class="peer f-input login-input login-input-pass w-full rounded-xl font-bold text-slate-700 bg-slate-50 border-slate-200 focus:bg-white focus:border-bomberos-red focus:ring-4 transition-all text-base" placeholder="Introduce tu clave">
+                            <input type="password" id="loginPass" autocomplete="current-password" spellcheck="false" class="peer f-input login-input login-input-pass w-full rounded-xl font-bold text-slate-700 bg-slate-50 border-slate-200 focus:bg-white focus:border-bomberos-red focus:ring-4 transition-all text-base" placeholder="Introduce tu clave">
                             <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-400 transition-colors peer-focus:text-bomberos-red"><i class="fas fa-lock text-lg"></i></div>
                             <div class="absolute inset-y-0 right-0 pr-4 flex items-center z-10"><button type="button" onclick="window.togglePassword()" class="text-slate-400 hover:text-bomberos-red transition-colors focus:outline-none p-2" tabindex="-1"><i class="fas fa-eye text-lg" id="togglePassIcon"></i></button></div>
                         </div>
@@ -337,11 +331,12 @@
         
         <!-- HEADER SUPERIOR -->
         <header class="h-16 bg-bomberos-dark border-b border-red-950 flex items-center justify-between px-4 sm:px-6 shadow-sm shrink-0 relative w-full" style="z-index: 50;">
-            <div class="flex items-center gap-4">
+            <!-- Izquierda: Logo y Marca -->
+            <div class="flex items-center gap-3 min-w-0">
                 <button type="button" onclick="window.toggleSidebar()" class="text-white hover:text-white transition-colors md:hidden p-2 rounded-lg hover:bg-red-800 shrink-0">
                     <i class="fas fa-bars text-lg"></i>
                 </button>
-                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-3 shrink-0">
                     <img src="Logo.png" class="dynamic-logo h-9 w-9 object-contain shrink-0 drop-shadow-sm">
                     <div class="flex flex-col">
                         <span id="header-client-name" class="font-bold text-white tracking-tight text-sm sm:text-base leading-none">SISBOM</span>
@@ -354,35 +349,34 @@
                     </div>
                 </div>
             </div>
-            
-            <!-- TÍTULO EN EL CENTRO ABSOLUTO -->
-            <div id="header-title-wrapper" class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 pointer-events-none hidden lg:block transition-opacity duration-300">
-                <h2 id="page-title" class="text-xl sm:text-2xl tracking-tight whitespace-nowrap">
+
+            <!-- Centro: Título del Módulo Centrado en la Barra Superior -->
+            <div id="header-title-wrapper" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center justify-center pointer-events-none transition-opacity duration-300">
+                <h2 id="page-title" class="text-base sm:text-lg font-bold tracking-tight whitespace-nowrap text-center text-white drop-shadow-sm">
                     <span class="font-light text-red-200/80">Estadísticas</span> <span class="font-bold text-white">Globales</span>
                 </h2>
             </div>
 
-            <div class="flex items-center gap-4 sm:gap-6">
-                <div class="hidden md:flex items-center gap-3 border-r border-red-900 pr-4 sm:pr-6">
-                    <div class="flex flex-col text-right min-w-0">
-                        <span id="user-name-display" class="font-bold text-white leading-none truncate text-xs">Cargando...</span>
-                        <span id="user-role-display" class="text-red-200 uppercase font-black tracking-widest leading-tight mt-0.5" style="font-size: 9px;">Administrador</span>
-                    </div>
-                    <div class="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center text-red-200 border border-white/10 shrink-0"><i class="fas fa-user-shield text-sm"></i></div>
-                </div>
-                
+            <!-- Derecha: Reloj, Selector de Ciclo, Sincronización y Salida -->
+            <div class="flex items-center gap-3 sm:gap-4 shrink-0">
+                <!-- Placeholders ocultos para mantener compatibilidad de scripts -->
+                <span id="user-name-display" class="hidden"></span>
+                <span id="user-role-display" class="hidden"></span>
+
                 <div class="hidden sm:flex flex-col items-end">
-                    <div id="clock-time" class="text-lg font-bold text-white leading-none tracking-tight">00:00:00</div>
-                    <div id="clock-date" class="font-semibold text-red-200/80 uppercase tracking-wider mt-0.5" style="font-size: 10px;">...</div>
+                    <div id="clock-time" class="text-base sm:text-lg font-bold text-white leading-none tracking-tight">00:00:00</div>
+                    <div id="clock-date" class="font-semibold text-red-200/80 uppercase tracking-wider mt-0.5" style="font-size: 9px;">...</div>
                 </div>
-                <!-- Selector de Ciclo Global -->
-                <select id="globalYearFilter" class="bg-white/10 border border-white/10 text-white font-bold text-xs uppercase tracking-wider h-10 px-3 rounded-full shadow-sm focus:outline-none focus:border-red-500 mr-2" onchange="window.changeGlobalYearFilter(this.value)">
+                <!-- Selector de Ciclo Global (Desde 1963 hasta año presente) -->
+                <select id="globalYearFilter" class="bg-white/10 hover:bg-white/20 border border-white/10 text-white font-bold text-xs uppercase tracking-wider h-9 px-2.5 rounded-xl shadow-sm focus:outline-none focus:border-red-500 cursor-pointer transition-colors" onchange="window.changeGlobalYearFilter(this.value)">
                 </select>
-                <button type="button" id="btn-global-refresh" onclick="window.refreshAllDatabaseData(true)" class="hidden">
-                    <i id="global-sync-icon" class="fas fa-sync"></i>
-                    <span id="last-sync-time">SINC.: --:--:--</span>
+                <!-- Botón Global de Sincronización de BD -->
+                <button type="button" id="btn-global-refresh" onclick="window.syncDatabaseIncremental(true, true)" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm shrink-0 active:scale-95 cursor-pointer" title="Sincronizar Base de Datos con el Servidor">
+                    <i id="global-sync-icon" class="fas fa-sync-alt text-xs"></i>
+                    <span class="hidden md:inline font-black">Sincronizar BD</span>
+                    <span id="last-sync-time" class="hidden 2xl:inline text-[9px] text-blue-200 font-bold ml-0.5 border-l border-blue-400 pl-1.5">--:--:--</span>
                 </button>
-                <button type="button" onclick="window.requestLogout()" class="text-red-200/80 hover:text-white hover:bg-red-600 bg-white/10 border border-white/10 transition-colors w-10 h-10 flex items-center justify-center rounded-xl shadow-sm shrink-0" title="Cerrar Sesión"><i class="fas fa-power-off text-sm"></i></button>
+                <button type="button" onclick="window.requestLogout()" class="text-red-200/80 hover:text-white hover:bg-red-600 bg-white/10 border border-white/10 transition-colors w-9 h-9 flex items-center justify-center rounded-xl shadow-sm shrink-0" title="Cerrar Sesión"><i class="fas fa-power-off text-xs"></i></button>
             </div>
         </header>
 
@@ -604,12 +598,12 @@
         window.togglePassword = function() {
             const input = document.getElementById('loginPass');
             const icon = document.getElementById('togglePassIcon');
-            if (input.classList.contains('show-pass-text')) {
-                input.classList.remove('show-pass-text');
+            if (input.type === 'text') {
+                input.type = 'password';
                 icon.classList.remove('fa-eye-slash');
                 icon.classList.add('fa-eye');
             } else {
-                input.classList.add('show-pass-text');
+                input.type = 'text';
                 icon.classList.remove('fa-eye');
                 icon.classList.add('fa-eye-slash');
             }
@@ -1539,105 +1533,94 @@
             }
         };
 
-        window.refreshAllDatabaseData = async function(force = false) {
-            if (!window.isSystemLoggedIn || !fbDb || !window.fbGetDocs) return;
-            if (window.isGlobalRefreshing) return;
-            window.isGlobalRefreshing = true;
-
-            console.log("Iniciando actualización completa de la base de datos...");
-            window.showLoader();
-
-            const syncIcon = document.getElementById('global-sync-icon');
-            if (syncIcon) syncIcon.classList.add('fa-spin');
-
-            try {
-                const collections = ['personal', 'vehiculos', 'bitacora', 'alertas', 'asistencia', 'despachos'];
-                for (const col of collections) {
-                    try {
-                        const snap = await window.fbGetDocs(window.fbCollection(fbDb, col));
-                        const list = [];
-                        snap.forEach(d => {
-                            const data = d.data();
-                            data.id = d.id;
-                            if (col === 'personal') data.idRegistro = d.id;
-                            if (col === 'vehiculos') data.idCarro = d.id;
-                            if (col === 'alertas') data.idAlerta = d.id;
-                            if (col === 'asistencia') data.idLista = d.id;
-                            if (col === 'despachos') data.idServicio = d.id;
-                            list.push(data);
-                        });
-
-                        if (col === 'personal') {
-                            localStorage.setItem('db_personal', JSON.stringify(list));
-                            localStorage.setItem('sisbom_personal_cache', JSON.stringify(list));
-                            localStorage.setItem('sisbom_personal_cache_updated', new Date().toISOString());
-                        } else if (col === 'vehiculos') {
-                            localStorage.setItem('sisbom_vehiculos_cache_v3', JSON.stringify({ vehiculos: list }));
-                        } else if (col === 'bitacora') {
-                            localStorage.setItem('db_bitacora', JSON.stringify(list));
-                        } else if (col === 'alertas') {
-                            const cachedPers = JSON.parse(localStorage.getItem('db_personal') || '[]');
-                            localStorage.setItem('sisbom_alertas_cache_v2', JSON.stringify({ alertas: list, personal: cachedPers }));
-                        } else if (col === 'asistencia') {
-                            localStorage.setItem('sisbom_asistencia_cache', JSON.stringify(list));
-                        } else if (col === 'despachos') {
-                            localStorage.setItem('sisbom_despachos_cache_v3', JSON.stringify(list));
-                        }
-                        console.log(`Colección ${col} actualizada correctamente con ${list.length} documentos.`);
-                    } catch (e) {
-                        console.error(`Error al actualizar colección ${col}:`, e);
-                    }
+        window.initGlobalYearFilter = function() {
+            const filterEl = document.getElementById('globalYearFilter');
+            if (!filterEl) return;
+            const currentYear = new Date().getFullYear();
+            const savedYear = localStorage.getItem('selectedCycleYear') || currentYear;
+            
+            filterEl.innerHTML = '';
+            for (let y = currentYear; y >= 1963; y--) {
+                const opt = document.createElement('option');
+                opt.value = y;
+                opt.textContent = `CICLO ${y}`;
+                opt.className = 'bg-slate-900 text-white font-bold';
+                if (String(y) === String(savedYear)) {
+                    opt.selected = true;
                 }
-
-                // Recargar/notificar iframes
-                Object.keys(APP_MODULES).forEach(key => {
-                    const iframe = document.getElementById('frame-' + key);
-                    if (iframe && iframe.contentWindow) {
-                        try {
-                            if (typeof iframe.contentWindow.loadData === 'function') {
-                                iframe.contentWindow.loadData(false);
-                            } else if (typeof iframe.contentWindow.fetchData === 'function') {
-                                iframe.contentWindow.fetchData(false);
-                            } else {
-                                iframe.contentWindow.location.reload();
-                            }
-                        } catch(err) {
-                            try { iframe.src = iframe.src; } catch(ex) {}
-                        }
-                    }
-                });
-
-                const now = new Date();
-                const timeStr = `SINC.: ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
-                localStorage.setItem('last_sync_time', timeStr);
-                const timeEl = document.getElementById('last-sync-time');
-                if (timeEl) timeEl.innerText = timeStr;
-
-                if (force) {
-                    window.showSysModal("Base de Datos Actualizada", "Todos los módulos han sido actualizados con los datos más recientes del servidor.", "fa-check-circle text-green-500", () => window.closeSysModal(), true);
-                }
-            } catch (err) {
-                console.error("Error en actualización global de base de datos:", err);
-            } finally {
-                if (syncIcon) syncIcon.classList.remove('fa-spin');
-                window.isGlobalRefreshing = false;
-                window.hideLoader();
+                filterEl.appendChild(opt);
             }
         };
 
-        window.silentSyncDatabase = async function(showUI = false) {
-            if (!window.isSystemLoggedIn || !fbDb || !window.fbGetDocs) return;
+        window.changeGlobalYearFilter = function(year) {
+            const yr = parseInt(year, 10) || new Date().getFullYear();
+            localStorage.setItem('selectedCycleYear', yr);
+            console.log("Ciclo global seleccionado:", yr);
+            
+            // Notificar y refrescar todos los iframes activos
+            Object.keys(APP_MODULES).forEach(key => {
+                const iframe = document.getElementById('frame-' + key);
+                if (iframe && iframe.contentWindow) {
+                    try {
+                        if (typeof iframe.contentWindow.changeYear === 'function') {
+                            iframe.contentWindow.changeYear(yr);
+                        } else if (typeof iframe.contentWindow.loadData === 'function') {
+                            iframe.contentWindow.loadData(false);
+                        } else if (typeof iframe.contentWindow.refreshDashboard === 'function') {
+                            iframe.contentWindow.refreshDashboard();
+                        } else {
+                            iframe.contentWindow.location.reload();
+                        }
+                    } catch(e){}
+                }
+            });
+        };
+
+        window.syncDatabaseIncremental = async function(showUI = false, force = false) {
+            if (!window.isSystemLoggedIn || !window.fbDb || !window.fbGetDocs) return;
             if (window.isSilentSyncing) return;
             window.isSilentSyncing = true;
-            
+
+            const syncIcon = document.getElementById('global-sync-icon');
+            const lastSyncEl = document.getElementById('last-sync-time');
+            if (syncIcon) syncIcon.classList.add('fa-spin');
             if (showUI) window.showLoader("Sincronizando Base de Datos...");
-            console.log("Iniciando sincronización silenciosa de base de datos...");
-            
+
             try {
-                const collections = ['personal', 'vehiculos', 'bitacora', 'alertas', 'asistencia', 'despachos'];
-                for (const col of collections) {
+                // 1. Obtener metadata de sincronización del servidor (1 sola lectura rápida)
+                let remoteMeta = {};
+                try {
+                    const metaDocRef = window.fbDoc(window.fbDb, 'accesos/comandancia/metadata', 'sync_state');
+                    const metaSnap = await window.fbGetDoc(metaDocRef);
+                    if (metaSnap.exists()) {
+                        remoteMeta = metaSnap.data() || {};
+                    }
+                } catch(metaErr) {
+                    console.warn("No se pudo leer metadata de sincronización, evaluando sincronización directa:", metaErr);
+                }
+
+                const collections = ['personal', 'vehiculos', 'bitacora', 'alertas', 'asistencia', 'despachos', 'prueba_radial', 'sirena'];
+                let updatedCollections = [];
+                let skippedCollections = [];
+
+                await Promise.all(collections.map(async col => {
                     try {
-                        const snap = await window.fbGetDocs(window.fbCollection(fbDb, col));
+                        const localTsKey = 'sisbom_sync_' + col + '_ts';
+                        const localTs = parseInt(localStorage.getItem(localTsKey) || '0', 10);
+                        const remoteColMeta = remoteMeta[col] || {};
+                        const remoteTs = remoteColMeta.lastModified || 0;
+
+                        // Verificar si tenemos datos locales en memoria/almacenamiento
+                        const hasLocalCache = !!(localStorage.getItem('sisbom_db_' + col) || localStorage.getItem('db_' + col) || localStorage.getItem('sisbom_' + col + '_cache') || localStorage.getItem('sirena_data_cache'));
+
+                        // Si no es forzado, la metadata remota no cambió y existe caché local -> OMITIR DESCARGA (0 lecturas)
+                        if (!force && remoteTs > 0 && remoteTs <= localTs && hasLocalCache) {
+                            skippedCollections.push(col);
+                            return;
+                        }
+
+                        // Descargar colección actualizada
+                        const snap = await window.fbGetDocs(window.fbCollection(window.fbDb, col));
                         const list = [];
                         snap.forEach(d => {
                             const data = d.data();
@@ -1647,16 +1630,74 @@
                             if (col === 'alertas') data.idAlerta = d.id;
                             if (col === 'asistencia') data.idLista = d.id;
                             if (col === 'despachos') data.idServicio = d.id;
+                            if (col === 'prueba_radial') data.id115 = d.id;
+                            if (col === 'sirena') data.idToqueSirena = d.id;
                             list.push(data);
                         });
-                        
-                        // Guardar en LocalStorage (ambas llaves)
+
+                        // Preservar subcolecciones locales (bomberos, estadosHistorico) al sincronizar cabeceras
+                        if (col === 'asistencia') {
+                            let existingList = [];
+                            try {
+                                const c = localStorage.getItem('sisbom_asistencia_cache') || localStorage.getItem('db_asistencia');
+                                if (c) existingList = JSON.parse(c);
+                            } catch(e){}
+                            const existingMap = new Map();
+                            existingList.forEach(item => {
+                                const bList = item.bomberos || item.firefighters;
+                                if (item.idLista && Array.isArray(bList) && bList.length > 0) {
+                                    existingMap.set(String(item.idLista), bList);
+                                }
+                            });
+                            list.forEach(item => {
+                                if (existingMap.has(String(item.idLista))) {
+                                    item.bomberos = existingMap.get(String(item.idLista));
+                                }
+                            });
+                        } else if (col === 'personal') {
+                            let existingList = [];
+                            try {
+                                const c = localStorage.getItem('sisbom_personal_cache') || localStorage.getItem('db_personal');
+                                if (c) existingList = JSON.parse(c);
+                            } catch(e){}
+                            const existingMap = new Map();
+                            existingList.forEach(item => {
+                                if (item.idRegistro && Array.isArray(item.estadosHistorico) && item.estadosHistorico.length > 0) {
+                                    existingMap.set(String(item.idRegistro), item.estadosHistorico);
+                                }
+                            });
+                            list.forEach(item => {
+                                if (existingMap.has(String(item.idRegistro))) {
+                                    item.estadosHistorico = existingMap.get(String(item.idRegistro));
+                                }
+                            });
+                        } else if (col === 'prueba_radial') {
+                            let existingList = [];
+                            try {
+                                const c = localStorage.getItem('sisbom_prueba_radial_cache') || localStorage.getItem('db_prueba_radial');
+                                if (c) existingList = JSON.parse(c);
+                            } catch(e){}
+                            const existingMap = new Map();
+                            existingList.forEach(item => {
+                                if (item.id115 && Array.isArray(item.bomberos) && item.bomberos.length > 0) {
+                                    existingMap.set(String(item.id115), item.bomberos);
+                                }
+                            });
+                            list.forEach(item => {
+                                if (existingMap.has(String(item.id115))) {
+                                    item.bomberos = existingMap.get(String(item.id115));
+                                }
+                            });
+                        }
+
+                        // Guardar en LocalStorage y estructuras de caché
                         localStorage.setItem('sisbom_db_' + col, JSON.stringify(list));
                         if (col === 'personal') {
                             localStorage.setItem('db_personal', JSON.stringify(list));
                             localStorage.setItem('sisbom_personal_cache', JSON.stringify(list));
                             localStorage.setItem('sisbom_personal_cache_updated', new Date().toISOString());
                         } else if (col === 'vehiculos') {
+                            localStorage.setItem('db_vehiculos', JSON.stringify(list));
                             localStorage.setItem('sisbom_vehiculos_cache_v3', JSON.stringify({ vehiculos: list }));
                         } else if (col === 'bitacora') {
                             localStorage.setItem('db_bitacora', JSON.stringify(list));
@@ -1667,47 +1708,68 @@
                             localStorage.setItem('sisbom_asistencia_cache', JSON.stringify(list));
                         } else if (col === 'despachos') {
                             localStorage.setItem('sisbom_despachos_cache_v3', JSON.stringify(list));
+                        } else if (col === 'prueba_radial') {
+                            localStorage.setItem('db_prueba_radial', JSON.stringify(list));
+                            localStorage.setItem('sisbom_prueba_radial_cache', JSON.stringify(list));
+                        } else if (col === 'sirena') {
+                            localStorage.setItem('sirena_data_cache', JSON.stringify(list));
                         }
-                        
-                        // Guardar en disco físico
+
+                        // Guardar en disco físico mediante pywebview API
                         if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
                             const filename = `comandancia/db_${col}.json`;
-                            await window.pywebview.api.save_local_db(filename, JSON.stringify(list))
+                            window.pywebview.api.save_local_db(filename, JSON.stringify(list))
                                 .catch(err => console.error("Error al guardar archivo en disco:", filename, err));
                         }
-                    } catch (e) {
-                        console.error(`Error al sincronizar colección ${col}:`, e);
+
+                        // Actualizar timestamp local
+                        const newTs = remoteTs > 0 ? remoteTs : Date.now();
+                        localStorage.setItem(localTsKey, String(newTs));
+                        updatedCollections.push(col);
+                    } catch (colErr) {
+                        console.error(`Error al sincronizar colección ${col}:`, colErr);
                     }
-                }
-                
-                // Recargar/notificar iframes
-                Object.keys(APP_MODULES).forEach(key => {
-                    const iframe = document.getElementById('frame-' + key);
-                    if (iframe && iframe.contentWindow) {
-                        try {
-                            if (typeof iframe.contentWindow.loadData === 'function') {
-                                iframe.contentWindow.loadData(false);
-                            } else if (typeof iframe.contentWindow.fetchData === 'function') {
-                                iframe.contentWindow.fetchData(false);
-                            } else {
-                                iframe.contentWindow.location.reload();
+                }));
+
+                console.log(`Sincronización incremental: ${updatedCollections.length} actualizadas (${updatedCollections.join(', ')}), ${skippedCollections.length} sin cambios (${skippedCollections.join(', ')})`);
+
+                // Notificar a los módulos/iframes si hubo cambios
+                if (updatedCollections.length > 0 || force) {
+                    Object.keys(APP_MODULES).forEach(key => {
+                        const iframe = document.getElementById('frame-' + key);
+                        if (iframe && iframe.contentWindow) {
+                            try {
+                                if (typeof iframe.contentWindow.loadData === 'function') {
+                                    iframe.contentWindow.loadData(false);
+                                } else if (typeof iframe.contentWindow.fetchData === 'function') {
+                                    iframe.contentWindow.fetchData(false);
+                                } else if (typeof iframe.contentWindow.refreshDashboard === 'function') {
+                                    iframe.contentWindow.refreshDashboard();
+                                }
+                            } catch(err) {
+                                try { iframe.src = iframe.src; } catch(ex) {}
                             }
-                        } catch(err) {
-                            try { iframe.src = iframe.src; } catch(ex) {}
                         }
-                    }
-                });
-                
-                if (showUI) {
-                    window.showSysModal("Sincronización Completada", "La base de datos se ha sincronizado correctamente con el servidor.", "fa-check-circle text-green-500", () => window.closeSysModal(), true);
+                    });
                 }
+
+                const now = new Date();
+                const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+                localStorage.setItem('last_sync_time', timeStr);
+                if (lastSyncEl) lastSyncEl.innerText = timeStr;
+
+                // Sincronización finalizada silenciosamente (indicador visual en botón superior)
             } catch (err) {
-                console.error("Error en sincronización silenciosa:", err);
+                console.error("Error en sincronización incremental:", err);
             } finally {
                 window.isSilentSyncing = false;
+                if (syncIcon) syncIcon.classList.remove('fa-spin');
                 if (showUI) window.hideLoader();
             }
         };
+
+        window.silentSyncDatabase = window.syncDatabaseIncremental;
+        window.refreshAllDatabaseData = window.syncDatabaseIncremental;
 
         window.startGlobalBackgroundSync = function() {
             setInterval(() => {
@@ -1841,19 +1903,66 @@
                 console.error("Error validando licencia:", err);
             }
 
-            // Load databases from local disk if available
+            window.initGlobalYearFilter();
+
+            // Cargar todas las bases de datos desde el disco físico local a la memoria/LocalStorage
             if (window.isNativeApp && window.pywebview.api.load_local_db) {
                 try {
                     const pDb = await window.pywebview.api.load_local_db('db_personal.json');
                     if (pDb) {
                         localStorage.setItem('db_personal', pDb);
+                        localStorage.setItem('sisbom_db_personal', pDb);
+                        localStorage.setItem('sisbom_personal_cache', pDb);
                     }
                     const bDb = await window.pywebview.api.load_local_db('db_bitacora.json');
                     if (bDb) {
                         localStorage.setItem('db_bitacora', bDb);
+                        localStorage.setItem('sisbom_db_bitacora', bDb);
+                    }
+                    const aDb = await window.pywebview.api.load_local_db('db_asistencia.json');
+                    if (aDb) {
+                        localStorage.setItem('db_asistencia', aDb);
+                        localStorage.setItem('sisbom_db_asistencia', aDb);
+                        localStorage.setItem('sisbom_asistencia_cache', aDb);
+                    }
+                    const dDb = await window.pywebview.api.load_local_db('db_despachos.json');
+                    if (dDb) {
+                        localStorage.setItem('db_despachos', dDb);
+                        localStorage.setItem('sisbom_db_despachos', dDb);
+                        localStorage.setItem('sisbom_despachos_cache_v3', dDb);
+                    }
+                    const vDb = await window.pywebview.api.load_local_db('db_vehiculos.json');
+                    if (vDb) {
+                        localStorage.setItem('db_vehiculos', vDb);
+                        localStorage.setItem('sisbom_db_vehiculos', vDb);
+                        try {
+                            localStorage.setItem('sisbom_vehiculos_cache_v3', JSON.stringify({ vehiculos: JSON.parse(vDb) }));
+                        } catch(e){}
+                    }
+                    const rDb = await window.pywebview.api.load_local_db('db_prueba_radial.json');
+                    if (rDb) {
+                        localStorage.setItem('db_prueba_radial', rDb);
+                        localStorage.setItem('sisbom_db_prueba_radial', rDb);
+                        localStorage.setItem('sisbom_prueba_radial_cache', rDb);
+                    }
+                    const sDb = await window.pywebview.api.load_local_db('db_sirena.json');
+                    if (sDb) {
+                        localStorage.setItem('db_sirena', sDb);
+                        localStorage.setItem('sisbom_db_sirena', sDb);
+                        localStorage.setItem('sirena_data_cache', sDb);
+                    }
+                    const alDb = await window.pywebview.api.load_local_db('db_alertas.json');
+                    if (alDb) {
+                        try {
+                            const pParsed = pDb ? JSON.parse(pDb) : [];
+                            localStorage.setItem('sisbom_alertas_cache_v2', JSON.stringify({
+                                alertas: JSON.parse(alDb),
+                                personal: pParsed
+                            }));
+                        } catch(e){}
                     }
                 } catch (e) {
-                    console.error("Error loading local DB from disk:", e);
+                    console.error("Error loading local DBs from disk:", e);
                 }
             }
 
@@ -1942,36 +2051,68 @@
                     return val;
                 };
 
+                window.touchSyncMetadata = function(pathOrRef) {
+                    try {
+                        let pathStr = '';
+                        if (typeof pathOrRef === 'string') pathStr = pathOrRef;
+                        else if (pathOrRef && pathOrRef.path) pathStr = pathOrRef.path;
+                        const topCol = pathStr.split('/').filter(Boolean)[0];
+                        if (!topCol || topCol === 'accesos') return;
+                        
+                        const now = Date.now();
+                        localStorage.setItem('sisbom_sync_' + topCol + '_ts', String(now));
+                        
+                        if (fbDb && window.fbDoc && window.fbSetDoc) {
+                            setTimeout(async () => {
+                                try {
+                                    const metaDocRef = doc(fbDb, 'accesos/comandancia/metadata', 'sync_state');
+                                    await setDoc(metaDocRef, {
+                                        [topCol]: { lastModified: now }
+                                    }, { merge: true });
+                                } catch(e){}
+                            }, 500);
+                        }
+                    } catch(e){}
+                };
+
                 window.fbDoc = doc;
-                window.fbSetDoc = (reference, data, options) => {
+                window.fbSetDoc = async (reference, data, options) => {
                     if (localStorage.getItem('saas_read_only') === '1') {
                         console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbSetDoc.");
                         return Promise.resolve();
                     }
-                    return setDoc(reference, sanitizeData(data), options);
+                    const res = await setDoc(reference, sanitizeData(data), options);
+                    window.touchSyncMetadata(reference);
+                    return res;
                 };
-                window.fbUpdateDoc = (reference, data) => {
+                window.fbUpdateDoc = async (reference, data) => {
                     if (localStorage.getItem('saas_read_only') === '1') {
                         console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbUpdateDoc.");
                         return Promise.resolve();
                     }
-                    return updateDoc(reference, sanitizeData(data));
+                    const res = await updateDoc(reference, sanitizeData(data));
+                    window.touchSyncMetadata(reference);
+                    return res;
                 };
-                window.fbDeleteDoc = (reference) => {
+                window.fbDeleteDoc = async (reference) => {
                     if (localStorage.getItem('saas_read_only') === '1') {
                         console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbDeleteDoc.");
                         return Promise.resolve();
                     }
-                    return deleteDoc(reference);
+                    const res = await deleteDoc(reference);
+                    window.touchSyncMetadata(reference);
+                    return res;
                 };
                 window.fbCollection = collection;
                 window.fbGetDocs = getDocs;
-                window.fbAddDoc = (collRef, data) => {
+                window.fbAddDoc = async (collRef, data) => {
                     if (localStorage.getItem('saas_read_only') === '1') {
                         console.warn("Modo Lectura (SaaS): Escritura bloqueada en fbAddDoc.");
                         return Promise.resolve();
                     }
-                    return addDoc(collRef, sanitizeData(data));
+                    const res = await addDoc(collRef, sanitizeData(data));
+                    window.touchSyncMetadata(collRef);
+                    return res;
                 };
                 window.fbGetDoc = getDoc;
                 window.fbOnSnapshot = onSnapshot;
@@ -2402,10 +2543,12 @@
                         console.log("SISBOM Backup: Iniciando copia de seguridad diaria...");
                         const backupData = {
                             asistencia: JSON.parse(localStorage.getItem('sisbom_asistencia_cache') || '[]'),
-                            personal: JSON.parse(localStorage.getItem('sisbom_personal_cache') || '[]'),
+                            personal: JSON.parse(localStorage.getItem('sisbom_personal_cache') || localStorage.getItem('db_personal') || '[]'),
                             despachos: JSON.parse(localStorage.getItem('sisbom_despachos_cache_v3') || '[]'),
                             bitacora: JSON.parse(localStorage.getItem('db_bitacora') || '[]'),
-                            vehiculos: JSON.parse(localStorage.getItem('db_vehiculos') || '[]')
+                            vehiculos: JSON.parse(localStorage.getItem('db_vehiculos') || '[]'),
+                            prueba_radial: JSON.parse(localStorage.getItem('sisbom_prueba_radial_cache') || localStorage.getItem('db_prueba_radial') || '[]'),
+                            sirena: JSON.parse(localStorage.getItem('sirena_data_cache') || '[]')
                         };
                         await window.pywebview.api.save_database_backup(JSON.stringify(backupData));
                         console.log("SISBOM Backup: Copia de seguridad guardada con éxito.");
@@ -2422,10 +2565,12 @@
                     console.log("SISBOM Backup: Forzando actualización de copia de seguridad...");
                     const backupData = {
                         asistencia: JSON.parse(localStorage.getItem('sisbom_asistencia_cache') || '[]'),
-                        personal: JSON.parse(localStorage.getItem('sisbom_personal_cache') || '[]'),
+                        personal: JSON.parse(localStorage.getItem('sisbom_personal_cache') || localStorage.getItem('db_personal') || '[]'),
                         despachos: JSON.parse(localStorage.getItem('sisbom_despachos_cache_v3') || '[]'),
                         bitacora: JSON.parse(localStorage.getItem('db_bitacora') || '[]'),
-                        vehiculos: JSON.parse(localStorage.getItem('db_vehiculos') || '[]')
+                        vehiculos: JSON.parse(localStorage.getItem('db_vehiculos') || '[]'),
+                        prueba_radial: JSON.parse(localStorage.getItem('sisbom_prueba_radial_cache') || localStorage.getItem('db_prueba_radial') || '[]'),
+                        sirena: JSON.parse(localStorage.getItem('sirena_data_cache') || '[]')
                     };
                     await window.pywebview.api.save_database_backup(JSON.stringify(backupData));
                     console.log("SISBOM Backup: Copia de seguridad actualizada con éxito.");

@@ -1,0 +1,49 @@
+[
+    {
+        "dia": 26,
+        "anio": 2026,
+        "mes": 8,
+        "totalPersonal": 2,
+        "fecha115": "26-08-2026",
+        "id115": "107",
+        "hora115": "08:58",
+        "id115_num": 107,
+        "timestamp": 1787749141721,
+        "turno": "MANANA",
+        "id": "107",
+        "ID": "107",
+        "idRegistro": "107"
+    },
+    {
+        "totalPersonal": 2,
+        "id115": "108",
+        "mes": 8,
+        "dia": 29,
+        "anio": 2026,
+        "fecha115": "29-08-2026",
+        "turno": "TARDE",
+        "id115_num": 108,
+        "timestamp": 1788044805258,
+        "hora115": "19:06",
+        "id": "108",
+        "ID": "108",
+        "idRegistro": "108"
+    },
+    {
+        "totalPersonal": 2,
+        "id115": "3",
+        "hora115": "22:42",
+        "fecha115": "19-07-2026",
+        "timestamp": 1784516423682,
+        "id": "3",
+        "ID": "3",
+        "idRegistro": "3"
+    },
+    {
+        "placeholder": true,
+        "fechaInicializacion": "2026-07-17T16:45:32.402Z",
+        "id": "init",
+        "ID": "init",
+        "idRegistro": "init"
+    }
+]

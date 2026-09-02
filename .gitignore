@@ -17,3 +17,9 @@ MiSisBom/APK/.idea/
 MiSisBom/APK/.kotlin/
 MiSisBom/iOS/build/
 MiSisBom/iOS/DerivedData/
+SisBomCar/APK/build/
+SisBomCar/APK/.gradle/
+SisBomCar/APK/.idea/
+SisBomCar/APK/.kotlin/
+*.apk
+
