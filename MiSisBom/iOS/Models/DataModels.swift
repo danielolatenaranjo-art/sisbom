@@ -171,6 +171,23 @@ struct Dispatch: Identifiable, Codable, Equatable {
         operadorInicial = try container.decodeIfPresent(String.self, forKey: .operadorInicial)
         unidades = try container.decodeIfPresent([String: UnitInfo].self, forKey: .unidades) ?? [:]
 
+        // Flexible decoding for lat/lng
+        if let dLat = try? container.decodeIfPresent(Double.self, forKey: .lat) {
+            lat = dLat
+        } else if let sLat = try? container.decodeIfPresent(String.self, forKey: .lat), let parsedLat = Double(sLat) {
+            lat = parsedLat
+        } else {
+            lat = nil
+        }
+
+        if let dLng = try? container.decodeIfPresent(Double.self, forKey: .lng) {
+            lng = dLng
+        } else if let sLng = try? container.decodeIfPresent(String.self, forKey: .lng), let parsedLng = Double(sLng) {
+            lng = parsedLng
+        } else {
+            lng = nil
+        }
+
         // Flexible decoding for 'carros' (can be String or Array/List)
         if let stringCarros = try? container.decode(String.self, forKey: .carros) {
             carros = stringCarros
