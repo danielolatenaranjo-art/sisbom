@@ -497,7 +497,8 @@ class SisBomViewModel: ObservableObject {
                         } else {
                             // Query by idRegistro field
                             db.collection("personal").whereField("idRegistro", isEqualTo: cleanId).getDocuments { snap, _ in
-                                if let queryDoc = snap?.documents.first, let qData = queryDoc.data() {
+                                if let queryDoc = snap?.documents.first {
+                                    let qData = queryDoc.data()
                                     processUserLogin(docId: queryDoc.documentID, data: qData)
                                 } else {
                                     // Local cache fallback
