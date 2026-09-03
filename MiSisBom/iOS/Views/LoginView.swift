@@ -24,7 +24,7 @@ struct LoginView: View {
                         .padding(.bottom, 14)
                     
                     // Header Title & Client Name
-                    Text("SISBOM")
+                    Text("miSisBom")
                         .font(.system(size: 24, weight: .black))
                         .foregroundColor(isDark ? .white : .textDark)
                         .padding(.bottom, 2)

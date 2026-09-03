@@ -27,14 +27,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             
             if FirebaseApp.app() == nil {
                 FirebaseApp.configure(options: options)
+                print("Firebase configured at launch for project: \(projectId)")
             }
-        } else if FirebaseApp.app() == nil {
-            // Valid initialization for fresh install to prevent crashes prior to license activation
-            let defaultOptions = FirebaseOptions(googleAppID: "1:39449538456:ios:b2f806e0a0e9fc927485ed", gcmSenderID: "39449538456")
-            defaultOptions.apiKey = "AIzaSyBA61BksAK7FcCh0va-fP-sAFjjrk1gSiw"
-            defaultOptions.projectID = "sisbom-de5f8"
-            defaultOptions.storageBucket = "sisbom-de5f8.firebasestorage.app"
-            FirebaseApp.configure(options: defaultOptions)
         }
         
         UNUserNotificationCenter.current().delegate = self

@@ -307,7 +307,7 @@ struct ProfileDrawerContent: View {
                     }
                 }
                 
-                Text("SISBOM V 1.0.7")
+                Text("miSisBom V 1.0.7")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundColor(isDark ? Color.white.opacity(0.4) : Color.black.opacity(0.4))
                     .frame(maxWidth: .infinity)
@@ -420,7 +420,7 @@ struct ChangelogDialog: View {
                         .font(.system(size: 18, weight: .black))
                         .foregroundColor(isDark ? .white : .textDark)
                     
-                    Text("SISBOM V 1.0.7")
+                    Text("miSisBom V 1.0.7")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.gray)
                 }

@@ -13,6 +13,7 @@ targets:
       - path: Views
       - path: ViewModels
       - path: Services
+      - path: Resources
       - path: SisBomApp.swift
       - path: Assets.xcassets
       - path: GoogleService-Info.plist
@@ -27,9 +28,23 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: "SisBom"
+        CFBundleDisplayName: "miSisBom"
         CFBundleShortVersionString: "2.1.0"
         CFBundleVersion: "10"
         UILaunchScreen: {}
         UIBackgroundModes:
           - fetch
+        CFBundleIcons:
+          CFBundlePrimaryIcon:
+            CFBundleIconFiles:
+              - AppIcon
+            UIPrerenderedIcon: false
+          CFBundleAlternateIcons:
+            SB-CBPL-OH:
+              CFBundleIconFiles:
+                - SB-CBPL-OH
+              UIPrerenderedIcon: false
+            PRUEBA:
+              CFBundleIconFiles:
+                - PRUEBA
+              UIPrerenderedIcon: false

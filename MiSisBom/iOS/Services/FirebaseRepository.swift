@@ -23,10 +23,8 @@ class FirebaseRepository {
                 print("Error fetching personnel: \(error?.localizedDescription ?? "Unknown error")")
                 return
             }
-            let list = documents.compactMap { doc -> UserPersonal? in
-                let data = doc.data()
-                guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
-                return try? JSONDecoder().decode(UserPersonal.self, from: jsonData)
+            let list = documents.map { doc -> UserPersonal in
+                UserPersonal(docId: doc.documentID, data: doc.data())
             }
             onChange(list)
         }
@@ -39,11 +37,7 @@ class FirebaseRepository {
                 onChange(nil)
                 return
             }
-            guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else {
-                onChange(nil)
-                return
-            }
-            let user = try? JSONDecoder().decode(UserPersonal.self, from: jsonData)
+            let user = UserPersonal(docId: document.documentID, data: data)
             onChange(user)
         }
     }

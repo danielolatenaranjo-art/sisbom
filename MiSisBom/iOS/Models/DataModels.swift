@@ -13,9 +13,10 @@ struct UserPersonal: Identifiable, Codable, Equatable {
     let cargo: String
     let foto: String
     let estado: String
+    var deviceId: String
 
     enum CodingKeys: String, CodingKey {
-        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado
+        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado, deviceId
     }
 
     init(
@@ -28,7 +29,8 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         enServicio: String = "0",
         cargo: String = "",
         foto: String = "",
-        estado: String = ""
+        estado: String = "",
+        deviceId: String = ""
     ) {
         self.idRegistro = idRegistro
         self.nombreBombero = nombreBombero
@@ -40,19 +42,140 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         self.cargo = cargo
         self.foto = foto
         self.estado = estado
+        self.deviceId = deviceId
+    }
+
+    // Direct initialization from Firestore document dictionary
+    init(docId: String, data: [String: Any]) {
+        // idRegistro
+        if let regStr = data["idRegistro"] as? String, !regStr.isEmpty {
+            self.idRegistro = regStr
+        } else if let regNum = data["idRegistro"] as? NSNumber {
+            self.idRegistro = regNum.stringValue
+        } else {
+            self.idRegistro = docId
+        }
+
+        self.nombreBombero = data["nombreBombero"] as? String ?? ""
+
+        // idRadial
+        if let radStr = data["idRadial"] as? String {
+            self.idRadial = radStr
+        } else if let radNum = data["idRadial"] as? NSNumber {
+            self.idRadial = radNum.stringValue
+        } else {
+            self.idRadial = ""
+        }
+
+        // contrasena
+        if let passStr = data["contrasena"] as? String {
+            self.contrasena = passStr
+        } else if let passNum = data["contrasena"] as? NSNumber {
+            self.contrasena = passNum.stringValue
+        } else {
+            self.contrasena = ""
+        }
+
+        // activo (Bool, NSNumber/Int, or String "SI")
+        if let b = data["activo"] as? Bool {
+            self.activo = b
+        } else if let num = data["activo"] as? NSNumber {
+            self.activo = (num.intValue == 1)
+        } else if let str = data["activo"] as? String {
+            let s = str.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            self.activo = (s == "SI" || s == "1" || s == "TRUE" || s == "S")
+        } else {
+            self.activo = false
+        }
+
+        // conductor (Int, Bool, or String "SI"/"NO")
+        if let num = data["conductor"] as? NSNumber {
+            self.conductor = num.intValue
+        } else if let b = data["conductor"] as? Bool {
+            self.conductor = b ? 1 : 0
+        } else if let str = data["conductor"] as? String {
+            let s = str.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            self.conductor = (s == "SI" || s == "1" || s == "TRUE" || s == "S") ? 1 : 0
+        } else {
+            self.conductor = 0
+        }
+
+        // enServicio
+        if let s = data["enServicio"] as? String {
+            self.enServicio = s
+        } else if let num = data["enServicio"] as? NSNumber {
+            self.enServicio = num.stringValue
+        } else if let b = data["enServicio"] as? Bool {
+            self.enServicio = b ? "1" : "0"
+        } else {
+            self.enServicio = "0"
+        }
+
+        self.cargo = data["cargo"] as? String ?? ""
+        self.foto = data["foto"] as? String ?? ""
+        self.estado = data["estado"] as? String ?? ""
+        self.deviceId = data["deviceId"] as? String ?? ""
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        idRegistro = try container.decodeIfPresent(String.self, forKey: .idRegistro) ?? ""
+
+        // Flexible idRegistro
+        if let s = try? container.decode(String.self, forKey: .idRegistro) {
+            idRegistro = s
+        } else if let n = try? container.decode(Int.self, forKey: .idRegistro) {
+            idRegistro = String(n)
+        } else {
+            idRegistro = ""
+        }
+
         nombreBombero = try container.decodeIfPresent(String.self, forKey: .nombreBombero) ?? ""
-        idRadial = try container.decodeIfPresent(String.self, forKey: .idRadial) ?? ""
-        contrasena = try container.decodeIfPresent(String.self, forKey: .contrasena) ?? ""
-        conductor = try container.decodeIfPresent(Int.self, forKey: .conductor) ?? 0
-        enServicio = try container.decodeIfPresent(String.self, forKey: .enServicio) ?? "0"
+
+        // Flexible idRadial
+        if let s = try? container.decode(String.self, forKey: .idRadial) {
+            idRadial = s
+        } else if let n = try? container.decode(Int.self, forKey: .idRadial) {
+            idRadial = String(n)
+        } else {
+            idRadial = ""
+        }
+
+        // Flexible contrasena
+        if let s = try? container.decode(String.self, forKey: .contrasena) {
+            contrasena = s
+        } else if let n = try? container.decode(Int.self, forKey: .contrasena) {
+            contrasena = String(n)
+        } else {
+            contrasena = ""
+        }
+
+        // Flexible conductor (Int, Bool, or String "SI"/"NO")
+        if let intVal = try? container.decode(Int.self, forKey: .conductor) {
+            conductor = intVal
+        } else if let boolVal = try? container.decode(Bool.self, forKey: .conductor) {
+            conductor = boolVal ? 1 : 0
+        } else if let strVal = try? container.decode(String.self, forKey: .conductor) {
+            let s = strVal.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            conductor = (s == "SI" || s == "1" || s == "TRUE" || s == "S") ? 1 : 0
+        } else {
+            conductor = 0
+        }
+
+        // Flexible enServicio
+        if let s = try? container.decode(String.self, forKey: .enServicio) {
+            enServicio = s
+        } else if let n = try? container.decode(Int.self, forKey: .enServicio) {
+            enServicio = String(n)
+        } else if let b = try? container.decode(Bool.self, forKey: .enServicio) {
+            enServicio = b ? "1" : "0"
+        } else {
+            enServicio = "0"
+        }
+
         cargo = try container.decodeIfPresent(String.self, forKey: .cargo) ?? ""
         foto = try container.decodeIfPresent(String.self, forKey: .foto) ?? ""
         estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? ""
+        deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId) ?? ""
 
         // Flexible decoding for 'activo' (could be Bool, Int, or String)
         if let boolVal = try? container.decode(Bool.self, forKey: .activo) {
@@ -60,7 +183,8 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         } else if let intVal = try? container.decode(Int.self, forKey: .activo) {
             activo = (intVal == 1)
         } else if let strVal = try? container.decode(String.self, forKey: .activo) {
-            activo = (strVal == "1" || strVal.uppercased() == "SI")
+            let s = strVal.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            activo = (s == "1" || s == "SI" || s == "TRUE" || s == "S")
         } else {
             activo = false
         }

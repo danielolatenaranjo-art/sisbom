@@ -39,7 +39,7 @@ struct SetupView: View {
                             .frame(width: 90, height: 90)
                             .shadow(color: Color.red.opacity(0.3), radius: 10, x: 0, y: 4)
 
-                        Text("SISBOM SaaS")
+                        Text("miSisBom SaaS")
                             .font(.system(size: 26, weight: .black, design: .rounded))
                             .foregroundColor(.white)
                             .tracking(1.5)
@@ -180,6 +180,15 @@ struct SetupView: View {
             if let savedKey = UserDefaults.standard.string(forKey: "saas_license_key") {
                 licenseKeyInput = savedKey
             }
+        }
+        .alert(isPresented: $viewModel.requiresAppRestartAfterLicenseChange) {
+            Alert(
+                title: Text("Nueva Institución Activada"),
+                message: Text("Se ha conectado con éxito a \(viewModel.saasClientName). Para aplicar los cambios y conectarse a los servidores de la nueva institución, presione Continuar para reiniciar la aplicación."),
+                dismissButton: .default(Text("Continuar"), action: {
+                    exit(0)
+                })
+            )
         }
     }
 

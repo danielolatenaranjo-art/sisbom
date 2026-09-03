@@ -41,6 +41,7 @@ class SisBomViewModel: ObservableObject {
     @Published var saasLogoUrl: String = ""
     @Published var saasActivationError: String = ""
     @Published var isActivatingLicense: Bool = false
+    @Published var requiresAppRestartAfterLicenseChange: Bool = false
     
     @Published var isDarkMode: Bool = false {
         didSet {
@@ -110,6 +111,7 @@ class SisBomViewModel: ObservableObject {
             self.currentScreen = .setup
         } else {
             initializeDynamicFirebase(configStr: savedConfigStr)
+            self.updateAppIcon(for: savedLicense, clientName: self.saasClientName)
             
             // Load saved user session
             if let savedUser: UserPersonal = loadCache(key: "fire_user") {
@@ -437,65 +439,91 @@ class SisBomViewModel: ObservableObject {
     // MARK: - Actions
     
     func performLogin(idReg: String, pass: String, completion: @escaping (Bool) -> Void) {
-        let trimmedId = idReg.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let cleanId = idReg.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanPass = pass.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        if trimmedId.isEmpty || pass.isEmpty {
+        if cleanId.isEmpty || cleanPass.isEmpty {
             completion(false)
             return
         }
         
         isLoggingIn = true
         
-        let email = trimmedId + "@sisbom.com"
-        let securePass = pass + "_secure_sisbom"
+        let email = cleanId.lowercased() + "@sisbom.com"
+        let securePass = cleanPass + "_secure_sisbom"
         
+        // Helper to validate and finalize login once user document data is found
+        func processUserLogin(docId: String, data: [String: Any]) {
+            let user = UserPersonal(docId: docId, data: data)
+            
+            // Validate password against Firestore
+            let storedPass = user.contrasena.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !storedPass.isEmpty && storedPass != cleanPass {
+                self.isLoggingIn = false
+                completion(false)
+                return
+            }
+            
+            // Validate active
+            if !user.activo {
+                self.isLoggingIn = false
+                completion(false)
+                return
+            }
+            
+            self.currentUser = user
+            self.saveCache(user, key: "fire_user")
+            self.currentScreen = .main
+            self.isLoggingIn = false
+            self.startFirebaseSync(userId: user.idRegistro)
+            completion(true)
+        }
+        
+        // 1. Try Firebase Auth sign-in
         Auth.auth().signIn(withEmail: email, password: securePass) { [weak self] authResult, authError in
             guard let self = self else { return }
             
-            if authResult != nil {
-                Firestore.firestore().collection("personal").document(trimmedId).getDocument { doc, docError in
-                    if let doc = doc, doc.exists, let data = doc.data() {
-                        guard let jsonData = try? JSONSerialization.data(withJSONObject: data),
-                              let user = try? JSONDecoder().decode(UserPersonal.self, from: jsonData) else {
-                            self.isLoggingIn = false
-                            completion(false)
-                            return
-                        }
-                        
-                        if !user.activo {
-                            self.isLoggingIn = false
-                            completion(false)
-                            return
-                        }
-                        
-                        self.currentUser = user
-                        self.saveCache(user, key: "fire_user")
-                        self.currentScreen = .main
-                        self.isLoggingIn = false
-                        self.startFirebaseSync(userId: user.idRegistro)
-                        completion(true)
-                    } else {
-                        self.isLoggingIn = false
-                        completion(false)
-                    }
-                }
-            } else {
-                print("Firebase Auth sign-in failed: \(authError?.localizedDescription ?? "unknown error")")
-                if let matchLocal = self.personnelList.first(where: { $0.idRegistro.lowercased() == trimmedId && $0.contrasena == pass }) {
-                    if !matchLocal.activo {
-                        self.isLoggingIn = false
-                        completion(false)
-                        return
-                    }
-                    self.currentUser = matchLocal
-                    self.saveCache(matchLocal, key: "fire_user")
-                    self.currentScreen = .main
-                    self.isLoggingIn = false
-                    self.startFirebaseSync(userId: matchLocal.idRegistro)
-                    completion(true)
+            let db = Firestore.firestore()
+            
+            // 2. Query Firestore personal collection
+            db.collection("personal").document(cleanId).getDocument { doc, docError in
+                if let doc = doc, doc.exists, let data = doc.data() {
+                    processUserLogin(docId: doc.documentID, data: data)
                 } else {
-                    self.isLoggingIn = false
-                    completion(false)
+                    // Try lowercase ID in case doc is keyed with lowercase
+                    db.collection("personal").document(cleanId.lowercased()).getDocument { docLower, _ in
+                        if let docLower = docLower, docLower.exists, let dataLower = docLower.data() {
+                            processUserLogin(docId: docLower.documentID, data: dataLower)
+                        } else {
+                            // Query by idRegistro field
+                            db.collection("personal").whereField("idRegistro", isEqualTo: cleanId).getDocuments { snap, _ in
+                                if let queryDoc = snap?.documents.first, let qData = queryDoc.data() {
+                                    processUserLogin(docId: queryDoc.documentID, data: qData)
+                                } else {
+                                    // Local cache fallback
+                                    if let matchLocal = self.personnelList.first(where: {
+                                        ($0.idRegistro.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == cleanId.lowercased()) &&
+                                        ($0.contrasena.trimmingCharacters(in: .whitespacesAndNewlines) == cleanPass)
+                                    }) {
+                                        if !matchLocal.activo {
+                                            self.isLoggingIn = false
+                                            completion(false)
+                                            return
+                                        }
+                                        self.currentUser = matchLocal
+                                        self.saveCache(matchLocal, key: "fire_user")
+                                        self.currentScreen = .main
+                                        self.isLoggingIn = false
+                                        self.startFirebaseSync(userId: matchLocal.idRegistro)
+                                        completion(true)
+                                    } else {
+                                        self.isLoggingIn = false
+                                        completion(false)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -899,14 +927,8 @@ class SisBomViewModel: ObservableObject {
                 print("Firebase already configured for project: \(projectId)")
                 return
             }
-            currentApp.delete { _ in
-                DispatchQueue.main.async {
-                    if FirebaseApp.app() == nil {
-                        FirebaseApp.configure(options: options)
-                        print("Dynamic Firebase re-configured: \(projectId)")
-                    }
-                }
-            }
+            // In iOS, Firebase SDK cannot be reconfigured in the same process without causing an unhandled fatal NSException.
+            print("Different Firebase project detected (\(currentApp.options.projectID ?? "") -> \(projectId)). Process restart required.")
         } else {
             FirebaseApp.configure(options: options)
             print("Dynamic Firebase configured: \(projectId)")
@@ -956,7 +978,8 @@ class SisBomViewModel: ObservableObject {
                 let authorized = json["authorized"] as? Bool ?? false
                 if authorized, let firebaseConfig = json["firebaseConfig"] as? [String: Any],
                    let configData = try? JSONSerialization.data(withJSONObject: firebaseConfig),
-                   let configStr = String(data: configData, encoding: .utf8) {
+                   let configStr = String(data: configData, encoding: .utf8),
+                   let newProjectId = firebaseConfig["projectId"] as? String {
                     
                     let clientName = json["clientName"] as? String ?? json["nombreMostrar"] as? String ?? "SisBom"
                     let logoUrl = json["logoUrl"] as? String ?? ""
@@ -975,6 +998,17 @@ class SisBomViewModel: ObservableObject {
                         self.downloadClientLogo(logoUrl)
                     }
                     
+                    // Update launcher app icon based on license/institution
+                    self.updateAppIcon(for: trimmedKey, clientName: clientName)
+                    
+                    // Check if Firebase was already configured for a different project in this running session
+                    if let currentApp = FirebaseApp.app(), currentApp.options.projectID != newProjectId {
+                        self.saasActivationError = "Licencia activada con éxito para \(clientName). Para conectar con la nueva institución, presione Continuar para reiniciar la aplicación."
+                        self.requiresAppRestartAfterLicenseChange = true
+                        onComplete?(true)
+                        return
+                    }
+                    
                     self.initializeDynamicFirebase(configStr: configStr)
                     self.currentScreen = .login
                     onComplete?(true)
@@ -985,6 +1019,30 @@ class SisBomViewModel: ObservableObject {
                 }
             }
         }.resume()
+    }
+
+    func updateAppIcon(for key: String, clientName: String) {
+        guard UIApplication.shared.supportsAlternateIcons else { return }
+        
+        let upperKey = key.uppercased()
+        let upperName = clientName.uppercased()
+        
+        var targetIconName: String? = nil
+        if upperKey.contains("CBPL") || upperKey.contains("PLACILLA") || upperName.contains("PLACILLA") {
+            targetIconName = "SB-CBPL-OH"
+        } else if upperKey == "PRUEBA" {
+            targetIconName = "PRUEBA"
+        }
+        
+        if UIApplication.shared.alternateIconName != targetIconName {
+            UIApplication.shared.setAlternateIconName(targetIconName) { error in
+                if let error = error {
+                    print("Error setting alternate icon: \(error.localizedDescription)")
+                } else {
+                    print("Switched app icon to: \(targetIconName ?? "primary")")
+                }
+            }
+        }
     }
 
     func checkLicenseStatus() {
@@ -1040,6 +1098,11 @@ class SisBomViewModel: ObservableObject {
         self.saasClientName = ""
         self.saasLogoUrl = ""
         self.currentScreen = .setup
+        
+        // Reset app icon to default primary icon
+        if UIApplication.shared.supportsAlternateIcons {
+            UIApplication.shared.setAlternateIconName(nil)
+        }
     }
 
     func downloadClientLogo(_ urlString: String) {

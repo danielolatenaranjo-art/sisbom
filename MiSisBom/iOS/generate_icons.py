@@ -6,13 +6,15 @@ def generate_ios_icons():
     # Paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
     source_logo = os.path.abspath(os.path.join(script_dir, "..", "logo.png"))
-    assets_path = os.path.join(script_dir, "Assets.xcassets")
-    appicon_path = os.path.join(assets_path, "AppIcon.appiconset")
+    if not os.path.exists(source_logo):
+        source_logo = os.path.abspath(os.path.join(script_dir, "..", "..", "..", "Logos", "default.png"))
 
     if not os.path.exists(source_logo):
         print(f"Error: Source logo not found at {source_logo}")
         return
 
+    assets_path = os.path.join(script_dir, "Assets.xcassets")
+    appicon_path = os.path.join(assets_path, "AppIcon.appiconset")
     os.makedirs(appicon_path, exist_ok=True)
 
     # Standard iOS AppIcon sizes configuration
@@ -96,5 +98,35 @@ def generate_ios_icons():
     print(f"Generated asset Contents.json at: {contents_filepath}")
     print("All iOS AppIcon assets generated successfully!")
 
+def generate_alternate_icons():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    logos_dir = os.path.abspath(os.path.join(script_dir, "..", "..", "..", "Logos"))
+    res_dir = os.path.join(script_dir, "Resources")
+    os.makedirs(res_dir, exist_ok=True)
+
+    if not os.path.exists(logos_dir):
+        print(f"Logos dir not found at: {logos_dir}")
+        return
+
+    for name in ['SB-CBPL-OH', 'PRUEBA']:
+        src = os.path.join(logos_dir, f"{name}.png")
+        if os.path.exists(src):
+            with Image.open(src) as img:
+                img = img.convert('RGBA')
+                for scale, px in [(2, 120), (3, 180)]:
+                    bg = Image.new('RGBA', (px, px), (255, 255, 255, 255))
+                    resized = img.copy()
+                    resized.thumbnail((px, px), Image.Resampling.LANCZOS)
+                    offset_x = (px - resized.width) // 2
+                    offset_y = (px - resized.height) // 2
+                    bg.paste(resized, (offset_x, offset_y), resized)
+                    final_img = bg.convert('RGB')
+                    dst = os.path.join(res_dir, f"{name}@{scale}x.png")
+                    final_img.save(dst, 'PNG')
+                    if scale == 2:
+                        final_img.save(os.path.join(res_dir, f"{name}.png"), 'PNG')
+                    print(f"Generated alternate icon: {dst}")
+
 if __name__ == "__main__":
     generate_ios_icons()
+    generate_alternate_icons()
