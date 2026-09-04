@@ -110,8 +110,7 @@ class SisBomViewModel: ObservableObject {
         if savedLicense.isEmpty || savedConfigStr.isEmpty {
             self.currentScreen = .setup
         } else {
-            initializeDynamicFirebase(configStr: savedConfigStr)
-            self.updateAppIcon(for: savedLicense, clientName: self.saasClientName)
+            AppDelegate.configureDynamicFirebase(configStr: savedConfigStr)
             
             // Load saved user session
             if let savedUser: UserPersonal = loadCache(key: "fire_user") {
@@ -907,33 +906,7 @@ class SisBomViewModel: ObservableObject {
     // MARK: - Dynamic Firebase & SaaS License Methods
     
     func initializeDynamicFirebase(configStr: String) {
-        guard let data = configStr.data(using: .utf8),
-              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let apiKey = config["apiKey"] as? String,
-              let projectId = config["projectId"] as? String,
-              let appId = config["appId"] as? String,
-              let messagingSenderId = config["messagingSenderId"] as? String,
-              let storageBucket = config["storageBucket"] as? String else {
-            print("Error: Invalid Firebase config JSON")
-            return
-        }
-        
-        let options = FirebaseOptions(googleAppID: appId, gcmSenderID: messagingSenderId)
-        options.apiKey = apiKey
-        options.projectID = projectId
-        options.storageBucket = storageBucket
-        
-        if let currentApp = FirebaseApp.app() {
-            if currentApp.options.projectID == projectId {
-                print("Firebase already configured for project: \(projectId)")
-                return
-            }
-            // In iOS, Firebase SDK cannot be reconfigured in the same process without causing an unhandled fatal NSException.
-            print("Different Firebase project detected (\(currentApp.options.projectID ?? "") -> \(projectId)). Process restart required.")
-        } else {
-            FirebaseApp.configure(options: options)
-            print("Dynamic Firebase configured: \(projectId)")
-        }
+        AppDelegate.configureDynamicFirebase(configStr: configStr)
     }
 
     func activateLicense(key: String, onComplete: ((Bool) -> Void)? = nil) {
@@ -1023,24 +996,26 @@ class SisBomViewModel: ObservableObject {
     }
 
     func updateAppIcon(for key: String, clientName: String) {
-        guard UIApplication.shared.supportsAlternateIcons else { return }
-        
-        let upperKey = key.uppercased()
-        let upperName = clientName.uppercased()
-        
-        var targetIconName: String? = nil
-        if upperKey.contains("CBPL") || upperKey.contains("PLACILLA") || upperName.contains("PLACILLA") {
-            targetIconName = "SB-CBPL-OH"
-        } else if upperKey == "PRUEBA" {
-            targetIconName = "PRUEBA"
-        }
-        
-        if UIApplication.shared.alternateIconName != targetIconName {
-            UIApplication.shared.setAlternateIconName(targetIconName) { error in
-                if let error = error {
-                    print("Error setting alternate icon: \(error.localizedDescription)")
-                } else {
-                    print("Switched app icon to: \(targetIconName ?? "primary")")
+        DispatchQueue.main.async {
+            guard UIApplication.shared.supportsAlternateIcons else { return }
+            
+            let upperKey = key.uppercased()
+            let upperName = clientName.uppercased()
+            
+            var targetIconName: String? = nil
+            if upperKey.contains("CBPL") || upperKey.contains("PLACILLA") || upperName.contains("PLACILLA") {
+                targetIconName = "SB-CBPL-OH"
+            } else if upperKey == "PRUEBA" {
+                targetIconName = "PRUEBA"
+            }
+            
+            if UIApplication.shared.alternateIconName != targetIconName {
+                UIApplication.shared.setAlternateIconName(targetIconName) { error in
+                    if let error = error {
+                        print("Error setting alternate icon: \(error.localizedDescription)")
+                    } else {
+                        print("Switched app icon to: \(targetIconName ?? "primary")")
+                    }
                 }
             }
         }

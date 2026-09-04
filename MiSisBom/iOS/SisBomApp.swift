@@ -6,29 +6,47 @@ import UserNotifications
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     static var launchChatId: String? = nil
 
+    static func configureDynamicFirebase(configStr: String) {
+        guard let data = configStr.data(using: .utf8),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let apiKey = config["apiKey"] as? String, !apiKey.isEmpty,
+              let projectId = config["projectId"] as? String, !projectId.isEmpty,
+              let rawAppId = config["appId"] as? String, !rawAppId.isEmpty,
+              let messagingSenderId = config["messagingSenderId"] as? String, !messagingSenderId.isEmpty else {
+            print("Error: Invalid Firebase configuration payload")
+            return
+        }
+
+        // Format appId for iOS SDK (SaaS returns Web App IDs containing ':web:', Firebase iOS requires ':ios:')
+        let formattedAppId = rawAppId.replacingOccurrences(of: ":web:", with: ":ios:")
+        let storageBucket = (config["storageBucket"] as? String) ?? "\(projectId).appspot.com"
+        let bundleId = Bundle.main.bundleIdentifier ?? "com.misisbom.sisbom"
+
+        let options = FirebaseOptions(googleAppID: formattedAppId, gcmSenderID: messagingSenderId)
+        options.apiKey = apiKey
+        options.projectID = projectId
+        options.storageBucket = storageBucket
+        options.bundleID = bundleId
+
+        if let currentApp = FirebaseApp.app() {
+            if currentApp.options.projectID == projectId {
+                print("Firebase already configured for project: \(projectId)")
+                return
+            }
+            print("Different Firebase project detected (\(currentApp.options.projectID ?? "") -> \(projectId)). Restart required.")
+        } else {
+            FirebaseApp.configure(options: options)
+            print("Dynamic Firebase successfully configured for project: \(projectId)")
+        }
+    }
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
         // Attempt dynamic Firebase configuration if cached config exists
-        if let cachedConfigStr = UserDefaults.standard.string(forKey: "saas_firebase_config"),
-           let data = cachedConfigStr.data(using: .utf8),
-           let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let apiKey = config["apiKey"] as? String,
-           let projectId = config["projectId"] as? String,
-           let appId = config["appId"] as? String,
-           let messagingSenderId = config["messagingSenderId"] as? String,
-           let storageBucket = config["storageBucket"] as? String {
-            
-            let options = FirebaseOptions(googleAppID: appId, gcmSenderID: messagingSenderId)
-            options.apiKey = apiKey
-            options.projectID = projectId
-            options.storageBucket = storageBucket
-            
-            if FirebaseApp.app() == nil {
-                FirebaseApp.configure(options: options)
-                print("Firebase configured at launch for project: \(projectId)")
-            }
+        if let cachedConfigStr = UserDefaults.standard.string(forKey: "saas_firebase_config"), !cachedConfigStr.isEmpty {
+            AppDelegate.configureDynamicFirebase(configStr: cachedConfigStr)
         }
         
         UNUserNotificationCenter.current().delegate = self
