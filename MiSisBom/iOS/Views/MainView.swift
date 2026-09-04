@@ -6,6 +6,25 @@ struct MainView: View {
     @State private var showingChangePassword: Bool = false
     @State private var newPassword: String = ""
 
+    var visibleTabs: [MainTab] {
+        getVisibleTabs(isCentralActive: viewModel.isCentralActive, user: viewModel.currentUser)
+    }
+
+    var showFullscreenAlert: Dispatch? {
+        guard let user = viewModel.currentUser, !viewModel.isCentralActive else { return nil }
+        let userStatus = user.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let is09 = userStatus == "0-9"
+        let is08 = userStatus == "0-8" || userStatus == "10-8"
+        guard let fId = viewModel.fullscreenDispatchId, (is09 || is08) else { return nil }
+        guard let d = viewModel.dispatchesList.first(where: { $0.idServicio == fId && $0.operadorFinal.isEmpty }) else { return nil }
+        let isAttending = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) == fId
+        let isEscalationAlarm = d.clave.contains("10-30") || d.clave.uppercased().contains("FORESTAL")
+        if !isAttending && (isEscalationAlarm || (is09 && userStatus != "NO ASISTIR")) {
+            return d
+        }
+        return nil
+    }
+
     var body: some View {
         let isDark = viewModel.isDarkMode
         
@@ -55,29 +74,26 @@ struct MainView: View {
                             AlertasTab(viewModel: viewModel)
                         case .asistencia:
                             AsistenciaTab(viewModel: viewModel)
+                        case .disponibles:
+                            DisponiblesTab(viewModel: viewModel)
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     
                     // Custom Bottom Navigation Bar
                     HStack {
-                        ForEach(MainTab.allCases, id: \.self) { tab in
-                            // Do not show DespachoTab if the user is not Central Operator
-                            if tab == .despacho && !viewModel.isCentralActive {
-                                EmptyView()
-                            } else {
-                                Button(action: {
-                                    viewModel.currentTab = tab
-                                }) {
-                                    VStack(spacing: 4) {
-                                        Image(systemName: tabIcon(for: tab))
-                                            .font(.system(size: 20))
-                                        Text(tabLabel(for: tab))
-                                            .font(.system(size: 9, weight: .bold))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .foregroundColor(viewModel.currentTab == tab ? Color.bomberosRed : Color.textSecondary)
+                        ForEach(visibleTabs, id: \.self) { tab in
+                            Button(action: {
+                                viewModel.currentTab = tab
+                            }) {
+                                VStack(spacing: 4) {
+                                    Image(systemName: tabIcon(for: tab))
+                                        .font(.system(size: 20))
+                                    Text(tabLabel(for: tab))
+                                        .font(.system(size: 9, weight: .bold))
                                 }
+                                .frame(maxWidth: .infinity)
+                                .foregroundColor(viewModel.currentTab == tab ? Color.bomberosRed : Color.textSecondary)
                             }
                         }
                     }
@@ -123,6 +139,19 @@ struct MainView: View {
             if viewModel.showChangelogDialog {
                 ChangelogDialog(viewModel: viewModel)
             }
+
+            // Emergency Fullscreen Overlay Alert
+            if let dispatch = showFullscreenAlert {
+                FullscreenEmergencyAlertView(dispatch: dispatch, viewModel: viewModel)
+                    .transition(.opacity)
+                    .zIndex(100)
+            }
+        }
+        .onAppear {
+            ensureCurrentTabValid()
+        }
+        .onChange(of: viewModel.isCentralActive) { _ in
+            ensureCurrentTabValid()
         }
         .fullScreenCover(item: Binding<AlertaItem?>(
             get: { viewModel.activeChatAlert },
@@ -132,6 +161,38 @@ struct MainView: View {
         }
     }
     
+    private func ensureCurrentTabValid() {
+        if !visibleTabs.contains(viewModel.currentTab), let first = visibleTabs.first {
+            viewModel.currentTab = first
+        }
+    }
+
+    private func getVisibleTabs(isCentralActive: Bool, user: UserPersonal?) -> [MainTab] {
+        var list: [MainTab] = []
+        let cargo = user?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        let isHonorario = cargo == "BOMBERO HONORARIO"
+        let idRadial = user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !isHonorario {
+            if isCentralActive {
+                list.append(.despacho)
+            } else {
+                list.append(.actividad)
+            }
+        }
+        
+        list.append(.ordenes)
+        list.append(.alertas)
+        
+        if !isHonorario {
+            list.append(.asistencia)
+            if isCentralActive || idRadial == "1" {
+                list.append(.disponibles)
+            }
+        }
+        return list
+    }
+    
     private func headerTitle(for tab: MainTab) -> String {
         switch tab {
         case .actividad: return "Actividad"
@@ -139,6 +200,7 @@ struct MainView: View {
         case .ordenes: return "Órdenes del Día"
         case .alertas: return "Alertas Generales"
         case .asistencia: return "Asistencia"
+        case .disponibles: return "Disponibles"
         }
     }
     
@@ -149,6 +211,7 @@ struct MainView: View {
         case .ordenes: return "doc.plaintext.fill"
         case .alertas: return "bell.fill"
         case .asistencia: return "person.3.fill"
+        case .disponibles: return "person.crop.circle.badge.checkmark"
         }
     }
     
@@ -159,6 +222,7 @@ struct MainView: View {
         case .ordenes: return "Orden del Día"
         case .alertas: return "Alertas"
         case .asistencia: return "Asistencia"
+        case .disponibles: return "Disponibles"
         }
     }
 }
@@ -412,7 +476,7 @@ struct ChangelogDialog: View {
             VStack(spacing: 20) {
                 // Header
                 VStack(spacing: 8) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "bolt.fill")
                         .font(.system(size: 36))
                         .foregroundColor(Color.bomberosRed)
                     
@@ -420,7 +484,7 @@ struct ChangelogDialog: View {
                         .font(.system(size: 18, weight: .black))
                         .foregroundColor(isDark ? .white : .textDark)
                     
-                    Text("miSisBom V 1.0.7")
+                    Text("SISBOM V 2.1.4")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.gray)
                 }
@@ -428,16 +492,23 @@ struct ChangelogDialog: View {
                 // Bullet points
                 VStack(alignment: .leading, spacing: 14) {
                     bulletPoint(
-                        icon: "lock.fill",
-                        title: "Seguridad y Autenticación",
-                        desc: "Se implementó el inicio de sesión seguro en segundo plano para cumplir con las políticas de Firebase.",
+                        icon: "gearshape.fill",
+                        title: "Logo e Icono Personalizado",
+                        desc: "Soporte para cambiar dinámicamente el icono de lanzamiento y almacenar en caché el logotipo oficial de su institución.",
                         isDark: isDark
                     )
                     
                     bulletPoint(
                         icon: "cloud.fill",
-                        title: "Optimización de Lecturas",
-                        desc: "Sincronización en tiempo real optimizada individualmente para reducir drásticamente el consumo diario de la BD.",
+                        title: "Descarga de Actualizaciones",
+                        desc: "Corrección en la visualización del progreso de descargas OTA al evitar la compresión en tránsito.",
+                        isDark: isDark
+                    )
+
+                    bulletPoint(
+                        icon: "lock.fill",
+                        title: "Seguridad del Portal",
+                        desc: "Se removió la opción de cambiar organización en la pantalla de login para evitar desvinculaciones accidentales.",
                         isDark: isDark
                     )
                 }
@@ -486,6 +557,131 @@ struct ChangelogDialog: View {
                     .foregroundColor(.gray)
                     .lineLimit(nil)
                     .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+// MARK: - Fullscreen Emergency Alert View
+struct FullscreenEmergencyAlertView: View {
+    let dispatch: Dispatch
+    @ObservedObject var viewModel: SisBomViewModel
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.725, green: 0.11, blue: 0.11) // #B91C1C
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                // Header: Logo and Title
+                VStack(spacing: 8) {
+                    Image(uiImage: viewModel.getInstitutionLogo())
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 72, height: 72)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
+
+                    Text("🚨 DESPACHO DE EMERGENCIA 🚨")
+                        .font(.system(size: 18, weight: .black))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+
+                    Text("¡CONFIRMA TU ASISTENCIA AHORA!")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(Color.white.opacity(0.9))
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, 40)
+
+                Spacer()
+
+                // Center: Clave, Time, Date, Preinforme, Units
+                VStack(spacing: 12) {
+                    Text("CLAVE")
+                        .font(.system(size: 15, weight: .heavy))
+                        .tracking(2)
+                        .foregroundColor(Color.white.opacity(0.75))
+
+                    let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
+                    Text(claveText)
+                        .font(.system(size: claveText.count > 5 ? 64 : 80, weight: .black))
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+
+                    HStack(spacing: 14) {
+                        let hora = dispatch.horaDespacho.isEmpty ? "--:--" : dispatch.horaDespacho
+                        Text("HORA: \(hora)")
+                            .font(.system(size: 16, weight: .black))
+                            .foregroundColor(.white)
+
+                        Text("•")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundColor(Color.white.opacity(0.6))
+
+                        let fecha = dispatch.fechaDespacho.isEmpty ? DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none) : dispatch.fechaDespacho
+                        Text("FECHA: \(fecha)")
+                            .font(.system(size: 16, weight: .black))
+                            .foregroundColor(.white)
+                    }
+
+                    if !dispatch.preinforme.isEmpty {
+                        Text(dispatch.preinforme)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.9))
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .padding(.horizontal, 24)
+                            .padding(.top, 6)
+                    }
+
+                    if !dispatch.carros.isEmpty {
+                        Text("UNIDADES: \(dispatch.carros)")
+                            .font(.system(size: 15, weight: .black))
+                            .foregroundColor(Color(red: 0.98, green: 0.75, blue: 0.14)) // Amber #FBBF24
+                            .multilineTextAlignment(.center)
+                            .padding(.top, 4)
+                    }
+                }
+
+                Spacer()
+
+                // Action Buttons: ASISTIR & NO ASISTIR
+                VStack(spacing: 12) {
+                    Button(action: {
+                        viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
+                        viewModel.fullscreenDispatchId = nil
+                    }) {
+                        Text("ASISTIR")
+                            .font(.system(size: 18, weight: .black))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 56)
+                            .background(Color(red: 0.06, green: 0.73, blue: 0.51)) // #10B981
+                            .cornerRadius(18)
+                    }
+
+                    Button(action: {
+                        viewModel.declineService(dispatchId: dispatch.idServicio)
+                        viewModel.fullscreenDispatchId = nil
+                    }) {
+                        Text("NO ASISTIR")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(Color.black.opacity(0.45))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 18)
+                                    .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
+                            )
+                            .cornerRadius(18)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 44)
             }
         }
     }

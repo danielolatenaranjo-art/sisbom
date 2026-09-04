@@ -22,6 +22,7 @@ enum MainTab: String, Codable, CaseIterable {
     case ordenes
     case alertas
     case asistencia
+    case disponibles
 }
 
 class SisBomViewModel: ObservableObject {
@@ -66,6 +67,7 @@ class SisBomViewModel: ObservableObject {
     @Published var activeChatAlert: AlertaItem? = nil
     @Published var selectedOrdenId: String? = nil
     @Published var showChangelogDialog: Bool = false
+    @Published var fullscreenDispatchId: String? = nil
     private var pendingChatId: String? = nil
     
     // Feedback strings
@@ -145,7 +147,7 @@ class SisBomViewModel: ObservableObject {
         }
         
         let lastSeenVersion = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
-        if lastSeenVersion != "1.0.7" {
+        if lastSeenVersion != "2.1.4" {
             self.showChangelogDialog = true
         }
     }
@@ -160,7 +162,7 @@ class SisBomViewModel: ObservableObject {
     
     func dismissChangelog() {
         showChangelogDialog = false
-        UserDefaults.standard.set("1.0.7", forKey: "last_seen_version")
+        UserDefaults.standard.set("2.1.4", forKey: "last_seen_version")
     }
     
     func openChatRoom(chatId: String) {
@@ -291,22 +293,44 @@ class SisBomViewModel: ObservableObject {
         // Listener 3: Dispatches list
         let l3 = repository.getDispatches { [weak self] list in
             guard let self = self else { return }
+            let oldList = self.dispatchesList
             self.dispatchesList = list
             self.saveCache(list, key: "cache_dispatches")
             
             for d in list {
+                let oldDispatch = oldList.first(where: { $0.idServicio == d.idServicio })
+                let oldClave = oldDispatch?.clave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                let newClave = d.clave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+                let isEscalation1030 = (oldClave == "10-0" || oldClave.contains("10-0")) && newClave.contains("10-30")
+                let isEscalationForestal = (oldClave == "10-2" || oldClave.contains("10-2")) && newClave.contains("FORESTAL")
+                let isEscalation = isEscalation1030 || isEscalationForestal
+
                 let cleanClave = d.clave.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                let is1030 = cleanClave == "10-30" || cleanClave == "10_30" || cleanClave.contains("10-30")
-                let trackerKey1030 = "\(d.idServicio)_10_30"
+                let is1030 = cleanClave == "10-30" || cleanClave == "10_30" || cleanClave.contains("10-30") || newClave.contains("FORESTAL")
+                let trackerKey1030 = "\(d.idServicio)_\(isEscalationForestal ? "FORESTAL" : "10_30")"
 
                 let userStatus = self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
                 let isSpecial = userStatus.contains("SUSPENDIDO") || userStatus == "CDS" || userStatus.contains("LICENCIA") || userStatus == "PERMISO"
                 let is09 = userStatus == "0-9" && !isSpecial
+                let is08 = userStatus == "0-8" || userStatus == "10-8"
                 let isAbsoluteSilence = UserDefaults.standard.bool(forKey: "SILENCIO_ABSOLUTO") || userStatus.contains("ABSOLUTO")
                 let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let isAttending = !userEnServicio.isEmpty && userEnServicio == d.idServicio
 
-                if is1030 && !self.knownDispatchIds.contains(trackerKey1030) {
+                // 1. Escalamiento a alarma declarada (10-0 -> 10-30 o 10-2 -> FORESTAL)
+                if isEscalation && d.operadorFinal.isEmpty && !self.isFirstCheck {
+                    if !self.knownDispatchIds.contains(trackerKey1030) {
+                        self.knownDispatchIds.insert(trackerKey1030)
+                        self.knownDispatchIds.insert(d.idServicio)
+
+                        if !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive {
+                            self.playSound(soundName: "c10_30")
+                            self.triggerVibration()
+                            self.fullscreenDispatchId = d.idServicio
+                        }
+                    }
+                } else if is1030 && !self.knownDispatchIds.contains(trackerKey1030) {
                     self.knownDispatchIds.insert(trackerKey1030)
                     self.knownDispatchIds.insert(d.idServicio)
                     
@@ -314,15 +338,21 @@ class SisBomViewModel: ObservableObject {
                     if !isSpecial && !isAbsoluteSilence && !isAttending {
                         self.playSound(soundName: "c10_30")
                         self.triggerVibration()
+                        if !self.isFirstCheck && d.operadorFinal.isEmpty && !self.isCentralActive && (is09 || is08) {
+                            self.fullscreenDispatchId = d.idServicio
+                        }
                     }
                 } else if !self.knownDispatchIds.contains(d.idServicio) {
                     self.knownDispatchIds.insert(d.idServicio)
                     let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
-                    let is08 = userStatus == "0-8" || isSpecial
                     
-                    if !is08 && !isAbsoluteSilence {
+                    if !is08 && !isSpecial && !isAbsoluteSilence {
                         self.playSound(soundName: soundName)
                         self.triggerVibration()
+                    }
+
+                    if !self.isFirstCheck && d.operadorFinal.isEmpty && !self.isCentralActive && is09 && !isAttending {
+                        self.fullscreenDispatchId = d.idServicio
                     }
                 }
 
@@ -621,9 +651,18 @@ class SisBomViewModel: ObservableObject {
         repository.updatePersonalService(userId: user.idRegistro, serviceId: newServiceId) { _ in }
     }
     
+    func declineService(dispatchId: String) {
+        fullscreenDispatchId = nil
+        changePersonalService(newServiceId: "-\(dispatchId)")
+    }
+    
     func attendService(dispatchId: String, attend: Bool) {
-        let serviceId = attend ? dispatchId : "0"
-        changePersonalService(newServiceId: serviceId)
+        fullscreenDispatchId = nil
+        if attend {
+            changePersonalService(newServiceId: dispatchId)
+        } else {
+            declineService(dispatchId: dispatchId)
+        }
     }
     
     // ANCLAR / DESANCLAR ALERTA
