@@ -39,7 +39,7 @@ struct SetupView: View {
                             .frame(width: 90, height: 90)
                             .shadow(color: Color.red.opacity(0.3), radius: 10, x: 0, y: 4)
 
-                        Text("miSisBom SaaS")
+                        Text("SENTINEL ONE SaaS")
                             .font(.system(size: 26, weight: .black, design: .rounded))
                             .foregroundColor(.white)
                             .tracking(1.5)

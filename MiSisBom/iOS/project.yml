@@ -28,12 +28,18 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: "miSisBom"
+        CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "2.1.4"
         CFBundleVersion: "214"
         UILaunchScreen: {}
         UIBackgroundModes:
           - fetch
+          - remote-notification
+          - audio
+        NSLocationWhenInUseUsageDescription: "SENTINEL ONE requiere acceso a su ubicación para calcular distancias a emergencias y coordinar al personal."
+        NSLocationAlwaysAndWhenInUseUsageDescription: "SENTINEL ONE requiere acceso a su ubicación para alertas de despacho y seguimiento de emergencias."
+        NSCameraUsageDescription: "SENTINEL ONE requiere acceso a la cámara para adjuntar fotografías en reportes y bitácora de emergencias."
+        NSPhotoLibraryUsageDescription: "SENTINEL ONE requiere acceso a la galería para adjuntar imágenes a reportes de servicio y bitácora."
         CFBundleIcons:
           CFBundlePrimaryIcon:
             CFBundleIconFiles:

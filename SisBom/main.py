@@ -75,6 +75,35 @@ class InMemoryHTTPRequestHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(content)
                 return
 
+        # Intercept sentinel_logo.png requests to serve the official SENTINEL brand logo
+        if path.endswith('sentinel_logo.png'):
+            root_sentinel_path = os.path.join(get_exe_dir(), 'sentinel_logo.png')
+            if not os.path.isfile(root_sentinel_path):
+                root_sentinel_path = os.path.join(get_exe_dir(), 'central', 'sentinel_logo.png')
+            if os.path.isfile(root_sentinel_path):
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                self.send_header('Pragma', 'no-cache')
+                self.send_header('Expires', '0')
+                with open(root_sentinel_path, 'rb') as f:
+                    content = f.read()
+                self.send_header('Content-Length', len(content))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+            if 'central/sentinel_logo.png' in ASSETS:
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/png')
+                self.send_header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
+                self.send_header('Pragma', 'no-cache')
+                self.send_header('Expires', '0')
+                content = ASSETS['central/sentinel_logo.png']
+                self.send_header('Content-Length', len(content))
+                self.end_headers()
+                self.wfile.write(content)
+                return
+
         # Check if the file exists physically in the executable directory to allow SaaS branding override
         local_file_path = os.path.join(get_exe_dir(), path)
         if os.path.isfile(local_file_path):

@@ -89,7 +89,7 @@ fun LoginScreen(viewModel: SisBomViewModel) {
             )
 
             Text(
-                text = if (viewModel.saasClientName.isNotEmpty()) viewModel.saasClientName.uppercase() else "SISBOM",
+                text = if (viewModel.saasClientName.isNotEmpty()) viewModel.saasClientName.uppercase() else "SENTINEL ONE",
                 color = if (isDark) Color.White else TextDark,
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Black,
@@ -250,7 +250,7 @@ fun LoginScreen(viewModel: SisBomViewModel) {
 
             Spacer(modifier = Modifier.height(16.dp))
             Text(
-                text = "SISBOM V${viewModel.appVersionName} • USO OFICIAL",
+                text = "SENTINEL ONE V${viewModel.appVersionName} • USO OFICIAL",
                 color = if (isDark) Color.DarkGray else Color.LightGray,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Black,

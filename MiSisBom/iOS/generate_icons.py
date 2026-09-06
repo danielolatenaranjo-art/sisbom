@@ -5,7 +5,9 @@ from PIL import Image
 def generate_ios_icons():
     # Paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    source_logo = os.path.abspath(os.path.join(script_dir, "..", "logo.png"))
+    source_logo = os.path.abspath(os.path.join(script_dir, "..", "..", "..", "Logos", "sentinel_logo.png"))
+    if not os.path.exists(source_logo):
+        source_logo = os.path.abspath(os.path.join(script_dir, "..", "logo.png"))
     if not os.path.exists(source_logo):
         source_logo = os.path.abspath(os.path.join(script_dir, "..", "..", "..", "Logos", "default.png"))
 

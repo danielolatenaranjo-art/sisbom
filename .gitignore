@@ -22,4 +22,7 @@ SisBomCar/APK/.gradle/
 SisBomCar/APK/.idea/
 SisBomCar/APK/.kotlin/
 *.apk
-
+*.aab
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies

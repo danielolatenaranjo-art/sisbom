@@ -1,0 +1,1935 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <script src="./libs/sisbom-sync.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Material Mayor - SENTINEL CAD</title>
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="./libs/tailwind.css">
+    <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <style>
+        /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
+        body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
+            text-transform: uppercase !important;
+        }
+        ::placeholder {
+            text-transform: uppercase !important;
+        }
+
+        :root {
+            /* Paleta Oscura Principal */
+            --bg-app: #0f172a;
+            --bg-card: #1e293b;
+            --bg-input: #0b0f19;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --glass-border: #334155;
+        }
+
+        html { font-size: 14px; }
+        body { font-family: 'Segoe UI', sans-serif; min-font-size: 12px; background-color: var(--bg-app); color: var(--text-main); -webkit-font-smoothing: antialiased; overflow-y: auto; }
+        
+        /* Dark Theme Overrides para Tailwind clases quemadas */
+        .bg-white { background-color: var(--bg-card) !important; }
+        .bg-slate-50 { background-color: var(--bg-input) !important; }
+        .bg-slate-100, .bg-slate-200 { background-color: rgba(255,255,255,0.03) !important; }
+        .border-slate-100, .border-slate-200, .border-slate-300 { border-color: var(--glass-border) !important; }
+        .text-slate-800, .text-slate-700 { color: var(--text-main) !important; }
+        .text-slate-600, .text-slate-500 { color: var(--text-muted) !important; }
+        .text-slate-400, .text-slate-300 { color: #cbd5e1 !important; }
+        .hover\:bg-slate-50:hover { background-color: var(--bg-input) !important; }
+        .hover\:bg-slate-100:hover { background-color: rgba(255,255,255,0.08) !important; }
+        .hover\:bg-slate-200:hover { background-color: rgba(255,255,255,0.12) !important; }
+        
+        input[type="time"], input[type="date"], .f-input { color-scheme: dark; }
+        button, .cursor-pointer { cursor: pointer !important; }
+        button:disabled { cursor: not-allowed !important; opacity: 0.5; }
+
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.05); border-radius: 50%; border-top: 3px solid #ef4444;
+            width: 60px; height: 60px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #334155; }
+        
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #1e293b; border-radius: 10px; }
+
+        .f-label { display: block; font-size: 0.70rem; font-weight: 700; color: var(--text-muted); margin-bottom: 0.25rem; letter-spacing: 0.05em; }
+        .f-input { 
+            width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--glass-border); border-radius: 0.5rem; 
+            line-height: 1.25rem; background-color: var(--bg-input); color: var(--text-main); outline: none; transition: all 0.2s; font-size: 13px;
+        }
+        .f-input:focus { border-color: #ef4444; box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.1); }
+        
+        .button-10 { 
+            display: inline-flex; align-items: center; justify-content: center; font-weight: 700; 
+            border-radius: 0.5rem; transition: all 0.2s; cursor: pointer; user-select: none; padding: 0.5rem 1rem; font-size: 12px; border: 1px solid transparent;
+        }
+        .button-10:active { transform: scale(0.96); }
+        .button-10:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body class="p-4 md:p-6 pb-24 flex flex-col min-h-screen">
+
+    <div class="max-w-7xl w-full mx-auto space-y-6">
+        <!-- Banner de Modo Lectura -->
+        <div id="read-only-banner" class="hidden bg-amber-50 border border-amber-200 text-amber-800 px-4 py-3 rounded-xl flex items-center gap-3 shadow-sm animate-enter">
+            <i class="fas fa-lock text-lg text-amber-600 animate-pulse"></i>
+            <div class="flex-1 text-sm font-semibold">
+                Modo Lectura Activo. Inicie sesión en la pantalla principal para cambiar estados y despachar unidades.
+            </div>
+        </div>
+
+
+        
+        <!-- GRID DE TARJETAS DE VEHÍCULOS -->
+        <div id="fleet-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+            <div class="col-span-full py-20 text-center text-slate-400 italic flex flex-col items-center gap-3">
+                <div class="spinner mx-auto mb-2"></div>
+                <span class="text-xs font-semibold tracking-widest">Conectando a central...</span>
+            </div>
+        </div>
+
+        <!-- SECCIÓN: HISTORIAL DIARIO -->
+        <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col mt-8">
+            <div class="px-6 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center flex-wrap gap-3">
+                <h3 class="font-bold text-slate-700 tracking-wider text-xs flex items-center gap-2"><i class="fas fa-history text-slate-400"></i> Historial de Salidas</h3>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs font-bold text-slate-500 tracking-widest">Fecha:</label>
+                    <select id="filter-date" class="f-input" style="padding-top: 4px; padding-bottom: 4px; width: 160px; font-weight: bold; color: var(--text-main);" onchange="App.renderHistory()">
+                        <option value="">Cargando...</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="p-4 bg-white">
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="w-2 h-4 bg-bomberos-red rounded-sm"></div>
+                    <h4 class="font-bold text-slate-700 text-xs tracking-widest">Salidas a Servicio</h4>
+                </div>
+                <div id="list-service" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <span class="text-xs text-slate-400 italic">Cargando...</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ==========================================
+         MODALES DE INTERACCIÓN (TARJETAS FLOTANTES)
+         ========================================== -->
+
+    <!-- MODAL 0-8 (FUERA DE SERVICIO) -->
+    <div id="modal-08" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8000;">
+        <div class="bg-[#0f172a] rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col border border-red-500/50" id="modal-08-content">
+            <div class="p-5 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-lg"><i class="fas fa-wrench"></i></div>
+                <div>
+                    <h3 class="font-black text-slate-800 tracking-tight leading-tight">Dejar Fuera de Servicio</h3>
+                    <p class="text-xs font-bold text-slate-500 tracking-widest mt-0.5">Unidad <span id="m08-carro" class="text-bomberos-red"></span></p>
+                </div>
+            </div>
+            <div class="p-5 space-y-4 bg-white">
+                <div>
+                    <label class="f-label required">Motivo (Falla o Mantención)</label>
+                    <textarea id="m08-motivo" class="f-input resize-y" rows="3" placeholder="Ej: Falla de frenos, revisión técnica..."></textarea>
+                </div>
+                <div id="m08-error" class="hidden text-xs font-bold text-red-500 bg-red-50 p-2 rounded border border-red-100 text-center"></div>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-3 gap-2">
+                <button onclick="App.closeModals()" class="button-10 flex-1 bg-[#1e293b] text-slate-300 border border-slate-600 hover:bg-slate-700 focus:outline-none">Cancelar</button>
+                <button onclick="App.execute08(this)" class="button-10 flex-1 bg-slate-700 text-white hover:bg-slate-800 shadow-sm focus:outline-none">Confirmar 0-8</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 6-13 / 6-14 (SALIDAS ESPECIALES) -->
+    <div id="modal-special" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8000;">
+        <div class="bg-[#0f172a] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col border border-red-500/50" id="modal-special-content">
+            <div class="p-5 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+                <div id="ms-icon-box" class="w-10 h-10 rounded-full flex items-center justify-center text-lg"></div>
+                <div>
+                    <h3 class="font-black text-slate-800 tracking-tight leading-tight" id="ms-title">Salida</h3>
+                    <p class="text-xs font-bold text-slate-500 tracking-widest mt-0.5">Unidad <span id="ms-carro" class="text-bomberos-red"></span></p>
+                </div>
+            </div>
+            <div class="p-5 space-y-4 bg-white overflow-y-auto custom-scrollbar" style="max-height: 60vh;">
+                <div>
+                    <label class="f-label required">Lugar de Destino</label>
+                    <input type="text" id="ms-lugar" class="f-input" placeholder="Dirección o lugar...">
+                </div>
+                <div>
+                    <label class="f-label required">Motivo / Informe</label>
+                    <textarea id="ms-motivo" class="f-input resize-y" rows="2" placeholder="Motivo de la salida..."></textarea>
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="f-label required">Conductor (ID)</label>
+                        <input type="text" id="ms-cond" class="f-input font-bold text-center" placeholder="N° Radial">
+                    </div>
+                    <div>
+                        <label class="f-label required">A Cargo (OBAC)</label>
+                        <input type="text" id="ms-obac" class="f-input font-bold text-center" placeholder="N° Radial">
+                    </div>
+                </div>
+                <div>
+                    <!-- Cambiado de type="number" a type="text" para permitir valores como "2 + 2" -->
+                    <label class="f-label required">Total Tripulantes</label>
+                    <input type="text" id="ms-trip" class="f-input font-bold text-center" placeholder="CUANTOS BOMBEROS">
+                </div>
+                <div id="ms-error" class="hidden text-xs font-bold text-red-500 bg-red-50 p-2 rounded border border-red-100 text-center"></div>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-3 gap-2">
+                <button onclick="App.closeModals()" class="button-10 flex-1 bg-[#1e293b] text-slate-300 border border-slate-600 hover:bg-slate-700 focus:outline-none">Cancelar</button>
+                <button onclick="App.executeSpecial(this)" id="ms-btn-confirm" class="button-10 flex-1 text-white shadow-sm focus:outline-none">Confirmar Salida</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 6-8 (DISPONIBLE / FIN DE SERVICIO) -->
+    <div id="modal-68" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8000;">
+        <div class="bg-[#0f172a] rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col border border-red-500/50" id="modal-68-content">
+            <div class="p-5 border-b border-slate-100 bg-slate-50 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-full bg-[rgba(16,185,129,0.15)] text-emerald-500 flex items-center justify-center text-lg"><i class="fas fa-warehouse"></i></div>
+                <div>
+                    <h3 class="font-black text-emerald-500 tracking-tight leading-tight">Retorno a Cuartel (6-8)</h3>
+                    <p class="text-xs font-bold text-emerald-600/70 tracking-widest mt-0.5">Unidad <span id="m68-carro" class="text-slate-300"></span></p>
+                </div>
+            </div>
+            <div class="p-5 space-y-4 bg-white">
+                <div>
+                    <label class="f-label required text-slate-600">Odómetro Final (KM)</label>
+                    <input type="number" id="m68-km" class="f-input text-2xl font-black text-center shadow-inner py-3" placeholder="0">
+                    <p class="font-bold text-slate-400 mt-1 text-center" style="font-size: 10px;" id="m68-kminfo">KM Actual: 0</p>
+                </div>
+                <div>
+                    <label class="f-label text-slate-600">Observaciones Generales (Opcional)</label>
+                    <textarea id="m68-obs" class="f-input resize-y" rows="2" placeholder="Fallas, novedades..."></textarea>
+                </div>
+                <div id="m68-error" class="hidden text-xs font-bold text-red-500 bg-red-50 p-2 rounded border border-red-100 text-center"></div>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-3 gap-2">
+                <button onclick="App.closeModals()" class="button-10 flex-1 bg-[#1e293b] text-slate-300 border border-slate-600 hover:bg-slate-700 focus:outline-none">Cancelar</button>
+                <button onclick="App.execute68(this)" class="button-10 flex-1 bg-green-600 text-white hover:bg-green-700 shadow-sm focus:outline-none">Guardar 6-8</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL DETALLE HISTORIAL -->
+    <div id="history-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8500;">
+        <div id="history-modal-content" class="bg-[#0f172a] rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col" style="max-height: 85vh;">
+            <div class="px-5 py-4 border-b border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+                <h3 class="text-sm font-black text-slate-800 tracking-wide uppercase"><i class="fas fa-file-invoice mr-1 text-bomberos-red"></i> Detalle del Acto</h3>
+                <div class="flex items-center gap-2">
+                    <button id="btn-edit-history" class="px-3 py-1.5 text-xs font-bold rounded-lg border transition-colors focus:outline-none"></button>
+                    <button onclick="App.closeHistoryModal()" class="w-8 h-8 rounded-full bg-white text-slate-400 hover:text-red-500 shadow-sm border border-slate-200 flex items-center justify-center transition-colors focus:outline-none">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div id="history-detail-body" class="p-5 overflow-y-auto flex-1 custom-scrollbar"></div>
+        </div>
+    </div>
+
+    <!-- MODAL CONFIRMACIÓN GENÉRICO -->
+    <div id="confirm-modal" class="fixed inset-0 hidden bg-slate-900 bg-opacity-60 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 9000;">
+        <div id="confirm-modal-content" class="bg-[#0f172a] rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all scale-95 border border-red-500/50">
+            <div class="p-6 text-center">
+                <div class="w-14 h-14 rounded-full bg-[rgba(239,68,68,0.15)] text-red-500 flex items-center justify-center text-2xl mx-auto mb-4 border border-red-500/30">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 class="font-bold text-lg text-slate-800 mb-2 tracking-tight uppercase" id="confirm-title">Confirmar</h3>
+                <p class="text-sm text-slate-600 font-medium uppercase" id="confirm-msg">¿Estás seguro?</p>
+            </div>
+            <div class="flex border-t border-slate-100 bg-slate-50 p-2 gap-2">
+                <button onclick="App.closeConfirmModal()" class="flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 border border-red-700 rounded-xl transition-colors shadow-sm focus:outline-none">Cancelar</button>
+                <button onclick="App.executeConfirm()" id="btn-confirm-action" class="flex-1 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 shadow-sm rounded-xl transition-colors focus:outline-none">Sí, Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
+
+    <!-- SCRIPTS LÓGICOS -->
+    <script>
+        try {
+            Object.defineProperty(navigator, 'onLine', { get: () => true });
+        } catch(e) {
+            console.error("Error overriding navigator.onLine:", e);
+        }
+    </script>
+    <script type="module">
+        import { initializeApp } from "./libs/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithEmailAndPassword } from "./libs/firebase-auth.js";
+        import { getFirestore, doc, setDoc, updateDoc, collection, getDocs, writeBatch, onSnapshot, deleteDoc } from "./libs/firebase-firestore.js";
+
+        (function() {
+            const originalSetItem = Storage.prototype.setItem;
+            Storage.prototype.setItem = function(key, value) {
+                originalSetItem.call(this, key, value);
+                if (key === 'db_vehiculos' || key === 'db_bitacora' || key === 'db_personal' || key === 'activeServices') {
+                    originalSetItem.call(this, key + '_updated', String(Date.now()));
+                }
+            };
+        })();
+
+        document.addEventListener('input', function(e) {
+            if (e.target.tagName === 'TEXTAREA' || (e.target.tagName === 'INPUT' && e.target.type === 'text')) {
+                const start = e.target.selectionStart;
+                const end = e.target.selectionEnd;
+                e.target.value = e.target.value.toUpperCase();
+                try { e.target.setSelectionRange(start, end); } catch (err) {}
+            }
+        });
+
+        window.formatNumberWithDots = function(val) {
+            if (val === null || val === undefined || val === '') return '0';
+            const clean = String(val).replace(/\D/g, '');
+            if (!clean) return '0';
+            return clean.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+        };
+
+        window.formatKmInput = function(input) {
+            const start = input.selectionStart;
+            const originalLen = input.value.length;
+            const formatted = window.formatNumberWithDots(input.value);
+            input.value = formatted;
+            const newLen = formatted.length;
+            try { input.setSelectionRange(start + (newLen - originalLen), start + (newLen - originalLen)); } catch (err) {}
+        };
+
+        window.resolvePersonnelFullNameLocal = function(idOrName) {
+            if (!idOrName) return '';
+            const cleanVal = String(idOrName).trim().toUpperCase();
+            if (cleanVal.includes(' - ') || cleanVal.includes(' – ')) return idOrName;
+            
+            const person = window.App && window.App.personalData ? window.App.personalData.find(p => p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanVal) : null;
+            if (person) {
+                return `${person.idRadial} - ${person.nombreBombero}`;
+            }
+            
+            const personByName = window.App && window.App.personalData ? window.App.personalData.find(p => p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanVal)) : null;
+            if (personByName) {
+                return `${personByName.idRadial} - ${personByName.nombreBombero}`;
+            }
+            
+            return idOrName;
+        };
+
+        window.sanitizeTimeForInput = function(val) {
+            if (!val) return '';
+            const trimmed = String(val).trim();
+            if (/^\d{2}:\d{2}(:\d{2})?$/.test(trimmed)) {
+                return trimmed.substring(0, 5);
+            }
+            return '';
+        };
+
+        const firebaseConfig = null;
+
+        window.fbDb = null;
+        window.fbDoc = doc;
+        window.fbSetDoc = setDoc;
+        window.fbUpdateDoc = updateDoc;
+        window.fbDeleteDoc = deleteDoc;
+        window.fbCollection = collection;
+        window.fbGetDocs = getDocs;
+        window.fbWriteBatch = writeBatch;
+        window.fbOnSnapshot = onSnapshot;
+
+        // ====== COLA DE SINCRONIZACIÓN OFFLINE-FIRST ======
+        window.queueFirebaseWrite = function(type, coll, docId, data, options) {
+            if (localStorage.getItem('saas_read_only') === '1') {
+                console.warn("Modo Lectura (SaaS): Escritura bloqueada en queueFirebaseWrite (iframe).");
+                if (window.App && window.App.showToast) {
+                    window.App.showToast("Modo Lectura - Escrituras deshabilitadas", "warning");
+                }
+                return;
+            }
+            if (!localStorage.getItem('authUserId')) {
+                console.warn("ESCRITURA BLOQUEADA PORQUE NO HAY USUARIO INGRESADO.");
+                if (window.App && window.App.showToast) {
+                    window.App.showToast("INICIE SESION EN LA VENTANA PRINCIPAL PARA EDITAR", "warning");
+                }
+                return;
+            }
+            if (window.self !== window.top && parent) {
+                try {
+                    if (parent.queueFirebaseWrite) {
+                        parent.queueFirebaseWrite(type, coll, docId, data, options);
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("Error accessing parent.queueFirebaseWrite in Material Mayor, falling back to local queue:", e);
+                }
+            }
+            let q = new Array();
+            try { 
+                const savedQ = localStorage.getItem('sisbom_sync_queue');
+                if (savedQ) q = JSON.parse(savedQ); 
+            } catch(e){}
+            const newItem = new Object({ type: type, coll: coll, docId: docId, data: data, options: options || new Object(), time: Date.now() });
+            q.push(newItem);
+            localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+            window.processSyncQueue();
+        };
+
+        window.sanitizeForFirebase = function(val) {
+            if (val === null || val === undefined) return val;
+            if (typeof val === 'function' || (val && val.constructor && val.constructor.name === 'FieldValueImpl')) return val;
+            if (Array.isArray(val) || (typeof val === 'object' && typeof val.length === 'number' && Object.prototype.toString.call(val) === '[object Array]')) {
+                return Array.from(val).map(window.sanitizeForFirebase);
+            }
+            if (typeof val === 'object') {
+                const ParentObj = (window.parent && window.parent.Object) ? window.parent.Object : Object;
+                const clean = new ParentObj();
+                for (const k of Object.keys(val)) { Reflect.set(clean, k, window.sanitizeForFirebase(val[k])); }
+                return clean;
+            }
+            return val;
+        };
+
+        window.processSyncQueue = async function() {
+            if (window.self !== window.top) {
+                if (window.parent && window.parent.processSyncQueue) {
+                    window.parent.processSyncQueue();
+                }
+                return;
+            }
+            if (!navigator.onLine || !window.fbDb || window.isSyncing) return;
+            window.isSyncing = true;
+            
+            while (true) {
+                let q = new Array();
+                try { 
+                    const savedQ = localStorage.getItem('sisbom_sync_queue');
+                    if (savedQ) q = JSON.parse(savedQ); 
+                } catch(e){}
+                
+                if (!q || q.length === 0) break;
+                
+                let item = q.shift();
+                localStorage.setItem('sisbom_sync_queue', JSON.stringify(q));
+                
+                try {
+                    const sanitizedData = window.sanitizeForFirebase(item.data);
+                    
+                    if (item.type === 'set' && window.fbSetDoc) {
+                        await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), sanitizedData, item.options);
+                    } else if (item.type === 'update' && window.fbSetDoc) {
+                        let finalData = new Object();
+                        let hasDeleteField = false;
+                        for (let k of Object.keys(sanitizedData)) {
+                            if (sanitizedData[k] === '__DELETE_FIELD__' && window.fbDeleteField) {
+                                Reflect.set(finalData, k, window.fbDeleteField());
+                                hasDeleteField = true;
+                            } else {
+                                Reflect.set(finalData, k, sanitizedData[k]);
+                            }
+                        }
+                        if (hasDeleteField && window.fbUpdateDoc) {
+                            await window.fbUpdateDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData);
+                        } else {
+                            await window.fbSetDoc(window.fbDoc(window.fbDb, item.coll, item.docId), finalData, new Object({ merge: true }));
+                        }
+                    } else if (item.type === 'delete' && window.fbDeleteDoc) {
+                        await window.fbDeleteDoc(window.fbDoc(window.fbDb, item.coll, item.docId));
+                    }
+                } catch(e) {
+                    console.warn("Fallo sync item, docId:", item.docId, e);
+                    
+                    let currentQ = new Array();
+                    try { 
+                        const savedQ = localStorage.getItem('sisbom_sync_queue');
+                        if (savedQ) currentQ = JSON.parse(savedQ); 
+                    } catch(ex){}
+                    
+                    if (!currentQ.some(x => x.time === item.time)) {
+                        item.errCount = (item.errCount || 0) + 1;
+                        currentQ.unshift(item);
+                        localStorage.setItem('sisbom_sync_queue', JSON.stringify(currentQ));
+                    }
+                    
+                    if (e && e.code === 'permission-denied') {
+                        if (window.parent && window.parent.authenticateFirebase) {
+                            window.parent.authenticateFirebase();
+                        }
+                    }
+                    
+                    break;
+                }
+            }
+            window.isSyncing = false;
+        };
+
+        window.addEventListener('online', window.processSyncQueue);
+        setInterval(window.processSyncQueue, 15000);
+
+        // Notificación local de pestañas
+        window.notifyLocalIframes = function() {
+            const keys = Object.keys(new Object({ 'despacho': '', 'personal': '', '11-5': '', 'alertas': '' }));
+            keys.forEach(key => {
+                try {
+                    const iframe = parent.document.getElementById('frame-' + key);
+                    if (iframe && iframe.contentWindow) {
+                        iframe.contentWindow.dispatchEvent(new Event('storage'));
+                    }
+                } catch(e) {}
+            });
+        };
+
+        function checkIsNative() {
+            return !!(window.pywebview && window.pywebview.api) || !!(window.parent && window.parent.isNativeApp);
+        }
+
+        window.App = new Object({
+            fleetData: new Array(),
+            personalData: new Array(),
+            bitacoraData: new Array(),
+            despachosData: new Array(),
+            allDespachosData: new Array(),
+            
+            unsubVehiculos: null,
+            unsubPersonal: null,
+            unsubBitacora: null,
+            unsubDespachos: null,
+            
+            selectedCarroId: null,
+            confirmCallback: null,
+
+            async init() {
+                // Wait up to 1000ms for pywebview to be defined
+                if (!window.pywebview || !window.pywebview.api) {
+                    await new Promise(resolve => {
+                        let resolved = false;
+                        const handleReady = () => {
+                            if (!resolved) {
+                                resolved = true;
+                                window.removeEventListener('pywebviewready', handleReady);
+                                resolve();
+                            }
+                        };
+                        window.addEventListener('pywebviewready', handleReady);
+                        
+                        let elapsed = 0;
+                        const interval = setInterval(() => {
+                            elapsed += 30;
+                            if (checkIsNative() || elapsed >= 1000) {
+                                clearInterval(interval);
+                                if (!resolved) {
+                                    resolved = true;
+                                    window.removeEventListener('pywebviewready', handleReady);
+                                    resolve();
+                                }
+                            }
+                        }, 30);
+                    });
+                }
+                await this.fetchLocalData();
+
+                window.addEventListener("storage", async (e) => {
+                    if (e.key === 'db_vehiculos' || e.key === 'db_bitacora' || e.key === 'db_personal' || e.key === 'activeServices' || e.key === null || e.key === undefined) {
+                        await this.fetchLocalData();
+                    }
+                    if (e.key === 'authUserId' || e.key === 'authPasswordSecure') {
+                        if (window.self === window.top) {
+                            window.handleStandaloneAuthChangeDebounced();
+                        }
+                    }
+                });
+
+                let lastUpdateKeys = {
+                    db_vehiculos: localStorage.getItem('db_vehiculos_updated') || '',
+                    db_bitacora: localStorage.getItem('db_bitacora_updated') || '',
+                    db_personal: localStorage.getItem('db_personal_updated') || '',
+                    activeServices: localStorage.getItem('activeServices_updated') || ''
+                };
+                setInterval(async () => {
+                    let changed = false;
+                    for (const key of Object.keys(lastUpdateKeys)) {
+                        const val = localStorage.getItem(key + '_updated') || '';
+                        if (val !== lastUpdateKeys[key]) {
+                            lastUpdateKeys[key] = val;
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        await this.fetchLocalData();
+                    }
+                }, 1000);
+
+                let success = await this.initFirebase();
+                if (success && window.self !== window.top && parent) {
+                    if (parent.isFirebaseActiveCentral) {
+                        this.setupSnapshots();
+                    } else {
+                        window.onFirebaseParentReady = () => {
+                            this.setupSnapshots();
+                        };
+                    }
+                } else if (!success && window.self !== window.top) {
+                    let attempts = 0;
+                    const interval = setInterval(async () => {
+                        attempts++;
+                        success = await this.initFirebase();
+                        if (success) {
+                            clearInterval(interval);
+                            if (parent && parent.isFirebaseActiveCentral) {
+                                this.setupSnapshots();
+                            } else {
+                                window.onFirebaseParentReady = () => {
+                                    this.setupSnapshots();
+                                };
+                            }
+                        } else if (attempts >= 10) { // Retry for 5 seconds (10 attempts * 500ms)
+                            clearInterval(interval);
+                            console.log("Parent Firebase not ready after 5s. Falling back to self-initialization in Material Mayor.");
+                            const fallbackSuccess = await this.initFirebaseSelf();
+                            if (fallbackSuccess) {
+                                this.setupSnapshots();
+                            } else {
+                                this.showToast("Trabajando en Modo Local", "warning");
+                            }
+                        }
+                    }, 500);
+                } else {
+                    this.setupSnapshots();
+                }
+            },
+
+            async initFirebase() {
+                if (window.self !== window.top && parent) {
+                    try {
+                        if (parent.fbDb) {
+                            window.fbDb = parent.fbDb;
+                            window.fbDoc = parent.fbDoc;
+                            window.fbUpdateDoc = parent.fbUpdateDoc;
+                            window.fbSetDoc = parent.fbSetDoc;
+                            window.fbWriteBatch = parent.fbWriteBatch;
+                            window.fbCollection = parent.fbCollection;
+                            window.fbGetDocs = parent.fbGetDocs;
+                            window.fbDeleteDoc = parent.fbDeleteDoc;
+                            window.fbOnSnapshot = parent.fbOnSnapshot;
+                            console.log("Firebase inherited from parent in Material Mayor Central");
+                            window.processSyncQueue();
+                            return true;
+                        }
+                    } catch(e) {
+                        console.warn("Error inheriting Firebase in Material Mayor:", e);
+                    }
+                }
+                return await this.initFirebaseSelf();
+            },
+
+            async initFirebaseSelf() {
+                if (window.fbDb) return true;
+                try {
+                    let configToUse = null;
+                    try {
+                        const dynamicConfigStr = localStorage.getItem('saas_firebase_config') || localStorage.getItem('firebaseConfig');
+                        if (dynamicConfigStr) {
+                            configToUse = JSON.parse(dynamicConfigStr);
+                        }
+                    } catch (e) {
+                        console.error("Error parsing saas_firebase_config in Material Mayor:", e);
+                    }
+                    if (!configToUse) {
+                        console.error("No se encontró configuración de Firebase en Material Mayor.");
+                        return false;
+                    }
+                    const app = initializeApp(configToUse);
+                    const auth = getAuth(app);
+                    window.fbAuth = auth;
+                    window.fbDb = getFirestore(app);
+                    
+                    const storedUser = localStorage.getItem('authUserId');
+                    const storedPassSecure = localStorage.getItem('authPasswordSecure');
+                    if (storedUser && storedPassSecure) {
+                        const email = storedUser + "@sisbom.com";
+                        await signInWithEmailAndPassword(auth, email, storedPassSecure);
+                        console.log("Firebase conectado con credenciales en Material Mayor Central");
+                    } else {
+                        console.warn("Sin credenciales para autenticar Firebase en Material Mayor Central");
+                    }
+                    
+                    window.fbDoc = doc;
+                    window.fbUpdateDoc = updateDoc;
+                    window.fbSetDoc = setDoc;
+                    window.fbWriteBatch = writeBatch;
+                    window.fbCollection = collection;
+                    window.fbGetDocs = getDocs;
+                    window.fbDeleteDoc = deleteDoc;
+                    window.fbOnSnapshot = onSnapshot;
+
+                    window.processSyncQueue();
+                    return true;
+                } catch(e) {
+                    console.error("Error Firebase self-init in Material Mayor:", e);
+                    return false;
+                }
+            },
+
+            async fetchLocalData() {
+                try {
+                    let v = localStorage.getItem('db_vehiculos');
+                    let b = localStorage.getItem('db_bitacora');
+                    let p = localStorage.getItem('db_personal');
+                    let d = localStorage.getItem('activeServices');
+                    
+                    if (!v && !checkIsNative()) {
+                        try {
+                            const res = await fetch('./db_vehiculos.json');
+                            if (res.ok) {
+                                const data = await res.json();
+                                localStorage.setItem('db_vehiculos', JSON.stringify(data));
+                                v = localStorage.getItem('db_vehiculos');
+                            }
+                        } catch(e) {}
+                    }
+                    if (!b && !checkIsNative()) {
+                        try {
+                            const res = await fetch('./db_bitacora.json');
+                            if (res.ok) {
+                                const data = await res.json();
+                                localStorage.setItem('db_bitacora', JSON.stringify(data));
+                                b = localStorage.getItem('db_bitacora');
+                            }
+                        } catch(e) {}
+                    }
+                    if (!p && !checkIsNative()) {
+                        try {
+                            const res = await fetch('./db_personal.json');
+                            if (res.ok) {
+                                const data = await res.json();
+                                localStorage.setItem('db_personal', JSON.stringify(data));
+                                p = localStorage.getItem('db_personal');
+                            }
+                        } catch(e) {}
+                    }
+
+                    if (v) this.fleetData = JSON.parse(v);
+                    if (b) this.bitacoraData = JSON.parse(b);
+                    if (p) this.personalData = JSON.parse(p);
+                    if (d) this.despachosData = JSON.parse(d);
+                    
+                    let allD = localStorage.getItem('db_despachos') || localStorage.getItem('sisbom_despachos_cache_v3');
+                    if (allD) this.allDespachosData = JSON.parse(allD);
+                    
+                    this.updateFleetData();
+                } catch(e) {}
+            },
+
+            setupSnapshots() {
+                if (window.self !== window.top) {
+                    console.log("Bloqueando setupSnapshots: Estamos en un Iframe (Central de Alarmas).");
+                    return;
+                }
+                let loadedCount = 0;
+                const checkAllLoaded = () => {
+                    loadedCount++;
+                    if (loadedCount >= 4) {
+                        this.updateFleetData();
+                    }
+                };
+
+                const handleListenerError = (name, error) => {
+                    console.warn(name + " listener error in Material Mayor:", error);
+                    checkAllLoaded();
+                    
+                    if (error.code === 'permission-denied' && localStorage.getItem('adminUser')) {
+                        if (this.unsubPersonal) { try { this.unsubPersonal(); } catch(e){} this.unsubPersonal = null; }
+                        if (this.unsubDespachos) { try { this.unsubDespachos(); } catch(e){} this.unsubDespachos = null; }
+                        if (this.unsubBitacora) { try { this.unsubBitacora(); } catch(e){} this.unsubBitacora = null; }
+                        if (this.unsubVehiculos) { try { this.unsubVehiculos(); } catch(e){} this.unsubVehiculos = null; }
+                        
+                        setTimeout(() => {
+                            if (window.parent && window.parent.authenticateFirebase) {
+                                window.parent.authenticateFirebase();
+                            }
+                            this.setupSnapshots();
+                        }, 5000);
+                    }
+                };
+
+                if (this.unsubPersonal) { try { this.unsubPersonal(); } catch(e){} }
+                this.unsubPersonal = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'personal'), (snap) => {
+                    this.personalData = new Array();
+                    snap.forEach(d => {
+                        let p = d.data();
+                        p.idRegistro = d.id;
+                        this.personalData.push(p);
+                    });
+                    localStorage.setItem('db_personal', JSON.stringify(this.personalData));
+                    if (loadedCount >= 4) this.updateFleetData(); else checkAllLoaded();
+                }, (error) => {
+                    handleListenerError("Personal", error);
+                });
+
+                if (this.unsubDespachos) { try { this.unsubDespachos(); } catch(e){} }
+                this.unsubDespachos = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'despachos'), (snap) => {
+                    this.allDespachosData = new Array();
+                    this.despachosData = new Array();
+                    snap.forEach(d => {
+                        const row = d.data();
+                        const item = Object.assign(new Object({ id: d.id, key: row.clave }), row);
+                        this.allDespachosData.push(item);
+                        if (String(row.estado).toLowerCase() === 'activa') {
+                            this.despachosData.push(item);
+                        }
+                    });
+                    localStorage.setItem('db_despachos', JSON.stringify(this.allDespachosData));
+                    localStorage.setItem('activeServices', JSON.stringify(this.despachosData));
+                    if (loadedCount >= 4) this.updateFleetData(); else checkAllLoaded();
+                }, (error) => {
+                    handleListenerError("Despachos", error);
+                });
+
+                if (this.unsubBitacora) { try { this.unsubBitacora(); } catch(e){} }
+                this.unsubBitacora = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'bitacora'), (snap) => {
+                    this.bitacoraData = new Array();
+                    snap.forEach(d => {
+                        let row = d.data();
+                        row.idSalida = d.id;
+                        this.bitacoraData.push(row);
+                    });
+                    localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
+                    if (loadedCount >= 4) this.updateFleetData(); else checkAllLoaded();
+                }, (error) => {
+                    handleListenerError("Bitacora", error);
+                });
+
+                if (this.unsubVehiculos) { try { this.unsubVehiculos(); } catch(e){} }
+                this.unsubVehiculos = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'vehiculos'), (snap) => {
+                    this.fleetData = new Array();
+                    snap.forEach(d => {
+                        let row = d.data();
+                        row.idCarro = d.id;
+                        this.fleetData.push(row);
+                    });
+                    localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData));
+                    if (loadedCount >= 4) this.updateFleetData(); else checkAllLoaded();
+                }, (error) => {
+                    handleListenerError("Vehiculos", error);
+                });
+            },
+
+            updateFleetData() {
+                if (this.fleetData.length === 0) return;
+                
+                this.fleetData.forEach(u => {
+                    let activeTrip = null;
+                    const enServicioRaw = String(u.enServicio || '0').trim();
+                    const hasServicio = enServicioRaw !== '0' && enServicioRaw !== '';
+                    
+                    if (hasServicio) {
+                        // 1. Intentar buscar un viaje activo en bitacora que coincida con el idServicio y carro
+                        let matchedTrips = this.bitacoraData.filter(b => 
+                            String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase() &&
+                            String(b.idServicio || '').trim().toLowerCase() === enServicioRaw.toLowerCase()
+                        );
+                        
+                        if (matchedTrips.length > 0) {
+                            matchedTrips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
+                            activeTrip = matchedTrips.at(0);
+                        } else {
+                            // 2. Intentar buscar cualquier viaje activo para este carro (sin hora68 ni fecha68)
+                            matchedTrips = this.bitacoraData.filter(b => 
+                                String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase() &&
+                                (!b.hora68 && !b.fecha68 && b.estadoMovil !== 'en cuartel')
+                            );
+                            if (matchedTrips.length > 0) {
+                                matchedTrips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
+                                activeTrip = matchedTrips.at(0);
+                            }
+                        }
+                        
+                        // 3. Fallback al último viaje en general
+                        if (!activeTrip) {
+                            const trips = this.bitacoraData.filter(b => String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase());
+                            if (trips.length > 0) {
+                                trips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
+                                activeTrip = trips.at(0);
+                            }
+                        }
+                        
+                        // 4. Sintetizar un viaje temporal si activeTrip sigue siendo nulo o es un viaje ya terminado (para no perder información)
+                        const isCompleted = activeTrip && (activeTrip.hora68 || activeTrip.fecha68 || activeTrip.estadoMovil === 'en cuartel');
+                        if (!activeTrip || isCompleted) {
+                            const activeSvc = (this.allDespachosData || this.despachosData).find(d => String(d.idServicio || d.id || d._id).trim().toLowerCase() === enServicioRaw.toLowerCase());
+                            if (activeSvc) {
+                                let svcUnit = null;
+                                if (activeSvc.unidades) {
+                                    const carKey = Object.keys(activeSvc.unidades).find(k => 
+                                        k.replace(/-/g, '').toUpperCase() === String(u.idCarro).replace(/-/g, '').toUpperCase()
+                                    );
+                                    if (carKey) {
+                                        svcUnit = activeSvc.unidades[carKey];
+                                    }
+                                }
+                                activeTrip = {
+                                    idSalida: svcUnit ? (svcUnit.bitacoraId || svcUnit.idSalida || "") : "",
+                                    idServicio: enServicioRaw,
+                                    clave: activeSvc.key || activeSvc.clave,
+                                    lugar: activeSvc.location || activeSvc.lugar || "",
+                                    carro: u.idCarro,
+                                    conductor: svcUnit ? (svcUnit.driverRad || svcUnit.conductor || "") : (u.conductor || ""),
+                                    obac: svcUnit ? (svcUnit.obacRad || svcUnit.obac || "") : (u.obac || u.aCargo || ""),
+                                    cuantosBomberos: svcUnit ? (svcUnit.count || svcUnit.cuantosBomberos || "0") : (u.numTripulantes || "0"),
+                                    hora60: svcUnit ? (svcUnit.departureTime || svcUnit.hora60 || svcUnit.salida60At || "") : "",
+                                    fecha60: "",
+                                    hora63: svcUnit ? (svcUnit.arrivalTime || svcUnit.hora63 || svcUnit.llegada63At || "") : "",
+                                    hora69: svcUnit ? (svcUnit.time69 || svcUnit.hora69 || svcUnit.retorno69At || "") : "",
+                                    hora610: svcUnit ? (svcUnit.time610 || svcUnit.hora610 || svcUnit.llegada610At || "") : ""
+                                };
+                            }
+                        }
+                    }
+                    u.currentTrip = activeTrip;
+                });
+                
+                this.populateDateFilter();
+                this.renderFleet();
+                this.renderHistory();
+            },
+
+            // --- RENDERIZADO FLOTA (TARJETAS COMPACTAS) ---
+            renderFleet() {
+                const banner = document.getElementById('read-only-banner');
+                if (banner) {
+                    if (!localStorage.getItem('authUserId')) {
+                        banner.classList.remove('hidden');
+                    } else {
+                        banner.classList.add('hidden');
+                    }
+                }
+
+                const grid = document.getElementById('fleet-grid');
+                this.fleetData.sort((a, b) => String(a?.idCarro || a?.id || a?.ID || '').localeCompare(String(b?.idCarro || b?.id || b?.ID || ''), undefined, new Object({numeric: true, sensitivity: 'base'})));
+
+                grid.innerHTML = this.fleetData.map(unit => {
+                    const statusRaw = String(unit.estado || '1').trim();
+                    const enServicio = String(unit.enServicio || '0').trim();
+                    const kmActual = unit.kmActual || '0';
+                    const trip = unit.currentTrip;
+
+                    let borderColorHex = '#16a34a'; // green-600
+                    let statusText = 'Disponible';
+                    let badgeClass = 'text-white bg-green-600 border-green-700';
+                    let actionsHtml = '';
+                    let detailsHtml = '';
+
+                    const btnBase = "w-full py-2 rounded font-bold shadow-sm transition-colors border cursor-pointer disabled:cursor-not-allowed disabled:opacity-50";
+                    const authDisabled = !localStorage.getItem('authUserId') ? 'disabled' : '';
+
+                    if (statusRaw === '0-8') {
+                        // 0-8 Fuera de servicio
+                        borderColorHex = '#dc2626'; // red-600
+                        statusText = '0-8';
+                        badgeClass = 'text-white bg-red-600 border-red-700';
+                        detailsHtml = `
+                            <div class="bg-red-50 rounded border border-red-100 p-2 mt-2">
+                                <span class="font-bold text-red-500 block mb-0.5" style="font-size: 9px;">MOTIVO 0-8:</span>
+                                <p class="text-xs text-red-700 font-medium truncate" title="${unit.Observacion || 'Sin motivo'}">${unit.Observacion || 'Sin motivo'}</p>
+                            </div>
+                        `;
+                        actionsHtml = `<button ${authDisabled} onclick="App.habilitarCarro('${unit.idCarro}', this)" class="${btnBase} bg-slate-900 text-white hover:bg-slate-800 border-slate-800" style="font-size: 11px;"><i class="fas fa-check"></i> HABILITAR</button>`;
+                    } else if (enServicio !== '0') {
+                        // En Servicio
+                        borderColorHex = '#f97316'; // orange-500
+                        statusText = 'En Servicio';
+                        badgeClass = 'text-white bg-orange-500 border-orange-600 animate-pulse';
+
+                        if (trip) {
+                            const condName = this.getBomberoLabel(trip.conductor || unit.conductor);
+                            const obacName = this.getBomberoLabel(trip.obac || unit.obac || unit.aCargo);
+                            const countVol = trip.cuantosBomberos || trip.tripulantes || unit.numTripulantes || '0';
+                            const getTime = (t) => t ? `<span class="font-bold text-slate-700">${String(t).substring(0, 5)}</span>` : '<span class="text-slate-300">--:--</span>';
+
+                            detailsHtml = `
+                                <div class="bg-slate-50 rounded border border-slate-100 p-2 mt-2 space-y-1.5">
+                                    <div class="flex justify-between" style="font-size: 10px;"><span class="text-slate-500 font-bold">CONDUCTOR:</span> <span class="font-bold text-slate-700 truncate" style="max-width: 140px;">${condName}</span></div>
+                                    <div class="flex justify-between" style="font-size: 10px;"><span class="text-slate-500 font-bold">OBAC:</span> <span class="font-bold text-slate-700 truncate" style="max-width: 140px;">${obacName}</span></div>
+                                    <div class="flex justify-between" style="font-size: 10px;"><span class="text-slate-500 font-bold">TRIPULANTES:</span> <span class="font-bold text-white">${countVol}</span></div>
+                                    <div class="grid grid-cols-4 gap-1 text-center pt-1 border-t border-slate-200" style="font-size: 9px;">
+                                        <div class="flex flex-col"><span class="text-red-500 font-bold">6-0</span>${getTime(trip.hora60)}</div>
+                                        <div class="flex flex-col"><span class="text-yellow-500 font-bold">6-3</span>${getTime(trip.hora63)}</div>
+                                        <div class="flex flex-col"><span class="text-blue-400 font-bold">6-9</span>${getTime(trip.hora69)}</div>
+                                        <div class="flex flex-col"><span class="text-slate-400 font-bold">6-10</span>${getTime(trip.hora610)}</div>
+                                    </div>
+                                </div>
+                            `;
+                            
+                            if (!trip.fecha610 && !trip.hora610) {
+                                let gridCols = 0;
+                                let innerHtml = '';
+                                if (!trip.fecha63 && !trip.hora63) { gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '63', this)" class="${btnBase} bg-[rgba(234,179,8,0.15)] text-yellow-400 border-yellow-500/30 hover:bg-[rgba(234,179,8,0.25)] focus:outline-none" style="font-size: 11px;">6-3</button>`; }
+                                if (!trip.fecha69 && !trip.hora69) { gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '69', this)" class="${btnBase} bg-[rgba(59,130,246,0.15)] text-blue-400 border-blue-500/30 hover:bg-[rgba(59,130,246,0.25)] focus:outline-none" style="font-size: 11px;">6-9</button>`; }
+                                gridCols++; innerHtml += `<button ${authDisabled} onclick="App.registerTime('${unit.idCarro}', '610', this)" class="${btnBase} bg-[#1e293b] text-slate-300 border-slate-600 hover:bg-slate-700 focus:outline-none" style="font-size: 11px;">6-10</button>`;
+                                actionsHtml = `<div class="grid grid-cols-${gridCols} gap-2 w-full">${innerHtml}</div>`;
+                            } else {
+                                actionsHtml = `<button ${authDisabled} onclick="App.open68Modal('${unit.idCarro}')" class="${btnBase} bg-[rgba(16,185,129,0.15)] text-emerald-400 border-emerald-500/30 hover:bg-[rgba(16,185,129,0.25)] w-full shadow-sm focus:outline-none" style="font-size: 11px;"><i class="fas fa-check-circle"></i> DAR DISPONIBLE (6-8)</button>`;
+                            }
+
+                            actionsHtml += `<button ${authDisabled} onclick="App.urgentRelease('${unit.idCarro}')" class="w-full mt-1.5 py-1.5 font-bold text-slate-400 hover:text-red-500 tracking-widest transition-colors focus:outline-none" style="font-size: 9px;"><i class="fas fa-bolt"></i> Liberación Urgente</button>`;
+                        }
+                    } else {
+                        // Disponible
+                        detailsHtml = `
+                            <div class="flex justify-between items-center mt-2 bg-slate-50 p-2 rounded border border-slate-100">
+                                <span class="font-bold text-slate-400 tracking-widest" style="font-size: 10px;">Odómetro:</span>
+                                <span class="text-sm font-black text-slate-700">${kmActual} KM</span>
+                            </div>
+                        `;
+                        actionsHtml = `
+                            <div class="grid grid-cols-3 gap-2 w-full">
+                                <button ${authDisabled} onclick="App.open08Modal('${unit.idCarro}')" class="${btnBase} bg-[rgba(239,68,68,0.15)] text-red-400 border border-red-500/30 hover:bg-[rgba(239,68,68,0.25)] focus:outline-none" style="font-size: 11px;">0-8</button>
+                                <button ${authDisabled} onclick="App.openSpecialModal('${unit.idCarro}', '6-13')" class="${btnBase} bg-[rgba(59,130,246,0.15)] text-blue-400 border border-blue-500/30 hover:bg-[rgba(59,130,246,0.25)] focus:outline-none" style="font-size: 11px;">6-13</button>
+                                <button ${authDisabled} onclick="App.openSpecialModal('${unit.idCarro}', '6-14')" class="${btnBase} bg-[rgba(234,179,8,0.15)] text-yellow-400 border border-yellow-500/30 hover:bg-[rgba(234,179,8,0.25)] focus:outline-none" style="font-size: 11px;">6-14</button>
+                            </div>
+                        `;
+                    }
+
+                    return `
+                    <div class="bg-white rounded-xl border-y border-r border-slate-200 shadow-sm flex flex-col hover:shadow-md transition-shadow relative overflow-hidden" style="border-left-width: 6px; border-left-color: ${borderColorHex} !important;">
+                        <div class="p-4 flex flex-col h-full">
+                            <div class="flex justify-between items-start mb-2">
+                                <div class="flex items-center gap-3">
+                                    <div class="w-10 h-10 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center text-lg border border-slate-200 shrink-0">
+                                        <i class="fas fa-truck"></i>
+                                    </div>
+                                    <div class="flex flex-col">
+                                        <span class="text-xl font-black text-slate-800 leading-none">${unit.idCarro}</span>
+                                        <span class="font-bold text-slate-400 tracking-widest mt-0.5" style="font-size: 10px;">${unit.patente || 'S/P'}</span>
+                                    </div>
+                                </div>
+                                <span class="px-2 py-1 rounded font-black tracking-widest border shrink-0 shadow-sm ${badgeClass}" style="font-size: 9px;">${statusText}</span>
+                            </div>
+                            
+                            <div class="flex-1 flex flex-col justify-center" style="min-height: 60px;">
+                                ${detailsHtml}
+                            </div>
+                            
+                            <div class="mt-4 pt-3 border-t border-slate-100 flex flex-col items-center">
+                                ${actionsHtml}
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+            },
+
+            cleanDate(dateStr) {
+                if (!dateStr) return '';
+                const str = String(dateStr).trim();
+                if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+                    const p = str.split('-');
+                    return `${p[2]}-${p[1]}-${p[0]}`;
+                }
+                if (/^\d{1,2}-\d{1,2}-\d{4}$/.test(str)) {
+                    const p = str.split('-');
+                    return `${p[0].padStart(2, '0')}-${p[1].padStart(2, '0')}-${p[2]}`;
+                }
+                return str;
+            },
+
+            // --- HISTORIAL SECTION ---
+            populateDateFilter() {
+                const dateSelect = document.getElementById('filter-date');
+                if(!dateSelect) return;
+
+                const now = new Date();
+                const currentYear = now.getFullYear();
+                
+                let todayStr = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
+                
+                const datesSet = new Set();
+                datesSet.add(todayStr); 
+
+                this.bitacoraData.forEach(log => {
+                    let f = this.cleanDate(log.fecha60 || log.fecha68 || log.fechaDespacho || log.fecha || log.fecha63 || log.fecha69 || log.fecha610);
+                    if (f) {
+                        const parts = f.split('-');
+                        if (parts.length === 3 && parseInt(parts.at(2)) === currentYear) {
+                            datesSet.add(f);
+                        }
+                    }
+                });
+
+                const sortedDates = Array.from(datesSet).sort((a, b) => {
+                    const pa = a.split('-').map(Number);
+                    const pb = b.split('-').map(Number);
+                    return new Date(pb.at(2), pb.at(1) - 1, pb.at(0)) - new Date(pa.at(2), pa.at(1) - 1, pa.at(0));
+                });
+
+                dateSelect.innerHTML = '';
+                sortedDates.forEach(date => {
+                    const option = document.createElement('option');
+                    option.value = date;
+                    option.text = date === todayStr ? `${date} (HOY)` : date;
+                    dateSelect.add(option);
+                });
+
+                dateSelect.value = todayStr;
+                this.renderHistory();
+            },
+
+            renderHistory() {
+                const dateSelect = document.getElementById('filter-date');
+                const selectedDate = dateSelect ? dateSelect.value : '';
+                
+                if (!selectedDate) {
+                    this.renderListHtml('list-service', new Array());
+                    return;
+                }
+
+                const now = new Date();
+                const todayStr = `${String(now.getDate()).padStart(2,'0')}-${String(now.getMonth()+1).padStart(2,'0')}-${now.getFullYear()}`;
+
+                let filteredLogs = this.bitacoraData.filter(b => {
+                    const logDate = this.cleanDate(b.fecha60 || b.fecha68 || b.fechaDespacho || b.fecha || b.fecha63 || b.fecha69 || b.fecha610);
+                    return logDate === selectedDate || (!logDate && selectedDate === todayStr);
+                });
+                
+                // Incluir salidas finalizadas o que tengan fecha68 / hora68 / estadoMovil cuartel / 6-8 / 6-10
+                filteredLogs = filteredLogs.filter(b => {
+                    const hasEnd = (b.fecha68 && String(b.fecha68).trim() !== '') || 
+                                   (b.hora68 && String(b.hora68).trim() !== '') || 
+                                   b.estadoMovil === 'en cuartel' || 
+                                   b.estado === 'finalizada' ||
+                                   b.estado === 'disponible' ||
+                                   b.estado === '6-8' ||
+                                   (b.hora610 && String(b.hora610).trim() !== '');
+                    return hasEnd;
+                });
+                
+                const serviceLogs = filteredLogs.filter(b => {
+                    const resolvedClave = this.getClaveForTrip(b);
+                    const c = String(resolvedClave || '').trim();
+                    return c.startsWith('10-') || c.startsWith('6-') || c === 'ACTO' || c !== '';
+                });
+
+                this.renderListHtml('list-service', serviceLogs);
+            },
+
+            renderListHtml(containerId, items) {
+                const container = document.getElementById(containerId);
+                if (!items || items.length === 0) {
+                    container.innerHTML = `<div class="font-medium text-slate-400 italic p-3 bg-slate-50 rounded-lg border border-slate-100 text-center w-full col-span-full" style="font-size: 11px;">SIN REGISTROS</div>`;
+                    return;
+                }
+
+                container.innerHTML = items.map(item => {
+                    const condName = this.getBomberoLabel(item.conductor);
+                    const obacName = this.getBomberoLabel(item.obac);
+                    const vCount = item.cuantosBomberos || '0';
+                    
+                    let leftColor = 'bg-slate-300';
+                    const resolvedClave = this.getClaveForTrip(item);
+                    const c = String(resolvedClave || '').trim();
+                    if (c.startsWith('10-') || c === 'ACTO' || c.startsWith('6-0')) leftColor = 'bg-bomberos-red';
+                    else if (c === '6-13') leftColor = 'bg-blue-500';
+                    else if (c === '6-14') leftColor = 'bg-yellow-500';
+
+                    return `
+                    <div onclick="App.openHistoryModal('${item.idSalida}')" class="relative flex items-center justify-between border border-slate-200 bg-white hover:bg-slate-50 hover:border-bomberos-red p-2.5 pl-4 rounded-xl cursor-pointer transition-all shadow-sm group break-inside-avoid w-full overflow-hidden">
+                        <div class="absolute left-0 top-0 bottom-0 w-1.5 ${leftColor}"></div>
+                        <div class="flex items-center gap-3 relative z-10">
+                            <span class="bg-slate-100 text-slate-600 px-2 py-1 rounded font-black border border-slate-200" style="font-size: 10px;">${item.hora60 || '--:--'}</span>
+                            <span class="font-black text-slate-800 text-sm group-hover:text-bomberos-red transition-colors">${item.carro}</span>
+                            <span class="font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase" style="font-size: 10px;">${resolvedClave}</span>
+                        </div>
+                        <div class="flex flex-col items-end shrink-0 ml-2 relative z-10" style="max-width: 65%;">
+                            <div class="font-bold text-slate-400 flex flex-wrap justify-end gap-x-2 gap-y-1 tracking-widest uppercase text-right" style="font-size: 9px;">
+                                <span class="truncate"><i class="fas fa-steering-wheel text-blue-300 mr-1"></i>${condName}</span>
+                                <span class="truncate"><i class="fas fa-user-shield text-purple-300 mr-1"></i>${obacName}</span>
+                                <span><i class="fas fa-users text-orange-300 mr-1"></i>${vCount}</span>
+                            </div>
+                            <div class="font-bold text-slate-500 truncate text-right tracking-widest uppercase mt-1 w-full" style="font-size: 10px;"><i class="fas fa-map-marker-alt text-red-300 mr-1"></i>${item.lugar || 'S/L'}</div>
+                        </div>
+                    </div>
+                `}).join('');
+            },
+
+            // --- HISTORIAL MODAL ---
+            activeHistoryLog: null,
+
+            openHistoryModal(idSalida) {
+                const log = this.bitacoraData.find(b => String(b.idSalida) === String(idSalida));
+                if (!log) return;
+
+                let borderColorHex = '#64748b';
+                const resolvedClave = this.getClaveForTrip(log);
+                const c = String(resolvedClave || '').trim();
+                if (c.startsWith('10-') || c === 'ACTO' || c.startsWith('6-0')) borderColorHex = '#dc2626';
+                else if (c === '6-13') borderColorHex = '#2563eb';
+                else if (c === '6-14') borderColorHex = '#ca8a04';
+                else borderColorHex = '#16a34a';
+                
+                const modalContent = document.getElementById('history-modal-content');
+                modalContent.style.border = `1px solid ${borderColorHex}`;
+
+                this.activeHistoryLog = log;
+                this.renderHistoryDetail(log, false);
+
+                const modal = document.getElementById('history-modal');
+                document.body.classList.add('overflow-hidden');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    document.getElementById('history-modal-content').classList.remove('scale-95');
+                }, 10);
+            },
+
+            renderHistoryDetail(log, isEditing) {
+                const content = document.getElementById('history-detail-body');
+                const btnEdit = document.getElementById('btn-edit-history');
+
+                if (isEditing) {
+                    btnEdit.innerText = 'CANCELAR';
+                    btnEdit.className = 'px-3 py-1.5 text-xs font-bold bg-[#1e293b] text-slate-300 hover:bg-slate-700 rounded-lg border border-slate-600 transition-colors focus:outline-none';
+                    btnEdit.onclick = () => this.renderHistoryDetail(log, false);
+
+                    const obacRaw = log.obac || '';
+                    const condRaw = log.conductor || '';
+
+                    content.innerHTML = `
+                        <div class="space-y-4 uppercase text-xs">
+                            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                <span class="text-2xl font-black text-slate-800 tracking-tight">${log.carro}</span>
+                                <div class="flex flex-col items-end">
+                                    <span class="bg-bomberos-red text-white text-xs font-black px-3 py-1 rounded shadow-sm">${this.getClaveForTrip(log)}</span>
+                                    <span class="font-bold text-slate-400 mt-1" style="font-size: 9px;">ID: #${log.idSalida}</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-3">
+                                <div>
+                                    <span class="font-bold text-slate-400 tracking-widest block mb-1" style="font-size: 9px;">OBAC</span>
+                                    <input type="text" id="edit-obac" class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800 focus:border-blue-400 outline-none uppercase" value="${obacRaw}" placeholder="Ej: C-2 o Nombre">
+                                </div>
+                                <div>
+                                    <span class="font-bold text-slate-400 tracking-widest block mb-1" style="font-size: 9px;">CONDUCTOR</span>
+                                    <input type="text" id="edit-conductor" class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800 focus:border-blue-400 outline-none uppercase" value="${condRaw}" placeholder="Ej: C-2 o Nombre">
+                                </div>
+                                <div>
+                                    <span class="font-bold text-slate-400 tracking-widest block mb-1" style="font-size: 9px;">TRIPULACIÓN TOTAL</span>
+                                    <input type="text" id="edit-cuantos" class="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800 focus:border-blue-400 outline-none uppercase" value="${log.cuantosBomberos || '0'}">
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-2">
+                                <span class="font-bold text-slate-400 tracking-widest block mb-2" style="font-size: 9px;">TIEMPOS RADIALES</span>
+                                <div class="grid grid-cols-2 gap-2 font-bold uppercase text-[10px]">
+                                    <div class="bg-[rgba(239,68,68,0.15)] text-red-400 p-2 rounded border border-red-500/30 flex flex-col gap-1">
+                                        <span>6-0</span>
+                                        <input type="time" id="edit-hora60" class="w-full p-1 bg-[#0b0f19] border border-red-500/30 rounded font-bold text-center text-red-400" value="${window.sanitizeTimeForInput(log.hora60)}">
+                                    </div>
+                                    <div class="bg-[rgba(234,179,8,0.15)] text-yellow-400 p-2 rounded border border-yellow-500/30 flex flex-col gap-1">
+                                        <span>6-3</span>
+                                        <input type="time" id="edit-hora63" class="w-full p-1 bg-[#0b0f19] border border-yellow-500/30 rounded font-bold text-center text-yellow-400" value="${window.sanitizeTimeForInput(log.hora63)}">
+                                    </div>
+                                    <div class="bg-[rgba(59,130,246,0.15)] text-blue-400 p-2 rounded border border-blue-500/30 flex flex-col gap-1">
+                                        <span>6-9</span>
+                                        <input type="time" id="edit-hora69" class="w-full p-1 bg-[#0b0f19] border border-blue-500/30 rounded font-bold text-center text-blue-400" value="${window.sanitizeTimeForInput(log.hora69)}">
+                                    </div>
+                                    <div class="bg-slate-800/50 text-slate-300 p-2 rounded border border-slate-600 flex flex-col gap-1">
+                                        <span>6-10</span>
+                                        <input type="time" id="edit-hora610" class="w-full p-1 bg-[#0b0f19] border border-slate-600 rounded font-bold text-center text-slate-300" value="${window.sanitizeTimeForInput(log.hora610)}">
+                                    </div>
+                                    <div class="col-span-2 bg-[rgba(16,185,129,0.15)] text-emerald-400 p-2 rounded border border-emerald-500/30 flex flex-col gap-1">
+                                        <span>6-8 (FIN)</span>
+                                        <input type="time" id="edit-hora68" class="w-full p-1 bg-[#0b0f19] border border-emerald-500/30 rounded font-bold text-center text-emerald-400" value="${window.sanitizeTimeForInput(log.hora68)}">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                <span class="font-bold text-slate-400 tracking-widest" style="font-size: 9px;">ODÓMETRO FINAL (KM)</span>
+                                <input type="text" id="edit-km" class="p-2 bg-slate-50 border border-slate-200 rounded-lg font-black text-slate-800 text-center w-28 focus:border-blue-400 outline-none" value="${window.formatNumberWithDots(log.km)}" oninput="window.formatKmInput(this)">
+                            </div>
+
+                            <div class="pt-4 flex gap-2">
+                                <button onclick="App.renderHistoryDetail(App.activeHistoryLog, false)" class="flex-1 py-2.5 text-xs font-bold text-slate-300 bg-[#1e293b] hover:bg-slate-700 rounded-xl transition-all border border-slate-600 focus:outline-none">CANCELAR</button>
+                                <button onclick="App.saveHistoryEdits()" class="flex-1 py-2.5 text-xs font-bold text-white bg-bomberos-red hover:bg-bomberos-dark rounded-xl transition-all shadow-sm focus:outline-none">GUARDAR CAMBIOS</button>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    btnEdit.innerText = 'EDITAR';
+                    btnEdit.className = 'px-3 py-1.5 text-xs font-bold bg-[rgba(59,130,246,0.15)] text-blue-400 hover:bg-[rgba(59,130,246,0.25)] rounded-lg border border-blue-500/30 transition-colors focus:outline-none';
+                    btnEdit.onclick = () => this.renderHistoryDetail(log, true);
+
+                    const conductorNombre = this.getBomberoLabel(log.conductor);
+                    const obacNombre = this.getBomberoLabel(log.obac);
+
+                    let timesHtml = `
+                        <div class="grid grid-cols-2 gap-2 font-bold uppercase" style="font-size: 10px;">
+                            <div class="bg-[rgba(239,68,68,0.15)] text-red-400 p-2 rounded border border-red-500/30 flex justify-between"><span>6-0</span> <span>${log.hora60 || '--:--'}</span></div>
+                            <div class="bg-[rgba(234,179,8,0.15)] text-yellow-400 p-2 rounded border border-yellow-500/30 flex justify-between"><span>6-3</span> <span>${log.hora63 || '--:--'}</span></div>
+                            <div class="bg-[rgba(59,130,246,0.15)] text-blue-400 p-2 rounded border border-blue-500/30 flex justify-between"><span>6-9</span> <span>${log.hora69 || '--:--'}</span></div>
+                            <div class="bg-slate-800/50 text-slate-300 p-2 rounded border border-slate-600 flex justify-between"><span>6-10</span> <span>${log.hora610 || '--:--'}</span></div>
+                            <div class="col-span-2 bg-[rgba(16,185,129,0.15)] text-emerald-400 p-2 rounded border border-emerald-500/30 flex justify-between"><span>6-8 (FIN)</span> <span>${log.hora68 || '--:--'}</span></div>
+                        </div>
+                    `;
+                    let tripulantesDisplay = log.tripulantesNombres || log.tripulantes || '';
+                    if (!tripulantesDisplay && Array.isArray(log.tripulantesDetalle)) {
+                        tripulantesDisplay = log.tripulantesDetalle.map(p => `${p.idRadial || ''} ${p.nombre || p.nombreBombero || ''}`.trim()).filter(Boolean).join(', ');
+                    }
+
+                    content.innerHTML = `
+                        <div class="space-y-4 uppercase">
+                            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                <span class="text-3xl font-black text-slate-800 tracking-tight">${log.carro}</span>
+                                <div class="flex flex-col items-end">
+                                    <span class="bg-bomberos-red text-white text-sm font-black px-3 py-1 rounded shadow-sm">${this.getClaveForTrip(log)}</span>
+                                    <span class="font-bold text-slate-400 mt-1" style="font-size: 9px;">ID: #${log.idSalida}</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm space-y-2">
+                                <div><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">LUGAR / SECTOR</span><p class="text-xs font-bold text-slate-700">${log.lugar || 'NO ESPECIFICADO'}</p></div>
+                                <div class="border-t border-slate-100 pt-2"><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">PRE-INFORME</span><p class="text-xs font-medium text-slate-600 italic">${log.preInforme || '---'}</p></div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm grid grid-cols-2 gap-3">
+                                <div><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">OBAC</span><p class="text-xs font-bold text-slate-700 truncate" title="${obacNombre}">${obacNombre}</p></div>
+                                <div><span class="font-bold text-slate-400 tracking-widest block" style="font-size: 9px;">CONDUCTOR</span><p class="text-xs font-bold text-slate-700 truncate" title="${conductorNombre}">${conductorNombre}</p></div>
+                                <div class="col-span-2 border-t border-slate-100 pt-2">
+                                    <span class="font-bold text-slate-400 tracking-widest block mb-1" style="font-size: 9px;">TRIPULACIÓN (${log.cuantosBomberos || '0'} BOMBEROS)</span>
+                                    <div id="modal-tripulantes-list" class="text-xs font-semibold text-slate-700 bg-slate-50 p-2 rounded border border-slate-200">${tripulantesDisplay || 'SIN TRIPULANTES IDENTIFICADOS'}</div>
+                                </div>
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                                <span class="font-bold text-slate-400 tracking-widest block mb-2" style="font-size: 9px;">TIEMPOS RADIALES</span>
+                                ${timesHtml}
+                            </div>
+
+                            <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+                                <span class="font-bold text-slate-400 tracking-widest" style="font-size: 9px;">ODÓMETRO FINAL</span>
+                                <span class="text-sm font-black text-slate-800">${window.formatNumberWithDots(log.km) || '0'} KM</span>
+                            </div>
+                        </div>
+                    `;
+
+                    if (window.fbDb && window.fbGetDocs && window.fbCollection) {
+                        try {
+                            const tripColl = window.fbCollection(window.fbDb, 'bitacora', String(log.idSalida), 'tripulantes');
+                            window.fbGetDocs(tripColl).then(snap => {
+                                if (snap && !snap.empty) {
+                                    const tList = snap.docs.map(d => d.data());
+                                    const names = tList.map(t => `${t.idRadial || ''} ${t.nombreBombero || t.nombre || ''}`.trim()).filter(Boolean).join(', ');
+                                    const listEl = document.getElementById('modal-tripulantes-list');
+                                    if (listEl && names) {
+                                        listEl.innerText = names;
+                                    }
+                                }
+                            }).catch(() => {});
+                        } catch(e) {}
+                    }
+                }
+            },
+
+            async saveHistoryEdits() {
+                const log = this.activeHistoryLog;
+                if (!log) return;
+
+                const obacVal = document.getElementById('edit-obac').value.trim();
+                const condVal = document.getElementById('edit-conductor').value.trim();
+                const cuantosVal = document.getElementById('edit-cuantos').value.trim();
+                const kmVal = document.getElementById('edit-km').value.trim().replace(/\D/g, '');
+
+                const hora60Val = document.getElementById('edit-hora60').value.trim();
+                const hora63Val = document.getElementById('edit-hora63').value.trim();
+                const hora69Val = document.getElementById('edit-hora69').value.trim();
+                const hora610Val = document.getElementById('edit-hora610').value.trim();
+                const hora68Val = document.getElementById('edit-hora68').value.trim();
+
+                const resolvedObac = window.resolvePersonnelFullNameLocal ? window.resolvePersonnelFullNameLocal(obacVal) : obacVal;
+                const resolvedCond = window.resolvePersonnelFullNameLocal ? window.resolvePersonnelFullNameLocal(condVal) : condVal;
+
+                const payload = new Object({
+                    obac: resolvedObac,
+                    conductor: resolvedCond,
+                    cuantosBomberos: cuantosVal,
+                    tripulantes: cuantosVal,
+                    km: kmVal,
+                    hora60: hora60Val,
+                    hora63: hora63Val,
+                    hora69: hora69Val,
+                    hora610: hora610Val,
+                    hora68: hora68Val
+                });
+
+                const baseDate = log.fecha60 || log.fechaSalida || (window.App && window.App.getFormattedDate ? window.App.getFormattedDate() : new Date().toLocaleDateString('es-CL').replace(/\//g, '-'));
+                if (hora60Val && !log.fecha60) payload.fecha60 = baseDate;
+                if (hora63Val && !log.fecha63) payload.fecha63 = baseDate;
+                if (hora69Val && !log.fecha69) payload.fecha69 = baseDate;
+                if (hora610Val && !log.fecha610) payload.fecha610 = baseDate;
+                if (hora68Val && !log.fecha68) payload.fecha68 = baseDate;
+
+                try {
+                    window.queueFirebaseWrite('update', 'bitacora', String(log.idSalida), payload);
+                    
+                    Object.assign(log, payload);
+                    
+                    this.renderHistoryDetail(log, false);
+                    this.updateFleetData();
+                    
+                    this.showToast("Cambios guardados con éxito.");
+                } catch(e) {
+                    console.error(e);
+                    this.showToast("Error al guardar cambios.", "error");
+                }
+            },
+
+            closeHistoryModal() {
+                const modal = document.getElementById('history-modal');
+                document.getElementById('history-modal-content').classList.add('scale-95');
+                modal.classList.add('opacity-0');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                    document.body.classList.remove('overflow-hidden');
+                }, 200);
+            },
+
+            // --- ACCIONES MODALES (0-8, Especiales, 6-8) ---
+            
+            closeModals() {
+                new Array('modal-08', 'modal-special', 'modal-68').forEach(id => {
+                    const m = document.getElementById(id);
+                    const c = document.getElementById(`${id}-content`);
+                    if(c) c.classList.add('scale-95');
+                    m.classList.add('opacity-0');
+                    setTimeout(() => { m.classList.add('hidden'); m.classList.remove('flex'); }, 200);
+                });
+                document.body.classList.remove('overflow-hidden');
+                this.selectedCarroId = null;
+            },
+
+            open08Modal(idCarro) {
+                this.selectedCarroId = idCarro;
+                document.getElementById('m08-carro').innerText = idCarro;
+                document.getElementById('m08-motivo').value = '';
+                document.getElementById('m08-error').classList.add('hidden');
+                
+                const m = document.getElementById('modal-08');
+                const c = document.getElementById('modal-08-content');
+                document.body.classList.add('overflow-hidden');
+                m.classList.remove('hidden'); m.classList.add('flex');
+                setTimeout(() => { m.classList.remove('opacity-0'); c.classList.remove('scale-95'); }, 10);
+            },
+
+            async execute08(btn) {
+                if (!localStorage.getItem('authUserId')) return;
+                const id = this.selectedCarroId;
+                const motivo = document.getElementById('m08-motivo').value.trim();
+                const err = document.getElementById('m08-error');
+                
+                if (!motivo) { err.innerText = "DEBE INGRESAR UN MOTIVO."; err.classList.remove('hidden'); return; }
+                
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+
+                try {
+                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ estado: '0', notas: motivo.toUpperCase() }));
+                    const vUnit = this.fleetData.find(v => v.idCarro === id);
+                    if(vUnit) { vUnit.estado = '0'; vUnit.notas = motivo.toUpperCase(); localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); }
+                    
+                    window.notifyLocalIframes();
+                    this.showToast("UNIDAD FUERA DE SERVICIO.", "success");
+                    this.closeModals();
+                    this.updateFleetData();
+                } catch(e) {
+                    err.innerText = "ERROR AL GUARDAR."; err.classList.remove('hidden');
+                } finally { 
+                    btn.innerHTML = origHtml;
+                    btn.disabled = false;
+                }
+            },
+
+            async updateStatus(id, status, btn) {
+                if (!localStorage.getItem('authUserId')) return;
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+                
+                try {
+                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ estado: status, notas: '' }));
+                    const vUnit = this.fleetData.find(v => v.idCarro === id);
+                    if(vUnit) { vUnit.estado = status; vUnit.notas = ''; localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); }
+                    
+                    window.notifyLocalIframes();
+                    this.showToast("UNIDAD DISPONIBLE (0-9).", "success");
+                    this.updateFleetData();
+                } catch(e) {
+                    this.showToast("ERROR AL ACTUALIZAR.", "error");
+                } finally { 
+                    btn.innerHTML = origHtml;
+                    btn.disabled = false;
+                }
+            },
+
+            openSpecialModal(idCarro, type) {
+                this.selectedCarroId = idCarro;
+                const m = document.getElementById('modal-special');
+                const c = document.getElementById('modal-special-content');
+                const t = document.getElementById('ms-title');
+                const cr = document.getElementById('ms-carro');
+                const iconBox = document.getElementById('ms-icon-box');
+
+                cr.innerText = idCarro;
+                document.getElementById('ms-lugar').value = type === '6-14' ? 'SERVICENTRO' : '';
+                document.getElementById('ms-motivo').value = type === '6-14' ? 'CARGA DE COMBUSTIBLE' : '';
+                document.getElementById('ms-cond').value = '';
+                document.getElementById('ms-obac').value = '';
+                document.getElementById('ms-trip').value = '';
+                document.getElementById('ms-error').classList.add('hidden');
+                document.getElementById('ms-btn-confirm').dataset.type = type;
+
+                if (type === '6-14') {
+                    t.innerText = "6-14 COMBUSTIBLE";
+                    iconBox.className = "w-10 h-10 rounded-full flex items-center justify-center text-lg bg-yellow-100 text-yellow-600";
+                    iconBox.innerHTML = '<i class="fas fa-gas-pump"></i>';
+                    document.getElementById('ms-btn-confirm').className = "button-10 flex-1 text-white bg-yellow-500 hover:bg-yellow-600 focus:outline-none";
+                } else {
+                    t.innerText = "6-13 SE DIRIGE A";
+                    iconBox.className = "w-10 h-10 rounded-full flex items-center justify-center text-lg bg-blue-100 text-blue-600";
+                    iconBox.innerHTML = '<i class="fas fa-route"></i>';
+                    document.getElementById('ms-btn-confirm').className = "button-10 flex-1 text-white bg-blue-500 hover:bg-blue-600 focus:outline-none";
+                }
+
+                document.body.classList.add('overflow-hidden');
+                m.classList.remove('hidden'); m.classList.add('flex');
+                setTimeout(() => { m.classList.remove('opacity-0'); c.classList.remove('scale-95'); }, 10);
+            },
+
+            async executeSpecial(btn) {
+                if (!localStorage.getItem('authUserId')) return;
+                const id = this.selectedCarroId;
+                const type = document.getElementById('ms-btn-confirm').dataset.type;
+                const lugar = document.getElementById('ms-lugar').value.trim().toUpperCase();
+                const motivo = document.getElementById('ms-motivo').value.trim().toUpperCase();
+                let cond = document.getElementById('ms-cond').value.trim().toUpperCase();
+                let obac = document.getElementById('ms-obac').value.trim().toUpperCase();
+                
+                cond = window.resolvePersonnelFullNameLocal(cond);
+                if (obac !== '') {
+                    obac = window.resolvePersonnelFullNameLocal(obac);
+                }
+                const trip = document.getElementById('ms-trip').value.trim();
+                const err = document.getElementById('ms-error');
+
+                if (!lugar || !motivo || !cond) { err.innerText = "LUGAR, MOTIVO Y CONDUCTOR OBLIGATORIOS."; err.classList.remove('hidden'); return; }
+
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+
+                try {
+                    let maxId = 0;
+                    this.bitacoraData.forEach(b => {
+                        const v = parseInt(b.idSalida || b.id);
+                        if (!isNaN(v) && v > maxId) maxId = v;
+                    });
+                    const localMax = parseInt(localStorage.getItem('sisbom_max_bitacora_id')) || 0;
+                    if (localMax > maxId) maxId = localMax;
+                    
+                    const nextId = String(maxId + 1);
+                    localStorage.setItem('sisbom_max_bitacora_id', nextId);
+
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth()+1).padStart(2, '0')}-${now.getFullYear()}`;
+                    const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                    const logData = new Object({
+                        idSalida: nextId,
+                        idServicio: '',
+                        clave: type,
+                        lugar: lugar,
+                        preInforme: motivo,
+                        carro: id,
+                        fecha60: dStr,
+                        hora60: tStr,
+                        conductor: cond,
+                        obac: obac,
+                        cuantosBomberos: trip,
+                        fecha68: '', hora68: '', fecha63: '', hora63: '', fecha69: '', hora69: '', fecha610: '', hora610: '', km: '', observacion: ''
+                    });
+
+                    window.queueFirebaseWrite('set', 'bitacora', nextId, logData);
+                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ enServicio: type }));
+                    
+                    this.bitacoraData.push(logData);
+                    localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
+                    
+                    const vUnit = this.fleetData.find(v => v.idCarro === id);
+                    if(vUnit) { vUnit.enServicio = type; localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); }
+                    
+                    window.notifyLocalIframes();
+                    
+                    this.showToast(`SALIDA ${type} REGISTRADA.`, "success");
+                    this.closeModals();
+                    this.updateFleetData();
+
+                } catch(e) {
+                    err.innerText = "ERROR AL GUARDAR."; err.classList.remove('hidden');
+                } finally { 
+                    btn.innerHTML = origHtml;
+                    btn.disabled = false;
+                }
+            },
+
+            async registerTime(id, stampType, btn) {
+                if (!localStorage.getItem('authUserId')) return;
+                const unit = this.fleetData.find(u => u.idCarro === id);
+                if (!unit || !unit.currentTrip) return;
+
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+
+                try {
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth()+1).padStart(2, '0')}-${now.getFullYear()}`;
+                    const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                    const updates = new Object();
+                    Reflect.set(updates, "fecha" + stampType, dStr);
+                    Reflect.set(updates, "hora" + stampType, tStr);
+
+                    window.queueFirebaseWrite('update', 'bitacora', String(unit.currentTrip.idSalida), updates);
+                    
+                    Reflect.set(unit.currentTrip, "fecha" + stampType, dStr);
+                    Reflect.set(unit.currentTrip, "hora" + stampType, tStr);
+                    localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
+                    
+                    window.notifyLocalIframes();
+                    
+                    this.showToast(`HORA 6-${stampType.replace('6','')} REGISTRADA.`, "success");
+                    this.updateFleetData();
+                } catch(e) {
+                    this.showToast("ERROR AL REGISTRAR HORA.", "error");
+                    btn.innerHTML = origHtml;
+                    btn.disabled = false;
+                }
+            },
+
+            open68Modal(idCarro) {
+                this.selectedCarroId = idCarro;
+                const unit = this.fleetData.find(u => u.idCarro === idCarro);
+                
+                document.getElementById('m68-carro').innerText = idCarro;
+                document.getElementById('m68-kminfo').innerText = `KM ACTUAL: ${unit ? unit.kmActual : '0'}`;
+                document.getElementById('m68-km').value = '';
+                document.getElementById('m68-obs').value = '';
+                document.getElementById('m68-error').classList.add('hidden');
+                
+                const m = document.getElementById('modal-68');
+                const c = document.getElementById('modal-68-content');
+                document.body.classList.add('overflow-hidden');
+                m.classList.remove('hidden'); m.classList.add('flex');
+                setTimeout(() => { m.classList.remove('opacity-0'); c.classList.remove('scale-95'); }, 10);
+            },
+
+            async execute68(btn) {
+                if (!localStorage.getItem('authUserId')) return;
+                const id = this.selectedCarroId;
+                const unit = this.fleetData.find(u => u.idCarro === id);
+                const kmInput = document.getElementById('m68-km').value;
+                const obs = document.getElementById('m68-obs').value.trim().toUpperCase();
+                const err = document.getElementById('m68-error');
+
+                if (!kmInput) { err.innerText = "DEBE INGRESAR EL KM FINAL."; err.classList.remove('hidden'); return; }
+                const newKm = parseInt(kmInput, 10);
+                const currKm = parseInt(unit.kmActual || 0, 10);
+
+                if (newKm < currKm) { err.innerText = `EL KM NO PUEDE SER MENOR A ${currKm}.`; err.classList.remove('hidden'); return; }
+
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+
+                try {
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth()+1).padStart(2, '0')}-${now.getFullYear()}`;
+                    const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                    if (unit.currentTrip) {
+                        window.queueFirebaseWrite('update', 'bitacora', String(unit.currentTrip.idSalida), new Object({ km: String(newKm), observacion: obs, fecha68: dStr, hora68: tStr }));
+                        unit.currentTrip.km = String(newKm);
+                        unit.currentTrip.observacion = obs;
+                        unit.currentTrip.fecha68 = dStr;
+                        unit.currentTrip.hora68 = tStr;
+                        localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
+                    }
+
+                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ enServicio: '0', kmActual: String(newKm), Observacion: obs || unit.Observacion }));
+                    unit.enServicio = '0';
+                    unit.kmActual = String(newKm);
+                    unit.Observacion = obs || unit.Observacion;
+                    localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData));
+
+                    window.notifyLocalIframes();
+                    this.showToast("UNIDAD DISPONIBLE.", "success");
+                    this.closeModals();
+                    this.updateFleetData();
+
+                } catch(e) {
+                    err.innerText = "ERROR AL GUARDAR."; err.classList.remove('hidden');
+                } finally {
+                    btn.innerHTML = origHtml;
+                    btn.disabled = false;
+                }
+            },
+
+            openConfirmModal(title, msg, callback) {
+                document.getElementById('confirm-title').innerText = title;
+                document.getElementById('confirm-msg').innerHTML = msg;
+                this.confirmCallback = callback;
+                
+                const modal = document.getElementById('confirm-modal');
+                const content = document.getElementById('confirm-modal-content');
+                document.body.classList.add('overflow-hidden');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => { modal.classList.remove('opacity-0'); content.classList.remove('scale-95'); }, 10);
+            },
+
+            closeConfirmModal() {
+                const modal = document.getElementById('confirm-modal');
+                const content = document.getElementById('confirm-modal-content');
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                setTimeout(() => { 
+                    modal.classList.add('hidden'); 
+                    modal.classList.remove('flex'); 
+                    document.body.classList.remove('overflow-hidden');
+                    this.confirmCallback = null;
+                }, 200);
+            },
+
+            executeConfirm() {
+                if (!localStorage.getItem('authUserId')) return;
+                const btn = document.getElementById('btn-confirm-action');
+                const orig = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                btn.disabled = true;
+                
+                if (this.confirmCallback) this.confirmCallback();
+                
+                setTimeout(() => {
+                    btn.innerHTML = orig;
+                    btn.disabled = false;
+                    this.closeConfirmModal();
+                }, 500);
+            },
+
+            urgentRelease(id) {
+                if (!localStorage.getItem('authUserId')) return;
+                this.openConfirmModal("LIBERACIÓN URGENTE", `¿LIBERAR URGENTEMENTE LA UNIDAD <b>${id}</b>?<br><br>CERRARÁ LA SALIDA ACTUAL SIN PEDIR KM.`, async () => {
+                    const unit = this.fleetData.find(u => u.idCarro === id);
+                    try {
+                        const now = new Date();
+                        const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth()+1).padStart(2, '0')}-${now.getFullYear()}`;
+                        const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+                        if (unit.currentTrip) {
+                            window.queueFirebaseWrite('update', 'bitacora', String(unit.currentTrip.idSalida), new Object({ km: unit.kmActual || '0', observacion: 'LIBERACIÓN URGENTE', fecha68: dStr, hora68: tStr }));
+                            unit.currentTrip.km = unit.kmActual || '0';
+                            unit.currentTrip.observacion = 'LIBERACIÓN URGENTE';
+                            unit.currentTrip.fecha68 = dStr;
+                            unit.currentTrip.hora68 = tStr;
+                            localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
+                        }
+
+                        window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ enServicio: '0' }));
+                        unit.enServicio = '0';
+                        localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData));
+
+                        window.notifyLocalIframes();
+                        this.showToast("UNIDAD LIBERADA.", "success");
+                        this.updateFleetData();
+
+                    } catch(e) {
+                        this.showToast("ERROR AL LIBERAR.", "error");
+                    }
+                });
+            },
+
+            // --- UTILS FORMAT ---
+            cleanDate(dateStr) {
+                if(!dateStr) return '';
+                let d = String(dateStr).trim();
+                if(d.includes('T')) d = d.split('T').at(0).split('-').reverse().join('-');
+                return d;
+            },
+
+            formatShortName(fullName) {
+                if (!fullName) return "";
+                let n = String(fullName).trim();
+                if (n.includes(' • ')) n = n.split(' • ').at(1).trim();
+                if (n.includes(' - ')) n = n.split(' - ').at(1).trim();
+                const words = n.split(/\s+/);
+                if (words.length >= 3) return `${words.at(0)} ${words.at(words.length - 2)}`;
+                return n;
+            },
+
+            getBomberoLabel(id) {
+                if (!id || id === '0' || id === '---') return '---';
+                if (String(id).includes(' • ') || String(id).includes(' - ') || String(id).includes(' – ')) return id;
+                const cleanId = String(id).trim().toUpperCase();
+                if (cleanId === 'S/I') return 'S/I';
+                if (cleanId === 'GESTION' || cleanId === 'GESTIÓN') return 'GESTIÓN';
+                
+                let found = (this.personalData || []).find(p => 
+                    String(p.idRadial || '').trim().toUpperCase() === cleanId ||
+                    String(p.idRegistro || p.ID || p.id || '').trim() === cleanId
+                );
+                
+                if (!found) {
+                    found = (this.personalData || []).find(p => String(p.nombreBombero || '').trim().toUpperCase().includes(cleanId));
+                }
+                
+                if (found) {
+                    const shortName = this.formatShortName(found.nombreBombero);
+                    const rad = found.idRadial || cleanId;
+                    return `${rad} • ${shortName}`;
+                }
+                return this.formatShortName(cleanId);
+            },
+
+            getClaveForTrip(row) {
+                if (!row) return 'S/C';
+                let rawClave = String(row.clave || '').trim();
+                if (rawClave && !/^\d+$/.test(rawClave) && rawClave !== 'S/C') {
+                    return rawClave;
+                }
+                if (row.idServicio && String(row.idServicio).trim() !== '') {
+                    const list = this.allDespachosData || this.despachosData || [];
+                    const match = list.find(d => String(d.idServicio || d.id).trim() === String(row.idServicio).trim());
+                    if (match && (match.clave || match.key)) {
+                        return match.clave || match.key;
+                    }
+                }
+                return rawClave || 'S/C';
+            },
+
+            // --- UI HELPERS ---
+            showLoader() { const el = document.getElementById('loading-overlay'); if(el) { el.classList.remove('hidden'); el.classList.add('flex'); } },
+            hideLoader() { const el = document.getElementById('loading-overlay'); if(el) { el.classList.add('hidden'); el.classList.remove('flex'); } },
+            showToast(message, type = 'success') {
+                const container = document.getElementById('toast-container');
+                const toast = document.createElement('div');
+                const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+                toast.className = `transform transition-all duration-300 translate-y-full opacity-0 max-w-sm w-full shadow-lg rounded-lg pointer-events-auto flex ring-1 ring-black ring-opacity-5 ${bg} text-white uppercase`;
+                toast.innerHTML = `<div class="p-4 w-full flex items-center gap-3">
+                    ${type === 'success' ? '<i class="fas fa-check-circle text-lg"></i>' : '<i class="fas fa-times-circle text-lg"></i>'}
+                    <p class="text-sm font-medium tracking-wide">${message}</p>
+                </div>`;
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-full', 'opacity-0'), 10);
+                setTimeout(() => {
+                    toast.classList.add('translate-y-full', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3500);
+            }
+        });
+
+        window.onFirebaseParentLogout = function() {
+            console.log("Firebase Parent Logout event received in Material Mayor.");
+            if (App) {
+                if (App.unsubPersonal) { try { App.unsubPersonal(); } catch(e) {} App.unsubPersonal = null; }
+                if (App.unsubDespachos) { try { App.unsubDespachos(); } catch(e) {} App.unsubDespachos = null; }
+                if (App.unsubBitacora) { try { App.unsubBitacora(); } catch(e) {} App.unsubBitacora = null; }
+                if (App.unsubVehiculos) { try { App.unsubVehiculos(); } catch(e) {} App.unsubVehiculos = null; }
+            }
+        };
+
+        let authChangeTimeout = null;
+        window.handleStandaloneAuthChange = async function() {
+            if (!window.fbAuth) {
+                console.warn("FBAUTH NOT INITIALIZED YET.");
+                return;
+            }
+
+            console.log("RE-AUTHENTICATING STANDALONE MATERIAL MAYOR WINDOW...");
+
+            // 1. Unsubscribe current listeners to prevent permission denied errors
+            if (window.App) {
+                if (window.App.unsubPersonal) { try { window.App.unsubPersonal(); } catch(e) {} window.App.unsubPersonal = null; }
+                if (window.App.unsubDespachos) { try { window.App.unsubDespachos(); } catch(e) {} window.App.unsubDespachos = null; }
+                if (window.App.unsubBitacora) { try { window.App.unsubBitacora(); } catch(e) {} window.App.unsubBitacora = null; }
+                if (window.App.unsubVehiculos) { try { window.App.unsubVehiculos(); } catch(e) {} window.App.unsubVehiculos = null; }
+            }
+
+            // 2. Perform sign in based on new credentials
+            const storedUser = localStorage.getItem('authUserId');
+            const storedPassSecure = localStorage.getItem('authPasswordSecure');
+
+            try {
+                if (storedUser && storedPassSecure) {
+                    const email = storedUser + "@sisbom.com";
+                    await signInWithEmailAndPassword(window.fbAuth, email, storedPassSecure);
+                    console.log("RE-AUTHENTICATED WITH NEW USER CREDENTIALS:", storedUser);
+                } else {
+                    console.warn("SIN CREDANCIALES PARA RE-AUTENTICAR EN VENTANA INDEPENDIENTE");
+                }
+            } catch (err) {
+                console.error("ERROR RE-AUTHENTICATING IN STANDALONE WINDOW:", err);
+            }
+
+            // 3. Re-subscribe listeners
+            if (window.App && typeof window.App.setupSnapshots === 'function') {
+                window.App.setupSnapshots();
+            }
+        };
+
+        window.handleStandaloneAuthChangeDebounced = function() {
+            if (authChangeTimeout) clearTimeout(authChangeTimeout);
+            authChangeTimeout = setTimeout(async () => {
+                await window.handleStandaloneAuthChange();
+            }, 300);
+        };
+
+        window.detachWindow = function() {
+            const api = (window.pywebview && window.pywebview.api) || 
+                        (window.top && window.top.pywebview && window.top.pywebview.api);
+            if (api) {
+                api.open_window('materialMayor');
+            } else {
+                window.open('materialMayor.html', '_blank');
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Detect if running inside iframe (main window navigation)
+            if (window.self !== window.top) {
+                const headerCtrls = document.getElementById('header-controls');
+                if (headerCtrls) headerCtrls.classList.remove('hidden');
+            }
+            App.init();
+        });
+    </script>
+
+    <!-- Right-click block injected for definitive release V1.1.0 -->
+    <script>
+    document.addEventListener('contextmenu', e => {
+        const tag = e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA' && !e.target.isContentEditable) {
+            e.preventDefault();
+        }
+    });
+    </script>
+    
+</body>
+</html>

@@ -114,16 +114,19 @@ def build():
     download_external_resources('central')
     patch_firebase_files('central')
 
-    # Convert Logo.png to Logo.ico using pillow
+    # Convert sentinel_logo.png to Logo.ico using pillow
     try:
         from PIL import Image
-        if os.path.exists('Logo.png'):
+        if os.path.exists('sentinel_logo.png'):
+            print("\nConverting sentinel_logo.png to Logo.ico...")
+            img = Image.open('sentinel_logo.png')
+            img.save('Logo.ico', format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+            print("Logo.ico generated successfully from sentinel_logo.png!")
+        elif os.path.exists('Logo.png'):
             print("\nConverting Logo.png to Logo.ico...")
             img = Image.open('Logo.png')
             img.save('Logo.ico', format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
             print("Logo.ico generated successfully!")
-        else:
-            print("\nWarning: Logo.png not found, cannot convert to Logo.ico.")
     except Exception as e:
         print(f"\nWarning: Could not create Logo.ico using pillow: {e}")
 

@@ -133,6 +133,8 @@ class GpsTrackingService : Service(), LocationListener {
 
     private var hasRecentGpsFix = false
     private var lastGpsFixTimestamp = 0L
+    private var stationaryAnchorLat = 0.0
+    private var stationaryAnchorLng = 0.0
 
     private val gpsListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -203,8 +205,8 @@ class GpsTrackingService : Service(), LocationListener {
             lastGpsFixTimestamp = now
         }
 
-        // Descartar lecturas con pésima precisión (> 45 metros)
-        if (location.accuracy > 45f) {
+        // Descartar lecturas con pésima precisión (> 40 metros)
+        if (location.accuracy > 40f) {
             return
         }
 
@@ -213,38 +215,53 @@ class GpsTrackingService : Service(), LocationListener {
             return
         }
 
-        // Cálculo de velocidad con filtrado de ruido estricto
         val rawSpeedKmH = if (location.hasSpeed()) location.speed * 3.6f else 0f
+
+        // Inicializar ancla si es la primera coordenada válida
+        if (stationaryAnchorLat == 0.0 && stationaryAnchorLng == 0.0) {
+            stationaryAnchorLat = location.latitude
+            stationaryAnchorLng = location.longitude
+            currentLat = location.latitude
+            currentLng = location.longitude
+        }
+
+        val distFromAnchor = FloatArray(1)
+        Location.distanceBetween(stationaryAnchorLat, stationaryAnchorLng, location.latitude, location.longitude, distFromAnchor)
+
+        // Filtro estricto contra ruido de oficina / interiores:
+        // Si no ha salido de un radio de 15 metros del ancla, o la precisión es > 20m con velocidad baja,
+        // la velocidad real es estrictamente 0 km/h (elimina saltos de 11 a 14 km/h en reposo).
         val filteredSpeedKmH = when {
-            rawSpeedKmH < 4.0f -> 0f // Estacionado / ruido GPS
-            location.accuracy > 20f && rawSpeedKmH < 8f -> 0f
+            distFromAnchor[0] < 15.0f -> 0f
+            location.accuracy > 25f -> 0f
+            location.accuracy > 15f && rawSpeedKmH < 18.0f -> 0f
+            rawSpeedKmH < 5.0f -> 0f
             else -> rawSpeedKmH
         }
 
-        // Rumbo: solo actualizar si el vehículo realmente está en movimiento (> 5 km/h)
+        // Si el vehículo está detenido o dentro del radio de reposo:
+        if (filteredSpeedKmH == 0f) {
+            currentSpeedKmH = 0f
+            _localLocationFlow.value = GpsLocationData(
+                lat = stationaryAnchorLat,
+                lng = stationaryAnchorLng,
+                speedKmH = 0f,
+                heading = currentHeading,
+                accuracy = location.accuracy,
+                timestamp = location.time
+            )
+            return
+        }
+
+        // Si el vehículo realmente salió del reposo (movimiento genuino):
+        // Actualizar ancla a la posición en movimiento
+        stationaryAnchorLat = location.latitude
+        stationaryAnchorLng = location.longitude
+
         val filteredHeading = if (location.hasBearing() && filteredSpeedKmH >= 5f) {
             location.bearing
         } else {
             currentHeading
-        }
-
-        // Filtrado de jitter cuando el vehículo está detenido: no mover las coordenadas si el cambio es menor a 20 metros sin velocidad real
-        if (currentLat != 0.0 && currentLng != 0.0) {
-            val distMoved = FloatArray(1)
-            Location.distanceBetween(currentLat, currentLng, location.latitude, location.longitude, distMoved)
-            if (filteredSpeedKmH == 0f && distMoved[0] < 20.0f) {
-                // Detenido / Jitter en interiores: mantener coordenadas fijas
-                currentSpeedKmH = 0f
-                _localLocationFlow.value = GpsLocationData(
-                    lat = currentLat,
-                    lng = currentLng,
-                    speedKmH = 0f,
-                    heading = currentHeading,
-                    accuracy = location.accuracy,
-                    timestamp = location.time
-                )
-                return
-            }
         }
 
         currentLat = location.latitude

@@ -321,8 +321,13 @@ class FirebaseRepository {
                         val bCarro = (doc.getString("carro") ?: doc.getString("idCarro") ?: "").replace("-", "").trim().uppercase()
                         val hora68 = doc.getString("hora68") ?: ""
                         val fecha68 = doc.getString("fecha68") ?: ""
+                        val estadoMovil = (doc.getString("estadoMovil") ?: "").trim().lowercase()
+                        val fecha60 = doc.getString("fecha60") ?: ""
+                        val dateToday = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date())
+                        val isToday = fecha60.isEmpty() || fecha60 == dateToday
+
                         val isSameVeh = bCarro.isNotEmpty() && (bCarro == cleanVeh || cleanVeh.contains(bCarro) || bCarro.contains(cleanVeh))
-                        val isActive = hora68.isEmpty() && fecha68.isEmpty()
+                        val isActive = isToday && hora68.isEmpty() && fecha68.isEmpty() && estadoMovil != "en cuartel" && estadoMovil != "6-8"
 
                         if (isSameVeh && isActive) {
                             val tDetalleRaw = doc.get("tripulantesDetalle") as? List<*>
@@ -750,9 +755,7 @@ class FirebaseRepository {
                 else -> emptyList()
             }
 
-            val enServicioVal = doc.get("enServicio")?.toString()
-                ?: doc.get("estado")?.toString()
-                ?: "0"
+            val enServicioVal = doc.get("enServicio")?.toString() ?: "0"
 
             val claveVal = doc.getString("clave")
                 ?: doc.getString("nombre")
@@ -851,16 +854,36 @@ class FirebaseRepository {
                 } else null
             }
 
-            val geoMap = (doc.get("geo") as? Map<*, *>) ?: (doc.get("geolocalizacion") as? Map<*, *>)
-            val latVal = (geoMap?.get("lat") as? Number)?.toDouble()
+            val geoMap = (doc.get("geo") as? Map<*, *>)
+                ?: (doc.get("ubicacionGps") as? Map<*, *>)
+                ?: (doc.get("geolocalizacion") as? Map<*, *>)
+                ?: (doc.get("coordenadas") as? Map<*, *>)
+                ?: (doc.get("alertanteGeo") as? Map<*, *>)
+                ?: (doc.get("geolocalizacionAlertante") as? Map<*, *>)
+
+            val geoPoint = doc.getGeoPoint("posicionGps") ?: doc.getGeoPoint("geo") ?: doc.getGeoPoint("ubicacionGps")
+            val latVal = geoPoint?.latitude
+                ?: (geoMap?.get("lat") as? Number)?.toDouble()
                 ?: (geoMap?.get("lat") as? String)?.toDoubleOrNull()
                 ?: (doc.get("lat") as? Number)?.toDouble()
                 ?: (doc.get("lat") as? String)?.toDoubleOrNull()
 
-            val lngVal = (geoMap?.get("lng") as? Number)?.toDouble()
+            val lngVal = geoPoint?.longitude
+                ?: (geoMap?.get("lng") as? Number)?.toDouble()
                 ?: (geoMap?.get("lng") as? String)?.toDoubleOrNull()
                 ?: (doc.get("lng") as? Number)?.toDouble()
                 ?: (doc.get("lng") as? String)?.toDoubleOrNull()
+
+            val phoneVal = doc.getString("telefono")
+                ?: (doc.get("smsSolicitudGeo") as? Map<*, *>)?.get("telefono")?.toString()
+                ?: (doc.get("geolocalizacionAlertante") as? Map<*, *>)?.get("telefono")?.toString()
+                ?: (doc.get("alertanteGeo") as? Map<*, *>)?.get("telefono")?.toString()
+                ?: ""
+
+            val solicitanteVal = doc.getString("solicitante")
+                ?: doc.getString("alertante")
+                ?: doc.getString("nombreAlertante")
+                ?: ""
 
             Dispatch(
                 idServicio = doc.id,
@@ -879,6 +902,8 @@ class FirebaseRepository {
                 bitacora = bitacoraList,
                 solicitarConfirmacion = doc.getBoolean("solicitarConfirmacion") ?: false,
                 estado = doc.getString("estado") ?: "",
+                solicitante = solicitanteVal,
+                telefono = phoneVal,
                 lat = latVal,
                 lng = lngVal
             )

@@ -69,7 +69,14 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         val key = prefs.getString("saas_license_key", "") ?: ""
         if (key.isNotEmpty()) {
             val formattedKey = key.lowercase().replace("-", "_")
-            val resId = context.resources.getIdentifier("logo_$formattedKey", "drawable", context.packageName)
+            var resId = context.resources.getIdentifier("logo_$formattedKey", "drawable", context.packageName)
+            if (resId == 0) {
+                val stripped = formattedKey.replace("sb_", "")
+                resId = context.resources.getIdentifier("logo_$stripped", "drawable", context.packageName)
+                if (resId == 0) {
+                    resId = context.resources.getIdentifier("logo_sb_$stripped", "drawable", context.packageName)
+                }
+            }
             if (resId != 0) {
                 return resId
             }
@@ -108,36 +115,70 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
     fun updateLauncherIcon() {
         val key = prefs.getString("saas_license_key", "") ?: ""
         val clientName = prefs.getString("saas_client_name", "") ?: ""
-        val usePlacilla = key.lowercase().contains("placilla") || key.lowercase().contains("cbpl") || clientName.lowercase().contains("placilla")
+        val lowerKey = key.lowercase()
+        val lowerName = clientName.lowercase()
+        val usePlacilla = lowerKey.contains("placilla") || lowerKey.contains("cbpl") || lowerName.contains("placilla")
+        val usePrueba = lowerKey.contains("prueba") || lowerName.contains("prueba")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val pm = context.packageManager
                 val defaultAlias = ComponentName(context, "com.sisbom.misisbom.MainActivityDefault")
                 val placillaAlias = ComponentName(context, "com.sisbom.misisbom.MainActivityPlacilla")
+                val pruebaAlias = ComponentName(context, "com.sisbom.misisbom.MainActivityPrueba")
 
-                if (usePlacilla) {
-                    pm.setComponentEnabledSetting(
-                        placillaAlias,
-                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                        PackageManager.DONT_KILL_APP
-                    )
-                    pm.setComponentEnabledSetting(
-                        defaultAlias,
-                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                        PackageManager.DONT_KILL_APP
-                    )
-                } else {
-                    pm.setComponentEnabledSetting(
-                        defaultAlias,
-                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
-                        PackageManager.DONT_KILL_APP
-                    )
-                    pm.setComponentEnabledSetting(
-                        placillaAlias,
-                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                        PackageManager.DONT_KILL_APP
-                    )
+                when {
+                    usePlacilla -> {
+                        pm.setComponentEnabledSetting(
+                            placillaAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        pm.setComponentEnabledSetting(
+                            defaultAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        pm.setComponentEnabledSetting(
+                            pruebaAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                    }
+                    usePrueba -> {
+                        pm.setComponentEnabledSetting(
+                            pruebaAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        pm.setComponentEnabledSetting(
+                            defaultAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        pm.setComponentEnabledSetting(
+                            placillaAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                    }
+                    else -> {
+                        pm.setComponentEnabledSetting(
+                            defaultAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        pm.setComponentEnabledSetting(
+                            placillaAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                        pm.setComponentEnabledSetting(
+                            pruebaAlias,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -756,6 +797,45 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     saveStringToPrefs("cache_dispatches", serializeDispatches(list))
 
                     list.forEach { d ->
+                        val oldDispatch = oldList.find { it.idServicio == d.idServicio }
+                        val oldClave = oldDispatch?.clave?.trim()?.uppercase() ?: ""
+                        val newClave = d.clave.trim().uppercase()
+
+                        val isEscalation1030 = (oldClave == "10-0" || oldClave.contains("10-0")) && newClave.contains("10-30")
+                        val isEscalationForestal = (oldClave == "10-2" || oldClave.contains("10-2")) && newClave.contains("FORESTAL")
+                        val isEscalation = isEscalation1030 || isEscalationForestal
+
+                        // 1. Escalamiento a ALARMA DECLARADA (10-0 -> 10-30 o 10-2 -> ALARMA FORESTAL)
+                        if (isEscalation && d.operadorFinal.isEmpty() && !isFirstCheck) {
+                            val trackerKey = "${d.idServicio}_${if (isEscalation1030) "10_30" else "FORESTAL"}"
+                            if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
+                                PlayedSoundsTracker.markPlayed(trackerKey)
+                                PlayedSoundsTracker.markPlayed(d.idServicio)
+
+                                val myUser = currentUser
+                                val isAttending = myUser?.enServicio == d.idServicio
+                                val isAbsoluteSilence = prefs.getBoolean("SILENCIO_ABSOLUTO", false) || (myUser?.estado?.contains("ABSOLUTO") == true)
+                                val isSuspended = myUser?.hasActiveSuspension() == true || myUser?.estado?.contains("SUSPENDIDO") == true || myUser?.permiso?.toString()?.equals("SUSPENDIDO", ignoreCase = true) == true
+                                val isCDS = myUser?.hasActiveCDS() == true
+                                val isLicencia = myUser?.hasActiveLicense() == true || myUser?.estado?.contains("LICENCIA") == true
+
+                                val isExcluded = isAttending || isAbsoluteSilence || isSuspended || isCDS || isLicencia
+                                val is09 = myUser?.estado == "0-9"
+                                val is08 = myUser?.estado == "0-8" || myUser?.estado == "10-8"
+
+                                if (!isExcluded && (is09 || is08) && !isAirplaneMode && !isCentralActive) {
+                                    SoundPlayer.playSound(context, "c10_30")
+                                    SoundPlayer.triggerVibration(context, true)
+                                    NotificationHelper.scheduleRepeatAlert(context, d.idServicio, d.clave, true)
+
+                                    fullscreenDispatchId = d.idServicio
+                                    val alertTitle = if (isEscalation1030) "🚨 ALARMA 10-30 DECLARADA" else "🌲 ALARMA FORESTAL DECLARADA"
+                                    showSystemToast("$alertTitle: ${d.clave}")
+                                }
+                            }
+                        }
+
+                        // 2. Nuevo despacho general
                         if (!knownDispatchIds.contains(d.idServicio)) {
                             knownDispatchIds.add(d.idServicio)
                             val hasCDS = currentUser?.hasActiveCDS() == true
@@ -766,13 +846,18 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                                         val isTooOld = TimeValidation.isTooOld(d.fechaDespacho, d.horaDespacho)
                                         val inService = currentUser?.let { it.enServicio.isNotEmpty() && it.enServicio != "0" && !it.enServicio.startsWith("-") } ?: false
                                         if (!isTooOld && !isAirplaneMode && !inService) {
-                                            var cleanClave = d.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
-                                            val soundToPlay = if (cleanClave.contains("llamado") || cleanClave.contains("comandancia")) {
-                                                "llamado_comandancia"
+                                            val cleanClaveUpper = d.clave.trim().uppercase()
+                                            val soundToPlay = if (cleanClaveUpper.contains("10-30") || cleanClaveUpper.contains("10_30") ||
+                                                cleanClaveUpper.contains("FORESTAL") ||
+                                                cleanClaveUpper == "9-0" || cleanClaveUpper == "9.0" || cleanClaveUpper == "9_0" ||
+                                                cleanClaveUpper.contains("COMANDANCIA") || cleanClaveUpper.contains("LLAMADO")
+                                            ) {
+                                                "c10_30"
                                             } else {
-                                                val possibleSound = if (cleanClave == "9_0" || cleanClave == "9.0") "c9_0" else "c$cleanClave"
+                                                var cleanClave = d.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
+                                                val possibleSound = if (cleanClave.startsWith("c10") || cleanClave.startsWith("c9")) cleanClave else "c$cleanClave"
                                                 val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
-                                                if (resId != 0) possibleSound else if (cleanClave == "9_0" || cleanClave == "9.0") "c10_9" else "despacho"
+                                                if (resId != 0) possibleSound else "despacho"
                                             }
                                             
                                             SoundPlayer.playSound(context, soundToPlay)

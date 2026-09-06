@@ -160,53 +160,54 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
     private fun filterDispatchForUnit(list: List<Dispatch>, unitId: String, unitLabel: String): Dispatch? {
         if (unitId.isEmpty() && unitLabel.isEmpty()) return null
 
-        val v = currentUnitVehicle
+        val v = currentUnitVehicle ?: availableVehicles.find { it.idCarro == unitId }
         val idClean = unitId.replace("-", "").replace(" ", "").trim().uppercase()
         val labelClean = unitLabel.replace("-", "").replace(" ", "").trim().uppercase()
+        val enServ = v?.enServicio?.trim() ?: "0"
 
-        // 1. Si el vehículo tiene asignado un ID de servicio en su campo enServicio
-        if (v != null && v.enServicio.isNotEmpty() && v.enServicio != "0" && v.enServicio != "0-8" && v.enServicio != "6-13" && v.enServicio != "6-14") {
-            val directMatch = list.find { d ->
-                (d.idServicio == v.enServicio || d.idServicio == v.enServicio.trim()) &&
-                d.operadorFinal.isEmpty() &&
-                d.estado.trim().lowercase() != "finalizada" &&
-                d.estado.trim().lowercase() != "cancelada"
-            }
-            if (directMatch != null) {
-                val unitEntry = directMatch.unidades.entries.find { (uKey, _) ->
-                    val cleanKey = uKey.replace("-", "").replace(" ", "").trim().uppercase()
-                    (idClean.isNotEmpty() && cleanKey == idClean) ||
-                    (labelClean.isNotEmpty() && cleanKey == labelClean)
-                }
-                if (unitEntry != null) {
-                    val uData = unitEntry.value
-                    val estado = ((uData["estado"] ?: uData["status"]) as? String ?: "").lowercase()
-                    val hora68 = (uData["hora68"] ?: uData["regreso68At"]) as? String ?: ""
-                    val isInactive = estado == "cancelado" || estado == "6-8" || hora68.isNotEmpty()
-                    if (!isInactive) {
-                        return directMatch
-                    }
-                } else {
-                    return directMatch
-                }
-            }
-        }
+        // 1. Buscar en despachos activos donde la unidad esté en `unidades` o `carros`
+        val matchInDispatches = list.find { d ->
+            val isClosed = d.operadorFinal.isNotEmpty() ||
+                    d.estado.trim().lowercase() == "finalizada" ||
+                    d.estado.trim().lowercase() == "cancelada" ||
+                    d.estado.trim().lowercase() == "cerrada"
+            if (isClosed) return@find false
 
-        // 2. Buscar en despachos donde la unidad esté activamente en `d.unidades`
-        return list.find { d ->
             val matchUnit = d.unidades.entries.find { (uKey, _) ->
                 val cleanKey = uKey.replace("-", "").replace(" ", "").trim().uppercase()
                 (idClean.isNotEmpty() && cleanKey == idClean) ||
                 (labelClean.isNotEmpty() && cleanKey == labelClean)
             }
-            if (matchUnit != null && d.operadorFinal.isEmpty() && d.estado.trim().lowercase() != "finalizada") {
+            if (matchUnit != null) {
                 val uData = matchUnit.value
                 val estado = ((uData["estado"] ?: uData["status"]) as? String ?: "").lowercase()
                 val hora68 = (uData["hora68"] ?: uData["regreso68At"]) as? String ?: ""
                 val isInactive = estado == "cancelado" || estado == "6-8" || hora68.isNotEmpty()
                 !isInactive
-            } else false
+            } else {
+                // Fallback por lista de carros en texto
+                val carrosList = d.carros.split(",", "/", "-").map { it.replace(" ", "").replace("-", "").trim().uppercase() }
+                (idClean.isNotEmpty() && carrosList.contains(idClean)) || (labelClean.isNotEmpty() && carrosList.contains(labelClean))
+            }
         }
+        if (matchInDispatches != null) {
+            return matchInDispatches
+        }
+
+        // 2. Si el vehículo tiene asignado un ID de servicio en su campo enServicio
+        if (enServ.isNotEmpty() && enServ != "0" && enServ != "0-8" && enServ != "0-9" && enServ != "6-13" && enServ != "6-14") {
+            val directMatch = list.find { d ->
+                (d.idServicio == enServ || d.idServicio == enServ.trim()) &&
+                d.operadorFinal.isEmpty() &&
+                d.estado.trim().lowercase() != "finalizada" &&
+                d.estado.trim().lowercase() != "cancelada"
+            }
+            if (directMatch != null) {
+                return directMatch
+            }
+        }
+
+        return null
     }
 
     private fun subscribeToData() {
@@ -234,6 +235,7 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
                             prefs.edit().putString("active_dispatch_id", nextId).apply()
                             if (nextId.isNotEmpty()) {
                                 GpsTrackingService.triggerImmediateLocationUpdate(context)
+                                MainActivity.wakeUpScreenAndStayAwake(context)
                             }
                         }
                     }
@@ -262,6 +264,7 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
                         prefs.edit().putString("active_dispatch_id", nextId).apply()
                         if (nextId.isNotEmpty()) {
                             GpsTrackingService.triggerImmediateLocationUpdate(context)
+                            MainActivity.wakeUpScreenAndStayAwake(context)
                         }
                     }
                 }

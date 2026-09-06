@@ -1,0 +1,100 @@
+name: Build iOS IPA (SENTINEL ONE)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'MiSisBom/iOS/**'
+      - 'iOS/**'
+      - '.github/workflows/sentinel-one-ios.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-ios:
+    name: Build SENTINEL ONE iOS IPA
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Xcode 16
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode: '16'
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Locate iOS Directory
+        id: locate-ios
+        run: |
+          if [ -d "MiSisBom/iOS" ]; then
+            echo "ios_path=MiSisBom/iOS" >> $GITHUB_OUTPUT
+          elif [ -d "iOS" ]; then
+            echo "ios_path=iOS" >> $GITHUB_OUTPUT
+          else
+            echo "ios_path=." >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Xcode Project
+        run: |
+          cd "${{ steps.locate-ios.outputs.ios_path }}"
+          xcodegen generate
+
+      - name: Install Pods
+        run: |
+          cd "${{ steps.locate-ios.outputs.ios_path }}"
+          pod install --repo-update
+
+      - name: Build iOS Application
+        run: |
+          cd "${{ steps.locate-ios.outputs.ios_path }}"
+          xcodebuild build \
+            -workspace SisBom.xcworkspace \
+            -scheme SisBom \
+            -sdk iphoneos \
+            -configuration Release \
+            -skipMacroValidation \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO > build.log 2>&1 || true
+
+          if grep -q "\*\* BUILD SUCCEEDED \*\*" build.log; then
+            echo "Build Succeeded!"
+          else
+            echo "=== EXTRACTED COMPILER ERRORS ==="
+            grep -E "(error:|fatal error:)" build.log || tail -n 50 build.log
+            ERR_MSG=$(grep -E "(error:|fatal error:)" build.log | head -n 5 | tr '\n' ' ')
+            if [ -z "$ERR_MSG" ]; then
+              ERR_MSG=$(tail -n 20 build.log | tr '\n' ' ')
+            fi
+            echo "::error title=Xcode Compilation Error::$ERR_MSG"
+            exit 1
+          fi
+
+      - name: Package Clean IPA Artifact
+        run: |
+          cd "${{ steps.locate-ios.outputs.ios_path }}"
+          rm -rf Payload SENTINEL_ONE.ipa SisBom.ipa
+          mkdir -p Payload
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "SisBom.app" -type d | head -n 1)
+          if [ -n "$APP_PATH" ]; then
+            cp -r "$APP_PATH" Payload/
+          else
+            echo "Error: SisBom.app not found in DerivedData"
+            exit 1
+          fi
+          zip -r SENTINEL_ONE.ipa Payload
+          echo "SENTINEL_ONE.ipa created successfully."
+
+      - name: Upload iOS IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SENTINEL-ONE-iOS-IPA
+          path: ${{ steps.locate-ios.outputs.ios_path }}/SENTINEL_ONE.ipa

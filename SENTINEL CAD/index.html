@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activación - SENTINEL CAD</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <link rel="stylesheet" href="./libs/tailwind-activation.css">
+    
+    <!-- FontAwesome Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <style>
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at center, #1e131d 0%, #070913 100%);
+            color: #f4f4f5;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .glass-panel {
+            background: rgba(19, 28, 46, 0.45);
+            backdrop-filter: blur(25px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glow-effect {
+            position: relative;
+        }
+        .glow-effect::before {
+            content: '';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 150px; height: 150px;
+            background: #ef4444;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.15;
+            z-index: -1;
+            animation: pulse-glow 6s infinite alternate;
+        }
+        @keyframes pulse-glow {
+            0% { opacity: 0.1; transform: translate(-50%, -50%) scale(0.9); }
+            100% { opacity: 0.25; transform: translate(-50%, -50%) scale(1.2); }
+        }
+        .shimmer-btn {
+            position: relative;
+            overflow: hidden;
+        }
+        .shimmer-btn::after {
+            content: '';
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.12), transparent);
+            transition: all 0.6s ease;
+        }
+        .shimmer-btn:hover::after {
+            left: 100%;
+        }
+    </style>
+</head>
+<body class="antialiased select-none">
+
+    <div class="w-full max-w-lg px-6 relative glow-effect">
+        <!-- Main Card -->
+        <div id="activation-card" class="glass-panel p-10 rounded-3xl text-center flex flex-col items-center">
+            
+            <!-- Default SENTINEL Logo (Logo con texto integrado) -->
+            <div class="flex flex-col items-center mb-6">
+                <div class="relative w-60 h-60 flex items-center justify-center">
+                    <img id="logo-img" src="sentinel_vertical.png" class="w-56 h-56 object-contain drop-shadow-[0_10px_25px_rgba(239,68,68,0.3)] animate-pulse" alt="Logo SENTINEL">
+                </div>
+            </div>
+
+            <!-- Header / Status Title -->
+            <h1 id="status-title" class="text-2xl font-black tracking-tight text-white mb-2 uppercase">Validando SENTINEL CAD...</h1>
+            <p id="status-desc" class="text-zinc-400 text-sm font-semibold tracking-wider uppercase text-[10px] mb-8">Validando Licencia del Equipo</p>
+
+            <!-- Loading Spinner State -->
+            <div id="loader-state" class="flex flex-col items-center gap-4">
+                <div class="w-10 h-10 border-4 border-transparent border-t-red-500 rounded-full animate-spin"></div>
+                <span class="text-zinc-500 text-xs font-semibold uppercase tracking-widest">Consultando Servidor Central...</span>
+            </div>
+
+            <!-- Error / Registration State -->
+            <div id="error-state" class="hidden w-full space-y-6">
+                <!-- License Input Field -->
+                <div class="space-y-2 text-left">
+                    <label class="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Clave de Licencia</label>
+                    <input type="text" id="license-key-value" class="w-full bg-zinc-950/80 border border-white/5 py-3 px-4 rounded-xl text-white font-semibold text-xs tracking-wider uppercase shadow-inner text-center placeholder-zinc-600 focus:border-red-500/50 outline-none transition-colors" placeholder="INGRESE CLAVE DE LICENCIA">
+                </div>
+
+                <div class="bg-red-500/10 border border-red-500/20 rounded-2xl p-5 text-left space-y-3">
+                    <div class="flex items-center gap-2.5 text-red-400 font-bold text-xs uppercase tracking-wider">
+                        <i class="fas fa-triangle-exclamation"></i>
+                        <span>Equipo No Habilitado</span>
+                    </div>
+                    <p id="error-reason" class="text-zinc-300 text-xs leading-relaxed font-semibold">
+                        Este dispositivo no cuenta con una activación asignada en el panel de control SENTINEL.
+                    </p>
+                </div>
+
+                <!-- HWID Box -->
+                <div class="space-y-2 text-left">
+                    <label class="block text-[9px] font-bold text-zinc-500 uppercase tracking-widest pl-1">Identificador de Hardware (MAC / HWID)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="hwid-value" readonly class="w-full bg-zinc-950/80 border border-white/5 py-3 px-4 rounded-xl text-red-400 font-mono text-xs font-bold tracking-wider select-all uppercase shadow-inner text-center" value="CARGANDO...">
+                        <button onclick="copyHwid()" class="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-white/5 font-bold px-4 rounded-xl text-xs uppercase transition-colors shrink-0 flex items-center justify-center gap-1.5" title="Copiar HWID">
+                            <i class="fas fa-copy"></i> Copiar
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex pt-4 border-t border-white/5">
+                    <button onclick="checkLicenseWithInput()" class="w-full py-3 bg-red-600 hover:bg-red-700 active:scale-[0.98] transition-all text-white font-bold rounded-xl text-[10px] uppercase tracking-wider shadow-lg shadow-red-600/25 shimmer-btn">
+                        Activar Licencia
+                    </button>
+                </div>
+            </div>
+
+            <!-- Blocked / Overdue state -->
+            <div id="blocked-state" class="hidden w-full space-y-6">
+                <div class="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-5 text-left space-y-2">
+                    <div class="flex items-center gap-2.5 text-amber-400 font-bold text-xs uppercase tracking-wider">
+                        <i class="fas fa-lock text-sm"></i>
+                        <span>Licencia Suspendida</span>
+                    </div>
+                    <p id="blocked-reason" class="text-zinc-300 text-xs leading-relaxed font-semibold">
+                        El servicio ha sido suspendido temporalmente por el administrador.
+                    </p>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- API Hooking and logic -->
+    <script>
+        window.closeApp = function() {
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.closeApp) {
+                window.pywebview.api.closeApp();
+            } else {
+                window.close();
+            }
+        };
+
+        let isChecking = false;
+
+        async function checkLicense(licenseKey = null) {
+            if (isChecking) return;
+            isChecking = true;
+
+            // Show loading state
+            document.getElementById('loader-state').classList.remove('hidden');
+            document.getElementById('error-state').classList.add('hidden');
+            document.getElementById('blocked-state').classList.add('hidden');
+            document.getElementById('status-title').innerText = "Validando SENTINEL CAD...";
+            document.getElementById('status-desc').innerText = "Validando Licencia del Equipo";
+            document.getElementById('logo-img').classList.add('animate-pulse');
+
+            try {
+                // Ensure Python webview API is initialized
+                if (!window.pywebview || !window.pywebview.api) {
+                    await new Promise(resolve => {
+                        const checkInterval = setInterval(() => {
+                            if (window.pywebview && window.pywebview.api) {
+                                clearInterval(checkInterval);
+                                resolve();
+                            }
+                        }, 100);
+                    });
+                }
+
+                // 1. Get HWID
+                const hwid = await pywebview.api.get_hwid();
+                document.getElementById('hwid-value').value = hwid;
+
+                // 2. Perform License Check
+                const res = await pywebview.api.check_license(licenseKey);
+                
+                // Keep Sentinel vertical logo on the activation screen
+                document.getElementById('logo-img').src = "sentinel_vertical.png";
+                
+                if (res.authorized) {
+                    document.getElementById('status-title').innerText = "Habilitado";
+                    document.getElementById('status-desc').innerText = (res.nombreMostrar || "SENTINEL").toUpperCase();
+                    document.getElementById('logo-img').classList.remove('animate-pulse');
+                    
+                    // Show institutional name if given
+                    if (res.nombreMostrar) {
+                        document.getElementById('status-desc').innerText = res.nombreMostrar.toUpperCase();
+                    }
+
+                    // Clear old cached DBs if switching company/license
+                    const oldConfig = localStorage.getItem("firebaseConfig");
+                    const newConfig = JSON.stringify(res.firebaseConfig);
+                    if (oldConfig !== newConfig) {
+                        localStorage.removeItem("db_personal");
+                        localStorage.removeItem("db_vehiculos");
+                        localStorage.removeItem("db_bitacora");
+                        localStorage.removeItem("sisbom_alertas_cache_v1");
+                        localStorage.removeItem("adminUser");
+                    }
+
+                    // Save settings locally
+                    localStorage.setItem("firebaseConfig", newConfig);
+                    localStorage.setItem("nombreMostrar", res.nombreMostrar || "SENTINEL");
+                    localStorage.setItem("logoUrl", res.logoUrl || "");
+                    localStorage.setItem("authorized_module", res.module || "central");
+
+                    // Redirect dynamically
+                    setTimeout(() => {
+                        const targetModule = res.module || "central";
+                        if (targetModule === "comandancia") {
+                            window.location.href = "./comandancia/index.html";
+                        } else {
+                            window.location.href = "./central/index.html";
+                        }
+                    }, 1500);
+
+                } else {
+                    // Unauthorized or Blocked
+                    document.getElementById('logo-img').classList.remove('animate-pulse');
+                    
+                    if (res.reason && (res.reason.includes("bloqueada") || res.reason.includes("vencida") || res.reason.includes("Falta de pago"))) {
+                        document.getElementById('status-title').innerText = "Acceso Denegado";
+                        document.getElementById('status-desc').innerText = "Suscripción Inactiva";
+                        document.getElementById('blocked-reason').innerText = res.reason;
+                        document.getElementById('loader-state').classList.add('hidden');
+                        document.getElementById('blocked-state').classList.remove('hidden');
+                    } else {
+                        document.getElementById('status-title').innerText = "Dispositivo Inactivo";
+                        document.getElementById('status-desc').innerText = "Espera de Activación";
+                        document.getElementById('error-reason').innerText = res.reason || "Este equipo no está autorizado en el Servidor Central SENTINEL.";
+                        document.getElementById('loader-state').classList.add('hidden');
+                        document.getElementById('error-state').classList.remove('hidden');
+                        
+                        // Prefill license key input if returned or cached
+                        if (res.licenseKey) {
+                            document.getElementById('license-key-value').value = res.licenseKey;
+                        }
+                    }
+                }
+
+            } catch (err) {
+                console.error("Error in checkLicense:", err);
+                document.getElementById('status-title').innerText = "Error de Conexión";
+                document.getElementById('status-desc').innerText = "Error de red";
+                document.getElementById('logo-img').classList.remove('animate-pulse');
+                document.getElementById('error-reason').innerText = "No se pudo conectar al Servidor Central SENTINEL. Revise su conexión a Internet. Detalle: " + err.message;
+                document.getElementById('loader-state').classList.add('hidden');
+                document.getElementById('error-state').classList.remove('hidden');
+            } finally {
+                isChecking = false;
+            }
+        }
+
+        function checkLicenseWithInput() {
+            const licenseKey = document.getElementById('license-key-value').value.trim();
+            checkLicense(licenseKey);
+        }
+
+        function copyHwid() {
+            const hwidInput = document.getElementById('hwid-value');
+            hwidInput.select();
+            document.execCommand('copy');
+            alert('Hardware ID copiado al portapapeles: ' + hwidInput.value);
+        }
+
+        // Auto trigger license check when webview loads
+        window.addEventListener('pywebviewready', function() {
+            checkLicense();
+        });
+
+        // Fallback triggers if the event ready is delayed
+        setTimeout(() => {
+            if (!isChecking && window.pywebview && window.pywebview.api) {
+                checkLicense();
+            }
+        }, 1500);
+    </script>
+</body>
+</html>

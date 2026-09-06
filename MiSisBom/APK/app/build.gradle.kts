@@ -13,8 +13,8 @@ android {
         applicationId = "com.sisbom.misisbom"
         minSdk = 24
         targetSdk = 36
-        versionCode = 211
-        versionName = "2.1.1"
+        versionCode = 214
+        versionName = "2.1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

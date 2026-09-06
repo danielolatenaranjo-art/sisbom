@@ -149,14 +149,36 @@ fun SisBomBackground(
         }
 
         val context = androidx.compose.ui.platform.LocalContext.current
-        val logoModel = androidx.compose.runtime.remember {
+        val prefs = androidx.compose.runtime.remember {
+            context.getSharedPreferences("SisBomPrefs", android.content.Context.MODE_PRIVATE)
+        }
+        val logoModel = androidx.compose.runtime.remember(
+            prefs.getString("saas_license_key", ""),
+            prefs.getString("saas_logo_url", "")
+        ) {
             val file = java.io.File(context.filesDir, "client_logo.png")
             if (file.exists() && file.length() > 0) {
                 file
             } else {
-                val url = context.getSharedPreferences("SisBomPrefs", android.content.Context.MODE_PRIVATE)
-                    .getString("saas_logo_url", "") ?: ""
-                url.ifEmpty { R.drawable.logo }
+                val url = prefs.getString("saas_logo_url", "") ?: ""
+                if (url.isNotEmpty()) {
+                    url
+                } else {
+                    val key = prefs.getString("saas_license_key", "") ?: ""
+                    var resId = 0
+                    if (key.isNotEmpty()) {
+                        val formattedKey = key.lowercase().replace("-", "_")
+                        resId = context.resources.getIdentifier("logo_$formattedKey", "drawable", context.packageName)
+                        if (resId == 0) {
+                            val stripped = formattedKey.replace("sb_", "")
+                            resId = context.resources.getIdentifier("logo_$stripped", "drawable", context.packageName)
+                            if (resId == 0) {
+                                resId = context.resources.getIdentifier("logo_sb_$stripped", "drawable", context.packageName)
+                            }
+                        }
+                    }
+                    if (resId != 0) resId else R.drawable.logo
+                }
             }
         }
 
@@ -381,12 +403,22 @@ object SoundPlayer {
             if (audioManager != null) {
                 try {
                     audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                    val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+                } catch (_: Exception) {}
+                try {
                     val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                    val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
                     audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
+                } catch (_: Exception) {}
+                try {
+                    val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
+                } catch (_: Exception) {}
+                try {
+                    val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
+                    audioManager.setStreamVolume(AudioManager.STREAM_RING, maxRing, 0)
+                } catch (_: Exception) {}
+                try {
+                    val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
                 } catch (_: Exception) {}
             }
 
@@ -398,8 +430,11 @@ object SoundPlayer {
                     val attributes = AudioAttributes.Builder()
                         .setUsage(AudioAttributes.USAGE_ALARM)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .setLegacyStreamType(AudioManager.STREAM_ALARM)
                         .build()
                     setAudioAttributes(attributes)
+                    @Suppress("DEPRECATION")
+                    setAudioStreamType(AudioManager.STREAM_ALARM)
                     val afd = context.resources.openRawResourceFd(resId)
                     setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                     afd.close()
@@ -439,14 +474,24 @@ object SoundPlayer {
 
     fun triggerVibration(context: Context, isLong: Boolean) {
         try {
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                vm?.defaultVibrator ?: (context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator)
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
             val pattern = if (isLong) {
                 longArrayOf(0, 1200, 400, 1200, 400, 1200, 400, 1200)
             } else {
                 longArrayOf(0, 400, 200, 400)
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
+                val audioAttributes = AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .build()
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1), audioAttributes)
             } else {
                 @Suppress("DEPRECATION")
                 vibrator.vibrate(pattern, -1)

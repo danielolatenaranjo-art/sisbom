@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@source "./central/**/*.html";
+@source "./comandancia/**/*.html";
+@source "./*.html";
+
+@theme {
+  --color-bomberos-red: #B91C1C;
+  --color-bomberos-dark: #7F1D1D;
+  --color-bomberos-light: #FEF2F2;
+
+  --color-brand-red: #EF4444;
+  --color-brand-darkRed: #B91C1C;
+  --color-brand-dark: #070913;
+  --color-brand-slate: #1E293B;
+  --color-brand-card: #131C2E;
+  --color-brand-gold: #F59E0B;
+
+  --color-primary-red: #ef4444;
+  --color-primary-green: #10b981;
+  --color-primary-blue: #3b82f6;
+
+  --font-sans: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  --font-outfit: Outfit, sans-serif;
+}

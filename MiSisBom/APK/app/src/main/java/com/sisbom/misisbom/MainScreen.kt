@@ -8,6 +8,9 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clipToBounds
@@ -205,7 +208,7 @@ fun MainScreen(viewModel: SisBomViewModel) {
                     val todayDay = cal.get(java.util.Calendar.DAY_OF_MONTH)
                     val isDecember8th = (todayMonth == java.util.Calendar.DECEMBER && todayDay == 8)
 
-                    val topPaddingValue = 82.dp // 140.dp - 58.dp
+                    val topPaddingValue = 112.dp
                     val customPaddingValues = PaddingValues(
                         top = topPaddingValue + saasTopExtra,
                         bottom = navigationBarPadding + 88.dp
@@ -315,7 +318,7 @@ fun MainScreen(viewModel: SisBomViewModel) {
                         color = if (isDark) Color.White else TextDark
                     )
                     Text(
-                        text = "SISBOM V ${viewModel.appVersionName}",
+                        text = "SENTINEL ONE V ${viewModel.appVersionName}",
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
                         color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
@@ -431,14 +434,16 @@ fun TopAppBarView(viewModel: SisBomViewModel, onMenuClick: () -> Unit) {
             .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // 1. NOMBRE CUERPO BOMBEROS (Centrado)
-        Text(
-            text = if (viewModel.saasClientName.isNotEmpty()) viewModel.saasClientName.uppercase() else "CUERPO DE BOMBEROS",
-            color = if (isDark) Color.White else Color(0xFF0F172A),
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = 0.5.sp,
-            modifier = Modifier.padding(bottom = 12.dp)
+        // Logo SENTINEL ONE (Adaptativo Claro/Oscuro)
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(
+                id = if (isDark) R.drawable.sentinel_one_logo else R.drawable.sentinel_one_logo_light
+            ),
+            contentDescription = "SENTINEL ONE",
+            modifier = Modifier
+                .height(24.dp)
+                .padding(bottom = 6.dp),
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )
 
         // 2. Tarjeta con efecto Glassmorphism teñido del color del estado (Altamente diferenciable)
@@ -498,8 +503,21 @@ fun TopAppBarView(viewModel: SisBomViewModel, onMenuClick: () -> Unit) {
                 .clip(RoundedCornerShape(24.dp))
                 .background(glassBgColor)
                 .border(1.dp, cardBorderColor, RoundedCornerShape(24.dp))
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
+            // NOMBRE CUERPO BOMBEROS (Dentro de la tarjeta, arriba al centro)
+            Text(
+                text = if (viewModel.saasClientName.isNotEmpty()) viewModel.saasClientName.uppercase() else "CUERPO DE BOMBEROS",
+                color = if (isDark) Color.White.copy(alpha = 0.9f) else Color(0xFF1E293B),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.5.sp,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp)
+            )
+
             // Fila con Avatar, Nombre e ID/Cargo a la izquierda, y botones 09/08 a la derecha
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -936,10 +954,10 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
             ) {
                 Box(
                     modifier = Modifier
-                        .size(56.dp)
-                        .clip(CircleShape)
-                        .border(1.5.dp, BomberosRed, CircleShape)
-                        .background(Color.White),
+                        .size(54.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(1.5.dp, BomberosRed, RoundedCornerShape(10.dp))
+                        .background(if (isDark) Color(0xFF1E293B) else Color.White),
                     contentAlignment = Alignment.Center
                 ) {
                     val photoModel = remember(user.foto) {
@@ -962,7 +980,7 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
                         androidx.compose.foundation.Image(
                             bitmap = photoModel.asImageBitmap(),
                             contentDescription = "Foto de perfil",
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
                     } else if (photoModel != null) {
@@ -971,7 +989,7 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
                             contentDescription = "Foto de perfil",
                             placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
                             error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
                     } else {
@@ -980,7 +998,7 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
                             contentDescription = "Logo",
                             placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
                             error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
-                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp)),
                             contentScale = androidx.compose.ui.layout.ContentScale.Crop
                         )
                     }
@@ -1412,14 +1430,31 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
-        Text(
-            text = "SISBOM V ${viewModel.appVersionName}",
-            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.align(Alignment.CenterHorizontally)
-        )
+        Column(
+            modifier = Modifier.align(Alignment.CenterHorizontally),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Image(
+                painter = painterResource(
+                    id = if (isDark) R.drawable.sentinel_one_logo else R.drawable.sentinel_one_logo_light
+                ),
+                contentDescription = "SENTINEL ONE",
+                modifier = Modifier
+                    .height(34.dp)
+                    .padding(horizontal = 8.dp),
+                contentScale = ContentScale.Fit
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "V ${viewModel.appVersionName}",
+                color = Color(0xFFD97706),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.5.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
     }
 }

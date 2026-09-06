@@ -1,1 +1,38 @@
-[{"dia":26,"id115":"107","turno":"MANANA","anio":2026,"mes":8,"fecha115":"26-08-2026","totalPersonal":2,"id115_num":107,"hora115":"08:58","timestamp":1787749141721,"id":"107","ID":"107","idRegistro":"107"},{"hora115":"19:06","id115_num":108,"fecha115":"29-08-2026","totalPersonal":2,"timestamp":1788044805258,"dia":29,"mes":8,"anio":2026,"turno":"TARDE","id115":"108","id":"108","ID":"108","idRegistro":"108"},{"totalPersonal":2,"hora115":"22:42","fecha115":"19-07-2026","id115":"3","timestamp":1784516423682,"id":"3","ID":"3","idRegistro":"3"},{"placeholder":true,"fechaInicializacion":"2026-07-17T16:45:32.402Z","id":"init","ID":"init","idRegistro":"init"}]
+[
+    {
+        "hora115": "08:58",
+        "timestamp": 1787749141721,
+        "dia": 26,
+        "mes": 8,
+        "totalPersonal": 2,
+        "anio": 2026,
+        "id115": "107",
+        "turno": "MANANA",
+        "id115_num": 107,
+        "fecha115": "26-08-2026"
+    },
+    {
+        "mes": 8,
+        "dia": 29,
+        "timestamp": 1788044805258,
+        "totalPersonal": 2,
+        "hora115": "19:06",
+        "id115_num": 108,
+        "id115": "108",
+        "anio": 2026,
+        "turno": "TARDE",
+        "fecha115": "29-08-2026"
+    },
+    {
+        "hora115": "22:42",
+        "fecha115": "19-07-2026",
+        "totalPersonal": 2,
+        "id115": "3",
+        "timestamp": 1784516423682
+    },
+    {
+        "placeholder": true,
+        "fechaInicializacion": "2026-07-17T16:45:32.402Z",
+        "id115": "init"
+    }
+]

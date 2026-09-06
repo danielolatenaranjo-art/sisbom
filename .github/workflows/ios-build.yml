@@ -1,11 +1,14 @@
 name: Build iOS App (MiSisBom)
 
+# Desactivado trigger automático para ahorrar minutos de GitHub Actions
+# on:
+#   push:
+#     branches: [ "main", "master" ]
+#   pull_request:
+#     branches: [ "main", "master" ]
 on:
-  push:
-    branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
+
 
 permissions:
   contents: write

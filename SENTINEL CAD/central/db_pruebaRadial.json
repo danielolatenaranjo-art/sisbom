@@ -1,0 +1,38 @@
+[
+    {
+        "hora115": "08:58",
+        "turno": "MANANA",
+        "timestamp": 1787749141721,
+        "id115": "107",
+        "dia": 26,
+        "anio": 2026,
+        "mes": 8,
+        "fecha115": "26-08-2026",
+        "id115_num": 107,
+        "totalPersonal": 2
+    },
+    {
+        "mes": 8,
+        "dia": 29,
+        "totalPersonal": 2,
+        "hora115": "19:06",
+        "timestamp": 1788044805258,
+        "id115_num": 108,
+        "fecha115": "29-08-2026",
+        "anio": 2026,
+        "id115": "108",
+        "turno": "TARDE"
+    },
+    {
+        "id115": "3",
+        "hora115": "22:42",
+        "timestamp": 1784516423682,
+        "fecha115": "19-07-2026",
+        "totalPersonal": 2
+    },
+    {
+        "fechaInicializacion": "2026-07-17T16:45:32.402Z",
+        "placeholder": true,
+        "id115": "init"
+    }
+]

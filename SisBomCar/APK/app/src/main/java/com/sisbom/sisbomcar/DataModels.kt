@@ -113,6 +113,8 @@ data class Dispatch(
     val bitacora: List<BitacoraEntry> = emptyList(),
     val solicitarConfirmacion: Boolean = false,
     val estado: String = "",
+    val solicitante: String = "",
+    val telefono: String = "",
     val lat: Double? = null,
     val lng: Double? = null
 )

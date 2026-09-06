@@ -389,17 +389,17 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                 lineHeight = 18.sp
             )
             val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
-            val actualLat = if (hasValidLocation) dispatch.lat!! else -34.637373
-            val actualLng = if (hasValidLocation) dispatch.lng!! else -71.125741
-            Spacer(modifier = Modifier.height(10.dp))
-            IncidentMapPreview(
-                lat = actualLat,
-                lng = actualLng,
-                isPending = !hasValidLocation,
-                clave = dispatch.clave,
-                lugar = dispatch.lugar,
-                isDark = isDark
-            )
+            if (hasValidLocation) {
+                Spacer(modifier = Modifier.height(10.dp))
+                IncidentMapPreview(
+                    lat = dispatch.lat!!,
+                    lng = dispatch.lng!!,
+                    isPending = false,
+                    clave = dispatch.clave,
+                    lugar = dispatch.lugar,
+                    isDark = isDark
+                )
+            }
             Spacer(modifier = Modifier.height(10.dp))
             
             val cleanPreinforme = dispatch.preinforme.trim().replace("---", "").trim()
@@ -702,6 +702,10 @@ fun IncidentMapPreview(
     isDark: Boolean = true,
     modifier: Modifier = Modifier
 ) {
+    if (lat == 0.0 || lng == 0.0 || isPending) {
+        return
+    }
+
     val cleanKey = clave.trim().uppercase()
     val pinColorHex = when (cleanKey) {
         "10-0" -> "#DC2626"
@@ -766,7 +770,7 @@ fun IncidentMapPreview(
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->
                 org.osmdroid.config.Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE))
-                org.osmdroid.config.Configuration.getInstance().userAgentValue = "MiSisBom/2.1 (Android Bomberos Emergency App)"
+                org.osmdroid.config.Configuration.getInstance().userAgentValue = "SENTINEL ONE/2.1 (Android Bomberos Emergency App)"
 
                 org.osmdroid.views.MapView(ctx).apply {
                     setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)

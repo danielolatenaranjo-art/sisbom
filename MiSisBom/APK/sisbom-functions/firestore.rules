@@ -199,5 +199,20 @@ service cloud.firestore {
     match /saas_clientes/{licenciaKey} {
       allow read, write: if true;
     }
+
+    // llamadas collection (SisBomTel Caller ID en tiempo real)
+    match /llamadas/{id} {
+      allow read, write: if true;
+    }
+
+    // historial_llamadas collection (SisBomTel registro de llamadas)
+    match /historial_llamadas/{id} {
+      allow read, write: if true;
+    }
+
+    // sms_queue collection (SisBomTel pasarela SMS y cola de salida)
+    match /sms_queue/{id} {
+      allow read, write: if true;
+    }
   }
 }

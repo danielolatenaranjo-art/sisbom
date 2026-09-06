@@ -1,9 +1,33 @@
 import SwiftUI
 import FirebaseCore
+import FirebaseMessaging
 import UserNotifications
+import CoreLocation
+import AVFoundation
 
-// MARK: - AppDelegate for Firebase Core Initialization
-class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+// MARK: - Location Service
+class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
+    static let shared = LocationService()
+    private let manager = CLLocationManager()
+    @Published var lastLocation: CLLocation?
+
+    override init() {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = kCLLocationAccuracyBest
+    }
+
+    func requestPermissions() {
+        manager.requestWhenInUseAuthorization()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        lastLocation = locations.last
+    }
+}
+
+// MARK: - AppDelegate for Firebase Core & Permissions Initialization
+class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     static var launchChatId: String? = nil
 
     static func configureDynamicFirebase(configStr: String) {
@@ -49,7 +73,29 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             AppDelegate.configureDynamicFirebase(configStr: cachedConfigStr)
         }
         
+        // Setup User Notifications
         UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
+            if granted {
+                DispatchQueue.main.async {
+                    application.registerForRemoteNotifications()
+                }
+            }
+        }
+        
+        // Setup Location
+        LocationService.shared.requestPermissions()
+        
+        // Setup Audio Session for Siren / Tone playback
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            print("Audio session configuration error: \(error)")
+        }
+        
+        // Setup Messaging Delegate
+        Messaging.messaging().delegate = self
         
         // Check if launched from a notification response in launchOptions
         if let notificationPayload = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
@@ -60,6 +106,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         
         return true
+    }
+    
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Messaging.messaging().apnsToken = deviceToken
+    }
+    
+    // Foreground Notification Presentation
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
     }
     
     // Handle notification tap when app is in background/closed
@@ -82,6 +141,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         
         completionHandler()
+    }
+    
+    func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
+        print("Firebase registration token: \(String(describing: fcmToken))")
     }
 }
 
@@ -109,3 +172,4 @@ struct SisBomApp: App {
         }
     }
 }
+

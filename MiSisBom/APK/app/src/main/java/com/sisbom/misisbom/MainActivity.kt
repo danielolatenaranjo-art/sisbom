@@ -401,6 +401,10 @@ object NotificationHelper {
             } catch (_: Exception) { "" }
         } else { "" }
 
+        val is1030 = (type == "DISPATCH" || type == "DISPATCH_UPDATE") && (claveOpt.trim().contains("10-30") || title.contains("10-30") || message.contains("10-30"))
+        val isForestal = (type == "DISPATCH" || type == "DISPATCH_UPDATE") && (claveOpt.trim().uppercase().contains("FORESTAL") || title.uppercase().contains("FORESTAL") || message.uppercase().contains("FORESTAL"))
+        val isEscalationAlarm = is1030 || isForestal
+
         // If user is a Bombero Honorario, do not show or play anything for dispatches or requests
         if (userCargo == "BOMBERO HONORARIO" && (type == "DISPATCH" || type == "DISPATCH_UPDATE")) {
             return
@@ -408,8 +412,11 @@ object NotificationHelper {
 
         if (type != "STATUS_CHANGE" && isFromFCM && MainActivity.isAppInForeground) return
         // Do NOT block dispatches when user is 0-8 (isUnavailable)
+        // AND do NOT block escalation alarms (10-30 or Alarma Forestal) even if in ignoredPayloads (e.g. user previously pressed "No Asistir")
         if (type == "DISPATCH" && is08) {
             // Let it proceed
+        } else if (isEscalationAlarm) {
+            // Let escalation alarms proceed even if in ignoredPayloads!
         } else if (payloadId.isNotEmpty() && ignoredPayloads.contains(payloadId)) {
             return
         }
@@ -426,7 +433,7 @@ object NotificationHelper {
             }
             "DISPATCH_UPDATE" -> {
                 if (isCentral) "sisbom_actions_v1"
-                else if (is08) "sisbom_dispatch_silent_v1"
+                else if (is08 && !isEscalationAlarm) "sisbom_dispatch_silent_v1"
                 else "sisbom_dispatch_urgent_v1"
             }
             "CHAT" -> {
@@ -470,7 +477,6 @@ object NotificationHelper {
         val is66 = title.contains("6-6") || message.contains("6-6")
         val isOrden = type == "ORDEN" || title.contains("ORDEN", ignoreCase = true)
         val isGrade3 = type == "ALERT" && gradoAlerta == "3"
-        val is1030 = (type == "DISPATCH" || type == "DISPATCH_UPDATE") && (claveOpt.trim() == "10-30" || title.contains("10-30") || message.contains("10-30"))
 
         val isConductor = if (cachedUser != null) {
             try {
@@ -514,8 +520,8 @@ object NotificationHelper {
                 playLoud = false
                 forceVibrateOnly = !isCentral
             }
-        } else if (is1030) {
-            // Alarma 10-30 declarada: Suena c10_30.mp3 para:
+        } else if (isEscalationAlarm) {
+            // Alarma 10-30 o ALARMA FORESTAL declarada: Suena c10_30.mp3 para:
             // 1. Bomberos en 0-9 que no hayan puesto Asistir (o que hayan puesto No Asistir).
             // 2. Bomberos en 0-8 (sin silencio absoluto).
             // Excluidos: Silencio absoluto, 0-8 absoluto, CDS, licencia médica, suspendido, o si ya asiste a este despacho.
@@ -527,7 +533,9 @@ object NotificationHelper {
                 playLoud = !isCentral
             }
         } else {
-            playLoud = (type == "DISPATCH" || type == "DISPATCH_UPDATE" || isOrden || isGrade3) && !isCentral
+            // Para despachos generales: suena fuerte si no es central ni 0-8.
+            // Para DISPATCH_UPDATE: SOLO suena si es escalamiento (isEscalationAlarm). Si es un cambio de clave ordinario (ej: 10-4 a 10-7), NO SUENA!
+            playLoud = (type == "DISPATCH" || isOrden || isGrade3) && !isCentral
             if ((is08 || isCDS)) {
                 playLoud = false
             }
@@ -539,44 +547,55 @@ object NotificationHelper {
         if (playLoud) {
             try {
                 audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+            } catch (_: Exception) {}
+            try {
                 val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
                 audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
+            } catch (_: Exception) {}
+            try {
+                val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                 audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
             } catch (_: Exception) {}
+            try {
+                val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+                audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
+            } catch (_: Exception) {}
+            try {
+                val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
+                audioManager.setStreamVolume(AudioManager.STREAM_RING, maxRing, 0)
+            } catch (_: Exception) {}
+
+            val cleanKeyUpper = claveOpt.trim().uppercase()
+            val fullTextUpper = "$title $message".uppercase()
 
             val soundToPlay = if (is1210 || is66) {
                 "alerta"
-            } else if (is1030) {
+            } else if (isEscalationAlarm ||
+                cleanKeyUpper.contains("10-30") || cleanKeyUpper.contains("10_30") ||
+                cleanKeyUpper.contains("FORESTAL") ||
+                cleanKeyUpper == "9-0" || cleanKeyUpper == "9.0" || cleanKeyUpper == "9_0" ||
+                cleanKeyUpper.contains("COMANDANCIA") || cleanKeyUpper.contains("LLAMADO") ||
+                fullTextUpper.contains("10-30") || fullTextUpper.contains("FORESTAL") ||
+                fullTextUpper.contains("COMANDANCIA") || fullTextUpper.contains("9-0")
+            ) {
                 "c10_30"
             } else if (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
                 var detectedKey = claveOpt.trim().replace("-", "_").replace(".", "_").replace(" ", "_").lowercase()
-                val fullText = "$title $message".lowercase()
-
-                if (detectedKey.contains("llamado") || detectedKey.contains("comandancia") || fullText.contains("llamado comandancia")) {
-                    "llamado_comandancia"
-                } else {
-                    if (detectedKey == "9_0" || detectedKey == "9.0" || fullText.contains("9-0") || fullText.contains("9_0")) {
-                        detectedKey = "9_0"
-                    }
-                    if (detectedKey.isEmpty()) {
-                        val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15", "10_30", "9_0")
-                        for (k in keys) {
-                            if (fullText.contains(k.replace("_", "-")) || fullText.contains(k)) {
-                                detectedKey = k
-                                break
-                            }
+                if (detectedKey.isEmpty()) {
+                    val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15")
+                    for (k in keys) {
+                        if (fullTextUpper.contains(k.replace("_", "-")) || fullTextUpper.contains(k.uppercase())) {
+                            detectedKey = k
+                            break
                         }
                     }
-                    if (detectedKey.isNotEmpty()) {
-                        val possibleSound = if (detectedKey == "9_0") "c9_0" else if (detectedKey.startsWith("c9") || detectedKey.startsWith("c10")) detectedKey else "c$detectedKey"
-                        val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
-                        if (resId != 0) possibleSound else if (detectedKey == "9_0") "c10_9" else if (detectedKey.contains("10_30")) "c10_30" else "despacho"
-                    } else {
-                        "despacho"
-                    }
+                }
+                if (detectedKey.isNotEmpty()) {
+                    val possibleSound = if (detectedKey.startsWith("c10") || detectedKey.startsWith("c9")) detectedKey else "c$detectedKey"
+                    val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
+                    if (resId != 0) possibleSound else "despacho"
+                } else {
+                    "despacho"
                 }
             } else if (isOrden || isGrade3) {
                 "alerta"
@@ -584,12 +603,12 @@ object NotificationHelper {
                 "alerta"
             }
 
-            val isDispatchOr1030 = type == "DISPATCH" || (type == "DISPATCH_UPDATE" && is1030)
-            if (isDispatchOr1030 && payloadId.isNotEmpty()) {
-                val trackerKey = if (is1030) payloadId + "_10_30" else payloadId
+            val isDispatchOrEscalation = type == "DISPATCH" || (type == "DISPATCH_UPDATE" && isEscalationAlarm)
+            if (isDispatchOrEscalation && payloadId.isNotEmpty()) {
+                val trackerKey = if (isEscalationAlarm) "${payloadId}_escalation" else payloadId
                 if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
                     PlayedSoundsTracker.markPlayed(trackerKey)
-                    if (is1030) {
+                    if (isEscalationAlarm) {
                         PlayedSoundsTracker.markPlayed(payloadId)
                     }
                     if (playLoud) {
@@ -598,7 +617,7 @@ object NotificationHelper {
                         scheduleRepeatAlert(context, payloadId, claveOpt.ifEmpty { soundToPlay }, true)
                     }
                 }
-            } else if (playLoud) {
+            } else if (playLoud && type != "DISPATCH_UPDATE") {
                 SoundPlayer.playSound(context, soundToPlay)
             }
 
@@ -612,9 +631,9 @@ object NotificationHelper {
                 } catch (_: Exception) {}
             }
         } else {
-            // Trigger custom strong/long vibration if dispatch/update or forceVibrateOnly
-            val isDispatchOrUpdate = (type == "DISPATCH" || type == "DISPATCH_UPDATE")
-            if ((isDispatchOrUpdate || forceVibrateOnly) && !isCentral && !forceSilent) {
+            // Trigger custom strong/long vibration if initial dispatch, escalation or forceVibrateOnly
+            val isDispatchInitial = (type == "DISPATCH")
+            if ((isDispatchInitial || isEscalationAlarm || forceVibrateOnly) && !isCentral && !forceSilent) {
                 SoundPlayer.triggerVibration(context, true)
             }
         }
@@ -650,6 +669,13 @@ object NotificationHelper {
                 if (key.isNotEmpty()) {
                     val formattedKey = key.lowercase().replace("-", "_")
                     resId = context.resources.getIdentifier("logo_$formattedKey", "drawable", context.packageName)
+                    if (resId == 0) {
+                        val stripped = formattedKey.replace("sb_", "")
+                        resId = context.resources.getIdentifier("logo_$stripped", "drawable", context.packageName)
+                        if (resId == 0) {
+                            resId = context.resources.getIdentifier("logo_sb_$stripped", "drawable", context.packageName)
+                        }
+                    }
                 }
                 val finalRes = if (resId != 0) resId else R.drawable.logo
                 BitmapFactory.decodeResource(context.resources, finalRes)
@@ -659,7 +685,7 @@ object NotificationHelper {
         }
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(R.drawable.ic_notification_firefighter)
+            .setSmallIcon(R.drawable.logo)
             .apply {
                 if (largeIcon != null) {
                     setLargeIcon(largeIcon)
@@ -915,7 +941,7 @@ class DispatchForegroundService : Service() {
                                                 payloadId = idServicio,
                                                 userId = userId,
                                                 type = "DISPATCH_UPDATE",
-                                                isFromFCM = true,
+                                                isFromFCM = false,
                                                 claveOpt = "10-30",
                                                 gradoAlerta = "3",
                                                 forceSilent = isTooOld || isAttendingThisDispatch
@@ -1220,9 +1246,9 @@ class DispatchForegroundService : Service() {
 
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification_firefighter)
-            .setContentTitle("SisBom activo")
-            .setContentText("Escuchando despachos y alertas")
+            .setSmallIcon(R.drawable.logo)
+            .setContentTitle("SENTINEL ONE")
+            .setContentText("Servicio de despacho y alertas activo")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -1488,14 +1514,16 @@ fun SisBomApp(viewModel: SisBomViewModel) {
     val isCentral = viewModel.isCentralActive
 
     val showFullscreenAlert = androidx.compose.runtime.remember(user, dispatches, isCentral, viewModel.fullscreenDispatchId) {
-        if (user != null && user.estado.trim().uppercase() == "0-9" && !isCentral) {
-            val inService = user.enServicio.trim().isNotEmpty() && user.enServicio.trim() != "0" && !user.enServicio.trim().startsWith("-")
-            if (!inService && user.estado.trim().uppercase() != "NO ASISTIR") {
-                val fId = viewModel.fullscreenDispatchId
-                if (fId != null) {
-                    dispatches.firstOrNull { d ->
-                        d.idServicio == fId && d.operadorFinal.isEmpty() && !TimeValidation.isTooOld(d.fechaDespacho, d.horaDespacho)
-                    }
+        if (user != null && !isCentral) {
+            val is09 = user.estado.trim().uppercase() == "0-9"
+            val is08 = user.estado.trim().uppercase() == "0-8" || user.estado.trim().uppercase() == "10-8"
+            val fId = viewModel.fullscreenDispatchId
+            if (fId != null && (is09 || is08)) {
+                val d = dispatches.firstOrNull { it.idServicio == fId && it.operadorFinal.isEmpty() }
+                val isAttending = user.enServicio.trim() == fId
+                val isEscalationAlarm = d?.clave?.contains("10-30") == true || d?.clave?.uppercase()?.contains("FORESTAL") == true
+                if (!isAttending && (isEscalationAlarm || (is09 && user.estado.trim().uppercase() != "NO ASISTIR"))) {
+                    d
                 } else null
             } else null
         } else null
@@ -1503,6 +1531,23 @@ fun SisBomApp(viewModel: SisBomViewModel) {
 
     if (showFullscreenAlert != null) {
         val dispatch = showFullscreenAlert
+        val context = androidx.compose.ui.platform.LocalContext.current
+
+        val is1030 = dispatch.clave.contains("10-30")
+        val isForestal = dispatch.clave.uppercase().contains("FORESTAL")
+        val escalationKey = if (is1030) "10-30" else if (isForestal) "FORESTAL" else ""
+
+        androidx.compose.runtime.LaunchedEffect(dispatch.idServicio, escalationKey) {
+            val soundToPlay = if (is1030 || isForestal || dispatch.clave.trim() == "9-0" || dispatch.clave.trim() == "9.0" || dispatch.clave.uppercase().contains("COMANDANCIA")) {
+                "c10_30"
+            } else {
+                var c = dispatch.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
+                if (c.startsWith("c10") || c.startsWith("c9")) c else "c$c"
+            }
+            SoundPlayer.playSound(context, soundToPlay)
+            SoundPlayer.triggerVibration(context, true)
+        }
+
         androidx.compose.ui.window.Dialog(
             onDismissRequest = { /* Bloqueante */ },
             properties = androidx.compose.ui.window.DialogProperties(
@@ -1534,16 +1579,14 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(16.dp),
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
                     // Header / Pulsing icon / Logo
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier
-                            .statusBarsPadding()
-                            .padding(top = 36.dp)
+                        modifier = Modifier.padding(top = 16.dp)
                     ) {
                         coil.compose.AsyncImage(
                             model = viewModel.getClientLogoModel(),
@@ -1551,12 +1594,12 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                             placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
                             error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
                             modifier = Modifier
-                                .size(75.dp)
+                                .size(72.dp)
                                 .clip(CircleShape)
                                 .border(2.dp, Color.White, CircleShape),
                             contentScale = androidx.compose.ui.layout.ContentScale.Fit
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
                             text = "🚨 DESPACHO DE EMERGENCIA 🚨",
                             color = Color.White,
@@ -1564,107 +1607,101 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                             fontWeight = FontWeight.Black,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
-                        Spacer(modifier = Modifier.height(2.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "¡CONFIRMA TU ASISTENCIA AHORA!",
                             color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
 
-                    // Dispatch details card
-                    Box(
+                    // Clave, Hora y Fecha (Directo sobre el rojo, sin tarjeta)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(16.dp))
-                            .padding(16.dp)
+                            .padding(vertical = 12.dp)
                     ) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier.verticalScroll(androidx.compose.foundation.rememberScrollState())
+                        Text(
+                            text = "CLAVE",
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 2.sp
+                        )
+                        val claveText = dispatch.clave.ifEmpty { "10-0" }
+                        Text(
+                            text = claveText,
+                            color = Color.White,
+                            fontSize = if (claveText.length > 5) 68.sp else 84.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = if (claveText.length > 5) 72.sp else 88.sp
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Clave
-                            Column {
-                                Text(
-                                    text = "CLAVE",
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = dispatch.clave,
-                                    color = Color.White,
-                                    fontSize = 28.sp,
-                                    fontWeight = FontWeight.Black
-                                )
+                            Text(
+                                text = "HORA: ${dispatch.horaDespacho.ifEmpty { "--:--" }}",
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Text(
+                                text = "•",
+                                color = Color.White.copy(alpha = 0.6f),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(14.dp))
+                            val fechaDespacho = dispatch.fechaDespacho.ifEmpty {
+                                java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date())
                             }
+                            Text(
+                                text = "FECHA: $fechaDespacho",
+                                color = Color.White,
+                                fontSize = 17.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
 
-                            // Preinforme / Referencias
-                            if (dispatch.preinforme.isNotEmpty()) {
-                                Column {
-                                    Text(
-                                        text = "REFERENCIAS / PREINFORME",
-                                        color = Color.White.copy(alpha = 0.6f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = dispatch.preinforme,
-                                        color = Color.White,
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                }
-                            }
+                        if (dispatch.preinforme.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = dispatch.preinforme,
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                maxLines = 2,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            )
+                        }
 
-                            // Carros / Unidades
-                            if (dispatch.carros.isNotEmpty()) {
-                                Column {
-                                    Text(
-                                        text = "UNIDADES DESPACHADAS",
-                                        color = Color.White.copy(alpha = 0.6f),
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Text(
-                                        text = dispatch.carros,
-                                        color = Color(0xFFFBBF24), // Amber/Yellow
-                                        fontSize = 16.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-
-                            // Hora
-                            Column {
-                                Text(
-                                    text = "HORA",
-                                    color = Color.White.copy(alpha = 0.6f),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = dispatch.horaDespacho,
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                        if (dispatch.carros.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "UNIDADES: ${dispatch.carros}",
+                                color = Color(0xFFFBBF24),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Black,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
                         }
                     }
 
-                    // Action buttons
+                    // Action buttons (Elevados más arriba)
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .navigationBarsPadding()
-                            .padding(bottom = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                            .padding(bottom = 44.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Button(
                             onClick = { 
@@ -1672,15 +1709,15 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                                 viewModel.fullscreenDispatchId = null
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)), // Green
-                            shape = RoundedCornerShape(16.dp),
+                            shape = RoundedCornerShape(18.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(54.dp)
+                                .height(56.dp)
                         ) {
                             Text(
                                 text = "ASISTIR",
                                 color = Color.White,
-                                fontSize = 16.sp,
+                                fontSize = 18.sp,
                                 fontWeight = FontWeight.Black
                             )
                         }
@@ -1690,17 +1727,17 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                                 viewModel.declineService(dispatch.idServicio)
                                 viewModel.fullscreenDispatchId = null
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.4f)),
-                            shape = RoundedCornerShape(16.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.5f)),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.45f)),
+                            shape = RoundedCornerShape(18.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White.copy(alpha = 0.6f)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(46.dp)
+                                .height(48.dp)
                         ) {
                             Text(
                                 text = "NO ASISTIR",
                                 color = Color.White,
-                                fontSize = 14.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold
                             )
                         }
@@ -1809,7 +1846,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
         NotificationHelper.createChannels(context)
 
         val builder = NotificationCompat.Builder(context, "sisbom_actions_v1")
-            .setSmallIcon(R.drawable.ic_notification_firefighter)
+            .setSmallIcon(R.drawable.logo)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setDefaults(0)
@@ -2057,7 +2094,7 @@ class DailyReminderReceiver : BroadcastReceiver() {
         }
         
         val builder = NotificationCompat.Builder(context, "sisbom_alertas_normal_v10")
-            .setSmallIcon(R.drawable.ic_notification_firefighter)
+            .setSmallIcon(R.drawable.logo)
             .setContentTitle("Actualizar Estado 🚨")
             .setContentText("Recuerda actualizar tu estado (0-8 o 0-9) en la app.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)

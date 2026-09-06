@@ -73,9 +73,9 @@ fun SetupScreen(viewModel: SisBomViewModel) {
             )
 
             Text(
-                text = "SISBOM SAAS",
+                text = "SENTINEL ONE SAAS",
                 color = if (isDark) Color.White else TextDark,
-                fontSize = 26.sp,
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Black,
                 letterSpacing = 0.5.sp
             )
@@ -194,7 +194,7 @@ fun SetupScreen(viewModel: SisBomViewModel) {
 
             Spacer(modifier = Modifier.height(48.dp))
             Text(
-                text = "SISBOM V${viewModel.appVersionName} • SaaS MULTITENANT",
+                text = "SENTINEL ONE V${viewModel.appVersionName} • SaaS MULTITENANT",
                 color = if (isDark) Color.DarkGray else Color.LightGray,
                 fontSize = 9.sp,
                 fontWeight = FontWeight.Black,

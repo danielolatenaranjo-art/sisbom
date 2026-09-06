@@ -856,7 +856,7 @@ input::-webkit-credentials-auto-fill-button {
                 <div class="flex items-center gap-3">
                     <img src="Logo.png" class="h-9 w-9 object-contain shrink-0 drop-shadow-sm">
                     <div class="flex flex-col">
-                        <span class="font-bold text-white tracking-tight text-sm sm:text-base leading-none">SISBOM</span>
+                        <span class="font-bold text-white tracking-tight text-sm sm:text-base leading-none">SENTINEL CAD</span>
                         <div class="flex items-center gap-2">
                             <span class="text-red-200 font-black leading-tight uppercase tracking-widest mt-0.5" style="font-size: 10px;">Central de Alarmas</span>
                             <div id="offline-indicator" class="hidden items-center gap-1 bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-[8px] font-black tracking-widest uppercase mt-0.5 shadow-inner border border-orange-200" title="Trabajando sin conexión">
@@ -925,14 +925,17 @@ input::-webkit-credentials-auto-fill-button {
                     <button type="button" onclick="window.navigate('sirena', 'sirena.html', this)" class="nav-btn"><div class="flex items-center"><i class="fas fa-bullhorn shrink-0"></i><span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Sirena</span></div></button>
                 </div>
                 
-                <div class="px-3 py-2 border-t border-slate-800/80 bg-slate-950/50 flex flex-col gap-1.5 shrink-0">
-                    <div id="sidebar-reconnect-indicator" class="hidden flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold transition-all cursor-pointer" onclick="window.softReconnect('manual')" title="Haga clic para reconectar ahora">
+                <div class="px-3 py-2.5 border-t border-slate-800/80 bg-slate-950/60 flex flex-col items-center gap-1.5 shrink-0">
+                    <div id="sidebar-reconnect-indicator" class="hidden w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold transition-all cursor-pointer" onclick="window.softReconnect('manual')" title="Haga clic para reconectar ahora">
                         <div class="w-3.5 h-3.5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin shrink-0"></div>
                         <span id="sidebar-reconnect-text" class="truncate transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 uppercase tracking-wider" style="font-size: 11px;">Reconectando...</span>
                     </div>
-                    <div class="px-2 py-1 text-slate-500 font-bold tracking-widest transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 flex justify-between items-center" style="font-size: 10px;">
-                        <span>SisBom</span>
-                        <span>V.2.1.0</span>
+                    <div class="flex items-center justify-center py-1">
+                        <img src="sentinel_logo.png" alt="SENTINEL" class="h-10 w-10 object-contain drop-shadow-md transition-transform duration-200 group-hover:scale-105">
+                    </div>
+                    <div class="w-full px-1.5 py-0.5 text-slate-400 font-bold tracking-widest transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 flex justify-between items-center text-[10px]">
+                        <span>SENTINEL CAD</span>
+                        <span class="text-red-400">V.2.1.1</span>
                     </div>
                 </div>
             </aside>
@@ -988,6 +991,9 @@ input::-webkit-credentials-auto-fill-button {
                                             <div id="btn-10-30-container" class="mt-1 hidden w-full px-2">
                                                 <button onclick="window.declare1030()" class="button-10 bg-red-600 text-white text-[10px] w-full py-1 shadow-md hover:bg-red-700 animate-pulse rounded-full border border-red-500 font-bold"><i class="fas fa-fire mr-1"></i> DECLARAR 10-30</button>
                                             </div>
+                                            <div id="btn-forestal-container" class="mt-1 hidden w-full px-2">
+                                                <button onclick="window.declareForestal()" class="button-10 bg-emerald-600 text-white text-[10px] w-full py-1 shadow-md hover:bg-emerald-700 animate-pulse rounded-full border border-emerald-500 font-bold"><i class="fas fa-tree mr-1"></i> DECLARAR ALARMA FORESTAL</button>
+                                            </div>
                                         </div>
 
                                         <!-- Botones 6-7 y Finalizar -->
@@ -1011,6 +1017,36 @@ input::-webkit-credentials-auto-fill-button {
                                             </div>
                                         </div>
 
+                                        <!-- SUBMENÚ INLINE ABSOLUTO PARA CONFIRMAR DECLARAR 10-30 -->
+                                        <div id="inline-declare1030-panel" class="hidden flex-col gap-2 absolute inset-0 bg-slate-900 opacity-100 border border-red-500/50 rounded-xl shadow-2xl z-50 p-3 justify-between">
+                                            <div class="flex justify-between items-center text-red-400">
+                                                <span class="text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5"><i class="fas fa-fire text-xs"></i> Declarar 10-30:</span>
+                                                <button type="button" onclick="window.toggleInlineDeclare1030Panel(false)" class="text-slate-400 hover:text-white text-xs px-1"><i class="fas fa-times"></i></button>
+                                            </div>
+                                            <div class="flex-1 flex flex-col justify-center items-center text-center px-1">
+                                                <p class="text-xs text-slate-200 font-bold leading-tight">¿Confirma escalar y declarar <span class="text-red-400 font-black">10-30 (ALARMA DE INCENDIO)</span>?</p>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button type="button" onclick="window.toggleInlineDeclare1030Panel(false)" class="button-10 btn-white flex-1 py-1.5 text-xs font-bold">CANCELAR</button>
+                                                <button type="button" onclick="window.confirmDeclare1030Inline()" class="button-10 bg-red-600 hover:bg-red-700 text-white flex-1 py-1.5 text-xs font-bold shadow-md">CONFIRMAR</button>
+                                            </div>
+                                        </div>
+
+                                        <!-- SUBMENÚ INLINE ABSOLUTO PARA CONFIRMAR DECLARAR ALARMA FORESTAL -->
+                                        <div id="inline-forestal-panel" class="hidden flex-col gap-2 absolute inset-0 bg-slate-900 opacity-100 border border-emerald-500/50 rounded-xl shadow-2xl z-50 p-3 justify-between">
+                                            <div class="flex justify-between items-center text-emerald-400">
+                                                <span class="text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5"><i class="fas fa-tree text-xs"></i> Alarma Forestal:</span>
+                                                <button type="button" onclick="window.toggleInlineForestalPanel(false)" class="text-slate-400 hover:text-white text-xs px-1"><i class="fas fa-times"></i></button>
+                                            </div>
+                                            <div class="flex-1 flex flex-col justify-center items-center text-center px-1">
+                                                <p class="text-xs text-slate-200 font-bold leading-tight">¿Confirma escalar y declarar <span class="text-emerald-400 font-black">ALARMA FORESTAL</span>?</p>
+                                            </div>
+                                            <div class="flex gap-2">
+                                                <button type="button" onclick="window.toggleInlineForestalPanel(false)" class="button-10 btn-white flex-1 py-1.5 text-xs font-bold">CANCELAR</button>
+                                                <button type="button" onclick="window.confirmDeclareForestalInline()" class="button-10 bg-emerald-600 hover:bg-emerald-700 text-white flex-1 py-1.5 text-xs font-bold shadow-md">CONFIRMAR</button>
+                                            </div>
+                                        </div>
+
                                         <!-- SUBMENÚ INLINE ABSOLUTO PARA CAMBIAR CLAVE -->
                                         <div id="inline-change-key-panel" class="hidden flex-col gap-2 absolute inset-0 bg-slate-900 opacity-100 border border-blue-500/50 rounded-xl shadow-2xl z-50 p-3 justify-between">
                                             <div class="flex justify-between items-center">
@@ -1031,6 +1067,7 @@ input::-webkit-credentials-auto-fill-button {
                                                 <option value="10-10">10-10 REBROTE</option>
                                                 <option value="10-12">10-12 APOYO EXTERNO</option>
                                                 <option value="10-30">10-30 DECLARADO</option>
+                                                <option value="ALARMA FORESTAL">ALARMA FORESTAL</option>
                                                 <option value="9-0">9-0 ACUARTELAMIENTO</option>
                                                 <option value="LLAMADO COMANDANCIA">LLAMADO COMANDANCIA</option>
                                             </select>
@@ -4374,21 +4411,96 @@ input::-webkit-credentials-auto-fill-button {
             el.innerText = cleanKey;
         };
 
+        window.toggleInlineDeclare1030Panel = function(show) {
+            const panel = document.getElementById('inline-declare1030-panel');
+            if (!panel) return;
+            const keyPanel = document.getElementById('inline-change-key-panel');
+            const locPanel = document.getElementById('inline-change-loc-panel');
+            const finishPanel = document.getElementById('inline-finish-panel');
+            const c67Panel = document.getElementById('inline-control67-panel');
+            const forestalPanel = document.getElementById('inline-forestal-panel');
+
+            const isCurrentlyHidden = panel.classList.contains('hidden');
+            const shouldShow = show !== undefined ? show : isCurrentlyHidden;
+
+            if (shouldShow) {
+                if (keyPanel) { keyPanel.classList.add('hidden'); keyPanel.classList.remove('flex'); }
+                if (locPanel) { locPanel.classList.add('hidden'); locPanel.classList.remove('flex'); }
+                if (finishPanel) { finishPanel.classList.add('hidden'); finishPanel.classList.remove('flex'); }
+                if (c67Panel) { c67Panel.classList.add('hidden'); c67Panel.classList.remove('flex'); }
+                if (forestalPanel) { forestalPanel.classList.add('hidden'); forestalPanel.classList.remove('flex'); }
+                panel.classList.remove('hidden');
+                panel.classList.add('flex');
+            } else {
+                panel.classList.add('hidden');
+                panel.classList.remove('flex');
+            }
+        };
+
+        window.toggleInlineForestalPanel = function(show) {
+            const panel = document.getElementById('inline-forestal-panel');
+            if (!panel) return;
+            const keyPanel = document.getElementById('inline-change-key-panel');
+            const locPanel = document.getElementById('inline-change-loc-panel');
+            const finishPanel = document.getElementById('inline-finish-panel');
+            const c67Panel = document.getElementById('inline-control67-panel');
+            const d1030Panel = document.getElementById('inline-declare1030-panel');
+
+            const isCurrentlyHidden = panel.classList.contains('hidden');
+            const shouldShow = show !== undefined ? show : isCurrentlyHidden;
+
+            if (shouldShow) {
+                if (keyPanel) { keyPanel.classList.add('hidden'); keyPanel.classList.remove('flex'); }
+                if (locPanel) { locPanel.classList.add('hidden'); locPanel.classList.remove('flex'); }
+                if (finishPanel) { finishPanel.classList.add('hidden'); finishPanel.classList.remove('flex'); }
+                if (c67Panel) { c67Panel.classList.add('hidden'); c67Panel.classList.remove('flex'); }
+                if (d1030Panel) { d1030Panel.classList.add('hidden'); d1030Panel.classList.remove('flex'); }
+                panel.classList.remove('hidden');
+                panel.classList.add('flex');
+            } else {
+                panel.classList.add('hidden');
+                panel.classList.remove('flex');
+            }
+        };
+
         window.declare1030 = function() {
+            window.toggleInlineDeclare1030Panel(true);
+        };
+
+        window.declareForestal = function() {
+            window.toggleInlineForestalPanel(true);
+        };
+
+        window.confirmDeclare1030Inline = function() {
             const svc = activeServices.at(currentModalIndex);
             if (!svc) return;
-            window.showSysModal("Declarar 10-30", "¿Confirma escalar y declarar 10-30 para esta emergencia?", "fa-fire text-red-500", () => {
-                window.closeSysModal();
-                svc.key = '10-30';
-                svc.lastLocalUpdate = Date.now();
-                localStorage.setItem('activeServices', JSON.stringify(activeServices));
-                window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: '10-30' }));
-                window.updateSvcKeyDisplay('10-30');
-                document.getElementById('btn-10-30-container').classList.add('hidden');
-                window.updateFloatingDock();
-                window.notifyLocalIframes();
-                window.showToast("Alarma escalada a 10-30 Declarado");
-            });
+            window.toggleInlineDeclare1030Panel(false);
+            svc.key = '10-30';
+            svc.lastLocalUpdate = Date.now();
+            localStorage.setItem('activeServices', JSON.stringify(activeServices));
+            window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: '10-30' }));
+            window.updateSvcKeyDisplay('10-30');
+            const btn1030 = document.getElementById('btn-10-30-container');
+            if (btn1030) btn1030.classList.add('hidden');
+            window.updateFloatingDock();
+            window.notifyLocalIframes();
+            window.showToast("Alarma escalada a 10-30 Declarado");
+        };
+
+        window.confirmDeclareForestalInline = function() {
+            const svc = activeServices.at(currentModalIndex);
+            if (!svc) return;
+            window.toggleInlineForestalPanel(false);
+            svc.key = 'ALARMA FORESTAL';
+            svc.lastLocalUpdate = Date.now();
+            localStorage.setItem('activeServices', JSON.stringify(activeServices));
+            window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: 'ALARMA FORESTAL' }));
+            window.updateSvcKeyDisplay('ALARMA FORESTAL');
+            const btnForestal = document.getElementById('btn-forestal-container');
+            if (btnForestal) btnForestal.classList.add('hidden');
+            window.updateFloatingDock();
+            window.notifyLocalIframes();
+            window.showToast("Alarma escalada a ALARMA FORESTAL");
         };
 
         window.toggleInlineControl67Panel = function(show) {
@@ -4466,10 +4578,15 @@ input::-webkit-credentials-auto-fill-button {
             window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: newKey }));
             window.updateSvcKeyDisplay(newKey);
             
-            if (newKey === '10-0') {
-                document.getElementById('btn-10-30-container').classList.remove('hidden');
-            } else {
-                document.getElementById('btn-10-30-container').classList.add('hidden');
+            const btn1030 = document.getElementById('btn-10-30-container');
+            const btnForestal = document.getElementById('btn-forestal-container');
+            if (btn1030) {
+                if (newKey === '10-0') btn1030.classList.remove('hidden');
+                else btn1030.classList.add('hidden');
+            }
+            if (btnForestal) {
+                if (newKey === '10-2') btnForestal.classList.remove('hidden');
+                else btnForestal.classList.add('hidden');
             }
 
             window.toggleInlineChangeKeyPanel(false);
@@ -4501,10 +4618,15 @@ input::-webkit-credentials-auto-fill-button {
             window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ clave: newKey }));
             window.updateSvcKeyDisplay(newKey);
             
-            if (newKey === '10-0') {
-                document.getElementById('btn-10-30-container').classList.remove('hidden');
-            } else {
-                document.getElementById('btn-10-30-container').classList.add('hidden');
+            const btn1030 = document.getElementById('btn-10-30-container');
+            const btnForestal = document.getElementById('btn-forestal-container');
+            if (btn1030) {
+                if (newKey === '10-0') btn1030.classList.remove('hidden');
+                else btn1030.classList.add('hidden');
+            }
+            if (btnForestal) {
+                if (newKey === '10-2') btnForestal.classList.remove('hidden');
+                else btnForestal.classList.add('hidden');
             }
 
             window.closeChangeKeyModal();
@@ -4601,10 +4723,17 @@ input::-webkit-credentials-auto-fill-button {
             const displayKeyText = svc.key === '10-12' && svc.claveApoyo ? `${svc.key} (${svc.claveApoyo})` : svc.key;
             window.updateSvcKeyDisplay(displayKeyText);
             
-            if (svc.key === '10-0') {
-                document.getElementById('btn-10-30-container').classList.remove('hidden');
-            } else {
-                document.getElementById('btn-10-30-container').classList.add('hidden');
+            const is100 = svc.key === '10-0';
+            const is102 = svc.key === '10-2';
+            const btn1030 = document.getElementById('btn-10-30-container');
+            const btnForestal = document.getElementById('btn-forestal-container');
+            if (btn1030) {
+                if (is100) btn1030.classList.remove('hidden');
+                else btn1030.classList.add('hidden');
+            }
+            if (btnForestal) {
+                if (is102) btnForestal.classList.remove('hidden');
+                else btnForestal.classList.add('hidden');
             }
 
             document.getElementById('svc-loc').innerText = svc.location;
@@ -5308,26 +5437,50 @@ input::-webkit-credentials-auto-fill-button {
             
             // También agregar unidades finalizadas desde el despacho si no estuvieran aún en globalBitacora
             const rawSvc = (window.rawDespachos || []).find(d => String(d.idServicio || d.id || d._id) === String(serviceId));
-            if (rawSvc && rawSvc.unidades) {
-                Object.entries(rawSvc.unidades).forEach(([uKey, uVal]) => {
-                    if (uVal && (uVal.status === '6-8' || uVal.estado === '6-8' || uVal.hora68 || uVal.disponible68At)) {
-                        const exists = historyLogs.some(l => String(l.carro || '').replace(/-/g, '').toUpperCase() === uKey.replace(/-/g, '').toUpperCase());
-                        if (!exists) {
-                            historyLogs.push({
-                                idSalida: uVal.bitacoraId || uVal.idSalida || '---',
-                                idServicio: String(serviceId),
-                                carro: uKey,
-                                conductor: uVal.driverRad || uVal.conductor || '',
-                                obac: uVal.obacRad || uVal.obac || '',
-                                cuantosBomberos: uVal.count || uVal.cuantosBomberos || '0',
-                                hora60: uVal.hora60 || uVal.salida60At || '',
-                                hora63: uVal.hora63 || uVal.llegada63At || '',
-                                hora69: uVal.hora69 || uVal.retorno69At || '',
-                                hora610: uVal.hora610 || uVal.llegada610At || '',
-                                hora68: uVal.hora68 || uVal.disponible68At || '',
-                                km: uVal.km || '',
-                                estadoMovil: 'en cuartel'
-                            });
+            if (rawSvc) {
+                const rawUnidades = (rawSvc.unidades && typeof rawSvc.unidades === 'object') ? { ...rawSvc.unidades } : {};
+                Object.keys(rawSvc).forEach(k => {
+                    if (k.startsWith('unidades.')) {
+                        const parts = k.split('.');
+                        if (parts.length >= 3) {
+                            const carKey = parts[1];
+                            const propKey = parts.slice(2).join('.');
+                            if (!rawUnidades[carKey]) rawUnidades[carKey] = {};
+                            rawUnidades[carKey][propKey] = rawSvc[k];
+                        }
+                    }
+                });
+
+                Object.entries(rawUnidades).forEach(([uKey, uVal]) => {
+                    if (uVal) {
+                        const isFinalized = uVal.status === '6-8' || uVal.status === '6-10' || uVal.estado === '6-8' || uVal.estado === 'finalizado' || uVal.hora68 || uVal.hora610 || uVal.disponible68At;
+                        if (isFinalized) {
+                            const idx = historyLogs.findIndex(l => String(l.carro || '').replace(/-/g, '').toUpperCase() === uKey.replace(/-/g, '').toUpperCase());
+                            const driver = uVal.driverRad || uVal.conductor || '';
+                            const obac = uVal.obacRad || uVal.obac || '';
+                            const count = uVal.count !== undefined ? uVal.count : (uVal.cuantosBomberos !== undefined ? uVal.cuantosBomberos : (uVal.tripulantes || '0'));
+                            
+                            if (idx >= 0) {
+                                if (!historyLogs[idx].conductor && driver) historyLogs[idx].conductor = driver;
+                                if (!historyLogs[idx].obac && obac) historyLogs[idx].obac = obac;
+                                if ((!historyLogs[idx].cuantosBomberos || historyLogs[idx].cuantosBomberos === '0') && count !== '0') historyLogs[idx].cuantosBomberos = count;
+                            } else {
+                                historyLogs.push({
+                                    idSalida: uVal.bitacoraId || uVal.idSalida || '---',
+                                    idServicio: String(serviceId),
+                                    carro: uKey,
+                                    conductor: driver,
+                                    obac: obac,
+                                    cuantosBomberos: count,
+                                    hora60: uVal.hora60 || uVal.salida60At || '',
+                                    hora63: uVal.hora63 || uVal.llegada63At || '',
+                                    hora69: uVal.hora69 || uVal.retorno69At || '',
+                                    hora610: uVal.hora610 || uVal.llegada610At || '',
+                                    hora68: uVal.hora68 || uVal.disponible68At || '',
+                                    km: uVal.km || '',
+                                    estadoMovil: 'en cuartel'
+                                });
+                            }
                         }
                     }
                 });
@@ -6220,6 +6373,7 @@ input::-webkit-credentials-auto-fill-button {
                 vehiculoMatch.enServicio = String(svc.id);
                 localStorage.setItem('db_vehiculos', JSON.stringify(vehiclesData));
             }
+            window.queueFirebaseWrite('update', 'vehiculos', String(name).trim(), new Object({ enServicio: String(svc.id) }));
             
             window.renderActiveUnitsGrid(svc); window.renderAddUnitGrid(); window.updateServiceTotals(svc);
             
@@ -6621,6 +6775,7 @@ input::-webkit-credentials-auto-fill-button {
                 let unsubMainAlertas = null;
                 let unsubMainSirena = null;
                 let unsubMainPruebas = null;
+                let unsubMainLlamadas = null;
                 let restoreIntervalId = null;
                 let isSoftReconnecting = false;
                 let lastSoftReconnectTime = 0;
@@ -6650,6 +6805,7 @@ input::-webkit-credentials-auto-fill-button {
                         if (unsubMainAlertas) { try { unsubMainAlertas(); } catch(e){} unsubMainAlertas = null; }
                         if (unsubMainSirena) { try { unsubMainSirena(); } catch(e){} unsubMainSirena = null; }
                         if (unsubMainPruebas) { try { unsubMainPruebas(); } catch(e){} unsubMainPruebas = null; }
+                        if (unsubMainLlamadas) { try { unsubMainLlamadas(); } catch(e){} unsubMainLlamadas = null; }
 
                         let authSuccess = true;
                         if (window.authenticateFirebase) {
@@ -6712,6 +6868,32 @@ input::-webkit-credentials-auto-fill-button {
                     }
                 }, 5000);
 
+                window.maxDespachoId = parseInt(localStorage.getItem('sisbom_max_despacho_id') || '0', 10);
+
+                window.getNextDispatchId = function() {
+                    let maxFound = window.maxDespachoId || 0;
+
+                    const stored = parseInt(localStorage.getItem('sisbom_max_despacho_id') || '0', 10);
+                    if (!isNaN(stored) && stored > maxFound) maxFound = stored;
+
+                    try {
+                        const localData = localStorage.getItem('db_despachos') || localStorage.getItem('sisbom_despachos_cache_v3');
+                        if (localData) {
+                            const parsed = JSON.parse(localData);
+                            const list = Array.isArray(parsed) ? parsed : (parsed.despachos || []);
+                            list.forEach(item => {
+                                const val = parseInt(item.idServicio || item.id || item.idRegistro || 0, 10);
+                                if (!isNaN(val) && val > maxFound) maxFound = val;
+                            });
+                        }
+                    } catch(e) {}
+
+                    const nextId = maxFound + 1;
+                    window.maxDespachoId = nextId;
+                    localStorage.setItem('sisbom_max_despacho_id', String(nextId));
+                    return String(nextId);
+                };
+
                 window.setupMainListeners = function() {
                     window.isFirebaseActiveCentral = true;
                     if (restoreIntervalId) { try { clearInterval(restoreIntervalId); } catch(e){} }
@@ -6732,6 +6914,7 @@ input::-webkit-credentials-auto-fill-button {
                     if (unsubMainAlertas) { try { unsubMainAlertas(); } catch(e){} }
                     if (unsubMainSirena) { try { unsubMainSirena(); } catch(e){} }
                     if (unsubMainPruebas) { try { unsubMainPruebas(); } catch(e){} }
+                    if (unsubMainLlamadas) { try { unsubMainLlamadas(); } catch(e){} }
 
                     unsubMainPersonal = window.fbOnSnapshot(window.fbCollection(fbDb, 'personal'), (snapshot) => {
                         const persData = new Array();
@@ -6859,13 +7042,29 @@ input::-webkit-credentials-auto-fill-button {
                             }
                         });
 
-                        if (maxFbId >= 0) {
+                        const currentStoredMax = parseInt(localStorage.getItem('sisbom_max_despacho_id') || '0');
+                        if (maxFbId > currentStoredMax) {
                             localStorage.setItem('sisbom_max_despacho_id', String(maxFbId));
                         }
+                        window.maxDespachoId = Math.max(window.maxDespachoId || 0, maxFbId, currentStoredMax);
                         
                         const firebaseServices = window.rawDespachos.map(data => {
                             const svcId = String(data.idServicio || data.id || data._id || '');
-                            const unidadesMap = data.unidades || new Object();
+                            const unidadesMap = (data.unidades && typeof data.unidades === 'object') ? { ...data.unidades } : new Object();
+                            
+                            // Expandir cualquier propiedad aplanada tipo "unidades.B1.count" o "unidades.B1.driverRad"
+                            Object.keys(data).forEach(k => {
+                                if (k.startsWith('unidades.')) {
+                                    const parts = k.split('.');
+                                    if (parts.length >= 3) {
+                                        const carKey = parts[1];
+                                        const propKey = parts.slice(2).join('.');
+                                        if (!unidadesMap[carKey]) unidadesMap[carKey] = {};
+                                        unidadesMap[carKey][propKey] = data[k];
+                                    }
+                                }
+                            });
+
                             const logs = globalBitacora.filter(b => String(b.idServicio) === svcId);
                             
                             const validMapKeys = Object.keys(unidadesMap).filter(k => {
@@ -7073,6 +7272,44 @@ input::-webkit-credentials-auto-fill-button {
                     }, (error) => {
                         console.warn("Main prueba_radial listener error:", error);
                         unsubMainPruebas = null;
+                    });
+
+                    // Escucha en tiempo real de llamadas de emergencia desde SisBomTel (Caller ID)
+                    unsubMainLlamadas = window.fbOnSnapshot(window.fbDoc(fbDb, 'llamadas', 'central'), (docSnap) => {
+                        if (!docSnap.exists()) {
+                            window.hideIncomingCallNotification();
+                            return;
+                        }
+                        const data = docSnap.data();
+                        if (!data) {
+                            window.hideIncomingCallNotification();
+                            return;
+                        }
+                        const rawPhone = data.telefono || data.rawTelefono || '';
+                        const estado = String(data.estado || '').toUpperCase();
+                        const activo = data.activo === true || estado === 'TIMBRANDO' || estado === 'ATENDIDA' || estado === 'EN_LLAMADA';
+
+                        if (rawPhone) {
+                            localStorage.setItem('sisbom_last_incoming_call', JSON.stringify({
+                                telefono: rawPhone,
+                                rawTelefono: data.rawTelefono || rawPhone,
+                                estado: estado,
+                                activo: activo,
+                                hora: data.hora || '',
+                                fecha: data.fecha || '',
+                                timestamp: data.timestamp || Date.now()
+                            }));
+                            if (window.notifyLocalIframes) window.notifyLocalIframes();
+                        }
+
+                        if (activo && rawPhone) {
+                            window.showIncomingCallNotification(rawPhone, estado, data);
+                        } else {
+                            window.hideIncomingCallNotification();
+                        }
+                    }, (error) => {
+                        console.warn("Main llamadas listener error:", error);
+                        unsubMainLlamadas = null;
                     });
 
                     // Check for expired NO ASISTIR statuses every 15 seconds
@@ -7434,6 +7671,109 @@ input::-webkit-credentials-auto-fill-button {
             }
         };
 
+        // =========================================================================
+        // CALLER ID EN TIEMPO REAL (SISBOM TEL -> CENTRAL SISBOM.EXE)
+        // =========================================================================
+        window.lastAnnouncedCallNumber = "";
+        window.lastDismissedCallNumber = "";
+
+        window.showIncomingCallNotification = function(phone, estado, data) {
+            const banner = document.getElementById('incoming-call-banner');
+            if (!banner) return;
+
+            if (window.lastDismissedCallNumber === phone + '_' + estado) return;
+
+            const phoneEl = document.getElementById('call-card-phone');
+            const badgeEl = document.getElementById('call-card-badge');
+            const timeEl = document.getElementById('call-card-time');
+
+            let clean = String(phone).replace(/[^0-9+]/g, '');
+            let formatted = phone;
+            if (clean.startsWith('+569') && clean.length === 12) {
+                formatted = `+56 9 ${clean.slice(4, 8)} ${clean.slice(8)}`;
+            } else if (clean.startsWith('569') && clean.length === 11) {
+                formatted = `+56 9 ${clean.slice(3, 7)} ${clean.slice(7)}`;
+            } else if (clean.startsWith('9') && clean.length === 9) {
+                formatted = `+56 9 ${clean.slice(1, 5)} ${clean.slice(5)}`;
+            }
+
+            if (phoneEl) phoneEl.innerText = formatted;
+            if (timeEl) timeEl.innerText = data.hora || new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+
+            if (badgeEl) {
+                if (estado === 'TIMBRANDO') {
+                    badgeEl.innerText = '📞 LLAMADA ENTRANTE (TIMBRANDO)';
+                    badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wider uppercase bg-red-500/20 border border-red-500/40 text-red-300 animate-pulse';
+                } else if (estado === 'ATENDIDA' || estado === 'EN_LLAMADA') {
+                    badgeEl.innerText = '📞 EN LLAMADA CON ALERTANTE';
+                    badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wider uppercase bg-emerald-500/20 border border-emerald-500/40 text-emerald-300';
+                } else {
+                    badgeEl.innerText = `📞 ${estado}`;
+                    badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wider uppercase bg-blue-500/20 border border-blue-500/40 text-blue-300';
+                }
+            }
+
+            if (estado === 'TIMBRANDO' && window.lastAnnouncedCallNumber !== phone) {
+                window.lastAnnouncedCallNumber = phone;
+                if (window.speakText) {
+                    window.speakText('Llamada entrante de emergencia');
+                }
+            }
+
+            banner.classList.remove('hidden');
+        };
+
+        window.hideIncomingCallNotification = function(userDismissed = false) {
+            const banner = document.getElementById('incoming-call-banner');
+            if (!banner) return;
+            banner.classList.add('hidden');
+            if (userDismissed) {
+                const phoneEl = document.getElementById('call-card-phone');
+                const p = phoneEl ? phoneEl.innerText : '';
+                window.lastDismissedCallNumber = p + '_TIMBRANDO';
+            }
+        };
+
+        window.acceptCallAndDispatch = function() {
+            let phone = '';
+            try {
+                const raw = localStorage.getItem('sisbom_last_incoming_call');
+                if (raw) phone = JSON.parse(raw).telefono || '';
+            } catch(e){}
+
+            const navBtn = document.getElementById('nav-btn-despacho');
+            window.navigate('despacho', 'despacho.html', navBtn);
+
+            setTimeout(() => {
+                const frame = document.getElementById('frame-despacho');
+                if (frame && frame.contentWindow && typeof frame.contentWindow.onIncomingCallToDispatch === 'function') {
+                    frame.contentWindow.onIncomingCallToDispatch(phone);
+                }
+            }, 250);
+
+            window.hideIncomingCallNotification();
+        };
+
+        window.acceptCallAndSmsGeo = function() {
+            let phone = '';
+            try {
+                const raw = localStorage.getItem('sisbom_last_incoming_call');
+                if (raw) phone = JSON.parse(raw).telefono || '';
+            } catch(e){}
+
+            const navBtn = document.getElementById('nav-btn-despacho');
+            window.navigate('despacho', 'despacho.html', navBtn);
+
+            setTimeout(() => {
+                const frame = document.getElementById('frame-despacho');
+                if (frame && frame.contentWindow && typeof frame.contentWindow.onIncomingCallToSmsGeo === 'function') {
+                    frame.contentWindow.onIncomingCallToSmsGeo(phone);
+                }
+            }, 350);
+
+            window.hideIncomingCallNotification();
+        };
+
         window.onload = function() { 
             window.startClock(); 
             window.initSystem(); 
@@ -7445,5 +7785,56 @@ input::-webkit-credentials-auto-fill-button {
         };
 
     </script>
+
+    <!-- ========================================================
+         TARJETA FLOTANTE DE LLAMADA ENTRANTE (CALLER ID EN TIEMPO REAL)
+         ======================================================== -->
+    <div id="incoming-call-banner" class="hidden fixed bottom-6 right-6 z-[9999] max-w-sm w-full transition-all duration-300">
+        <div class="relative overflow-hidden rounded-3xl p-4 shadow-2xl border-2 backdrop-blur-xl bg-slate-900/95 border-red-500 shadow-red-900/50">
+            <div class="absolute -right-8 -top-8 w-28 h-28 bg-red-600/20 rounded-full blur-2xl animate-pulse pointer-events-none"></div>
+            <div class="absolute -left-8 -bottom-8 w-28 h-28 bg-amber-500/20 rounded-full blur-2xl animate-pulse pointer-events-none"></div>
+
+            <div class="relative z-10 flex flex-col gap-2.5">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="relative flex h-3 w-3">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                        </div>
+                        <span id="call-card-badge" class="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-red-500/20 border border-red-500/40 text-red-300 animate-pulse">
+                            📞 LLAMADA ENTRANTE
+                        </span>
+                        <span id="call-card-time" class="text-[10px] font-bold text-slate-400">13:00</span>
+                    </div>
+                    <button type="button" onclick="window.hideIncomingCallNotification(true)" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800/60 transition-colors" title="Descartar">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>
+
+                <div class="flex items-center gap-3 bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600 to-amber-600 flex items-center justify-center text-white text-lg shadow-lg shrink-0">
+                        <i class="fas fa-phone-volume animate-pulse"></i>
+                    </div>
+                    <div class="flex-1 min-w-0">
+                        <div class="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Alertante / Llamante</div>
+                        <div id="call-card-phone" class="text-xl font-black tracking-tight text-white select-all font-mono">
+                            +56 9 ...
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 pt-0.5">
+                    <button type="button" onclick="window.acceptCallAndDispatch()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-extrabold text-xs shadow-lg shadow-red-900/30 flex items-center justify-center gap-1.5 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
+                        <i class="fas fa-satellite-dish text-[11px]"></i>
+                        <span>DESPACHAR</span>
+                    </button>
+                    <button type="button" onclick="window.acceptCallAndSmsGeo()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-extrabold text-xs shadow-lg shadow-blue-900/30 flex items-center justify-center gap-1.5 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
+                        <i class="fas fa-location-crosshairs text-[11px]"></i>
+                        <span>SOLICITAR GPS</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

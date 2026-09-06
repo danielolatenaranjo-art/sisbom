@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Política de Privacidad - MiSisBom</title>
+    <style>
+        :root {
+            --primary: #b91c1c;
+            --primary-dark: #991b1b;
+            --bg: #0f172a;
+            --card: #1e293b;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #334155;
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+        body {
+            background-color: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 24px 16px;
+        }
+        .container {
+            max-width: 860px;
+            margin: 0 auto;
+            background: var(--card);
+            border-radius: 16px;
+            padding: 36px 32px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        header {
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+            margin-bottom: 28px;
+            text-align: center;
+        }
+        h1 {
+            color: #ef4444;
+            font-size: 28px;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+        h2 {
+            color: #fca5a5;
+            font-size: 20px;
+            margin-top: 28px;
+            margin-bottom: 12px;
+            border-left: 4px solid var(--primary);
+            padding-left: 12px;
+        }
+        p, li {
+            color: #cbd5e1;
+            font-size: 15px;
+            margin-bottom: 12px;
+        }
+        ul {
+            margin-left: 24px;
+            margin-bottom: 16px;
+        }
+        .highlight-box {
+            background: rgba(185, 28, 28, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 10px;
+            padding: 16px;
+            margin: 20px 0;
+        }
+        footer {
+            border-top: 1px solid var(--border);
+            margin-top: 36px;
+            padding-top: 20px;
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Política de Privacidad</h1>
+            <div class="subtitle">Aplicación Móvil MiSisBom • Última actualización: Septiembre 2026</div>
+        </header>
+
+        <section>
+            <h2>1. Introducción</h2>
+            <p>La aplicación móvil <strong>MiSisBom</strong> ha sido desarrollada como una herramienta de apoyo operativo, despacho de emergencias y gestión institucional para los Cuerpos de Bomberos y su personal voluntario. La privacidad y la seguridad de los datos de nuestros usuarios son de máxima prioridad.</p>
+            <p>Esta Política de Privacidad describe cómo se recopilan, utilizan, almacenan y protegen los datos personales y operativos de los usuarios al utilizar MiSisBom.</p>
+        </section>
+
+        <section>
+            <h2>2. Información que Recopilamos</h2>
+            <p>Para el correcto funcionamiento del sistema de alertas y despacho de emergencias, MiSisBom puede recopilar los siguientes datos:</p>
+            <ul>
+                <li><strong>Información de Cuenta y Perfil:</strong> RUT/Identificador institucional, nombre completo, compañía de bomberos, cargo y estado de servicio (0-8, 0-9, CDS, licencia).</li>
+                <li><strong>Datos de Ubicación (GPS):</strong> Ubicación geográfica en tiempo real durante la atención o confirmación de asistencia a una emergencia (servicio en primer plano y respuesta operativa), con el fin de calcular tiempos de respuesta y brindar mapas tácticos del lugar del incidente.</li>
+                <li><strong>Tokens de Notificación Push (FCM):</strong> Identificadores de Firebase Cloud Messaging para la entrega instantánea de tonos de alarma y despachos de emergencia.</li>
+                <li><strong>Registro de Asistencias y Actividad:</strong> Listas de asistencia a emergencias, citaciones y academias institucionales aprobadas por la oficialidad del Cuerpo de Bomberos.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>3. Uso de la Información</h2>
+            <p>Los datos recopilados se utilizan exclusivamente para los siguientes fines institucionales y operativos:</p>
+            <ul>
+                <li>Alertar oportunamente sobre despachos e incidentes a través de tonos audibles y notificaciones prioritarias.</li>
+                <li>Gestionar la disponibilidad del personal bomberil en tiempo real para las unidades de emergencia.</li>
+                <li>Registrar la asistencia reglamentaria a llamados de comandancia y actividades de compañía.</li>
+                <li>Visualización de mapas tácticos, rutas de despacho y localización de grifos contra incendios.</li>
+            </ul>
+        </section>
+
+        <section>
+            <h2>4. Permisos Requeridos en el Dispositivo</h2>
+            <div class="highlight-box">
+                <ul>
+                    <li><strong>Ubicación (ACCESS_FINE_LOCATION / ACCESS_COARSE_LOCATION):</strong> Requerido para geolocalizar la unidad de bomberos y calcular rutas a la emergencia.</li>
+                    <li><strong>Notificaciones (POST_NOTIFICATIONS):</strong> Esencial para recibir alarmas de emergencia y comunicaciones de Central.</li>
+                    <li><strong>Vibración y Audio (VIBRATE / WAKE_LOCK):</strong> Necesario para emitir los tonos reglamentarios de alarma institucional incluso con la pantalla apagada.</li>
+                    <li><strong>Servicio en Primer Plano (FOREGROUND_SERVICE):</strong> Mantiene la sincronización de alertas críticas en situaciones de emergencia.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section>
+            <h2>5. Protección y Almacenamiento de Datos</h2>
+            <p>Toda la información viaja cifrada mediante protocolos de seguridad estándar de la industria (HTTPS / TLS) y es gestionada a través de la infraestructura en la nube de Google Firebase (Firestore Database y Authentication), garantizando altos estándares de disponibilidad y confidencialidad.</p>
+            <p><strong>No vendemos, no comercializamos ni compartimos datos personales con terceros para fines publicitarios.</strong> La información sólo es accesible por los sistemas y oficiales autorizados del respectivo Cuerpo de Bomberos.</p>
+        </section>
+
+        <section>
+            <h2>6. Eliminación de Cuenta y Retención de Datos</h2>
+            <p>Los usuarios pueden solicitar la actualización o desvinculación de su cuenta a través de la comandancia de su Cuerpo de Bomberos o enviando un correo de soporte técnico a <strong>contacto@sisbom.cl</strong>.</p>
+        </section>
+
+        <section>
+            <h2>7. Contacto</h2>
+            <p>Si tiene preguntas o dudas sobre esta Política de Privacidad, puede contactarnos a través de:</p>
+            <ul>
+                <li><strong>Correo electrónico:</strong> contacto@sisbom.cl / soporte@sisbom.cl</li>
+                <li><strong>Sitio Web:</strong> https://sisbom.cl</li>
+            </ul>
+        </section>
+
+        <footer>
+            &copy; 2026 SisBom • Sistema de Despacho y Gestión Bomberil. Todos los derechos reservados.
+        </footer>
+    </div>
+</body>
+</html>

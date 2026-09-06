@@ -267,13 +267,14 @@ struct ProfileDrawerContent: View {
                                     .foregroundColor(.textSecondary)
                             }
                             .frame(width: 54, height: 54)
-                            .clipShape(Circle())
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
                         } else {
-                            Image(systemName: "person.circle.fill")
+                            Image(systemName: "person.crop.square.fill")
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
                                 .frame(width: 54, height: 54)
                                 .foregroundColor(.textSecondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
                         }
                         
                         VStack(alignment: .leading, spacing: 4) {
@@ -371,12 +372,18 @@ struct ProfileDrawerContent: View {
                     }
                 }
                 
-                Text("miSisBom V 1.0.7")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(isDark ? Color.white.opacity(0.4) : Color.black.opacity(0.4))
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 12)
-                    .padding(.bottom, 30)
+                VStack(spacing: 4) {
+                    Image(isDark ? "sentinel_one_logo" : "sentinel_one_logo_light")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(height: 28)
+                    Text("V 2.1.4")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color(red: 0.85, green: 0.47, blue: 0.02))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 12)
+                .padding(.bottom, 30)
             }
             .padding(24)
             .background(isDark ? Color.navyDeep : Color.white)
@@ -484,7 +491,7 @@ struct ChangelogDialog: View {
                         .font(.system(size: 18, weight: .black))
                         .foregroundColor(isDark ? .white : .textDark)
                     
-                    Text("SISBOM V 2.1.4")
+                    Text("SENTINEL ONE V 2.1.4")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.gray)
                 }

@@ -415,19 +415,26 @@ exports.actualizarDespacho = onDocumentUpdated(
       }
     }
 
-    // Alarma 10-30 Declarada (Escalamiento de emergencia)
-    const oldClave = String(oldData.clave || "").trim();
-    const newClave = String(newData.clave || "").trim();
-    if (newClave === "10-30" && oldClave !== "10-30") {
-      console.log(`Alarma escalada a 10-30 en despacho ${id}`);
+    // Escalamiento de Emergencia (10-0 -> 10-30 o 10-2 -> ALARMA FORESTAL)
+    const oldClave = String(oldData.clave || "").trim().toUpperCase();
+    const newClave = String(newData.clave || "").trim().toUpperCase();
+
+    const isEscalation1030 = (oldClave === "10-0" || oldClave.includes("10-0")) && newClave.includes("10-30");
+    const isEscalationForestal = (oldClave === "10-2" || oldClave.includes("10-2")) && newClave.includes("FORESTAL");
+
+    if (isEscalation1030 || isEscalationForestal) {
+      const alarmTitle = isEscalation1030 ? "ALARMA 10-30 DECLARADA" : "ALARMA FORESTAL DECLARADA";
+      const alarmClave = isEscalation1030 ? "10-30" : "ALARMA FORESTAL";
+      console.log(`Alarma escalada (${alarmClave}) en despacho ${id}`);
       const payload = {
         topic: "despachos",
         data: {
-          title: "ALARMA 10-30 DECLARADA",
-          body: `10-30 • ${lugar}`,
+          title: alarmTitle,
+          body: `${alarmClave} • ${lugar}`,
           type: "DISPATCH_UPDATE",
+          escalation: "true",
           payloadId: String(id),
-          clave: "10-30",
+          clave: alarmClave,
           lugar: String(lugar),
           timestamp: String(Date.now()),
           gradoAlerta: "3"
@@ -438,9 +445,9 @@ exports.actualizarDespacho = onDocumentUpdated(
       };
       try {
         await admin.messaging().send(payload);
-        console.log(`Push de 10-30 enviado exitosamente para despacho ${id}`);
+        console.log(`Push de escalamiento (${alarmClave}) enviado exitosamente para despacho ${id}`);
       } catch (e) {
-        console.error("Error enviando notificación 10-30:", e);
+        console.error("Error enviando notificación de escalamiento:", e);
       }
     }
 

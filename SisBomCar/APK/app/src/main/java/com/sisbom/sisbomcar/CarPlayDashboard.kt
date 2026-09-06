@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.LocalGasStation
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Route
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Timer
@@ -136,7 +138,7 @@ fun CarPlayDashboard(
         val liveLat = localGps?.lat?.takeIf { it != 0.0 } ?: unit?.lat
         val liveLng = localGps?.lng?.takeIf { it != 0.0 } ?: unit?.lng
         val liveHeading = localGps?.heading ?: unit?.heading ?: 0f
-        val liveSpeed = localGps?.speedKmH?.takeIf { it >= 0f } ?: (unit?.speed ?: 0f)
+        val liveSpeed = localGps?.speedKmH ?: 0f
 
         var etaMinutes by remember { mutableStateOf(0) }
         var etaDistanceKm by remember { mutableStateOf(0f) }
@@ -216,18 +218,65 @@ fun CarPlayDashboard(
         val hora610ForMap = (uDataForMap?.get("hora610") ?: uDataForMap?.get("llegada610At") ?: activeTrip?.hora610)?.toString()?.trim() ?: ""
         val hora68ForMap = (uDataForMap?.get("hora68") ?: uDataForMap?.get("disponible68At") ?: activeTrip?.hora68)?.toString()?.trim() ?: ""
 
-        val isEnCuartelForMap = uEstadoForMap == "finalizado" || uEstadoForMap == "6-10" || uEstadoForMap.contains("cuartel") || (hora610ForMap.isNotEmpty() && hora68ForMap.isEmpty())
-        val isRetornoForMap = !isEnCuartelForMap && (uEstadoForMap == "retorno" || uEstadoForMap == "6-9" || uEstadoForMap.contains("retorno") || (hora69ForMap.isNotEmpty() && hora610ForMap.isEmpty()))
+        val hasActiveDispatch = dispatch != null && dispatch.operadorFinal.isEmpty()
+        val hasActiveSalida = activeTrip != null && activeTrip.hora68.isEmpty() && activeTrip.estadoMovil != "en cuartel"
+
+        val isRetornoForMap = (uEstadoForMap == "retorno" || uEstadoForMap == "6-9" || (hora69ForMap.isNotEmpty() && hora610ForMap.isEmpty()))
+        val isEnCuartelForMap = (!hasActiveDispatch && !hasActiveSalida) || uEstadoForMap == "finalizado" || uEstadoForMap == "6-8" || hora68ForMap.isNotEmpty()
+
+        // Geocodificación de respaldo en segundo plano si dispatch.lat o dispatch.lng no vienen definidos
+        var geocodedLat by remember(dispatch?.idServicio) { mutableStateOf<Double?>(null) }
+        var geocodedLng by remember(dispatch?.idServicio) { mutableStateOf<Double?>(null) }
+
+        LaunchedEffect(dispatch?.idServicio, dispatch?.lugar, dispatch?.lat, dispatch?.lng) {
+            if (dispatch != null && (dispatch.lat == null || dispatch.lat == 0.0) && dispatch.lugar.isNotBlank()) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        val geocoder = android.location.Geocoder(context, Locale("es", "CL"))
+                        val rawLoc = dispatch.lugar.trim()
+                        val query = if (!rawLoc.contains("Placilla", ignoreCase = true) && !rawLoc.contains("Chile", ignoreCase = true)) {
+                            "$rawLoc, Placilla, O'Higgins, Chile"
+                        } else rawLoc
+                        val list = geocoder.getFromLocationName(query, 1)
+                        if (!list.isNullOrEmpty()) {
+                            geocodedLat = list[0].latitude
+                            geocodedLng = list[0].longitude
+                        }
+                    } catch (_: Exception) {}
+                }
+            } else {
+                geocodedLat = null
+                geocodedLng = null
+            }
+        }
 
         // Coordenadas del Cuartel General de Bomberos (Miraflores 697, Placilla)
         val CUARTEL_GENERAL_LAT = -34.636743
         val CUARTEL_GENERAL_LNG = -71.119915
 
+        // Si la unidad está en cuartel (6-8 / finalizada o sin despacho activo), no se traza ruta
         // Si la unidad está en retorno (6-9), la ruta apunta hacia el Cuartel General
-        val mapTargetLat = if (isRetornoForMap) CUARTEL_GENERAL_LAT else dispatch?.lat
-        val mapTargetLng = if (isRetornoForMap) CUARTEL_GENERAL_LNG else dispatch?.lng
-        val mapTargetClave = if (isRetornoForMap) "6-9 RETORNO CUARTEL" else (dispatch?.clave ?: "")
-        val mapDispatchId = if (isRetornoForMap) "retorno_${dispatch?.idServicio ?: activeTrip?.idSalida ?: "cuartel"}" else dispatch?.idServicio
+        // Si la unidad está despachada, la ruta apunta directamente hacia la emergencia
+        val mapTargetLat = when {
+            isEnCuartelForMap -> null
+            isRetornoForMap -> CUARTEL_GENERAL_LAT
+            else -> dispatch?.lat ?: geocodedLat
+        }
+        val mapTargetLng = when {
+            isEnCuartelForMap -> null
+            isRetornoForMap -> CUARTEL_GENERAL_LNG
+            else -> dispatch?.lng ?: geocodedLng
+        }
+        val mapTargetClave = when {
+            isEnCuartelForMap -> ""
+            isRetornoForMap -> "6-9 RETORNO CUARTEL"
+            else -> (dispatch?.clave ?: "")
+        }
+        val mapDispatchId = when {
+            isEnCuartelForMap -> null
+            isRetornoForMap -> "retorno_${dispatch?.idServicio ?: activeTrip?.idSalida ?: "cuartel"}"
+            else -> dispatch?.idServicio
+        }
 
         CarPlayTacticalMap(
             dispatchId = mapDispatchId,
@@ -1045,6 +1094,58 @@ fun CarPlayDashboard(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
+                        }
+                    }
+
+                    // Solicitante / Alertante y Teléfono de contacto
+                    val displaySolicitante = dispatch?.solicitante?.takeIf { it.isNotEmpty() } ?: ""
+                    val displayPhone = dispatch?.telefono?.takeIf { it.isNotEmpty() } ?: ""
+                    if (displaySolicitante.isNotEmpty() || displayPhone.isNotEmpty()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF1E293B).copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF334155), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            if (displaySolicitante.isNotEmpty()) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Person,
+                                        contentDescription = "Solicitante",
+                                        tint = CarPlayColors.PrimaryAmber,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = displaySolicitante.uppercase(),
+                                        color = Color.White,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            if (displayPhone.isNotEmpty()) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Phone,
+                                        contentDescription = "Teléfono",
+                                        tint = CarPlayColors.PrimaryGreen,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = displayPhone,
+                                        color = CarPlayColors.PrimaryGreen,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            }
                         }
                     }
 

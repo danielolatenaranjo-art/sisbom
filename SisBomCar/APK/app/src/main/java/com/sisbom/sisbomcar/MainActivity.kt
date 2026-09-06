@@ -47,8 +47,36 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    companion object {
+        private var instanceRef: java.lang.ref.WeakReference<MainActivity>? = null
+
+        fun wakeUpScreenAndStayAwake(context: Context? = null) {
+            try {
+                instanceRef?.get()?.let { activity ->
+                    activity.runOnUiThread {
+                        activity.wakeUpScreen()
+                        activity.updateScreenAwakeState(true)
+                    }
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val ctx = context ?: instanceRef?.get()
+                ctx?.let { c ->
+                    val intent = Intent(c, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                                Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    c.startActivity(intent)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        instanceRef = java.lang.ref.WeakReference(this)
 
         try {
             // Pantalla completa inmersiva
@@ -83,17 +111,24 @@ class MainActivity : ComponentActivity() {
             )
         } catch (_: Exception) {}
 
-        try {
-            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        } catch (_: Exception) {}
-
         setContent {
             CarPlayTheme {
-                val hasActiveTrip = viewModel.activeDispatch != null || viewModel.activeBitacoraTrip != null || (viewModel.currentUnitVehicle?.enServicio != null && viewModel.currentUnitVehicle?.enServicio != "0")
+                val hasActiveDispatch = viewModel.activeDispatch != null && viewModel.activeDispatch?.operadorFinal.isNullOrEmpty()
+                val hasActiveBitacora = viewModel.activeBitacoraTrip != null && viewModel.activeBitacoraTrip?.hora68.isNullOrEmpty() && viewModel.activeBitacoraTrip?.estadoMovil != "en cuartel"
+                val isVehicleDispatched = viewModel.currentUnitVehicle?.let { v ->
+                    val enServ = v.enServicio.trim()
+                    enServ.isNotEmpty() && enServ != "0" && enServ != "0-8" && enServ != "0-9" && enServ != "6-8" && !enServ.equals("false", ignoreCase = true)
+                } ?: false
 
-                LaunchedEffect(hasActiveTrip, isCharging) {
-                    wakeUpScreen()
-                    updateScreenAwakeState(hasActiveTrip, isCharging)
+                val hasActiveTrip = hasActiveDispatch || hasActiveBitacora || isVehicleDispatched
+
+                LaunchedEffect(hasActiveTrip) {
+                    if (hasActiveTrip) {
+                        wakeUpScreen()
+                        updateScreenAwakeState(true)
+                    } else {
+                        updateScreenAwakeState(false)
+                    }
                 }
 
                 Surface(modifier = Modifier.fillMaxSize()) {
@@ -141,10 +176,17 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun updateScreenAwakeState(hasTrip: Boolean, charging: Boolean) {
+    private fun updateScreenAwakeState(keepAwake: Boolean) {
         runOnUiThread {
             try {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (keepAwake) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                        setTurnScreenOn(false)
+                    }
+                }
             } catch (_: Exception) {}
         }
     }
