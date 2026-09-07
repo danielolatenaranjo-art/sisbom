@@ -19,11 +19,6 @@ struct DespachoTab: View {
         ZStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("CENTRAL DE ALARMAS - DESPACHO MÓVIL")
-                        .font(.system(size: 15, weight: .black))
-                        .foregroundColor(isDark ? .white : .textDark)
-                        .padding(.top, 16)
-                    
                     if !isCentral {
                         // Access Denied Card
                         GlassCard(viewModel: viewModel) {

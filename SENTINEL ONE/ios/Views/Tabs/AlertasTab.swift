@@ -5,10 +5,19 @@ struct AlertasTab: View {
 
     var body: some View {
         let isDark = viewModel.isDarkMode
-        let myRadial = viewModel.currentUser?.idRadial.uppercased() ?? ""
+        let myRadial = viewModel.currentUser?.idRadial.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let myReg = viewModel.currentUser?.idRegistro.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         
         let alerts = viewModel.alertsList
-            .filter { $0.tipo != "orden" }
+            .filter { alert in
+                guard alert.tipo != "orden" else { return false }
+                guard isAlertActive(duracion: alert.duracion) else { return false }
+                let aQuien = alert.aQuienAlerta.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                if aQuien.isEmpty || aQuien == "TC" || aQuien == "SC" {
+                    return true
+                }
+                return aQuien.contains(myRadial) || aQuien.contains(myReg)
+            }
             .sorted { a, b in
                 let aPinned = a.fijar.split(separator: ",")
                     .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
@@ -24,23 +33,17 @@ struct AlertasTab: View {
             }
         
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("MURO DE COMUNICACIONES")
-                    .font(.system(size: 16, weight: .black))
-                    .foregroundColor(isDark ? .white : .textDark)
-                    .padding(.top, 16)
-                    .padding(.horizontal, 16)
-                
+            VStack(spacing: 16) {
                 if alerts.isEmpty {
                     VStack {
                         Spacer().frame(height: 100)
-                        Text("No se registran alertas en la cartelera.")
+                        Text("No se registran alertas activas en la cartelera.")
                             .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.textSecondary)
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 } else {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: 14) {
                         ForEach(alerts) { alert in
                             AlertItemCard(alert: alert, viewModel: viewModel) {
                                 viewModel.activeChatAlert = alert
@@ -53,15 +56,17 @@ struct AlertasTab: View {
                 
                 Spacer(minLength: 20)
             }
+            .padding(.top, 8)
         }
     }
 }
 
-// MARK: - AlertItemCard Component
+// MARK: - AlertItemCard Component (Exact ANDROID 4.jpeg Design)
 struct AlertItemCard: View {
     let alert: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
     let onChatClick: () -> Void
+    @State private var showDetailSheet: Bool = false
 
     var body: some View {
         let isDark = viewModel.isDarkMode
@@ -74,214 +79,195 @@ struct AlertItemCard: View {
             .contains(myRadial)
         let isChat = alert.duracion.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "C"
         
-        let borderColor: Color = {
-            switch alert.gradoAlerta {
-            case "3": return .bomberosRed
-            case "2": return .alertAmber
-            default: return .infoBlue
-            }
-        }()
-        
-        let iconVector: String = isChat ? "message.and.waveform.fill" : "exclamationmark.circle.fill"
-        
-        let iconColor: Color = {
-            if isChat {
-                return isDark ? Color(red: 0.97, green: 0.44, blue: 0.44) : .bomberosRed
-            } else {
-                switch alert.gradoAlerta {
-                case "3": return isDark ? Color(red: 0.94, green: 0.27, blue: 0.27) : .bomberosRed
-                case "2": return isDark ? Color(red: 0.96, green: 0.62, blue: 0.04) : .alertAmber
-                default: return isDark ? Color(red: 0.23, green: 0.51, blue: 0.96) : .infoBlue
-                }
-            }
-        }()
-        
-        let cardBg: Color = {
-            if isChat && !isConforme {
-                return Color.bomberosRed.opacity(isDark ? 0.08 : 0.05)
-            } else if !isChat && !isConforme {
-                return isDark ? Color.navyDark.opacity(0.4) : Color.black.opacity(0.05)
-            } else {
-                return .clear
-            }
-        }()
-        
-        GlassCard(viewModel: viewModel) {
-            VStack(alignment: .leading, spacing: 0) {
-                // Header (interactive if chat)
+        VStack(spacing: 8) {
+            // Bookmark Ribbon Row
+            HStack {
+                Spacer()
                 Button(action: {
-                    if isChat { onChatClick() }
+                    viewModel.toggleAlertPin(alert: alert)
                 }) {
-                    HStack(spacing: 12) {
-                        ZStack {
-                            Circle()
-                                .fill(isDark ? Color.black.opacity(0.2) : Color.white.opacity(0.6))
-                                .frame(width: 36, height: 36)
-                                .overlay(
-                                    Circle()
-                                        .stroke(isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.05), lineWidth: 1)
-                                )
-                            
-                            Image(systemName: iconVector)
-                                .font(.system(size: 16))
-                                .foregroundColor(iconColor)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(alert.razonAlerta)
-                                .font(.system(size: 13, weight: .black))
-                                .foregroundColor(isChat && !isConforme ? (isDark ? Color(red: 0.97, green: 0.44, blue: 0.44) : .bomberosRed) : (isDark ? .white : .textDark))
-                                .lineLimit(1)
-                            
-                            Text("\(alert.fechaAlerta) • \(alert.horaAlerta)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-                        }
-                        Spacer()
-                    }
+                    Image(systemName: isPinned ? "bookmark.fill" : "bookmark")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(isPinned ? Color.alertAmber : (isDark ? Color.white.opacity(0.5) : Color(red: 0.60, green: 0.65, blue: 0.72)))
+                        .padding(4)
                 }
-                .disabled(!isChat)
-                .buttonStyle(PlainButtonStyle())
+            }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+
+            // Centered Circular Blue Icon
+            ZStack {
+                Circle()
+                    .fill(isDark ? Color.infoBlue.opacity(0.2) : Color(red: 0.88, green: 0.92, blue: 0.98))
+                    .frame(width: 44, height: 44)
                 
-                Spacer().frame(height: 10)
-                
-                // Preview message content
-                let previewText = parseAlertPreview(alert: alert)
-                Button(action: {
-                    if isChat { onChatClick() }
-                }) {
-                    Text(previewText)
-                        .font(.system(size: 12))
-                        .lineSpacing(4)
-                        .foregroundColor(isDark ? Color(red: 0.8, green: 0.84, blue: 0.88) : Color(red: 0.28, green: 0.33, blue: 0.41))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 2)
+                Image(systemName: isChat ? "message.and.waveform.fill" : "info.circle.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(isChat ? .bomberosRed : Color(red: 0.23, green: 0.51, blue: 0.96))
+            }
+            .onTapGesture {
+                if isChat {
+                    onChatClick()
+                } else if !alert.mensajeAlerta.isEmpty {
+                    showDetailSheet = true
                 }
-                .disabled(!isChat)
-                .buttonStyle(PlainButtonStyle())
-                
-                Spacer().frame(height: 12)
-                Divider()
-                    .background(isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.05))
-                Spacer().frame(height: 10)
-                
-                // Actions Footer Row
-                HStack {
+            }
+            
+            // Centered Title
+            Text(alert.razonAlerta.uppercased())
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(isDark ? .white : .textDark)
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .padding(.horizontal, 16)
+                .padding(.top, 2)
+                .onTapGesture {
                     if isChat {
-                        Button(action: onChatClick) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "bubble.left.and.bubble.right.fill")
-                                    .font(.system(size: 12))
-                                Text("RESPONDER")
-                                    .font(.system(size: 10, weight: .black))
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(height: 36)
-                            .foregroundColor(isDark ? Color(red: 0.97, green: 0.44, blue: 0.44) : .bomberosRed)
-                            .background(isDark ? Color.bomberosRed.opacity(0.15) : Color.bomberosRed.opacity(0.08))
-                            .cornerRadius(10)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Color.bomberosRed.opacity(0.2), lineWidth: 1)
-                            )
-                        }
-                    } else {
-                        HStack(spacing: 8) {
-                            Text(isConforme ? "CONFORME REGISTRADO" : "MARCAR CONFORME")
-                                .font(.system(size: 9, weight: .black))
-                                .foregroundColor(isConforme ? .goGreen : (isDark ? Color.textSecondary : .textSecondaryDark))
-                            
-                            Button(action: {
-                                if !isConforme {
-                                    viewModel.registerConforme(alert: alert)
-                                }
-                            }) {
-                                Image(systemName: isConforme ? "checkmark.square.fill" : "square")
-                                    .font(.title3)
-                                    .foregroundColor(isConforme ? .goGreen : (isDark ? Color.white.opacity(0.2) : Color.black.opacity(0.2)))
-                            }
-                            .disabled(isConforme)
-                        }
+                        onChatClick()
+                    } else if !alert.mensajeAlerta.isEmpty {
+                        showDetailSheet = true
                     }
+                }
+            
+            // Centered Date & Time
+            Text("\(alert.fechaAlerta) • \(alert.horaAlerta)")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                .padding(.bottom, 4)
+            
+            // Divider
+            Divider()
+                .background(isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08))
+                .padding(.horizontal, 24)
+            
+            // Bottom Status / Action
+            if isChat {
+                Button(action: onChatClick) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bubble.left.and.bubble.right.fill")
+                            .font(.system(size: 11))
+                        Text(isConforme ? "ABRIR CANAL DE CHAT" : "RESPONDER / ABRIR CANAL")
+                            .font(.system(size: 11, weight: .bold))
+                    }
+                    .foregroundColor(isDark ? Color(red: 0.97, green: 0.44, blue: 0.44) : .bomberosRed)
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            } else {
+                if isConforme {
+                    Text("✓ VISTO")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color(red: 0.02, green: 0.59, blue: 0.41))
+                        .padding(.vertical, 8)
+                } else {
+                    Button(action: {
+                        viewModel.registerConforme(alert: alert)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("MARCAR COMO VISTO")
+                        }
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.goGreen)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .background(isDark ? Color.navyDark : Color.white)
+        .cornerRadius(20)
+        .shadow(color: isDark ? Color.clear : Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(isPinned ? Color.alertAmber.opacity(0.7) : (isConforme ? Color.goGreen.opacity(0.35) : (isDark ? Color.white.opacity(0.1) : Color(red: 0.85, green: 0.94, blue: 0.90))), lineWidth: 1.5)
+        )
+        .sheet(isPresented: $showDetailSheet) {
+            AlertDetailModal(alert: alert, viewModel: viewModel, isPresented: $showDetailSheet)
+        }
+    }
+}
+
+// MARK: - AlertDetailModal
+struct AlertDetailModal: View {
+    let alert: AlertaItem
+    @ObservedObject var viewModel: SisBomViewModel
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        let isDark = viewModel.isDarkMode
+        let myRadial = viewModel.currentUser?.idRadial.uppercased() ?? ""
+        let isConforme = alert.conforme.split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
+            .contains(myRadial)
+        
+        ZStack {
+            (isDark ? Color.navyDeep : Color(red: 0.94, green: 0.96, blue: 0.98))
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Header Row
+                HStack {
+                    Text(alert.razonAlerta.uppercased())
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundColor(isDark ? .white : .textDark)
+                        .lineLimit(1)
                     
                     Spacer()
                     
-                    // Pin Button
-                    Button(action: {
-                        viewModel.toggleAlertPin(alert: alert)
-                    }) {
-                        Image(systemName: isPinned ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 14))
-                            .padding(10)
-                            .background(isPinned ? Color.bomberosRed.opacity(isDark ? 0.15 : 0.08) : Color.black.opacity(0.03))
-                            .foregroundColor(isPinned ? (isDark ? Color(red: 0.97, green: 0.44, blue: 0.44) : .bomberosRed) : (isDark ? Color.textSecondary : .textSecondaryDark))
-                            .cornerRadius(10)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(isPinned ? Color.bomberosRed.opacity(0.3) : Color.clear, lineWidth: 1)
-                            )
+                    Button(action: { isPresented = false }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 14, weight: .bold))
+                            .padding(8)
+                            .background(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.1))
+                            .foregroundColor(isDark ? .white : .textDark)
+                            .clipShape(Circle())
                     }
                 }
-            }
-            .padding(14)
-            .background(cardBg)
-            .cornerRadius(16)
-        }
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(isPinned ? Color.alertAmber : borderColor.opacity(0.3), lineWidth: 1.5)
-        )
-    }
-    
-    private func parseAlertPreview(alert: AlertaItem) -> String {
-        if alert.duracion.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "C" {
-            let msgs = alert.mensajeAlerta.split(separator: "|").map { String($0) }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            if let lastMsg = msgs.last {
-                if let colonIdx = findSeparatorColonIndex(lastMsg) {
-                    let prefix = String(lastMsg[..<colonIdx])
-                    let body = String(lastMsg[lastMsg.index(after: colonIdx)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-                    let senderId = (prefix.split(separator: "/").last.map { String($0) } ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    let trimmedSenderId = senderId.uppercased()
-                    let myIdReg = viewModel.currentUser?.idRegistro.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-                    let senderUser = viewModel.personnelList.first(where: {
-                        $0.idRegistro.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == trimmedSenderId
-                    })
-                    let isMe = senderUser != nil ?
-                               (senderUser!.idRegistro.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == myIdReg) :
-                               (trimmedSenderId == myIdReg)
-                    let senderName = isMe ? "Tú" : (senderUser != nil ? formatFirefighterName(senderUser!.nombreBombero) : senderId)
-                    return "\(senderName): \(body)"
+                .padding(16)
+                
+                Divider()
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        HStack {
+                            Text("Fecha: \(alert.fechaAlerta) • \(alert.horaAlerta)")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.textSecondary)
+                            Spacer()
+                        }
+                        
+                        Text(alert.mensajeAlerta.replacingOccurrences(of: "|", with: "\n"))
+                            .font(.system(size: 14))
+                            .lineSpacing(4)
+                            .foregroundColor(isDark ? .white : .textDark)
+                        
+                        if !alert.quienAlerta.isEmpty {
+                            Text("Emitido por: \(alert.quienAlerta)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.textSecondary)
+                        }
+                        
+                        if !isConforme {
+                            Button(action: {
+                                viewModel.registerConforme(alert: alert)
+                                isPresented = false
+                            }) {
+                                Text("MARCAR COMO VISTO")
+                                    .font(.system(size: 12, weight: .black))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 48)
+                                    .background(Color.goGreen)
+                                    .cornerRadius(12)
+                            }
+                            .padding(.top, 16)
+                        }
+                    }
+                    .padding(16)
                 }
-                return lastMsg
             }
-            return "Sin mensajes en el canal."
-        } else {
-            return alert.mensajeAlerta.replacingOccurrences(of: "|", with: "\n")
         }
-    }
-    
-    private func formatFirefighterName(_ name: String) -> String {
-        let parts = name.split(separator: " ").map { String($0) }
-        guard let first = parts.first else { return name }
-        if parts.count >= 3 {
-            return "\(first) \(parts[2])"
-        } else if parts.count == 2 {
-            return "\(first) \(parts[1])"
-        }
-        return first
-    }
-    
-    private func findSeparatorColonIndex(_ text: String) -> String.Index? {
-        guard let firstSlash = text.firstIndex(of: "/") else {
-            return text.firstIndex(of: ":")
-        }
-        let afterFirstSlash = text.index(after: firstSlash)
-        guard let secondSlash = text[afterFirstSlash...].firstIndex(of: "/") else {
-            return text[afterFirstSlash...].firstIndex(of: ":")
-        }
-        let afterSecondSlash = text.index(after: secondSlash)
-        return text[afterSecondSlash...].firstIndex(of: ":")
     }
 }

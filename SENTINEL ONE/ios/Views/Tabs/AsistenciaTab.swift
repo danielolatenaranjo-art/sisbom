@@ -105,10 +105,8 @@ struct AsistenciaTab: View {
         let calendar = Calendar.current
         let today = Date()
         let todayMonth = calendar.component(.month, from: today)
-        let todayDay = calendar.component(.day, from: today)
         let todayYear = calendar.component(.year, from: today)
         let currentCycleYear = todayMonth == 12 ? todayYear + 1 : todayYear
-        let isDecember8th = todayMonth == 12 && todayDay == 8
 
         let historyWithCycle: [(AttendanceSheet, Int)] = myHistory.compactMap { row in
             if let date = parseDateToDate(fechaStr: row.fecha) {
@@ -128,9 +126,6 @@ struct AsistenciaTab: View {
         let currentCycleHistory = historyWithCycle.filter { $0.1 == currentCycleYear }.map { $0.0 }
         let currentCycleStats = calculateCycleStats(history: currentCycleHistory)
 
-        let prevCycleHistory = historyWithCycle.filter { $0.1 == (currentCycleYear - 1) }.map { $0.0 }
-        let prevCycleStats = calculateCycleStats(history: prevCycleHistory)
-
         let displayedHistory = currentCycleHistory.filter { h in
             let st = h.userEstado.isEmpty ? "FALTA" : h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
             let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave)
@@ -139,73 +134,39 @@ struct AsistenciaTab: View {
         }
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("CONTROL DE ASISTENCIAS")
-                    .font(.system(size: 16, weight: .black))
-                    .foregroundColor(isDark ? .white : .textDark)
-                    .padding(.top, 16)
-                    .padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 14) {
+                // Top Annual Summary Card (Exact ANDROID 5.jpeg)
+                AnnualAttendanceHeaderCard(
+                    cycleYear: currentCycleYear,
+                    stats: currentCycleStats,
+                    isDark: isDark
+                )
+                .padding(.horizontal, 16)
 
-                if isDecember8th {
-                    // Card 1: Finalized Previous Cycle on Dec 8
-                    AttendanceCycleCard(
-                        title: "CICLO ANTERIOR FINALIZADO",
-                        subtitle: "8 DE DICIEMBRE",
-                        pctAsist: prevCycleStats.pct,
-                        totalObligatorias: prevCycleStats.totalObligatorias,
-                        totalAbonosAsiste: prevCycleStats.totalAbonosAsiste,
-                        showRights: true,
-                        viewModel: viewModel
-                    )
-                    .padding(.horizontal, 16)
-
-                    // Card 2: New ongoing cycle
-                    AttendanceCycleCard(
-                        title: "NUEVO CICLO EN CURSO",
-                        subtitle: "CICLO \(currentCycleYear)",
-                        pctAsist: currentCycleStats.pct,
-                        totalObligatorias: currentCycleStats.totalObligatorias,
-                        totalAbonosAsiste: currentCycleStats.totalAbonosAsiste,
-                        showRights: false,
-                        viewModel: viewModel
-                    )
-                    .padding(.horizontal, 16)
-                } else {
-                    // Card 1: Current Annual Cycle
-                    AttendanceCycleCard(
-                        title: "ASISTENCIA ANUAL",
-                        subtitle: "CICLO \(currentCycleYear)",
-                        pctAsist: currentCycleStats.pct,
-                        totalObligatorias: currentCycleStats.totalObligatorias,
-                        totalAbonosAsiste: currentCycleStats.totalAbonosAsiste,
-                        showRights: false,
-                        viewModel: viewModel
-                    )
-                    .padding(.horizontal, 16)
-
-                    // Card 2: Previous Cycle Card with Statutory Rights (Vota / Cargo)
-                    if !prevCycleHistory.isEmpty {
-                        AttendanceCycleCard(
-                            title: "CICLO ANTERIOR",
-                            subtitle: "CICLO \(currentCycleYear - 1)",
-                            pctAsist: prevCycleStats.pct,
-                            totalObligatorias: prevCycleStats.totalObligatorias,
-                            totalAbonosAsiste: prevCycleStats.totalAbonosAsiste,
-                            showRights: true,
-                            viewModel: viewModel
-                        )
-                        .padding(.horizontal, 16)
+                // Historial Section Header with Sincronizar Button
+                HStack {
+                    Text("HISTORIAL")
+                        .font(.system(size: 14, weight: .black))
+                        .foregroundColor(isDark ? .white : .textDark)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        viewModel.refreshAttendance()
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 12, weight: .bold))
+                            Text("Sincronizar")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(Color(red: 0.90, green: 0.20, blue: 0.20))
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
 
-                // History Header
-                Text("HISTORIAL DE ACTIVIDADES (\(currentCycleYear))")
-                    .font(.system(size: 14, weight: .black))
-                    .foregroundColor(isDark ? .white : .textDark)
-                    .padding(.top, 8)
-                    .padding(.horizontal, 16)
-
-                // History List
+                // 2-Column Grid of History Items (Exact ANDROID 5.jpeg)
                 if displayedHistory.isEmpty {
                     VStack {
                         Spacer().frame(height: 60)
@@ -215,9 +176,9 @@ struct AsistenciaTab: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 } else {
-                    LazyVStack(spacing: 12) {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                         ForEach(displayedHistory) { item in
-                            AttendanceItemRow(item: item, viewModel: viewModel)
+                            AttendanceGridCard(item: item, isDark: isDark)
                         }
                     }
                     .padding(.horizontal, 16)
@@ -225,116 +186,99 @@ struct AsistenciaTab: View {
 
                 Spacer(minLength: 20)
             }
+            .padding(.top, 8)
         }
     }
 }
 
-// MARK: - AttendanceCycleCard Component
-struct AttendanceCycleCard: View {
-    let title: String
-    let subtitle: String
-    let pctAsist: Double
-    let totalObligatorias: Int
-    let totalAbonosAsiste: Int
-    let showRights: Bool
-    @ObservedObject var viewModel: SisBomViewModel
+// MARK: - AnnualAttendanceHeaderCard Component (Exact ANDROID 5.jpeg)
+struct AnnualAttendanceHeaderCard: View {
+    let cycleYear: Int
+    let stats: CycleStats
+    let isDark: Bool
 
     var body: some View {
-        let isDark = viewModel.isDarkMode
-        let canVote = pctAsist >= 30.0
-        let canHoldCargo = pctAsist >= 40.0
+        HStack(spacing: 12) {
+            // Circular Progress Gauge
+            AttendanceCircle(percentage: stats.pct, size: 68, strokeWidth: 7, isDarkTheme: isDark)
 
-        GlassCard(viewModel: viewModel) {
-            VStack(spacing: 12) {
-                HStack(spacing: 16) {
-                    AttendanceCircle(percentage: Int(pctAsist.rounded()), size: 80, strokeWidth: 8, isDarkTheme: isDark)
+            // Titles
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Asistencia \(cycleYear)")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(isDark ? .white : .textDark)
+                    .lineLimit(1)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(title)
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundColor(isDark ? .white : .textDark)
-
-                        Text(subtitle)
-                            .font(.system(size: 10, weight: .black))
-                            .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-
-                        HStack(spacing: 8) {
-                            // Obligatorias count
-                            VStack(spacing: 2) {
-                                Text("\(totalObligatorias)")
-                                    .font(.system(size: 14, weight: .black))
-                                    .foregroundColor(isDark ? .white : .textDark)
-                                Text("OBLIGATORIAS")
-                                    .font(.system(size: 8, weight: .black))
-                                    .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(isDark ? Color(red: 0.12, green: 0.12, blue: 0.18).opacity(0.5) : Color(red: 0.95, green: 0.96, blue: 0.98))
-                            .cornerRadius(8)
-
-                            // Abono count
-                            VStack(spacing: 2) {
-                                Text("\(totalAbonosAsiste)")
-                                    .font(.system(size: 14, weight: .black))
-                                    .foregroundColor(isDark ? .white : .textDark)
-                                Text("ABONO")
-                                    .font(.system(size: 8, weight: .black))
-                                    .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(isDark ? Color(red: 0.12, green: 0.12, blue: 0.18).opacity(0.5) : Color(red: 0.95, green: 0.96, blue: 0.98))
-                            .cornerRadius(8)
-                        }
-                    }
-                }
-
-                if showRights {
-                    HStack(spacing: 8) {
-                        // Voto Badge
-                        Text(canVote ? "DERECHO VOTO: SÍ" : "DERECHO VOTO: NO")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundColor(canVote ? .goGreen : .bomberosRed)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background((canVote ? Color.goGreen : Color.bomberosRed).opacity(0.15))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke((canVote ? Color.goGreen : Color.bomberosRed).opacity(0.4), lineWidth: 1)
-                            )
-
-                        // Cargo Badge
-                        Text(canHoldCargo ? "DERECHO CARGO: SÍ" : "DERECHO CARGO: NO")
-                            .font(.system(size: 9, weight: .heavy))
-                            .foregroundColor(canHoldCargo ? .goGreen : .bomberosRed)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background((canHoldCargo ? Color.goGreen : Color.bomberosRed).opacity(0.15))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke((canHoldCargo ? Color.goGreen : Color.bomberosRed).opacity(0.4), lineWidth: 1)
-                            )
-                    }
-                }
+                Text("RENDIMIENTO ANUAL EN CURSO")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                    .lineLimit(1)
             }
-            .padding(14)
+
+            Spacer()
+
+            // Count Badges
+            HStack(spacing: 6) {
+                // Asiste Box
+                VStack(spacing: 2) {
+                    Text("\(stats.obligatoriasAsistidas) de \(stats.totalObligatorias)")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundColor(isDark ? .white : .textDark)
+                    Text("ASISTE")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                }
+                .frame(minWidth: 54)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+                .background(isDark ? Color.white.opacity(0.06) : Color(red: 0.96, green: 0.97, blue: 0.99))
+                .cornerRadius(10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isDark ? Color.white.opacity(0.1) : Color(red: 0.88, green: 0.90, blue: 0.94), lineWidth: 1)
+                )
+
+                // Abono Box
+                VStack(spacing: 2) {
+                    Text("\(stats.totalAbonosAsiste)")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundColor(isDark ? .white : .textDark)
+                    Text("ABONOS")
+                        .font(.system(size: 7.5, weight: .bold))
+                        .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                }
+                .frame(minWidth: 44)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 6)
+                .background(isDark ? Color.white.opacity(0.06) : Color(red: 0.96, green: 0.97, blue: 0.99))
+                .cornerRadius(10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isDark ? Color.white.opacity(0.1) : Color(red: 0.88, green: 0.90, blue: 0.94), lineWidth: 1)
+                )
+            }
         }
+        .padding(14)
+        .background(isDark ? Color.navyDark : Color.white)
+        .cornerRadius(20)
+        .shadow(color: isDark ? Color.clear : Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 20)
+                .stroke(isDark ? Color.white.opacity(0.1) : Color(red: 0.85, green: 0.94, blue: 0.90), lineWidth: 1.5)
+        )
     }
 }
 
 // MARK: - AttendanceCircle Gauge Ring
 struct AttendanceCircle: View {
-    let percentage: Int
-    var size: CGFloat = 100
-    var strokeWidth: CGFloat = 10
+    let percentage: Double
+    var size: CGFloat = 68
+    var strokeWidth: CGFloat = 7
     let isDarkTheme: Bool
 
     var body: some View {
         let trackColor = isDarkTheme ? Color.white.opacity(0.1) : Color(red: 0.88, green: 0.91, blue: 0.94)
-        let progressColor = percentage >= 50 ? Color.goGreen : Color.bomberosRed
+        let progressColor = percentage >= 50 ? Color(red: 0.02, green: 0.59, blue: 0.41) : Color.bomberosRed
         
         ZStack {
             // Background track circle
@@ -344,84 +288,126 @@ struct AttendanceCircle: View {
             
             // Progress arc circle
             Circle()
-                .trim(from: 0.0, to: CGFloat(min(self.percentage, 100)) / 100.0)
+                .trim(from: 0.0, to: CGFloat(min(max(self.percentage, 0.0), 100.0)) / 100.0)
                 .stroke(progressColor, style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round))
                 .frame(width: size, height: size)
                 .rotationEffect(Angle(degrees: -90))
                 .animation(.linear(duration: 0.5), value: percentage)
             
             // Percentage Text
-            VStack(spacing: 1) {
-                Text("\(percentage)%")
-                    .font(.system(size: 20, weight: .black))
-                    .foregroundColor(isDarkTheme ? .white : .textDark)
-                
-                Text("Asistencia")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundColor(isDarkTheme ? .textSecondaryDark : .textSecondary)
-            }
+            Text(String(format: "%.2f%%", percentage))
+                .font(.system(size: 9.5, weight: .black))
+                .foregroundColor(isDarkTheme ? .white : .textDark)
         }
     }
 }
 
-// MARK: - AttendanceItemRow Component
-struct AttendanceItemRow: View {
+// MARK: - AttendanceGridCard Component (Exact ANDROID 5.jpeg 2-Column Grid Card)
+struct AttendanceGridCard: View {
     let item: AttendanceSheet
-    @ObservedObject var viewModel: SisBomViewModel
+    let isDark: Bool
 
     var body: some View {
-        let isDark = viewModel.isDarkMode
+        let rawStatus = item.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanStatus: String = {
-            switch item.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) {
+            switch rawStatus {
             case "A", "ASISTE": return "ASISTE"
             case "F", "FALTA": return "FALTA"
             case "L", "LICENCIA": return "LICENCIA"
             case "P", "PERMISO": return "PERMISO"
             case "S", "SUSPENDIDO": return "SUSPENDIDO"
             case "CDS": return "CDS"
-            default: return item.userEstado.uppercased()
+            default: return rawStatus.isEmpty ? "FALTA" : rawStatus
             }
         }()
-        
-        let badgeColor: Color = {
+
+        let statusText: String = {
             switch cleanStatus {
-            case "ASISTE", "CDS": return .goGreen
-            case "FALTA": return .bomberosRed
-            case "PERMISO": return .alertAmber
-            case "LICENCIA": return .infoBlue
-            case "SUSPENDIDO": return .purple
-            default: return .gray
+            case "ASISTE", "CDS": return "✓ ASISTE"
+            case "FALTA": return "✗ FALTA"
+            case "PERMISO": return "✗ PERMISO"
+            case "LICENCIA": return "✗ LICENCIA"
+            case "SUSPENDIDO": return "✗ SUSPENDIDO"
+            default: return cleanStatus
             }
         }()
-        
-        GlassCard(viewModel: viewModel) {
-            HStack {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(item.clave)
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundColor(isDark ? .white : .textDark)
-                    
-                    Text("\(item.fecha) - \(item.hora) | \(item.lugar)")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-                        .lineLimit(1)
-                }
-                
-                Spacer()
-                
-                Text(cleanStatus)
-                    .font(.system(size: 10, weight: .black))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .foregroundColor(badgeColor)
-                    .background(badgeColor.opacity(0.15))
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(badgeColor.opacity(0.5), lineWidth: 1)
-                    )
+
+        let statusColor: Color = {
+            switch cleanStatus {
+            case "ASISTE", "CDS": return Color(red: 0.02, green: 0.59, blue: 0.41)
+            case "FALTA", "SUSPENDIDO": return Color(red: 0.85, green: 0.18, blue: 0.18)
+            case "PERMISO": return Color(red: 0.85, green: 0.48, blue: 0.05)
+            case "LICENCIA": return Color(red: 0.15, green: 0.45, blue: 0.85)
+            default: return Color.gray
             }
-            .padding(14)
+        }()
+
+        let cardBg: Color = {
+            if isDark {
+                switch cleanStatus {
+                case "ASISTE", "CDS": return Color.goGreen.opacity(0.12)
+                case "FALTA", "SUSPENDIDO": return Color.bomberosRed.opacity(0.12)
+                case "PERMISO": return Color.alertAmber.opacity(0.12)
+                default: return Color.white.opacity(0.06)
+                }
+            } else {
+                switch cleanStatus {
+                case "ASISTE", "CDS": return Color(red: 0.92, green: 0.98, blue: 0.95)
+                case "FALTA", "SUSPENDIDO": return Color(red: 0.99, green: 0.93, blue: 0.93)
+                case "PERMISO": return Color(red: 1.0, green: 0.97, blue: 0.91)
+                default: return Color(red: 0.95, green: 0.96, blue: 0.98)
+                }
+            }
+        }()
+
+        let borderColor: Color = {
+            if isDark {
+                switch cleanStatus {
+                case "ASISTE", "CDS": return Color.goGreen.opacity(0.35)
+                case "FALTA", "SUSPENDIDO": return Color.bomberosRed.opacity(0.35)
+                case "PERMISO": return Color.alertAmber.opacity(0.35)
+                default: return Color.white.opacity(0.12)
+                }
+            } else {
+                switch cleanStatus {
+                case "ASISTE", "CDS": return Color(red: 0.65, green: 0.90, blue: 0.78)
+                case "FALTA", "SUSPENDIDO": return Color(red: 0.96, green: 0.78, blue: 0.78)
+                case "PERMISO": return Color(red: 0.98, green: 0.88, blue: 0.70)
+                default: return Color(red: 0.88, green: 0.90, blue: 0.94)
+                }
+            }
+        }()
+
+        VStack(alignment: .leading, spacing: 4) {
+            // Clave
+            Text(item.clave)
+                .font(.system(size: 14, weight: .black))
+                .foregroundColor(isDark ? .white : .textDark)
+
+            // Status Badge Text
+            Text(statusText)
+                .font(.system(size: 11, weight: .black))
+                .foregroundColor(statusColor)
+
+            // Date & Time
+            Text("\(item.fecha) \(item.hora)")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                .lineLimit(1)
+
+            // Location
+            Text(item.lugar.isEmpty ? "Cuartel General" : item.lugar)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundColor(isDark ? Color.white.opacity(0.7) : Color(red: 0.32, green: 0.38, blue: 0.45))
+                .lineLimit(2)
         }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBg)
+        .cornerRadius(14)
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(borderColor, lineWidth: 1.2)
+        )
     }
 }

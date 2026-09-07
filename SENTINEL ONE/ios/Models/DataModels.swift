@@ -14,9 +14,10 @@ struct UserPersonal: Identifiable, Codable, Equatable {
     let foto: String
     let estado: String
     var deviceId: String
+    let puerta: Bool
 
     enum CodingKeys: String, CodingKey {
-        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado, deviceId
+        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado, deviceId, puerta
     }
 
     init(
@@ -30,7 +31,8 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         cargo: String = "",
         foto: String = "",
         estado: String = "",
-        deviceId: String = ""
+        deviceId: String = "",
+        puerta: Bool = false
     ) {
         self.idRegistro = idRegistro
         self.nombreBombero = nombreBombero
@@ -43,6 +45,7 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         self.foto = foto
         self.estado = estado
         self.deviceId = deviceId
+        self.puerta = puerta
     }
 
     // Direct initialization from Firestore document dictionary
@@ -115,6 +118,17 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         self.foto = data["foto"] as? String ?? ""
         self.estado = data["estado"] as? String ?? ""
         self.deviceId = data["deviceId"] as? String ?? ""
+
+        if let p = data["puerta"] as? Bool {
+            self.puerta = p
+        } else if let num = data["puerta"] as? NSNumber {
+            self.puerta = (num.intValue == 1)
+        } else if let str = data["puerta"] as? String {
+            let s = str.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            self.puerta = (s == "SI" || s == "1" || s == "TRUE" || s == "S")
+        } else {
+            self.puerta = false
+        }
     }
 
     init(from decoder: Decoder) throws {
@@ -187,6 +201,17 @@ struct UserPersonal: Identifiable, Codable, Equatable {
             activo = (s == "1" || s == "SI" || s == "TRUE" || s == "S")
         } else {
             activo = false
+        }
+
+        if let boolVal = try? container.decode(Bool.self, forKey: .puerta) {
+            puerta = boolVal
+        } else if let intVal = try? container.decode(Int.self, forKey: .puerta) {
+            puerta = (intVal == 1)
+        } else if let strVal = try? container.decode(String.self, forKey: .puerta) {
+            let s = strVal.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            puerta = (s == "1" || s == "SI" || s == "TRUE" || s == "S")
+        } else {
+            puerta = false
         }
     }
 }

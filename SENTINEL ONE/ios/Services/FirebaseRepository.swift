@@ -92,7 +92,7 @@ class FirebaseRepository {
                 }
                 guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
                 return try? JSONDecoder().decode(AlertaItem.self, from: jsonData)
-            }
+            }.filter { isAlertActive(duracion: $0.duracion) }
             onChange(list)
         }
     }
@@ -310,4 +310,71 @@ class FirebaseRepository {
             }
         }
     }
+
+    func setDoorOpen(onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
+        db.collection("accesos").document("central").updateData(["puerta": true]) { err in
+            if let err = err {
+                onFailure(err)
+            } else {
+                onSuccess()
+            }
+        }
+    }
+}
+
+func isAlertActive(duracion: String) -> Bool {
+    let durStr = duracion.replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if durStr == "i" || durStr == "c" { return true }
+    if durStr.isEmpty { return false }
+    
+    var dPart = durStr
+    var tPart = "23:59:59"
+    
+    if durStr.contains(" ") {
+        let parts = durStr.components(separatedBy: " ")
+        if parts.count >= 2 {
+            dPart = parts[0]
+            tPart = parts[1]
+            if tPart.filter({ $0 == ":" }).count == 1 {
+                tPart += ":00"
+            }
+        }
+    }
+    
+    if dPart.contains("-") && dPart.components(separatedBy: "-").first?.count == 2 {
+        let parts = dPart.components(separatedBy: "-")
+        let tParts = tPart.components(separatedBy: ":")
+        if parts.count >= 3 {
+            guard let year = Int(parts[2]),
+                  let month = Int(parts[1]),
+                  let day = Int(parts[0]) else { return true }
+            let hour = Int(tParts.first ?? "23") ?? 23
+            let min = (tParts.count > 1 ? Int(tParts[1]) : 59) ?? 59
+            let sec = (tParts.count > 2 ? Int(tParts[2]) : 59) ?? 59
+            
+            var comp = DateComponents()
+            comp.year = year
+            comp.month = month
+            comp.day = day
+            comp.hour = hour
+            comp.minute = min
+            comp.second = sec
+            
+            if let targetDate = Calendar.current.date(from: comp) {
+                return targetDate >= Date()
+            }
+            return true
+        }
+    }
+    
+    let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"]
+    for f in formats {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = f
+        if let d = df.date(from: durStr) {
+            return d >= Date()
+        }
+    }
+    return true
 }

@@ -36,6 +36,7 @@ targets:
           - fetch
           - remote-notification
           - audio
+          - location
         NSLocationWhenInUseUsageDescription: "SENTINEL ONE requiere acceso a su ubicación para calcular distancias a emergencias y coordinar al personal."
         NSLocationAlwaysAndWhenInUseUsageDescription: "SENTINEL ONE requiere acceso a su ubicación para alertas de despacho y seguimiento de emergencias."
         NSCameraUsageDescription: "SENTINEL ONE requiere acceso a la cámara para adjuntar fotografías en reportes y bitácora de emergencias."
