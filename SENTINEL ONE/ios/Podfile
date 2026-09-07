@@ -1,0 +1,10 @@
+platform :ios, '15.0'
+
+use_frameworks!
+
+target 'SisBom' do
+  pod 'FirebaseCore'
+  pod 'FirebaseAuth'
+  pod 'FirebaseFirestore'
+  pod 'FirebaseMessaging'
+end
