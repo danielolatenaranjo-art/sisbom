@@ -854,12 +854,11 @@ class FirebaseRepository {
                 } else null
             }
 
+            // Coordenadas del Incidente (Marcadas estrictamente por Central CAD / Mapa Táctico)
             val geoMap = (doc.get("geo") as? Map<*, *>)
-                ?: (doc.get("ubicacionGps") as? Map<*, *>)
                 ?: (doc.get("geolocalizacion") as? Map<*, *>)
+                ?: (doc.get("ubicacionGps") as? Map<*, *>)
                 ?: (doc.get("coordenadas") as? Map<*, *>)
-                ?: (doc.get("alertanteGeo") as? Map<*, *>)
-                ?: (doc.get("geolocalizacionAlertante") as? Map<*, *>)
 
             val geoPoint = doc.getGeoPoint("posicionGps") ?: doc.getGeoPoint("geo") ?: doc.getGeoPoint("ubicacionGps")
             val latVal = geoPoint?.latitude
@@ -873,6 +872,16 @@ class FirebaseRepository {
                 ?: (geoMap?.get("lng") as? String)?.toDoubleOrNull()
                 ?: (doc.get("lng") as? Number)?.toDouble()
                 ?: (doc.get("lng") as? String)?.toDoubleOrNull()
+
+            // Coordenadas separadas del Alertante (si reportó ubicación por link SMS/WhatsApp)
+            val alertanteMap = (doc.get("geolocalizacionAlertante") as? Map<*, *>)
+                ?: (doc.get("alertanteGeo") as? Map<*, *>)
+            val alertanteLatVal = (alertanteMap?.get("lat") as? Number)?.toDouble()
+                ?: (alertanteMap?.get("lat") as? String)?.toDoubleOrNull()
+            val alertanteLngVal = (alertanteMap?.get("lng") as? Number)?.toDouble()
+                ?: (alertanteMap?.get("lng") as? String)?.toDoubleOrNull()
+            val alertanteAccVal = (alertanteMap?.get("accuracy") as? Number)?.toFloat()
+                ?: (alertanteMap?.get("accuracy") as? String)?.toFloatOrNull()
 
             val phoneVal = doc.getString("telefono")
                 ?: (doc.get("smsSolicitudGeo") as? Map<*, *>)?.get("telefono")?.toString()
@@ -905,7 +914,10 @@ class FirebaseRepository {
                 solicitante = solicitanteVal,
                 telefono = phoneVal,
                 lat = latVal,
-                lng = lngVal
+                lng = lngVal,
+                alertanteLat = alertanteLatVal,
+                alertanteLng = alertanteLngVal,
+                alertanteAccuracy = alertanteAccVal
             )
         } catch (_: Exception) {
             null

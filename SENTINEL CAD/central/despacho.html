@@ -457,7 +457,7 @@
                     </button>
                 </div>
                 <div class="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg text-[11px] text-blue-400 font-mono break-all select-all" id="sms-generated-link">
-                    https://sisbom.web.app/geo.html?id=...
+                    https://sentinel.web.app/geo.html?id=...
                 </div>
             </div>
 
@@ -2024,7 +2024,7 @@
             }
         };
 
-        const PUBLIC_GEO_BASE_URL = 'https://sisbom.web.app/geo.html';
+        const PUBLIC_GEO_BASE_URL = 'https://sentinel.web.app/geo.html';
 
         window.switchMapTileLayer = function(type) {
             activeTileLayerType = type;
@@ -2457,6 +2457,60 @@
                 console.warn("Error Local Vehicles"); 
             } finally {
                 window.updateFinalizeButtonState();
+            }
+        };
+
+        window.forceRefreshVehicles = async function() {
+            const btn = document.getElementById('btn-refresh-units');
+            const icon = btn ? btn.querySelector('i') : null;
+            if (icon) icon.classList.add('fa-spin');
+
+            try {
+                // 1. Intentar consultar Firebase si está activo
+                const targetDb = window.fbDb || (window.parent && window.parent.fbDb);
+                const targetGetDocs = window.fbGetDocs || (window.parent && window.parent.fbGetDocs);
+                const targetCollection = window.fbCollection || (window.parent && window.parent.fbCollection);
+
+                if (targetDb && targetGetDocs && targetCollection) {
+                    try {
+                        const snap = await targetGetDocs(targetCollection(targetDb, 'vehiculos'));
+                        if (snap && !snap.empty) {
+                            vehiclesData = [];
+                            snap.forEach(d => {
+                                const data = d.data() || {};
+                                data.idCarro = d.id;
+                                vehiclesData.push(data);
+                            });
+                            localStorage.setItem('db_vehiculos', JSON.stringify(vehiclesData));
+                        }
+                    } catch(e) {
+                        console.warn("Error leyendo Firebase directo en forceRefreshVehicles:", e);
+                    }
+                }
+
+                // 2. Si todavía no hay vehículos o para asegurar fallback local
+                if (!vehiclesData || vehiclesData.length === 0) {
+                    try {
+                        const res = await fetch('./db_vehiculos.json?_t=' + Date.now());
+                        if (res.ok) {
+                            const data = await res.json();
+                            if (Array.isArray(data) && data.length > 0) {
+                                vehiclesData = data;
+                                localStorage.setItem('db_vehiculos', JSON.stringify(vehiclesData));
+                            }
+                        }
+                    } catch(e) {}
+                }
+
+                await window.fetchVehiclesLocal();
+                if (typeof renderUnitSelector === 'function') renderUnitSelector();
+                if (typeof window.updateFinalizeButtonState === 'function') window.updateFinalizeButtonState();
+            } catch(e) {
+                console.error("Error forzando refresco de vehículos:", e);
+            } finally {
+                setTimeout(() => {
+                    if (icon) icon.classList.remove('fa-spin');
+                }, 600);
             }
         };
 
@@ -3577,7 +3631,7 @@
             const phoneInput = document.getElementById('sms-caller-phone');
             if (phoneInput) phoneInput.value = "";
             const generatedLink = document.getElementById('sms-generated-link');
-            if (generatedLink) generatedLink.innerText = "https://sisbom.web.app/geo.html?id=...";
+            if (generatedLink) generatedLink.innerText = "https://sentinel.web.app/geo.html?id=...";
             const mapBadge = document.getElementById('map-alertante-badge');
             if (mapBadge) mapBadge.classList.add('hidden');
             const smsWait = document.getElementById('sms-waiting-status');

@@ -158,6 +158,10 @@ exports.enviarDespacho = onDocumentWritten(
     // Direct topic dispatch (each Fire Department has its own isolated Firebase project)
     const payload = {
       topic: "despachos",
+      notification: {
+        title: String(titleText),
+        body: String(unidadesTexto)
+      },
       data: {
         title: String(titleText),
         body: String(unidadesTexto),
@@ -169,6 +173,24 @@ exports.enviarDespacho = onDocumentWritten(
       },
       android: {
         priority: "high"
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: String(titleText),
+              body: String(unidadesTexto)
+            },
+            sound: "default",
+            category: "EMERGENCY_DISPATCH",
+            contentAvailable: true,
+            mutableContent: true
+          }
+        }
       }
     };
 
@@ -217,6 +239,10 @@ exports.enviarAlerta = onDocumentCreated(
     const aQuien = String(data.aQuienAlerta || "").trim().toUpperCase();
 
     const payload = {
+      notification: {
+        title: String(razon),
+        body: String(mensaje)
+      },
       data: {
         title: String(razon),
         body: String(mensaje),
@@ -227,6 +253,23 @@ exports.enviarAlerta = onDocumentCreated(
       },
       android: {
         priority: "high"
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: String(razon),
+              body: String(mensaje)
+            },
+            sound: "default",
+            category: (typePush === "CHAT") ? "CHAT_ALERT" : "GENERAL_ALERT",
+            contentAvailable: true
+          }
+        }
       }
     };
 
@@ -286,6 +329,10 @@ exports.actualizarChat = onDocumentUpdated(
     const aQuien = String(newData.aQuienAlerta || "").trim().toUpperCase();
 
     const payload = {
+      notification: {
+        title: String(razon),
+        body: String(ultimoMensaje)
+      },
       data: {
         title: String(razon),
         body: String(ultimoMensaje),
@@ -296,6 +343,23 @@ exports.actualizarChat = onDocumentUpdated(
       },
       android: {
         priority: "high"
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: String(razon),
+              body: String(ultimoMensaje)
+            },
+            sound: "default",
+            category: "CHAT_ALERT",
+            contentAvailable: true
+          }
+        }
       }
     };
 
@@ -358,6 +422,10 @@ exports.actualizarDespacho = onDocumentUpdated(
         console.log(`Nueva solicitud 12-10 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
           topic: "conductores",
+          notification: {
+            title: `SOLICITUD 12-10: ${unitName}`,
+            body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`
+          },
           data: {
             title: `SOLICITUD 12-10: ${unitName}`,
             body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`,
@@ -371,6 +439,23 @@ exports.actualizarDespacho = onDocumentUpdated(
           },
           android: {
             priority: "high"
+          },
+          apns: {
+            headers: {
+              "apns-priority": "10",
+              "apns-push-type": "alert"
+            },
+            payload: {
+              aps: {
+                alert: {
+                  title: `SOLICITUD 12-10: ${unitName}`,
+                  body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`
+                },
+                sound: "default",
+                category: "GENERAL_ALERT",
+                contentAvailable: true
+              }
+            }
           }
         };
         try {
@@ -391,6 +476,10 @@ exports.actualizarDespacho = onDocumentUpdated(
         console.log(`Nueva solicitud 6-6 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
           topic: "alertas_generales",
+          notification: {
+            title: `SOLICITUD 6-6: ${unitName}`,
+            body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`
+          },
           data: {
             title: `SOLICITUD 6-6: ${unitName}`,
             body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`,
@@ -404,6 +493,23 @@ exports.actualizarDespacho = onDocumentUpdated(
           },
           android: {
             priority: "high"
+          },
+          apns: {
+            headers: {
+              "apns-priority": "10",
+              "apns-push-type": "alert"
+            },
+            payload: {
+              aps: {
+                alert: {
+                  title: `SOLICITUD 6-6: ${unitName}`,
+                  body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`
+                },
+                sound: "default",
+                category: "GENERAL_ALERT",
+                contentAvailable: true
+              }
+            }
           }
         };
         try {
@@ -428,6 +534,10 @@ exports.actualizarDespacho = onDocumentUpdated(
       console.log(`Alarma escalada (${alarmClave}) en despacho ${id}`);
       const payload = {
         topic: "despachos",
+        notification: {
+          title: alarmTitle,
+          body: `${alarmClave} • ${lugar}`
+        },
         data: {
           title: alarmTitle,
           body: `${alarmClave} • ${lugar}`,
@@ -441,6 +551,23 @@ exports.actualizarDespacho = onDocumentUpdated(
         },
         android: {
           priority: "high"
+        },
+        apns: {
+          headers: {
+            "apns-priority": "10",
+            "apns-push-type": "alert"
+          },
+          payload: {
+            aps: {
+              alert: {
+                title: alarmTitle,
+                body: `${alarmClave} • ${lugar}`
+              },
+              sound: "default",
+              category: "EMERGENCY_DISPATCH",
+              contentAvailable: true
+            }
+          }
         }
       };
       try {
@@ -748,6 +875,10 @@ exports.actualizarEstadoPersonal = onDocumentUpdated(
 
     const payload = {
       topic: `usuario_${safeTopic}`,
+      notification: {
+        title: "ESTADO ACTUALIZADO",
+        body: `Tu estado ha sido cambiado a ${newEstado} por la Central`
+      },
       data: {
         title: "ESTADO ACTUALIZADO",
         body: `Tu estado ha sido cambiado a ${newEstado} por la Central`,
@@ -757,6 +888,23 @@ exports.actualizarEstadoPersonal = onDocumentUpdated(
       },
       android: {
         priority: "high"
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: "ESTADO ACTUALIZADO",
+              body: `Tu estado ha sido cambiado a ${newEstado} por la Central`
+            },
+            sound: "default",
+            category: "GENERAL_ALERT",
+            contentAvailable: true
+          }
+        }
       }
     };
 

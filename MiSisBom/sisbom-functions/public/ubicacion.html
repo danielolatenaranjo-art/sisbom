@@ -67,8 +67,8 @@
             <img src="./Logo.png" alt="Bomberos" class="w-full h-full object-contain filter drop-shadow" onerror="this.style.display='none'; document.getElementById('alt-fire-icon').classList.remove('hidden');">
             <i id="alt-fire-icon" class="fas fa-fire-extinguisher text-3xl text-red-500 hidden"></i>
         </div>
-        <h1 id="header-org-name" class="text-xl font-black tracking-wider text-red-500">CUERPO DE BOMBEROS DE PLACILLA</h1>
-        <h2 class="text-[11px] font-bold tracking-widest text-slate-400 mt-0.5">SISTEMA DE GEOLOCALIZACIÓN DE EMERGENCIAS</h2>
+        <h1 id="header-org-name" class="text-xl font-black tracking-wider text-red-500">CUERPO DE BOMBEROS</h1>
+        <h2 class="text-[11px] font-bold tracking-widest text-slate-400 mt-0.5">SISTEMA DE GEOLOCALIZACIÓN</h2>
     </header>
 
     <!-- TARJETA PRINCIPAL -->
@@ -91,7 +91,7 @@
             </button>
             
             <p class="text-[10px] text-slate-500 mt-4 font-bold">
-                <i class="fas fa-shield-halved mr-1"></i> Conexión Segura con Central 132
+                <i class="fas fa-shield-halved mr-1"></i> Conexión directa con Central de Alarmas y Despachos
             </p>
         </div>
 
@@ -150,19 +150,24 @@
                 <span>REINTENTAR AHORA</span>
             </button>
         </div>
-
     </main>
 
-    <!-- PIE DE PÁGINA -->
-    <footer class="w-full max-w-md text-center text-[10px] text-slate-500 font-bold mt-4">
-        SISBOM CENTRAL DE EMERGENCIAS • 132
+    <!-- PIE DE PÁGINA CON BRANDING OFICIAL SENTINEL LINK -->
+    <footer class="w-full max-w-md flex flex-col items-center justify-center gap-1.5 mt-6 mb-2">
+        <div class="flex items-center justify-center gap-2">
+            <img src="sentinel_link_logo.png" alt="SENTINEL LINK" class="h-7 w-auto object-contain drop-shadow" onerror="this.onerror=null; this.src='Logo.png';">
+            <span class="text-amber-500 font-extrabold text-[11px] tracking-wider">V.2.1.1</span>
+        </div>
+        <span class="text-[9.5px] text-slate-500 font-bold uppercase tracking-wider">
+            SENTINEL LINK • CENTRAL DE ALARMAS Y DESPACHOS
+        </span>
     </footer>
 
     <!-- FIREBASE SDK & LÓGICA DE GEOLOCALIZACIÓN -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
         // Parámetros de URL
         const urlParams = new URLSearchParams(window.location.search);
@@ -171,43 +176,21 @@
         const orgParam = urlParams.get('org') || urlParams.get('cuerpo') || 'SISBOM';
 
         // Configuración oficial Firebase Multi-Tenant Dinámica
-        const KNOWN_PROJECTS = {
-            'pruebas-sisbom': {
-                projectId: "pruebas-sisbom",
-                appId: "1:306101642399:web:0f26dd8b37eb90ce91aeaa",
-                storageBucket: "pruebas-sisbom.firebasestorage.app",
-                apiKey: "AIzaSyDyQc_gHlHocYJ5x8Wj0EZdSGSvbt8d9og",
-                authDomain: "pruebas-sisbom.firebaseapp.com",
-                messagingSenderId: "306101642399"
-            },
-            'sisbom-de5f8': {
-                projectId: "sisbom-de5f8",
-                appId: "1:39449538456:web:64f767264356ae587485ed",
-                storageBucket: "sisbom-de5f8.firebasestorage.app",
-                apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
-                authDomain: "sisbom-de5f8.firebaseapp.com",
-                messagingSenderId: "39449538456"
-            }
-        };
-
         let firebaseConfig = null;
         try {
             const cfgParam = urlParams.get('cfg');
             if (cfgParam) {
                 firebaseConfig = JSON.parse(atob(decodeURIComponent(cfgParam)));
-            } else {
-                const pParam = urlParams.get('p') || urlParams.get('project');
-                if (pParam && KNOWN_PROJECTS[pParam]) {
-                    firebaseConfig = KNOWN_PROJECTS[pParam];
-                }
             }
         } catch (e) {
             console.warn("Error parseando cfg dinámico:", e);
         }
 
         if (!firebaseConfig) {
-            const pParam = urlParams.get('p') || urlParams.get('project') || 'sisbom-de5f8';
-            firebaseConfig = KNOWN_PROJECTS[pParam] || KNOWN_PROJECTS['sisbom-de5f8'];
+            try {
+                const stored = localStorage.getItem("firebaseConfig");
+                if (stored) firebaseConfig = JSON.parse(stored);
+            } catch(e) {}
         }
 
         // Branding dinámico
@@ -222,6 +205,50 @@
         let accuracyCircle = null;
         let fbDb = null;
         let auth = null;
+        let activeWatchId = null;
+        let isDisconnectedByCentral = false;
+
+        function listenToCentralDisconnection() {
+            if (!fbDb || !dispatchId || dispatchId === 'DIRECT_ALERT') return;
+            try {
+                onSnapshot(doc(fbDb, 'geolocalizaciones_alertantes', String(dispatchId)), (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        if (data && (data.estado === 'desconectado' || data.desconectado === true)) {
+                            handleCentralDisconnection();
+                        }
+                    }
+                });
+            } catch(e) {
+                console.warn("Error escuchando estado de desconexión en geo.html:", e);
+            }
+        }
+
+        function handleCentralDisconnection() {
+            if (isDisconnectedByCentral) return;
+            isDisconnectedByCentral = true;
+            if (activeWatchId !== null) {
+                navigator.geolocation.clearWatch(activeWatchId);
+                activeWatchId = null;
+            }
+            const stateSuccess = document.getElementById('state-success');
+            if (stateSuccess) {
+                stateSuccess.innerHTML = `
+                    <div class="w-16 h-16 bg-blue-500/20 border-2 border-blue-500 rounded-full flex items-center justify-center text-blue-400 text-3xl mb-4">
+                        <i class="fas fa-satellite-dish"></i>
+                    </div>
+                    <h3 class="text-lg font-black text-white mb-2">RASTREO FINALIZADO</h3>
+                    <p class="text-xs font-bold text-slate-300 mb-4 leading-relaxed">
+                        La Central de Alarmas ha registrado su última ubicación y ha finalizado la transmisión en tiempo real para preservar su batería.
+                    </p>
+                    <div class="bg-red-500/10 border border-red-500/30 p-3.5 rounded-xl text-center w-full">
+                        <p class="text-xs font-black text-red-400 leading-tight">
+                            <i class="fas fa-truck-fire mr-1.5"></i> LAS UNIDADES DE BOMBEROS CONTINÚAN EN CAMINO A SU EMERGENCIA.
+                        </p>
+                    </div>
+                `;
+            }
+        }
 
         try {
             const app = initializeApp(firebaseConfig);
@@ -229,8 +256,10 @@
             fbDb = getFirestore(app);
             signInAnonymously(auth).then(() => {
                 console.log("Autenticación anónima establecida en geo.html para proyecto:", firebaseConfig.projectId);
+                listenToCentralDisconnection();
             }).catch(err => {
                 console.warn("Fallo auth anónima (usando reglas públicas):", err);
+                listenToCentralDisconnection();
             });
             console.log("Firebase conectado en geo.html a:", firebaseConfig.projectId);
         } catch (e) {
@@ -377,7 +406,8 @@
                 }).setView([lat, lng], 16);
 
                 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19
+                    maxZoom: 19,
+                    attribution: '&copy; OpenStreetMap'
                 }).addTo(map);
 
                 const customIcon = L.divIcon({
@@ -404,8 +434,10 @@
         }
 
         function iniciarSeguimientoContinuo() {
-            if (!navigator.geolocation) return;
-            navigator.geolocation.watchPosition((pos) => {
+            if (!navigator.geolocation || isDisconnectedByCentral) return;
+            if (activeWatchId !== null) navigator.geolocation.clearWatch(activeWatchId);
+            activeWatchId = navigator.geolocation.watchPosition((pos) => {
+                if (isDisconnectedByCentral) return;
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
                 const accuracy = Math.round(pos.coords.accuracy || 0);

@@ -60,6 +60,8 @@ class SisBomViewModel: ObservableObject {
     @Published var isCentralActive: Bool = false
     @Published var centralOperatorName: String = ""
     @Published var centralOperatorId: String = ""
+    @Published var isAirplaneMode: Bool = false
+    @Published var isSyncingAttendance: Bool = false
     
     // Navigation details
     @Published var selectedDispatchId: String? = nil
@@ -95,6 +97,10 @@ class SisBomViewModel: ObservableObject {
         } else {
             // Fallback to system setting
             self.isDarkMode = UITraitCollection.current.userInterfaceStyle == .dark
+        }
+
+        if UserDefaults.standard.object(forKey: "MODO_AVION") != nil {
+            self.isAirplaneMode = UserDefaults.standard.bool(forKey: "MODO_AVION")
         }
         
         updateInterfaceStyle()
@@ -140,10 +146,32 @@ class SisBomViewModel: ObservableObject {
             object: nil
         )
         
-        // Check if there is a cached launchChatId
+        // Listen for attend dispatch action notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAttendDispatchNotification(_:)),
+            name: NSNotification.Name("AttendDispatch"),
+            object: nil
+        )
+        
+        // Listen for open fullscreen dispatch notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenFullscreenDispatchNotification(_:)),
+            name: NSNotification.Name("OpenFullscreenDispatch"),
+            object: nil
+        )
+        
+        // Check if there is a cached launchChatId or launchDispatchId
         if let launchChatId = AppDelegate.launchChatId {
             self.openChatRoom(chatId: launchChatId)
             AppDelegate.launchChatId = nil
+        }
+        if let launchDispatchId = AppDelegate.launchDispatchId {
+            DispatchQueue.main.async {
+                self.fullscreenDispatchId = launchDispatchId
+            }
+            AppDelegate.launchDispatchId = nil
         }
         
         let lastSeenVersion = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
@@ -156,6 +184,24 @@ class SisBomViewModel: ObservableObject {
         if let chatId = notification.userInfo?["chatId"] as? String {
             DispatchQueue.main.async {
                 self.openChatRoom(chatId: chatId)
+            }
+        }
+    }
+    
+    @objc private func handleAttendDispatchNotification(_ notification: Foundation.Notification) {
+        if let dId = notification.userInfo?["dispatchId"] as? String,
+           let attend = notification.userInfo?["attend"] as? Bool {
+            DispatchQueue.main.async {
+                self.attendService(dispatchId: dId, attend: attend)
+                self.fullscreenDispatchId = nil
+            }
+        }
+    }
+
+    @objc private func handleOpenFullscreenDispatchNotification(_ notification: Foundation.Notification) {
+        if let dId = notification.userInfo?["dispatchId"] as? String {
+            DispatchQueue.main.async {
+                self.fullscreenDispatchId = dId
             }
         }
     }
@@ -226,9 +272,14 @@ class SisBomViewModel: ObservableObject {
         stopFirebaseSync()
         
         // FCM Subscriptions
-        Messaging.messaging().subscribe(toTopic: "alertas_generales")
+        Messaging.messaging().subscribe(toTopic: "all")
         Messaging.messaging().subscribe(toTopic: "despachos")
-        Messaging.messaging().subscribe(toTopic: "usuario_\(userId)")
+        Messaging.messaging().subscribe(toTopic: "alertas")
+        Messaging.messaging().subscribe(toTopic: "alertas_generales")
+        if !userId.isEmpty {
+            Messaging.messaging().subscribe(toTopic: "usuario_\(userId)")
+            Messaging.messaging().subscribe(toTopic: "personal_\(userId)")
+        }
         
         self.setupListeners(userId: userId)
     }
@@ -327,7 +378,9 @@ class SisBomViewModel: ObservableObject {
                         if !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive {
                             self.playSound(soundName: "c10_30")
                             self.triggerVibration()
-                            self.fullscreenDispatchId = d.idServicio
+                            DispatchQueue.main.async {
+                                self.fullscreenDispatchId = d.idServicio
+                            }
                         }
                     }
                 } else if is1030 && !self.knownDispatchIds.contains(trackerKey1030) {
@@ -335,10 +388,16 @@ class SisBomViewModel: ObservableObject {
                     self.knownDispatchIds.insert(d.idServicio)
                     
                     // Alarma 10-30: Suena c10_30 para 0-9 (sin asistir o no asistir) y 0-8 (sin silencio absoluto)
-                    if !isSpecial && !isAbsoluteSilence && !isAttending {
+                    if !self.isFirstCheck && !isSpecial && !isAbsoluteSilence && !isAttending {
                         self.playSound(soundName: "c10_30")
                         self.triggerVibration()
-                        if !self.isFirstCheck && d.operadorFinal.isEmpty && !self.isCentralActive && (is09 || is08) {
+                        if d.operadorFinal.isEmpty && !self.isCentralActive && (is09 || is08) {
+                            DispatchQueue.main.async {
+                                self.fullscreenDispatchId = d.idServicio
+                            }
+                        }
+                    } else if d.operadorFinal.isEmpty && !self.isCentralActive && !isSpecial && !isAttending && !userEnServicio.hasPrefix("-") && (is09 || is08) {
+                        DispatchQueue.main.async {
                             self.fullscreenDispatchId = d.idServicio
                         }
                     }
@@ -346,13 +405,15 @@ class SisBomViewModel: ObservableObject {
                     self.knownDispatchIds.insert(d.idServicio)
                     let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
                     
-                    if !is08 && !isSpecial && !isAbsoluteSilence {
+                    if !self.isFirstCheck && !is08 && !isSpecial && !isAbsoluteSilence {
                         self.playSound(soundName: soundName)
                         self.triggerVibration()
                     }
 
-                    if !self.isFirstCheck && d.operadorFinal.isEmpty && !self.isCentralActive && is09 && !isAttending {
-                        self.fullscreenDispatchId = d.idServicio
+                    if d.operadorFinal.isEmpty && !self.isCentralActive && is09 && !isAttending && !userEnServicio.hasPrefix("-") {
+                        DispatchQueue.main.async {
+                            self.fullscreenDispatchId = d.idServicio
+                        }
                     }
                 }
 
@@ -373,10 +434,10 @@ class SisBomViewModel: ObservableObject {
                         let key1210 = "\(d.idServicio)_1210_\(unitName)_\(condTs > 0 ? String(condTs) : condAt)"
                         if !self.knownDispatchIds.contains(key1210) {
                             self.knownDispatchIds.insert(key1210)
-                            if is09 && !hasDeclined {
+                            if !self.isFirstCheck && is09 && !hasDeclined {
                                 self.playSound(soundName: "alerta")
+                                self.triggerVibration()
                             }
-                            self.triggerVibration()
                         }
                     }
 
@@ -387,10 +448,10 @@ class SisBomViewModel: ObservableObject {
                         let key66 = "\(d.idServicio)_66_\(unitName)_\(persTs > 0 ? String(persTs) : persAt)"
                         if !self.knownDispatchIds.contains(key66) {
                             self.knownDispatchIds.insert(key66)
-                            if is09 && !hasDeclined {
+                            if !self.isFirstCheck && is09 && !hasDeclined {
                                 self.playSound(soundName: "alerta")
+                                self.triggerVibration()
                             }
-                            self.triggerVibration()
                         }
                     }
                 }
@@ -405,6 +466,10 @@ class SisBomViewModel: ObservableObject {
                         self.changePersonalService(newServiceId: "0")
                     }
                 }
+            }
+            
+            if self.isFirstCheck {
+                self.isFirstCheck = false
             }
         }
         listeners.append(l3)
@@ -1167,5 +1232,37 @@ class SisBomViewModel: ObservableObject {
                 }
             }
         )
+    }
+
+    func openDoor(onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
+        repository.setDoorOpen(onSuccess: onSuccess, onFailure: onFailure)
+    }
+
+    func setAirplaneModeEnabled(_ enabled: Bool) {
+        if isCentralActive { return }
+        isAirplaneMode = enabled
+        UserDefaults.standard.set(enabled, forKey: "MODO_AVION")
+        if enabled {
+            changeStatus(newStatus: "0-8")
+        } else {
+            changeStatus(newStatus: "0-9")
+        }
+    }
+
+    func setDarkModeEnabled(_ enabled: Bool) {
+        isDarkMode = enabled
+        UserDefaults.standard.set(enabled, forKey: "app_dark_mode")
+        updateInterfaceStyle()
+    }
+
+    func refreshAttendance() {
+        guard let my = currentUser, !my.idRegistro.isEmpty else { return }
+        isSyncingAttendance = true
+        _ = repository.getAttendance(userId: my.idRegistro) { [weak self] list in
+            guard let self = self else { return }
+            self.attendanceList = list
+            self.saveCache(list, key: "cache_attendance")
+            self.isSyncingAttendance = false
+        }
     }
 }

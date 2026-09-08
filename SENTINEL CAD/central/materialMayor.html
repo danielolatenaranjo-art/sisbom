@@ -307,20 +307,42 @@
 
         window.resolvePersonnelFullNameLocal = function(idOrName) {
             if (!idOrName) return '';
-            const cleanVal = String(idOrName).trim().toUpperCase();
-            if (cleanVal.includes(' - ') || cleanVal.includes(' – ')) return idOrName;
+            let rawStr = String(idOrName).trim();
+            if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+
+            let candidateId = rawStr;
+            let candidateName = '';
+            if (rawStr.includes(' - ')) {
+                const parts = rawStr.split(' - ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' • ')) {
+                const parts = rawStr.split(' • ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' – ')) {
+                const parts = rawStr.split(' – ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            }
+
+            const cleanIdUpper = candidateId.toUpperCase();
             
-            const person = window.App && window.App.personalData ? window.App.personalData.find(p => p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanVal) : null;
+            const person = window.App && window.App.personalData ? window.App.personalData.find(p => 
+                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+            ) : null;
+
             if (person) {
-                return `${person.idRadial} - ${person.nombreBombero}`;
+                const rad = person.idRadial || person.radio || candidateId;
+                return `${rad} - ${person.nombreBombero}`;
             }
             
-            const personByName = window.App && window.App.personalData ? window.App.personalData.find(p => p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanVal)) : null;
-            if (personByName) {
-                return `${personByName.idRadial} - ${personByName.nombreBombero}`;
-            }
-            
-            return idOrName;
+            return candidateId;
         };
 
         window.sanitizeTimeForInput = function(val) {
@@ -1786,26 +1808,42 @@
 
             getBomberoLabel(id) {
                 if (!id || id === '0' || id === '---') return '---';
-                if (String(id).includes(' • ') || String(id).includes(' - ') || String(id).includes(' – ')) return id;
-                const cleanId = String(id).trim().toUpperCase();
-                if (cleanId === 'S/I') return 'S/I';
-                if (cleanId === 'GESTION' || cleanId === 'GESTIÓN') return 'GESTIÓN';
+                let rawStr = String(id).trim();
+                if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+
+                let candidateId = rawStr;
+                let candidateName = '';
+                if (rawStr.includes(' • ')) {
+                    const parts = rawStr.split(' • ');
+                    candidateId = parts[0].trim();
+                    candidateName = parts.slice(1).join(' ').trim();
+                } else if (rawStr.includes(' - ')) {
+                    const parts = rawStr.split(' - ');
+                    candidateId = parts[0].trim();
+                    candidateName = parts.slice(1).join(' ').trim();
+                } else if (rawStr.includes(' – ')) {
+                    const parts = rawStr.split(' – ');
+                    candidateId = parts[0].trim();
+                    candidateName = parts.slice(1).join(' ').trim();
+                }
+
+                const cleanIdUpper = candidateId.toUpperCase();
                 
                 let found = (this.personalData || []).find(p => 
-                    String(p.idRadial || '').trim().toUpperCase() === cleanId ||
-                    String(p.idRegistro || p.ID || p.id || '').trim() === cleanId
+                    (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                    (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                    (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                    (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                    (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                    (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
                 );
-                
-                if (!found) {
-                    found = (this.personalData || []).find(p => String(p.nombreBombero || '').trim().toUpperCase().includes(cleanId));
-                }
                 
                 if (found) {
                     const shortName = this.formatShortName(found.nombreBombero);
-                    const rad = found.idRadial || cleanId;
+                    const rad = found.idRadial || found.radio || candidateId;
                     return `${rad} • ${shortName}`;
                 }
-                return this.formatShortName(cleanId);
+                return this.formatShortName(candidateId);
             },
 
             getClaveForTrip(row) {

@@ -146,10 +146,32 @@ class SisBomViewModel: ObservableObject {
             object: nil
         )
         
-        // Check if there is a cached launchChatId
+        // Listen for attend dispatch action notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAttendDispatchNotification(_:)),
+            name: NSNotification.Name("AttendDispatch"),
+            object: nil
+        )
+        
+        // Listen for open fullscreen dispatch notification
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOpenFullscreenDispatchNotification(_:)),
+            name: NSNotification.Name("OpenFullscreenDispatch"),
+            object: nil
+        )
+        
+        // Check if there is a cached launchChatId or launchDispatchId
         if let launchChatId = AppDelegate.launchChatId {
             self.openChatRoom(chatId: launchChatId)
             AppDelegate.launchChatId = nil
+        }
+        if let launchDispatchId = AppDelegate.launchDispatchId {
+            DispatchQueue.main.async {
+                self.fullscreenDispatchId = launchDispatchId
+            }
+            AppDelegate.launchDispatchId = nil
         }
         
         let lastSeenVersion = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
@@ -162,6 +184,24 @@ class SisBomViewModel: ObservableObject {
         if let chatId = notification.userInfo?["chatId"] as? String {
             DispatchQueue.main.async {
                 self.openChatRoom(chatId: chatId)
+            }
+        }
+    }
+    
+    @objc private func handleAttendDispatchNotification(_ notification: Foundation.Notification) {
+        if let dId = notification.userInfo?["dispatchId"] as? String,
+           let attend = notification.userInfo?["attend"] as? Bool {
+            DispatchQueue.main.async {
+                self.attendService(dispatchId: dId, attend: attend)
+                self.fullscreenDispatchId = nil
+            }
+        }
+    }
+
+    @objc private func handleOpenFullscreenDispatchNotification(_ notification: Foundation.Notification) {
+        if let dId = notification.userInfo?["dispatchId"] as? String {
+            DispatchQueue.main.async {
+                self.fullscreenDispatchId = dId
             }
         }
     }
@@ -338,7 +378,9 @@ class SisBomViewModel: ObservableObject {
                         if !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive {
                             self.playSound(soundName: "c10_30")
                             self.triggerVibration()
-                            self.fullscreenDispatchId = d.idServicio
+                            DispatchQueue.main.async {
+                                self.fullscreenDispatchId = d.idServicio
+                            }
                         }
                     }
                 } else if is1030 && !self.knownDispatchIds.contains(trackerKey1030) {
@@ -350,6 +392,12 @@ class SisBomViewModel: ObservableObject {
                         self.playSound(soundName: "c10_30")
                         self.triggerVibration()
                         if d.operadorFinal.isEmpty && !self.isCentralActive && (is09 || is08) {
+                            DispatchQueue.main.async {
+                                self.fullscreenDispatchId = d.idServicio
+                            }
+                        }
+                    } else if d.operadorFinal.isEmpty && !self.isCentralActive && !isSpecial && !isAttending && !userEnServicio.hasPrefix("-") && (is09 || is08) {
+                        DispatchQueue.main.async {
                             self.fullscreenDispatchId = d.idServicio
                         }
                     }
@@ -362,8 +410,10 @@ class SisBomViewModel: ObservableObject {
                         self.triggerVibration()
                     }
 
-                    if !self.isFirstCheck && d.operadorFinal.isEmpty && !self.isCentralActive && is09 && !isAttending {
-                        self.fullscreenDispatchId = d.idServicio
+                    if d.operadorFinal.isEmpty && !self.isCentralActive && is09 && !isAttending && !userEnServicio.hasPrefix("-") {
+                        DispatchQueue.main.async {
+                            self.fullscreenDispatchId = d.idServicio
+                        }
                     }
                 }
 

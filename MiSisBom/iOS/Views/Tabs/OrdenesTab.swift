@@ -10,13 +10,7 @@ struct OrdenesTab: View {
             .sorted(by: { $0.idAlerta > $1.idAlerta })
         
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                Text("ÓRDENES DEL DÍA")
-                    .font(.system(size: 16, weight: .black))
-                    .foregroundColor(isDark ? .white : .textDark)
-                    .padding(.top, 16)
-                    .padding(.horizontal, 16)
-                
+            VStack(spacing: 16) {
                 if ordenes.isEmpty {
                     VStack {
                         Spacer().frame(height: 100)
@@ -26,8 +20,8 @@ struct OrdenesTab: View {
                             .frame(maxWidth: .infinity, alignment: .center)
                     }
                 } else {
-                    // Display in 2-column Grid matching Android chunking
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    // Display in 2-column Grid matching Android chunking (ANDROID 3.jpeg)
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
                         ForEach(ordenes) { orden in
                             OrdenItemCard(orden: orden, viewModel: viewModel)
                         }
@@ -37,11 +31,12 @@ struct OrdenesTab: View {
                 
                 Spacer(minLength: 20)
             }
+            .padding(.top, 8)
         }
     }
 }
 
-// MARK: - OrdenItemCard Component
+// MARK: - OrdenItemCard Component (Exact ANDROID 3.jpeg Design)
 struct OrdenItemCard: View {
     let orden: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
@@ -57,36 +52,62 @@ struct OrdenItemCard: View {
         Button(action: {
             showDetailSheet = true
         }) {
-            GlassCard(viewModel: viewModel) {
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            Text("Orden N° \(orden.numeroOrden)")
-                                .font(.system(size: 14, weight: .black))
-                                .foregroundColor(isDark ? .white : .textDark)
-                                .lineLimit(1)
-                            
-                            // Blue dot indicator if not conformed
-                            if !isConforme {
-                                Circle()
-                                    .fill(Color.infoBlue)
-                                    .frame(width: 6, height: 6)
-                            }
-                        }
-                        
-                        Text("Fecha: \(orden.fechaOrden)")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-                    }
-                    Spacer()
+            VStack(spacing: 10) {
+                // Circle with Clipboard Icon
+                ZStack {
+                    Circle()
+                        .fill(isDark ? Color.white.opacity(0.1) : Color(red: 0.88, green: 0.91, blue: 0.95))
+                        .frame(width: 48, height: 48)
+                    
+                    Image(systemName: "list.clipboard.fill")
+                        .font(.system(size: 20))
+                        .foregroundColor(isDark ? .white : Color(red: 0.32, green: 0.38, blue: 0.48))
                 }
-                .padding(16)
+                .padding(.top, 10)
+                
+                // N° Number
+                HStack(spacing: 8) {
+                    Text("N°")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(isDark ? .white : .textDark)
+                    Text(orden.numeroOrden.isEmpty ? orden.idAlerta : orden.numeroOrden)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(isDark ? .white : .textDark)
+                }
+                
+                // Date
+                Text(orden.fechaOrden.isEmpty ? orden.fechaAlerta : orden.fechaOrden)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                
+                // Divider
+                Divider()
+                    .background(isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08))
+                    .padding(.horizontal, 12)
+                
+                // Status VISTO / PENDIENTE
+                if isConforme {
+                    Text("✓ VISTO")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(Color(red: 0.02, green: 0.59, blue: 0.41))
+                        .padding(.bottom, 8)
+                } else {
+                    Text("PENDIENTE")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.bomberosRed)
+                        .padding(.bottom, 8)
+                }
             }
+            .frame(maxWidth: .infinity)
+            .background(isDark ? Color.navyDark : Color.white)
+            .cornerRadius(20)
+            .shadow(color: isDark ? Color.clear : Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
-                    .stroke(isConforme ? Color.goGreen.opacity(0.5) : Color.gray.opacity(0.3), lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isConforme ? Color.goGreen.opacity(0.35) : (isDark ? Color.white.opacity(0.1) : Color(red: 0.85, green: 0.94, blue: 0.90)), lineWidth: 1.5)
             )
         }
+        .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showDetailSheet) {
             OrdenDetailView(orden: orden, viewModel: viewModel, isPresented: $showDetailSheet)
         }

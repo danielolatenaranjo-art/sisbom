@@ -15,10 +15,15 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         super.init()
         manager.delegate = self
         manager.desiredAccuracy = kCLLocationAccuracyBest
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
+        manager.pausesLocationUpdatesAutomatically = false
     }
 
     func requestPermissions() {
+        manager.requestAlwaysAuthorization()
         manager.requestWhenInUseAuthorization()
+        manager.startUpdatingLocation()
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -29,6 +34,7 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
 // MARK: - AppDelegate for Firebase Core & Permissions Initialization
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     static var launchChatId: String? = nil
+    static var launchDispatchId: String? = nil
 
     static func configureDynamicFirebase(configStr: String) {
         guard let data = configStr.data(using: .utf8),
@@ -73,8 +79,42 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             AppDelegate.configureDynamicFirebase(configStr: cachedConfigStr)
         }
         
-        // Setup User Notifications
+        // Setup User Notifications with Interactive Categories
         UNUserNotificationCenter.current().delegate = self
+        
+        let attendAction = UNNotificationAction(
+            identifier: "ATTEND_ACTION",
+            title: "ASISTIR",
+            options: [.foreground]
+        )
+        let declineAction = UNNotificationAction(
+            identifier: "DECLINE_ACTION",
+            title: "NO ASISTIR",
+            options: [.destructive]
+        )
+        let dispatchCategory = UNNotificationCategory(
+            identifier: "EMERGENCY_DISPATCH",
+            actions: [attendAction, declineAction],
+            intentIdentifiers: [],
+            options: [.customDismissAction]
+        )
+        
+        let generalAlertCategory = UNNotificationCategory(
+            identifier: "GENERAL_ALERT",
+            actions: [],
+            intentIdentifiers: [],
+            options: []
+        )
+        
+        let chatCategory = UNNotificationCategory(
+            identifier: "CHAT_ALERT",
+            actions: [],
+            intentIdentifiers: [],
+            options: []
+        )
+        
+        UNUserNotificationCenter.current().setNotificationCategories([dispatchCategory, generalAlertCategory, chatCategory])
+        
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
                 DispatchQueue.main.async {
@@ -99,9 +139,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         
         // Check if launched from a notification response in launchOptions
         if let notificationPayload = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
-            if let type = notificationPayload["type"] as? String, type == "CHAT",
-               let payloadId = notificationPayload["payloadId"] as? String {
-                AppDelegate.launchChatId = payloadId
+            if let type = notificationPayload["type"] as? String {
+                if type == "CHAT", let payloadId = notificationPayload["payloadId"] as? String {
+                    AppDelegate.launchChatId = payloadId
+                } else if type == "DISPATCH", let payloadId = notificationPayload["payloadId"] as? String {
+                    AppDelegate.launchDispatchId = payloadId
+                }
             }
         }
         
@@ -118,26 +161,54 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound, .badge])
+        if #available(iOS 14.0, *) {
+            completionHandler([.banner, .sound, .badge, .list])
+        } else {
+            completionHandler([.alert, .sound, .badge])
+        }
     }
     
-    // Handle notification tap when app is in background/closed
+    // Handle notification tap & action buttons when app is in background/foreground/closed
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
+        let actionIdentifier = response.actionIdentifier
         
-        if let type = userInfo["type"] as? String, type == "CHAT",
-           let payloadId = userInfo["payloadId"] as? String {
-            AppDelegate.launchChatId = payloadId
-            
-            NotificationCenter.default.post(
-                name: NSNotification.Name("OpenChatRoom"),
-                object: nil,
-                userInfo: ["chatId": payloadId]
-            )
+        if let type = userInfo["type"] as? String {
+            if type == "CHAT", let payloadId = userInfo["payloadId"] as? String {
+                AppDelegate.launchChatId = payloadId
+                
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("OpenChatRoom"),
+                    object: nil,
+                    userInfo: ["chatId": payloadId]
+                )
+            } else if type == "DISPATCH", let payloadId = userInfo["payloadId"] as? String {
+                if actionIdentifier == "ATTEND_ACTION" {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("AttendDispatch"),
+                        object: nil,
+                        userInfo: ["dispatchId": payloadId, "attend": true]
+                    )
+                } else if actionIdentifier == "DECLINE_ACTION" {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("AttendDispatch"),
+                        object: nil,
+                        userInfo: ["dispatchId": payloadId, "attend": false]
+                    )
+                } else {
+                    // Notification tapped directly -> Bring up the emergency red overlay
+                    AppDelegate.launchDispatchId = payloadId
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("OpenFullscreenDispatch"),
+                        object: nil,
+                        userInfo: ["dispatchId": payloadId]
+                    )
+                }
+            }
         }
         
         completionHandler()

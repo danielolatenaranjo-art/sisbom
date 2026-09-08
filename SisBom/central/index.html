@@ -31,14 +31,63 @@ input::-webkit-credentials-auto-fill-button {
     display: none !important;
     pointer-events: none !important;
 }
-.login-input-pass {
+.login-input-pass[type="password"] {
     -webkit-text-security: disc !important;
     text-security: disc !important;
 }
+.login-input-pass[type="text"],
 .login-input-pass.show-pass-text {
     -webkit-text-security: none !important;
     text-security: none !important;
 }
+
+        /* Floating Labels para Login Centrado */
+        .floating-login-box {
+            position: relative;
+            width: 100%;
+        }
+        .floating-login-input {
+            width: 100%;
+            padding-top: 1.4rem !important;
+            padding-bottom: 0.45rem !important;
+            padding-left: 2.75rem !important;
+            padding-right: 2.75rem !important;
+            text-align: center !important;
+            font-size: 1rem !important;
+            font-weight: 700 !important;
+            color: #ffffff !important;
+            background-color: rgba(2, 6, 23, 0.6) !important;
+            border: 1px solid #1e293b !important;
+            border-radius: 0.75rem !important;
+            outline: none !important;
+            transition: all 0.2s ease !important;
+        }
+        .floating-login-input:focus {
+            background-color: rgba(15, 23, 42, 0.95) !important;
+            border-color: #B91C1C !important;
+            box-shadow: 0 0 0 3px rgba(185, 28, 28, 0.2) !important;
+        }
+        .floating-login-label {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            transition: all 0.2s ease;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #64748b;
+        }
+        .floating-login-input:focus ~ .floating-login-label,
+        .floating-login-input:not(:placeholder-shown) ~ .floating-login-label {
+            top: 0.45rem;
+            transform: translate(-50%, 0);
+            font-size: 0.625rem;
+            font-weight: 800;
+            color: #ef4444;
+        }
         /* Reglas base del sistema SisBom */
         html { font-size: 14px; }
         body { font-family: 'Segoe UI', sans-serif; background-color: #0f172a; overflow: hidden; color: #334155; }
@@ -189,6 +238,15 @@ input::-webkit-credentials-auto-fill-button {
         .f-input-pass::-ms-reveal,
         .f-input-pass::-ms-clear { display: none; }
         
+        .sidebar-collapsed-brand { display: flex !important; }
+        .sidebar-expanded-brand { display: none !important; }
+        #main-sidebar:hover .sidebar-collapsed-brand { display: none !important; }
+        #main-sidebar:hover .sidebar-expanded-brand { display: flex !important; }
+        @media (max-width: 767px) {
+            #main-sidebar .sidebar-collapsed-brand { display: none !important; }
+            #main-sidebar .sidebar-expanded-brand { display: flex !important; }
+        }
+
         /* Sync indicator visual pulse */
         .syncing-dot { animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite; }
 
@@ -541,24 +599,37 @@ input::-webkit-credentials-auto-fill-button {
             <img id="main-logo" src="Logo.png" class="w-24 h-24 mx-auto mb-4 object-contain relative z-10" title="Tocar para desbloquear" style="filter: drop-shadow(0 10px 25px rgba(239,68,68,0.25));">
             
             <form id="login-form-elements" class="relative z-0" onsubmit="event.preventDefault(); window.handleLogin();" autocomplete="off">
-                <h1 class="text-3xl font-bold text-white tracking-tight mb-1">SisBom</h1>
-                <p class="text-slate-500 font-semibold uppercase tracking-widest mb-8" style="font-size: 12px;">CENTRAL DE ALARMAS</p>
+                <h1 id="login-client-name" class="text-2xl font-black text-white tracking-tight mb-1 uppercase">CUERPO DE BOMBEROS</h1>
+                <p class="text-slate-400 font-bold uppercase tracking-widest mb-8 text-xs">CENTRAL DE ALARMAS Y DESPACHOS</p>
                 
                 <div class="space-y-4">
-                    <div class="w-full text-left">
-                        <label for="loginUser" class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 pl-1">Usuario</label>
-                        <div class="relative w-full">
-                            <input type="text" id="loginUser" autocomplete="off" spellcheck="false" class="peer f-input login-input w-full rounded-xl font-bold text-white bg-slate-950/50 border-slate-800 focus:bg-slate-900 focus:border-bomberos-red focus:ring-4 transition-all text-base placeholder-slate-650" placeholder="" onkeydown="if(event.key==='Enter') { event.preventDefault(); document.getElementById('loginPass').focus(); }">
-                            <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-500 transition-colors peer-focus:text-bomberos-red"><i class="fas fa-user text-lg"></i></div>
+                    <!-- Campo Usuario con Floating Label y Texto Centrado -->
+                    <div class="floating-login-box">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 z-10">
+                            <i class="fas fa-user text-base"></i>
                         </div>
+                        <input type="text" id="loginUser" autocomplete="off" spellcheck="false" placeholder=" "
+                               class="floating-login-input text-center font-bold text-white uppercase"
+                               onkeydown="if(event.key==='Enter') { event.preventDefault(); document.getElementById('loginPass').focus(); }">
+                        <label for="loginUser" class="floating-login-label">
+                            Usuario
+                        </label>
                     </div>
                     
-                    <div class="w-full text-left">
-                        <label for="loginPass" class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 pl-1">Clave de Acceso</label>
-                        <div class="relative w-full">
-                            <input type="password" id="loginPass" autocomplete="current-password" spellcheck="false" class="peer f-input login-input login-input-pass w-full rounded-xl font-bold text-white bg-slate-950/50 border-slate-800 focus:bg-slate-900 focus:border-bomberos-red focus:ring-4 transition-all text-base placeholder-slate-650" placeholder="">
-                            <div class="absolute inset-y-0 left-0 pl-5 flex items-center pointer-events-none text-slate-500 transition-colors peer-focus:text-bomberos-red"><i class="fas fa-lock text-lg"></i></div>
-                            <div class="absolute inset-y-0 right-0 pr-4 flex items-center z-10"><button type="button" onclick="window.togglePassword()" class="text-slate-500 hover:text-bomberos-red transition-colors focus:outline-none p-2" tabindex="-1"><i class="fas fa-eye text-lg" id="togglePassIcon"></i></button></div>
+                    <!-- Campo Clave con Floating Label y Texto Centrado -->
+                    <div class="floating-login-box">
+                        <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 z-10">
+                            <i class="fas fa-lock text-base"></i>
+                        </div>
+                        <input type="password" id="loginPass" autocomplete="current-password" spellcheck="false" placeholder=" "
+                               class="floating-login-input login-input-pass text-center font-bold text-white">
+                        <label for="loginPass" class="floating-login-label">
+                            Clave de Acceso
+                        </label>
+                        <div class="absolute inset-y-0 right-0 pr-3 flex items-center z-20">
+                            <button type="button" onclick="window.togglePassword()" class="text-slate-500 hover:text-bomberos-red transition-colors focus:outline-none p-2" tabindex="-1" title="Mostrar/Ocultar clave">
+                                <i class="fas fa-eye text-base" id="togglePassIcon"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -566,8 +637,30 @@ input::-webkit-credentials-auto-fill-button {
                 <div id="loginError" class="text-red-500 text-xs font-bold text-center h-5 mt-4 mb-2 flex items-center justify-center gap-2 transition-opacity"></div>
                 <button type="submit" id="btnLogin" class="w-full py-4 bg-bomberos-red hover:bg-bomberos-dark text-white font-bold rounded-xl btn-login-shadow hover:-translate-y-0.5 transition-all duration-200 text-sm uppercase tracking-widest flex items-center justify-center gap-2"><i class="fas fa-sign-in-alt"></i> Ingresar al Sistema</button>
             </form>
-            <p id="sisbom-version" class="mt-8 text-slate-550 font-semibold tracking-wider transition-opacity" style="font-size: 10px; transition-duration: 1500ms;">SisBom • V.2.1.0</p>
+            <div id="sisbom-version" class="mt-8 flex items-center justify-center gap-3 transition-opacity">
+                <img src="SENTINEL CAD.png" alt="SENTINEL CAD" class="h-8 md:h-9 object-contain" style="filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));" onerror="this.onerror=null; this.src='sentinel_cad_logo.png';">
+                <span class="text-white/90 font-black tracking-widest uppercase text-xs md:text-sm" style="letter-spacing: 0.15em; text-shadow: 0 1px 4px rgba(0,0,0,0.7);">V.2.1.1</span>
+            </div>
         </div>
+        <script>
+            (function() {
+                try {
+                    function formatCuerpoDe(rawName) {
+                        if (!rawName) return "CUERPO DE BOMBEROS";
+                        let name = rawName.trim();
+                        let clean = name.replace(/^cuerpo\s+de\s+bomberos\s+de\s+/i, '')
+                                        .replace(/^cuerpo\s+de\s+bomberos\s+/i, '')
+                                        .replace(/^cb\s+de\s+/i, '')
+                                        .replace(/^cb\s+/i, '')
+                                        .trim();
+                        return `CUERPO DE BOMBEROS DE ${clean.toUpperCase()}`;
+                    }
+                    const cn = localStorage.getItem('nombreMostrar');
+                    const el = document.getElementById('login-client-name');
+                    if (el) el.innerText = formatCuerpoDe(cn);
+                } catch(e){}
+            })();
+        </script>
     </div>
 
 
@@ -853,12 +946,12 @@ input::-webkit-credentials-auto-fill-button {
                 <button type="button" onclick="window.toggleSidebar()" class="text-white hover:text-white transition-colors md:hidden p-2 rounded-lg hover:bg-red-800 shrink-0">
                     <i class="fas fa-bars text-lg"></i>
                 </button>
-                <div class="flex items-center gap-3">
-                    <img src="Logo.png" class="h-9 w-9 object-contain shrink-0 drop-shadow-sm">
-                    <div class="flex flex-col">
-                        <span class="font-bold text-white tracking-tight text-sm sm:text-base leading-none">SENTINEL CAD</span>
+                <div class="flex items-center gap-3 min-w-0">
+                    <img id="header-client-logo" src="Logo.png" class="h-10 w-10 object-contain shrink-0 drop-shadow-md" alt="Logo Institucional">
+                    <div class="flex flex-col min-w-0">
+                        <span id="header-client-name" class="font-black text-white tracking-tight text-sm sm:text-base leading-tight uppercase truncate">Cuerpo de Bomberos</span>
                         <div class="flex items-center gap-2">
-                            <span class="text-red-200 font-black leading-tight uppercase tracking-widest mt-0.5" style="font-size: 10px;">Central de Alarmas</span>
+                            <span class="text-amber-400 font-extrabold leading-tight uppercase tracking-widest mt-0.5" style="font-size: 9.5px;">CENTRAL DE ALARMAS Y DESPACHO</span>
                             <div id="offline-indicator" class="hidden items-center gap-1 bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded text-[8px] font-black tracking-widest uppercase mt-0.5 shadow-inner border border-orange-200" title="Trabajando sin conexión">
                                 <span class="w-1.5 h-1.5 bg-orange-500 rounded-full animate-pulse"></span> OFFLINE
                             </div>
@@ -925,17 +1018,22 @@ input::-webkit-credentials-auto-fill-button {
                     <button type="button" onclick="window.navigate('sirena', 'sirena.html', this)" class="nav-btn"><div class="flex items-center"><i class="fas fa-bullhorn shrink-0"></i><span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Sirena</span></div></button>
                 </div>
                 
-                <div class="px-3 py-2.5 border-t border-slate-800/80 bg-slate-950/60 flex flex-col items-center gap-1.5 shrink-0">
-                    <div id="sidebar-reconnect-indicator" class="hidden w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold transition-all cursor-pointer" onclick="window.softReconnect('manual')" title="Haga clic para reconectar ahora">
+                <div class="px-2 py-3 border-t border-slate-800/80 bg-slate-950/70 flex flex-col items-center justify-center shrink-0 w-full overflow-hidden">
+                    <div id="sidebar-reconnect-indicator" class="hidden w-full flex items-center gap-2 px-2.5 py-1.5 mb-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 font-semibold transition-all cursor-pointer" onclick="window.softReconnect('manual')" title="Haga clic para reconectar ahora">
                         <div class="w-3.5 h-3.5 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin shrink-0"></div>
                         <span id="sidebar-reconnect-text" class="truncate transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 uppercase tracking-wider" style="font-size: 11px;">Reconectando...</span>
                     </div>
-                    <div class="flex items-center justify-center py-1">
-                        <img src="sentinel_logo.png" alt="SENTINEL" class="h-10 w-10 object-contain drop-shadow-md transition-transform duration-200 group-hover:scale-105">
+                    
+                    <!-- Vista Colapsada (Escudo logo 2 grande + versión 10px amarillo oscuro abajo) -->
+                    <div class="sidebar-collapsed-brand flex flex-col items-center justify-center gap-0.5 w-full">
+                        <img src="logo 2.png" alt="SENTINEL" class="h-11 w-11 object-contain drop-shadow-md">
+                        <span style="font-size: 10px; line-height: 1; letter-spacing: 0.5px; color: #d97706;" class="font-bold">V.2.1.1</span>
                     </div>
-                    <div class="w-full px-1.5 py-0.5 text-slate-400 font-bold tracking-widest transition-opacity duration-200 md:opacity-0 group-hover:opacity-100 flex justify-between items-center text-[10px]">
-                        <span>SENTINEL CAD</span>
-                        <span class="text-red-400">V.2.1.1</span>
+
+                    <!-- Vista Expandida (Logo SENTINEL CAD horizontal grande + versión 10px amarillo oscuro abajo) -->
+                    <div class="sidebar-expanded-brand flex flex-col items-center justify-center w-full px-2">
+                        <img src="sentinel_cad_logo.png" alt="SENTINEL CAD" class="h-9 w-auto max-w-[210px] object-contain drop-shadow-md">
+                        <span style="font-size: 10px; line-height: 1; letter-spacing: 0.8px; color: #d97706;" class="font-bold text-center mt-1">V.2.1.1</span>
                     </div>
                 </div>
             </aside>
@@ -1123,7 +1221,10 @@ input::-webkit-credentials-auto-fill-button {
                                         </div>
                                     </div>
                                     
-                                    <div class="card-map-wrapper cursor-pointer group hover:border-blue-500/80 transition-all flex flex-col min-h-[160px]" onclick="window.openTacticalMapForCurrentService()" title="Click para abrir Mapa Táctico">
+                                    <div class="card-map-wrapper cursor-pointer group hover:border-blue-500/80 transition-all flex flex-col min-h-[160px] relative" onclick="window.openTacticalMapForCurrentService()" title="Click para abrir Mapa Táctico">
+                                        <!-- Capa transparente de captura absoluta de clic -->
+                                        <div class="absolute inset-0 z-[500] cursor-pointer" onclick="window.openTacticalMapForCurrentService()"></div>
+
                                         <!-- Map container ocupando el 100% de la tarjeta con curvas en las 4 esquinas -->
                                         <div id="svc-card-mini-map" class="pointer-events-none"></div>
 
@@ -1134,7 +1235,7 @@ input::-webkit-credentials-auto-fill-button {
 
                                         <!-- Bottom address badge -->
                                         <div class="absolute bottom-2 left-2 right-2 z-[400] bg-slate-900/90 backdrop-blur border border-slate-700/60 px-2.5 py-1 rounded-lg text-[10px] font-bold text-slate-300 truncate flex items-center gap-1 shadow-md pointer-events-none">
-                                            <i class="fas fa-location-dot text-red-500 shrink-0"></i> <span id="svc-card-map-loc" class="truncate">Placilla</span>
+                                            <i class="fas fa-location-dot text-red-500 shrink-0"></i> <span id="svc-card-map-loc" class="truncate">Ubicación...</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1276,15 +1377,29 @@ input::-webkit-credentials-auto-fill-button {
         let lastDockHTML = '';   
         let fbDb = null;
 
-        // =========================================================================
-        // MAPA TÁCTICO, RUTAS VIALES & ESTIMACIÓN DE TIEMPOS (ETA)
-        // =========================================================================
-        const DEFAULT_CUARTEL_COORDS = {
-            name: "Cuartel General / Central de Alarmas",
-            direccion: "Miraflores 697, Placilla",
-            lat: -34.636743,
-            lng: -71.119915
-        };
+        function resolveTenantCentralConfig() {
+            let lat = parseFloat(localStorage.getItem('tenant_lat'));
+            let lng = parseFloat(localStorage.getItem('tenant_lng'));
+            let comuna = localStorage.getItem('tenant_comuna') || '';
+            if (!lat || isNaN(lat) || (Math.abs(lat - (-33.4489)) < 0.05 && Math.abs(lng - (-70.6693)) < 0.05)) {
+                lat = -34.636808;
+                lng = -71.119757;
+                comuna = comuna || "Placilla";
+                try {
+                    localStorage.setItem('tenant_lat', String(lat));
+                    localStorage.setItem('tenant_lng', String(lng));
+                    localStorage.setItem('tenant_comuna', comuna);
+                } catch(e){}
+            }
+            return {
+                name: "Cuartel General / Central de Alarmas",
+                direccion: localStorage.getItem('tenant_direccion') || "Cuartel General",
+                comuna: comuna || "Placilla",
+                lat: lat,
+                lng: lng
+            };
+        }
+        const DEFAULT_CUARTEL_COORDS = resolveTenantCentralConfig();
 
         let serviceTacticalMap = null;
         let serviceEmergencyMarker = null;
@@ -1294,6 +1409,7 @@ input::-webkit-credentials-auto-fill-button {
         let serviceDistanceLine = null;
         let serviceUnitsLayer = null;
         let serviceGrifosLayer = null;
+        let cachedGrifosCentral = [];
         let serviceRoutingLayers = {
             units: null,
             cuartel: null,
@@ -1544,9 +1660,11 @@ input::-webkit-credentials-auto-fill-button {
         window.openTacticalMapForCurrentService = function() {
             try {
                 let svc = null;
-                if (currentModalIndex >= 0 && activeServices && activeServices.at(currentModalIndex)) {
-                    svc = activeServices.at(currentModalIndex);
-                } else if (activeServices && activeServices.length > 0) {
+                if (typeof currentModalIndex !== 'undefined' && currentModalIndex !== null && currentModalIndex >= 0 && activeServices) {
+                    svc = activeServices[Number(currentModalIndex)] || (typeof activeServices.at === 'function' ? activeServices.at(currentModalIndex) : null);
+                }
+                
+                if (!svc && activeServices && activeServices.length > 0) {
                     svc = activeServices[0];
                 }
                 
@@ -1575,18 +1693,22 @@ input::-webkit-credentials-auto-fill-button {
                 }
                 
                 if (!svc) {
-                    if (typeof window.showToast === 'function') window.showToast("No hay servicio activo seleccionado", "warning");
-                    return;
+                    svc = {
+                        id: 'emergency_' + Date.now(),
+                        key: '10-0',
+                        location: 'Ubicación de Emergencia',
+                        units: []
+                    };
                 }
                 currentTacticalService = svc;
                 
                 const modal = document.getElementById('service-tactical-map-modal');
                 if (!modal) {
-                    console.error("Modal #service-tactical-map-modal no encontrado");
+                    console.error("Modal #service-tactical-map-modal no encontrado en DOM");
                     return;
                 }
                 
-                const incidentVisuals = window.getIncidentKeyVisuals(svc.key, svc.claveApoyo);
+                const incidentVisuals = (typeof window.getIncidentKeyVisuals === 'function') ? window.getIncidentKeyVisuals(svc.key, svc.claveApoyo) : { color: '#dc2626', iconHtml: '<i class="fas fa-location-dot"></i>', label: 'EMERGENCIA' };
                 const keyBadge = document.getElementById('service-map-key-badge');
                 if (keyBadge) {
                     const labelText = (svc.key === '10-12' && svc.claveApoyo) ? `${svc.key} (${svc.claveApoyo})` : (svc.key || 'EMERGENCIA');
@@ -1600,11 +1722,17 @@ input::-webkit-credentials-auto-fill-button {
                 const timeBadge = document.getElementById('service-map-time-badge');
                 if (timeBadge) timeBadge.innerText = `⏱️ Despacho: ${String(svc.startTime || '--:--').replace(/['"]/g, '').trim().substring(0, 5)}`;
 
-                modal.style.display = 'flex';
+                modal.style.setProperty('display', 'flex', 'important');
+                modal.style.setProperty('visibility', 'visible', 'important');
+                modal.style.setProperty('opacity', '1', 'important');
+                modal.style.setProperty('z-index', '99999', 'important');
+                modal.style.setProperty('pointer-events', 'auto', 'important');
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
 
-                window.switchServiceTacticalTab('unidades');
+                if (typeof window.switchServiceTacticalTab === 'function') {
+                    window.switchServiceTacticalTab('unidades');
+                }
 
                 try { window.renderServiceTacticalUnits(svc); } catch(e){ console.error("Error renderServiceTacticalUnits", e); }
                 try { window.renderServiceAttendance(svc.id); } catch(e){ console.error("Error renderServiceAttendance", e); }
@@ -1614,22 +1742,18 @@ input::-webkit-credentials-auto-fill-button {
                         window.initServiceTacticalMap(svc);
                         if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
                     } catch(e) { console.error("Error initServiceTacticalMap", e); }
-                }, 50);
+                }, 30);
 
-                setTimeout(() => {
-                    if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
-                }, 200);
-
-                setTimeout(() => {
-                    if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
-                }, 500);
-
-                setTimeout(() => {
-                    if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
-                }, 900);
+                [100, 250, 500, 800].forEach(delay => {
+                    setTimeout(() => {
+                        if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
+                    }, delay);
+                });
 
                 // Iniciar escucha en tiempo real del Alertante
-                window.startTacticalAlertanteListener(svc.id);
+                if (typeof window.startTacticalAlertanteListener === 'function') {
+                    window.startTacticalAlertanteListener(svc.id);
+                }
 
                 // Refresco periódico de asistencia mientras el modal esté abierto
                 if (tacticalAttendancePollTimer) clearInterval(tacticalAttendancePollTimer);
@@ -2018,6 +2142,9 @@ input::-webkit-credentials-auto-fill-button {
             }
 
             if (!serviceTacticalMap) {
+                if (mapEl._leaflet_id) {
+                    mapEl._leaflet_id = null;
+                }
                 serviceTacticalMap = L.map('service-tactical-map', {
                     zoomControl: false,
                     attributionControl: false
@@ -2100,22 +2227,26 @@ input::-webkit-credentials-auto-fill-button {
             `).openPopup();
 
             // Actualizar Marcador y Widget de Alertante
-            window.updateAlertanteTacticalUI(alertGeo, svc);
+            try { window.updateAlertanteTacticalUI(alertGeo, svc); } catch(e){ console.warn("Error updateAlertanteTacticalUI", e); }
 
             // Calcular y Trazar Rutas con Estimación de Tiempos (ETA)
-            await window.calculateTacticalRoutesAndETA();
+            try { await window.calculateTacticalRoutesAndETA(); } catch(e){ console.warn("Error calculateTacticalRoutesAndETA", e); }
 
-            await window.loadServiceGrifos(lat, lng);
+            try { await window.loadServiceGrifos(lat, lng); } catch(e){ console.warn("Error loadServiceGrifos", e); }
 
             // Auto-activar rastreo de bomberos en camino
-            isPersonnelGpsActive = true;
-            const btnGps = document.getElementById('btn-service-map-toggle-personnel-gps');
-            const lblGps = document.getElementById('lbl-service-personnel-gps');
-            if (btnGps) {
-                btnGps.className = 'px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 rounded-lg text-xs font-black transition flex items-center gap-1 shadow-lg ring-2 ring-blue-400/40 animate-pulse';
-            }
-            if (lblGps) lblGps.innerText = 'Ocultar Bomberos';
-            window.startPersonnelGpsListener(svc.id);
+            try {
+                isPersonnelGpsActive = true;
+                const btnGps = document.getElementById('btn-service-map-toggle-personnel-gps');
+                const lblGps = document.getElementById('lbl-service-personnel-gps');
+                if (btnGps) {
+                    btnGps.className = 'px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 rounded-lg text-xs font-black transition flex items-center gap-1 shadow-lg ring-2 ring-blue-400/40 animate-pulse';
+                }
+                if (lblGps) lblGps.innerText = 'Ocultar Bomberos';
+                if (typeof window.startPersonnelGpsListener === 'function') {
+                    window.startPersonnelGpsListener(svc.id);
+                }
+            } catch(e){ console.warn("Error startPersonnelGpsListener", e); }
         };
 
         window.updateAlertanteTacticalUI = function(alertGeo, svc) {
@@ -3008,7 +3139,7 @@ input::-webkit-credentials-auto-fill-button {
                         <div class="flex items-center gap-1.5 shrink-0">
                             ${gpsBtn}
                             <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${isSi ? 'bg-green-600 text-white' : 'bg-red-900/60 text-red-400'}">
-                                ${isSi ? 'EN CAMINO' : 'NO ASISTE'}
+                                ${isSi ? 'EN CAMINO' : 'NO ASISTIRÁ'}
                             </span>
                         </div>
                     </div>
@@ -3464,11 +3595,10 @@ input::-webkit-credentials-auto-fill-button {
             const googleMapsUrl = `https://maps.google.com/?q=${lat},${lng}`;
             const wazeUrl = `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`;
 
-            const shareText = `🚨 *DESPACHO SISBOM*\n` +
-                              `🔥 *Clave:* ${clave}\n` +
-                              `📍 *Ubicación:* ${ubicacion}\n\n` +
-                              `🗺️ *Google Maps:*\n${googleMapsUrl}\n\n` +
-                              `🚗 *Waze:*\n${wazeUrl}`;
+            const shareText = `*CLAVE:* ${clave}\n` +
+                              `*UBICACIÓN:* ${ubicacion}\n` +
+                              `*MAPA GPS:* ${googleMapsUrl}\n` +
+                              `*WAZE:* ${wazeUrl}`;
 
             try {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -3496,17 +3626,33 @@ input::-webkit-credentials-auto-fill-button {
 
         window.loadServiceGrifos = async function(centerLat, centerLng) {
             try {
-                if (cachedGrifosCentral.length === 0) {
+                if (!Array.isArray(cachedGrifosCentral) || cachedGrifosCentral.length === 0) {
                     const cached = localStorage.getItem('sisbom_grifos_cache') || localStorage.getItem('db_grifos');
-                    if (cached) cachedGrifosCentral = JSON.parse(cached);
-                    if (!cachedGrifosCentral || cachedGrifosCentral.length === 0) {
-                        const res = await fetch('./db_grifos.json');
-                        if (res.ok) cachedGrifosCentral = await res.json();
+                    if (cached) {
+                        try {
+                            const parsed = JSON.parse(cached);
+                            if (Array.isArray(parsed)) cachedGrifosCentral = parsed;
+                        } catch(e){}
+                    }
+                    if (!Array.isArray(cachedGrifosCentral) || cachedGrifosCentral.length === 0) {
+                        try {
+                            const res = await fetch('./db_grifos.json');
+                            if (res.ok) {
+                                const parsed = await res.json();
+                                if (Array.isArray(parsed)) cachedGrifosCentral = parsed;
+                            }
+                        } catch(e){}
                     }
                 }
-            } catch(e){}
+            } catch(e){
+                console.warn("loadServiceGrifos fetch warning:", e);
+            }
 
-            if (serviceGrifosLayer) serviceGrifosLayer.clearLayers();
+            if (!Array.isArray(cachedGrifosCentral)) cachedGrifosCentral = [];
+
+            if (serviceGrifosLayer) {
+                try { serviceGrifosLayer.clearLayers(); } catch(e){}
+            }
 
             const grifoIcon = L.divIcon({
                 className: 'service-grifo-pin',
@@ -3515,10 +3661,10 @@ input::-webkit-credentials-auto-fill-button {
                 iconAnchor: [10, 10]
             });
 
-            (cachedGrifosCentral || []).forEach(g => {
-                if (g.lat && g.lng) {
+            cachedGrifosCentral.forEach(g => {
+                if (g && g.lat && g.lng) {
                     const marker = L.marker([g.lat, g.lng], { icon: grifoIcon }).bindPopup(`
-                        <div style="font-size: 11px; text-transform: uppercase;">
+                        <div style="font-family: inherit; font-size: 11px; text-transform: uppercase;">
                             <b style="color: #2563eb;">💧 GRIFO ${g.codigo || g.id}</b><br>
                             <span>${g.calle || ''}</span><br>
                             <span style="color: ${g.condicion === 'OPERATIVO' ? '#16a34a' : '#ea580c'}; font-weight: bold;">${g.condicion || g.estado || 'OPERATIVO'}</span>
@@ -3530,26 +3676,30 @@ input::-webkit-credentials-auto-fill-button {
 
             const barContainer = document.getElementById('service-nearest-grifos-bar');
             if (centerLat && centerLng && cachedGrifosCentral.length > 0) {
-                const origin = L.latLng(centerLat, centerLng);
-                const sorted = cachedGrifosCentral
-                    .filter(g => g.lat && g.lng)
-                    .map(g => ({ ...g, dist: Math.round(origin.distanceTo(L.latLng(g.lat, g.lng))) }))
-                    .sort((a, b) => a.dist - b.dist)
-                    .slice(0, 4);
+                try {
+                    const origin = L.latLng(centerLat, centerLng);
+                    const sorted = cachedGrifosCentral
+                        .filter(g => g && g.lat && g.lng)
+                        .map(g => ({ ...g, dist: Math.round(origin.distanceTo(L.latLng(g.lat, g.lng))) }))
+                        .sort((a, b) => a.dist - b.dist)
+                        .slice(0, 4);
 
-                const bar = document.getElementById('service-grifos-items-container');
-                if (bar && sorted.length > 0) {
-                    if (barContainer) barContainer.classList.remove('hidden');
-                    bar.innerHTML = `<span class="text-xs font-bold text-slate-400 shrink-0 mr-2"><i class="fas fa-faucet-drip text-blue-400 mr-1"></i> GRIFOS CERCANOS:</span>` +
-                        sorted.map(g => `
-                            <div class="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer hover:border-blue-500 transition" onclick="serviceTacticalMap.panTo([${g.lat}, ${g.lng}])">
-                                <span class="text-xs font-black text-blue-400">💧 ${g.codigo || g.id}</span>
-                                <span class="text-xs font-bold text-white">${g.dist}m</span>
-                                <span class="text-[10px] text-slate-400 truncate max-w-[120px]">${g.calle || ''}</span>
-                            </div>
-                        `).join('');
-                } else if (barContainer) {
-                    barContainer.classList.add('hidden');
+                    const bar = document.getElementById('service-grifos-items-container');
+                    if (bar && sorted.length > 0) {
+                        if (barContainer) barContainer.classList.remove('hidden');
+                        bar.innerHTML = `<span class="text-xs font-bold text-slate-400 shrink-0 mr-2"><i class="fas fa-faucet-drip text-blue-400 mr-1"></i> GRIFOS CERCANOS:</span>` +
+                            sorted.map(g => `
+                                <div class="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer hover:border-blue-500 transition" onclick="serviceTacticalMap.panTo([${g.lat}, ${g.lng}])">
+                                    <span class="text-xs font-black text-blue-400">💧 ${g.codigo || g.id}</span>
+                                    <span class="text-xs font-bold text-white">${g.dist}m</span>
+                                    <span class="text-[10px] text-slate-400 truncate max-w-[120px]">${g.calle || ''}</span>
+                                </div>
+                            `).join('');
+                    } else if (barContainer) {
+                        barContainer.classList.add('hidden');
+                    }
+                } catch(e) {
+                    if (barContainer) barContainer.classList.add('hidden');
                 }
             } else if (barContainer) {
                 barContainer.classList.add('hidden');
@@ -3610,18 +3760,39 @@ input::-webkit-credentials-auto-fill-button {
             return String(val).trim();
         };
 
-        window.showToast = function(msg) {
+        window.showToast = function(msg, type = 'info') {
             const container = document.getElementById('index-toast-container');
             if (!container) return;
             const toastId = 'toast-' + Date.now() + Math.floor(Math.random() * 100);
             const toast = document.createElement('div');
             toast.id = toastId;
-            toast.className = `transform transition-all duration-500 translate-y-full opacity-0 w-80 shadow-2xl rounded-2xl pointer-events-auto bg-white border-l-4 border-blue-500 overflow-hidden flex flex-col mb-3`;
+
+            let borderCol = 'border-blue-500';
+            let bgCol = 'bg-blue-50/50';
+            let iconBg = 'bg-blue-100 border-blue-200 text-blue-500';
+            let iconClass = 'fa-info-circle';
+            let title = 'Aviso de Sistema';
+
+            if (type === 'warning' || type === 'error' || type === 'declined') {
+                borderCol = 'border-red-500';
+                bgCol = 'bg-red-50/50';
+                iconBg = 'bg-red-100 border-red-200 text-red-500';
+                iconClass = 'fa-user-xmark';
+                title = 'Asistencia Declinada';
+            } else if (type === 'success') {
+                borderCol = 'border-emerald-500';
+                bgCol = 'bg-emerald-50/50';
+                iconBg = 'bg-emerald-100 border-emerald-200 text-emerald-500';
+                iconClass = 'fa-user-check';
+                title = 'Bombero en Camino';
+            }
+
+            toast.className = `transform transition-all duration-500 translate-y-full opacity-0 w-80 shadow-2xl rounded-2xl pointer-events-auto bg-white border-l-4 ${borderCol} overflow-hidden flex flex-col mb-3`;
             toast.innerHTML = `
-                <div class="p-4 w-full flex items-start gap-4 bg-blue-50/50">
-                    <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0 border border-blue-200"><i class="fas fa-info-circle text-lg text-blue-500"></i></div>
+                <div class="p-4 w-full flex items-start gap-4 ${bgCol}">
+                    <div class="w-10 h-10 ${iconBg} rounded-full flex items-center justify-center shrink-0 border"><i class="fas ${iconClass} text-lg"></i></div>
                     <div class="flex flex-col mt-0.5 min-w-0">
-                        <p class="font-bold text-slate-500 uppercase tracking-widest leading-tight" style="font-size: 10px;">Aviso de Sistema</p>
+                        <p class="font-bold text-slate-500 uppercase tracking-widest leading-tight" style="font-size: 10px;">${title}</p>
                         <p class="text-sm font-bold text-slate-800 mt-1">${msg}</p>
                     </div>
                 </div>`;
@@ -4225,12 +4396,17 @@ input::-webkit-credentials-auto-fill-button {
         window.togglePassword = function() {
             const input = document.getElementById('loginPass');
             const icon = document.getElementById('togglePassIcon');
+            if (!input || !icon) return;
             if (input.type === 'text') {
                 input.type = 'password';
+                input.classList.remove('show-pass-text');
+                input.style.setProperty('-webkit-text-security', 'disc', 'important');
                 icon.classList.remove('fa-eye-slash');
                 icon.classList.add('fa-eye');
             } else {
                 input.type = 'text';
+                input.classList.add('show-pass-text');
+                input.style.setProperty('-webkit-text-security', 'none', 'important');
                 icon.classList.remove('fa-eye');
                 icon.classList.add('fa-eye-slash');
             }
@@ -4535,11 +4711,16 @@ input::-webkit-credentials-auto-fill-button {
             svc.controlTime = timeStr;
             svc.lastLocalUpdate = Date.now();
             localStorage.setItem('activeServices', JSON.stringify(activeServices));
+            const btn = document.getElementById('btn-6-7-control');
+            if (btn) {
+                btn.classList.add('hidden');
+                btn.style.setProperty('display', 'none', 'important');
+            }
             window.renderControl67(svc);
             window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ hora67: timeStr, fecha67: dateStr }));
             window.notifyLocalIframes();
             if (typeof window.showToast === 'function') {
-                window.showToast(`Emergencia declarada controlada a las ${timeStr}`);
+                window.showToast(`Emergencia declarada controlada a las ${timeStr}`, 'info');
             }
         };
 
@@ -4858,12 +5039,12 @@ input::-webkit-credentials-auto-fill-button {
 
             // 4. Default si no hay nada guardado
             if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
-                lat = -34.637373;
-                lng = -71.125741;
+                lat = (typeof DEFAULT_CUARTEL_COORDS !== 'undefined' && DEFAULT_CUARTEL_COORDS.lat) ? DEFAULT_CUARTEL_COORDS.lat : -34.636808;
+                lng = (typeof DEFAULT_CUARTEL_COORDS !== 'undefined' && DEFAULT_CUARTEL_COORDS.lng) ? DEFAULT_CUARTEL_COORDS.lng : -71.119757;
             }
 
             const locLabel = document.getElementById('svc-card-map-loc');
-            if (locLabel) locLabel.innerText = (svc && svc.location) ? svc.location : "Placilla";
+            if (locLabel) locLabel.innerText = (svc && svc.location) ? svc.location : "";
 
             const pinVisuals = window.getIncidentKeyVisuals ? window.getIncidentKeyVisuals(svc.key, svc.claveApoyo) : { color: '#dc2626', iconHtml: '<i class="fas fa-location-dot"></i>', glow: 'rgba(220,38,38,0.4)' };
             const pinHtml = `<div style="background: ${pinVisuals.color}; width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid white; box-shadow: 0 0 12px ${pinVisuals.glow}; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">${pinVisuals.iconHtml}</div>`;
@@ -4875,6 +5056,9 @@ input::-webkit-credentials-auto-fill-button {
             });
 
             if (!serviceCardMiniMap) {
+                if (mapEl._leaflet_id) {
+                    mapEl._leaflet_id = null;
+                }
                 serviceCardMiniMap = L.map('svc-card-mini-map', {
                     zoomControl: false,
                     attributionControl: false,
@@ -4888,6 +5072,10 @@ input::-webkit-credentials-auto-fill-button {
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(serviceCardMiniMap);
                 serviceCardMiniMarker = L.marker([lat, lng], { icon: pinIcon }).addTo(serviceCardMiniMap);
+
+                serviceCardMiniMap.on('click', function() {
+                    window.openTacticalMapForCurrentService();
+                });
             } else {
                 serviceCardMiniMap.invalidateSize();
                 serviceCardMiniMap.setView([lat, lng], 14);
@@ -4929,7 +5117,7 @@ input::-webkit-credentials-auto-fill-button {
                 googleMapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
             }
 
-            let cuerpoNombre = "CUERPO DE BOMBEROS DE PLACILLA";
+            let cuerpoNombre = (localStorage.getItem('nombreMostrar') || "CUERPO DE BOMBEROS").toUpperCase();
             try {
                 const session = localStorage.getItem('adminUser');
                 if (session) {
@@ -4953,19 +5141,18 @@ input::-webkit-credentials-auto-fill-button {
                 cuerpoLabel = "C.B. DE " + cuerpoLabel;
             }
 
-            let wpMessage = `🚨 *DESPACHO DE EMERGENCIA* 🚨\n` +
-                            `*${cuerpoLabel}* 🚒\n\n` +
-                            `🔥 *CLAVE:* ${svc.key || '---'}\n` +
-                            `📍 *UBICACIÓN:* ${svc.location || '---'}\n` +
-                            `🚒 *UNIDADES:* ${carrosList}\n` +
-                            `⏰ *HORA:* ${horaStr} HRS | 📅 *FECHA:* ${fecha}\n`;
+            let wpMessage = `*CLAVE:* ${svc.key || '---'}\n` +
+                            `*UBICACIÓN:* ${svc.location || '---'}\n` +
+                            `*UNIDADES:* ${carrosList}\n` +
+                            `*HORA:* ${horaStr} HRS\n` +
+                            `*FECHA:* ${fecha}\n`;
 
             if (svc.obs && svc.obs.trim() && svc.obs.trim() !== '---' && !svc.obs.includes('A la espera')) {
-                wpMessage += `📝 *PRE-INFORME:* ${svc.obs.trim()}\n`;
+                wpMessage += `*PRE-INFORME:* ${svc.obs.trim()}\n`;
             }
 
             if (googleMapsUrl) {
-                wpMessage += `🗺️ *MAPA GPS:* ${googleMapsUrl}\n`;
+                wpMessage += `*MAPA GPS:* ${googleMapsUrl}\n`;
             }
 
             try {
@@ -5016,18 +5203,26 @@ input::-webkit-credentials-auto-fill-button {
             const btn = document.getElementById('btn-6-7-control');
             const container = document.getElementById('control-time-container');
             const valEl = document.getElementById('svc-control-time');
-            if (svc.controlTime && String(svc.controlTime).trim() !== '0') {
-                if (btn) btn.classList.add('hidden');
+            if (svc.controlTime && String(svc.controlTime).trim() !== '0' && String(svc.controlTime).trim() !== '') {
+                if (btn) {
+                    btn.classList.add('hidden');
+                    btn.style.setProperty('display', 'none', 'important');
+                }
                 if (container) {
                     container.classList.remove('hidden');
                     container.classList.add('inline-flex');
+                    container.style.setProperty('display', 'inline-flex', 'important');
                     if (valEl) valEl.innerText = String(svc.controlTime).replace(/['"]/g, '').trim().substring(0, 5);
                 }
             } else {
-                if (btn) btn.classList.remove('hidden');
+                if (btn) {
+                    btn.classList.remove('hidden');
+                    btn.style.removeProperty('display');
+                }
                 if (container) {
                     container.classList.add('hidden');
                     container.classList.remove('inline-flex');
+                    container.style.setProperty('display', 'none', 'important');
                 }
             }
         };
@@ -6581,7 +6776,33 @@ input::-webkit-credentials-auto-fill-button {
             return new Object({ id: String(docData.idServicio || docData.id || docId || ''), key: docData.clave || '', location: docData.lugar || '', startTime: docData.horaDespacho || '00:00', obs: docData.preinforme || '', controlTime: docData.hora67 || null, supportsStr: docData.cuerposEnApoyo || '', externalCbStr: docData.apoyoDeOtrosCuerpos || '', obacNameDisplay: docData.obacServicio || '', obacReport: docData.informeObac || '', units: units });
         };
 
+        window.updateHeaderClientInfo = function() {
+            try {
+                function formatCuerpoDe(rawName) {
+                    if (!rawName) return "CUERPO DE BOMBEROS";
+                    let name = rawName.trim();
+                    let clean = name.replace(/^cuerpo\s+de\s+bomberos\s+de\s+/i, '')
+                                    .replace(/^cuerpo\s+de\s+bomberos\s+/i, '')
+                                    .replace(/^cb\s+de\s+/i, '')
+                                    .replace(/^cb\s+/i, '')
+                                    .trim();
+                    return `CUERPO DE BOMBEROS DE ${clean.toUpperCase()}`;
+                }
+                const clientName = localStorage.getItem('nombreMostrar') || '';
+                const formatted = formatCuerpoDe(clientName);
+                const clientNameEl = document.getElementById('header-client-name');
+                if (clientNameEl) {
+                    clientNameEl.innerText = formatted;
+                }
+                const loginClientNameEl = document.getElementById('login-client-name');
+                if (loginClientNameEl) {
+                    loginClientNameEl.innerText = formatted;
+                }
+            } catch(e) {}
+        };
+
         window.initSystem = async function() {
+            window.updateHeaderClientInfo();
             let cachedData = localStorage.getItem('db_personal');
 
             if (!cachedData) {
@@ -6929,14 +7150,7 @@ input::-webkit-credentials-auto-fill-button {
                             const currentEnServicio = window.normalizeEmpty(data.enServicio);
                             const prevEnServicio = window.normalizeEmpty(Reflect.get(window.prevPersonnelState, id));
                             
-                            if (!isFirstLoad && prevEnServicio === '0' && currentEnServicio !== '0') {
-                                const conductorRaw = window.normalizeEmpty(data.conductor);
-                                const isCond = (conductorRaw === 'SI' || conductorRaw === '1' || conductorRaw === 'S');
-                                
-                                let svcKey = 'la emergencia';
-                                const svc = activeServices.find(s => String(s.id) === currentEnServicio);
-                                if (svc && svc.key) svcKey = String(svc.key).replace(new RegExp('-', 'g'), ' ');
-                                
+                            if (!isFirstLoad && prevEnServicio !== currentEnServicio && currentEnServicio !== '0') {
                                 let cleanName = String(data.nombreBombero || '').replace(new RegExp(',', 'g'), ' ').trim();
                                 let nameParts = cleanName.split(new RegExp('\\s+'));
                                 let shortName = cleanName;
@@ -6945,9 +7159,27 @@ input::-webkit-credentials-auto-fill-button {
                                     shortName = nameParts.at(0) + ' ' + nameParts.at(nameParts.length - 2);
                                 }
                                 
-                                const msgBody = isCond ? `${shortName} ASIGNADO CONDUCTOR EN ${svcKey.toUpperCase()}` : `${shortName} EN CAMINO A ${svcKey.toUpperCase()}`;
-                                window.showToast(msgBody);
-                                window.playSoundInfo(); // SOLUCIÓN: Cambiado a sonido. Sin TTS.
+                                if (currentEnServicio.startsWith('-')) {
+                                    const cleanSvcId = currentEnServicio.replace('-', '').trim();
+                                    let svcKey = 'la emergencia';
+                                    const svc = activeServices.find(s => String(s.id) === cleanSvcId);
+                                    if (svc && svc.key) svcKey = String(svc.key).replace(new RegExp('-', 'g'), ' ');
+
+                                    const msgBody = `${shortName} NO ASISTIRÁ A ${svcKey.toUpperCase()}`;
+                                    window.showToast(msgBody, 'warning');
+                                    window.playSoundInfo();
+                                } else {
+                                    const conductorRaw = window.normalizeEmpty(data.conductor);
+                                    const isCond = (conductorRaw === 'SI' || conductorRaw === '1' || conductorRaw === 'S');
+                                    
+                                    let svcKey = 'la emergencia';
+                                    const svc = activeServices.find(s => String(s.id) === currentEnServicio);
+                                    if (svc && svc.key) svcKey = String(svc.key).replace(new RegExp('-', 'g'), ' ');
+                                    
+                                    const msgBody = isCond ? `${shortName} ASIGNADO CONDUCTOR EN ${svcKey.toUpperCase()}` : `${shortName} EN CAMINO A ${svcKey.toUpperCase()}`;
+                                    window.showToast(msgBody, 'success');
+                                    window.playSoundInfo();
+                                }
                             }
                             Reflect.set(window.prevPersonnelState, id, currentEnServicio);
                         });
@@ -7337,6 +7569,98 @@ input::-webkit-credentials-auto-fill-button {
                     }, 15000);
                 };
 
+                // Pre-Auth y Sincronización en tiempo real de Sesión Central (SENTINEL LINK <-> SENTINEL CAD)
+                let unsubCentralAccess = null;
+                window.startCentralAccessListener = function() {
+                    if (unsubCentralAccess) {
+                        try { unsubCentralAccess(); } catch(e){}
+                        unsubCentralAccess = null;
+                    }
+                    if (!window.fbDb || !window.fbDoc || !window.fbOnSnapshot) return;
+                    
+                    try {
+                        const centralDocRef = window.fbDoc(window.fbDb, 'accesos', 'central');
+                        unsubCentralAccess = window.fbOnSnapshot(centralDocRef, async (snap) => {
+                            if (!snap || !snap.exists()) return;
+                            const data = snap.data();
+                            console.log("[SENTINEL CAD] Estado de accesos/central recibido:", data);
+                            
+                            // Si la central NO tiene sesión activa localmente y Firestore reporta estado activo (iniciado por LINK o remoto)
+                            if (data && data.estado === 'activo' && !window.isSystemLoggedIn) {
+                                console.log("⚡ [SENTINEL CAD] Sesión remota detectada desde SENTINEL LINK. Abriendo sesión automática de operador...");
+                                window.showLoader();
+                                
+                                let user = null;
+                                if (Array.isArray(personnelData) && personnelData.length > 0) {
+                                    user = personnelData.find(x => 
+                                        (data.idRegistro && String(x.idRegistro) === String(data.idRegistro)) || 
+                                        (x.nombreBombero && data.nombreBombero && x.nombreBombero.trim().toLowerCase() === data.nombreBombero.trim().toLowerCase()) ||
+                                        (x.nombreBombero && data.operador && x.nombreBombero.trim().toLowerCase() === data.operador.trim().toLowerCase())
+                                    );
+                                }
+                                
+                                const pass = (user && user.contrasena) ? user.contrasena : "sentinel_auto";
+                                const userId = (user && user.idRegistro) ? String(user.idRegistro) : (data.idRegistro || "CUARTELERO");
+                                const userName = (user && user.nombreBombero) ? user.nombreBombero : (data.nombreBombero || data.operador || "Operador de Guardia");
+                                const userCargo = (user && user.cargo) ? user.cargo : (data.cargo || "Cuartelero Residente");
+                                const userRadial = (user && user.idRadial) ? user.idRadial : "";
+
+                                localStorage.setItem('authUserId', userId);
+                                localStorage.setItem('authPasswordSecure', pass + "_secure_sisbom");
+                                
+                                try {
+                                    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                                        const diskAuthObj = new Object({ authUserId: userId, authPasswordSecure: pass + "_secure_sisbom", nombreBombero: userName });
+                                        await window.pywebview.api.save_local_db('central/auth_session.json', JSON.stringify(diskAuthObj));
+                                    }
+                                } catch(diskErr){}
+
+                                await window.authenticateFirebase();
+                                
+                                const sessionID = data.idInicio || String(Date.now());
+                                localStorage.setItem('sisbom_last_session_id', String(sessionID));
+                                
+                                const sessionData = new Object({
+                                    idIngreso: String(sessionID),
+                                    idInicio: sessionID,
+                                    idRegistro: userId,
+                                    idRadial: userRadial,
+                                    cargo: userCargo,
+                                    nombreBombero: userName,
+                                    fechaIngreso: data.fechaIngreso || window.getFormattedDate(),
+                                    horaIngreso: data.horaIngreso || window.getFormattedTime()
+                                });
+                                localStorage.setItem('adminUser', JSON.stringify(sessionData));
+                                
+                                if (window.setupMainListeners) {
+                                    window.setupMainListeners();
+                                }
+                                
+                                window.restoreSession(sessionData);
+                            } else if (data && data.estado === 'cerrado' && window.isSystemLoggedIn) {
+                                console.log("🔒 [SENTINEL CAD] Cierre de turno remoto detectado desde SENTINEL LINK. Finalizando sesión activa en CAD...");
+                                window.showLoader();
+                                localStorage.removeItem('adminUser');
+                                localStorage.removeItem('authUserId');
+                                localStorage.removeItem('authPasswordSecure');
+                                try {
+                                    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                                        await window.pywebview.api.save_local_db('central/auth_session.json', '');
+                                    }
+                                } catch(e){}
+                                window.isSystemLoggedIn = false;
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 300);
+                            }
+                        }, (err) => {
+                            console.warn("[SENTINEL CAD] Error en listener de accesos/central:", err.message);
+                        });
+                    } catch(e) {
+                        console.warn("[SENTINEL CAD] Error inicializando listener accesos/central:", e);
+                    }
+                };
+
                 // En lugar de disparar y olvidar, usamos await para evitar la "carrera de caballos"
                 (async () => {
                     try {
@@ -7345,8 +7669,10 @@ input::-webkit-credentials-auto-fill-button {
                             await window.authenticateFirebase();
                             window.setupMainListeners();
                         } else {
-                            console.log("No active session detected. Postponing Firebase listener setup until login.");
+                            console.log("No active session detected. Setting up Central access watcher for remote login...");
+                            await window.authenticateFirebase();
                         }
+                        window.startCentralAccessListener();
                     } catch(ex) {
                         console.error("Error setting up listeners after auth:", ex);
                     }

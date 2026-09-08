@@ -7,10 +7,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -283,6 +286,11 @@ fun CarPlayDashboard(
             emergencyLat = mapTargetLat,
             emergencyLng = mapTargetLng,
             emergencyClave = mapTargetClave,
+            alertanteLat = dispatch?.alertanteLat,
+            alertanteLng = dispatch?.alertanteLng,
+            alertantePhone = dispatch?.telefono ?: "",
+            centralLat = CUARTEL_GENERAL_LAT,
+            centralLng = CUARTEL_GENERAL_LNG,
             vehicleLat = liveLat,
             vehicleLng = liveLng,
             vehicleHeading = liveHeading,
@@ -305,6 +313,29 @@ fun CarPlayDashboard(
             },
             modifier = Modifier.fillMaxSize()
         )
+
+        // =========================================================================
+        // PÍLDORA SUPERIOR CENTRAL: LOGO OFICIAL SENTINEL NAV
+        // =========================================================================
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 16.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF0F172A).copy(alpha = 0.88f))
+                .border(1.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(22.dp))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.sentinel_nav_logo),
+                contentDescription = "SENTINEL NAV",
+                modifier = Modifier
+                    .height(26.dp)
+                    .wrapContentWidth(),
+                contentScale = ContentScale.Fit
+            )
+        }
 
         // =========================================================================
         // 2. BARRA LATERAL IZQUIERDA FLOTANTE CARPLAY (FLOATING DOCK CARD)
@@ -877,15 +908,15 @@ fun CarPlayDashboard(
         }
 
         // =========================================================================
-        // 5. TARJETA FLOTANTE DE CALLE / UBICACIÓN ACTUAL DEL CARRO
+        // 5. TARJETA FLOTANTE DE CALLE / UBICACIÓN ACTUAL DEL CARRO (ABAJO AL CENTRO)
         // =========================================================================
         if (currentStreetName.isNotEmpty()) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 110.dp, bottom = 16.dp)
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp)
                     .carPlayCard(cornerRadius = 14.dp, bgAlpha = 0.94f)
-                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

@@ -21,15 +21,40 @@ struct MainView: View {
     var showFullscreenAlert: Dispatch? {
         guard let user = viewModel.currentUser, !viewModel.isCentralActive else { return nil }
         let userStatus = user.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let is09 = userStatus == "0-9"
+        let isSpecial = userStatus.contains("SUSPENDIDO") || userStatus == "CDS" || userStatus.contains("LICENCIA") || userStatus == "PERMISO"
+        if isSpecial { return nil }
+        
+        let is09 = userStatus == "0-9" || userStatus.isEmpty || userStatus == "DISPONIBLE"
         let is08 = userStatus == "0-8" || userStatus == "10-8"
-        guard let fId = viewModel.fullscreenDispatchId, (is09 || is08) else { return nil }
-        guard let d = viewModel.dispatchesList.first(where: { $0.idServicio == fId && $0.operadorFinal.isEmpty }) else { return nil }
-        let isAttending = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) == fId
-        let isEscalationAlarm = d.clave.contains("10-30") || d.clave.uppercased().contains("FORESTAL")
-        if !isAttending && (isEscalationAlarm || (is09 && userStatus != "NO ASISTIR")) {
-            return d
+        
+        // 1. If explicit fullscreen dispatch requested (by push notification or real-time event)
+        if let fId = viewModel.fullscreenDispatchId {
+            if let d = viewModel.dispatchesList.first(where: { $0.idServicio == fId && $0.operadorFinal.isEmpty }) {
+                let userEnServicio = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
+                let isAttending = userEnServicio == fId
+                let hasDeclined = userEnServicio == "-\(fId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(fId))
+                
+                if !isAttending && !hasDeclined {
+                    return d
+                }
+            }
         }
+        
+        // 2. Fallback: If there is an active dispatch without answer and user is 0-9 (or 0-8 on escalation)
+        if let activeDispatch = viewModel.dispatchesList.first(where: { $0.operadorFinal.isEmpty }) {
+            let dId = activeDispatch.idServicio
+            let userEnServicio = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isAttending = userEnServicio == dId
+            let hasDeclined = userEnServicio == "-\(dId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(dId))
+            let isEscalationAlarm = activeDispatch.clave.contains("10-30") || activeDispatch.clave.uppercased().contains("FORESTAL")
+            
+            if !isAttending && !hasDeclined {
+                if isEscalationAlarm || is09 {
+                    return activeDispatch
+                }
+            }
+        }
+        
         return nil
     }
 
@@ -115,8 +140,9 @@ struct MainView: View {
             // Emergency Fullscreen Overlay Alert
             if let dispatch = showFullscreenAlert {
                 FullscreenEmergencyAlertView(dispatch: dispatch, viewModel: viewModel)
-                    .transition(.opacity)
-                    .zIndex(100)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .zIndex(999)
+                    .ignoresSafeArea()
             }
         }
         .onAppear {
@@ -985,123 +1011,224 @@ struct ChangelogDialog: View {
 struct FullscreenEmergencyAlertView: View {
     let dispatch: Dispatch
     @ObservedObject var viewModel: SisBomViewModel
+    @State private var pulseGlow: Bool = false
 
     var body: some View {
         ZStack {
-            Color(red: 0.725, green: 0.11, blue: 0.11) // #B91C1C
-                .ignoresSafeArea()
+            // Intense Emergency Red Gradient Background
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.88, green: 0.12, blue: 0.12),
+                    Color(red: 0.65, green: 0.05, blue: 0.05),
+                    Color(red: 0.40, green: 0.02, blue: 0.02)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            // Subtle pulsing background glow
+            Circle()
+                .fill(Color.red.opacity(pulseGlow ? 0.35 : 0.15))
+                .frame(width: 320, height: 320)
+                .blur(radius: 50)
+                .offset(y: -100)
+                .animation(Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulseGlow)
 
             VStack(spacing: 0) {
-                // Header: Logo and Title
-                VStack(spacing: 8) {
-                    Image(uiImage: viewModel.getInstitutionLogo())
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 72, height: 72)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                // Header: Logo and Emergency Header
+                VStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.3), lineWidth: 4)
+                            .frame(width: 78, height: 78)
+                            .scaleEffect(pulseGlow ? 1.12 : 1.0)
+                            .opacity(pulseGlow ? 0.8 : 0.4)
+                            .animation(Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseGlow)
+
+                        Image(uiImage: viewModel.getInstitutionLogo())
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 72, height: 72)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
+                            .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 3)
+                    }
 
                     Text("🚨 DESPACHO DE EMERGENCIA 🚨")
-                        .font(.system(size: 18, weight: .black))
+                        .font(.system(size: 20, weight: .black))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
+                        .shadow(color: Color.black.opacity(0.5), radius: 4, x: 0, y: 2)
 
                     Text("¡CONFIRMA TU ASISTENCIA AHORA!")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Color.white.opacity(0.9))
-                        .multilineTextAlignment(.center)
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(Color.white.opacity(0.95))
+                        .tracking(1)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
                 }
-                .padding(.top, 40)
+                .padding(.top, 48)
 
-                Spacer()
+                Spacer(minLength: 12)
 
-                // Center: Clave, Time, Date, Preinforme, Units
+                // Center Card: Emergency Clave, Location, Details
                 VStack(spacing: 12) {
-                    Text("CLAVE")
-                        .font(.system(size: 15, weight: .heavy))
-                        .tracking(2)
-                        .foregroundColor(Color.white.opacity(0.75))
+                    Text("CLAVE DE ACTUACIÓN")
+                        .font(.system(size: 13, weight: .black))
+                        .tracking(2.5)
+                        .foregroundColor(Color.white.opacity(0.8))
 
                     let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
                     Text(claveText)
-                        .font(.system(size: claveText.count > 5 ? 64 : 80, weight: .black))
+                        .font(.system(size: claveText.count > 6 ? 56 : 74, weight: .black))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
-                        .minimumScaleFactor(0.6)
+                        .minimumScaleFactor(0.5)
                         .lineLimit(1)
+                        .shadow(color: Color.black.opacity(0.6), radius: 8, x: 0, y: 4)
 
-                    HStack(spacing: 14) {
+                    // Location / Address Pill
+                    if !dispatch.lugar.isEmpty {
+                        HStack(alignment: .center, spacing: 6) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                            Text(dispatch.lugar)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.white)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.35))
+                        .cornerRadius(14)
+                        .padding(.horizontal, 20)
+                    }
+
+                    // Time & Date Pills
+                    HStack(spacing: 12) {
                         let hora = dispatch.horaDespacho.isEmpty ? "--:--" : dispatch.horaDespacho
-                        Text("HORA: \(hora)")
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundColor(.white)
-
-                        Text("•")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(Color.white.opacity(0.6))
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.fill")
+                                .font(.system(size: 12))
+                            Text(hora)
+                                .font(.system(size: 14, weight: .black))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.18))
+                        .cornerRadius(10)
 
                         let fecha = dispatch.fechaDespacho.isEmpty ? DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none) : dispatch.fechaDespacho
-                        Text("FECHA: \(fecha)")
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundColor(.white)
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 12))
+                            Text(fecha)
+                                .font(.system(size: 14, weight: .black))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.18))
+                        .cornerRadius(10)
                     }
 
                     if !dispatch.preinforme.isEmpty {
                         Text(dispatch.preinforme)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.9))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.95))
                             .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .padding(.horizontal, 24)
-                            .padding(.top, 6)
+                            .lineLimit(3)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.25))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
                     }
 
                     if !dispatch.carros.isEmpty {
-                        Text("UNIDADES: \(dispatch.carros)")
-                            .font(.system(size: 15, weight: .black))
-                            .foregroundColor(Color(red: 0.98, green: 0.75, blue: 0.14)) // Amber #FBBF24
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 4)
+                        HStack(spacing: 6) {
+                            Image(systemName: "flame.fill")
+                                .font(.system(size: 13))
+                            Text("UNIDADES: \(dispatch.carros)")
+                                .font(.system(size: 15, weight: .black))
+                        }
+                        .foregroundColor(Color(red: 0.99, green: 0.85, blue: 0.25)) // Amber/Yellow
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(12)
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 16)
 
                 // Action Buttons: ASISTIR & NO ASISTIR
                 VStack(spacing: 12) {
                     Button(action: {
-                        viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
-                        viewModel.fullscreenDispatchId = nil
+                        let impact = UIImpactFeedbackGenerator(style: .heavy)
+                        impact.impactOccurred()
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
+                            viewModel.fullscreenDispatchId = nil
+                        }
                     }) {
-                        Text("ASISTIR")
-                            .font(.system(size: 18, weight: .black))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(Color(red: 0.06, green: 0.73, blue: 0.51)) // #10B981
-                            .cornerRadius(18)
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 22, weight: .bold))
+                            Text("ASISTIR")
+                                .font(.system(size: 19, weight: .black))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.1, green: 0.78, blue: 0.55), Color(red: 0.05, green: 0.62, blue: 0.42)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .cornerRadius(20)
+                        .shadow(color: Color(red: 0.05, green: 0.62, blue: 0.42).opacity(0.5), radius: 8, x: 0, y: 4)
                     }
 
                     Button(action: {
-                        viewModel.declineService(dispatchId: dispatch.idServicio)
-                        viewModel.fullscreenDispatchId = nil
+                        let impact = UIImpactFeedbackGenerator(style: .medium)
+                        impact.impactOccurred()
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            viewModel.declineService(dispatchId: dispatch.idServicio)
+                            viewModel.fullscreenDispatchId = nil
+                        }
                     }) {
-                        Text("NO ASISTIR")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(Color.black.opacity(0.45))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
-                            )
-                            .cornerRadius(18)
+                        HStack(spacing: 8) {
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 18, weight: .bold))
+                            Text("NO ASISTIR")
+                                .font(.system(size: 15, weight: .heavy))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.black.opacity(0.45))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18)
+                                .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
+                        )
+                        .cornerRadius(18)
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 44)
+                .padding(.bottom, 48)
             }
+        }
+        .onAppear {
+            pulseGlow = true
         }
     }
 }

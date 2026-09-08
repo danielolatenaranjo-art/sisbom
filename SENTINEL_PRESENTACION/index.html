@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTINEL — Demostración Operativa Real</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & Outfit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        display: ['Outfit', 'sans-serif']
+                    },
+                    colors: {
+                        sentinel: {
+                            red: '#EF4444',
+                            amber: '#F59E0B',
+                            blue: '#0284C7',
+                            cyan: '#06B6D4',
+                            green: '#10B981',
+                            dark: '#070E1A',
+                            card: 'rgba(15, 23, 42, 0.90)',
+                            border: 'rgba(255, 255, 255, 0.12)'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #060B14;
+            color: #F8FAFC;
+            font-family: 'Inter', sans-serif;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.88);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
+        }
+
+        .glass-card {
+            background: rgba(30, 41, 59, 0.70);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            transition: all 0.25s ease-in-out;
+        }
+
+        .glass-card:hover {
+            border-color: rgba(6, 182, 212, 0.5);
+            transform: translateY(-2px);
+        }
+
+        .slide {
+            display: none;
+            opacity: 0;
+            transform: scale(0.99) translateY(8px);
+            transition: opacity 0.3s ease-out, transform 0.3s ease-out;
+            height: 100vh;
+            width: 100vw;
+            padding-bottom: 5rem;
+            padding-top: 4.5rem;
+            overflow-y: auto;
+        }
+
+        .slide.active {
+            display: flex;
+            opacity: 1;
+            transform: scale(1) translateY(0);
+        }
+
+        /* Mockup de Celular Real */
+        .phone-frame {
+            width: 290px;
+            height: 590px;
+            border-radius: 40px;
+            border: 8px solid #1E293B;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 25px rgba(6, 182, 212, 0.25);
+            overflow: hidden;
+            position: relative;
+            background: #0B132B;
+        }
+
+        .phone-notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            height: 20px;
+            width: 130px;
+            background: #1E293B;
+            border-bottom-left-radius: 14px;
+            border-bottom-right-radius: 14px;
+            z-index: 30;
+        }
+
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.08); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+        .pulse-alarm {
+            animation: pulse-ring 1.5s infinite ease-in-out;
+        }
+
+        @media print {
+            body { background: white !important; color: black !important; overflow: visible !important; }
+            .no-print { display: none !important; }
+            .slide { display: block !important; opacity: 1 !important; height: auto !important; page-break-after: always !important; }
+        }
+    </style>
+</head>
+<body class="relative h-screen w-screen overflow-hidden bg-gradient-to-br from-[#040810] via-[#071120] to-[#0A1A30]">
+
+    <!-- Fondo de malla -->
+    <div class="absolute inset-0 pointer-events-none opacity-15 bg-[radial-gradient(#0284C7_1px,transparent_1px)] [background-size:20px_20px]"></div>
+
+    <!-- ========================================================================= -->
+    <!-- BARRA SUPERIOR FIJA -->
+    <!-- ========================================================================= -->
+    <header class="no-print absolute top-0 left-0 right-0 h-16 glass-panel border-b border-white/10 z-50 flex items-center justify-between px-6">
+        <!-- Logo -->
+        <div class="flex items-center space-x-3 cursor-pointer" onclick="goToSlide(0)">
+            <img src="assets/logos/logo 1.png" alt="SENTINEL" class="h-9 w-auto object-contain drop-shadow-[0_0_10px_rgba(6,182,212,0.4)]">
+            <div>
+                <span class="font-display font-black text-sm tracking-wider text-white uppercase">Ecosistema SENTINEL</span>
+                <span class="block text-[10px] text-red-400 font-bold tracking-widest uppercase">Demostración Operativa en Vivo</span>
+            </div>
+        </div>
+
+        <!-- Indicador de Diapositiva -->
+        <div class="flex items-center space-x-3 bg-slate-900/90 px-4 py-1.5 rounded-full border border-white/10">
+            <span id="slideIndicator" class="text-xs font-mono font-bold text-cyan-400">01 / 10</span>
+            <span class="text-slate-600">|</span>
+            <span id="slideTitleHeader" class="text-xs font-bold text-slate-200 truncate max-w-[220px] md:max-w-[420px]">Portada</span>
+        </div>
+
+        <!-- Botones de Acción -->
+        <div class="flex items-center space-x-2">
+            <!-- Botón Ir a Despacho Real -->
+            <button onclick="goToSlide(2)" class="px-3 py-1.5 rounded-lg bg-red-600/20 border border-red-500/40 text-red-400 hover:bg-red-600/30 text-xs font-bold flex items-center space-x-1.5 transition">
+                <i data-lucide="radio" class="w-3.5 h-3.5"></i>
+                <span class="hidden md:inline">Ver Despacho en Vivo</span>
+            </button>
+
+            <!-- Botón Audio Tono 10-0 -->
+            <button onclick="playRealClaveAudio('c10_0')" title="Probar Audio Real Clave 10-0" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 text-cyan-400 transition">
+                <i data-lucide="volume-2" class="w-4 h-4"></i>
+            </button>
+
+            <!-- Botón Pantalla Completa -->
+            <button onclick="toggleFullScreen()" title="Pantalla Completa (F11)" class="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 text-slate-300 transition">
+                <i data-lucide="maximize" class="w-4 h-4"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- ========================================================================= -->
+    <!-- CONTENIDO PRINCIPAL: DIAPOSITIVAS REALES -->
+    <!-- ========================================================================= -->
+    <main class="relative h-full w-full">
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 1: PORTADA & QUÉ ES SENTINEL REALMENTE -->
+        <!-- ========================================================================= -->
+        <section id="slide-0" class="slide active flex-col items-center justify-center text-center px-6">
+            <div class="max-w-4xl mx-auto space-y-6">
+                <div class="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-bold uppercase tracking-widest">
+                    <span class="w-2 h-2 rounded-full bg-red-400 animate-ping"></span>
+                    <span>Desarrollado para la Realidad de Bomberos de Chile</span>
+                </div>
+
+                <div class="flex justify-center my-3">
+                    <img src="assets/logos/logo 1.png" alt="SENTINEL" class="h-28 md:h-36 w-auto object-contain drop-shadow-[0_0_30px_rgba(239,68,68,0.35)]">
+                </div>
+
+                <h1 class="text-4xl sm:text-5xl md:text-6xl font-black font-display tracking-tight text-white leading-tight">
+                    Despacho Inmediato, Alerta en Celulares <br>
+                    <span class="bg-gradient-to-r from-red-500 via-amber-400 to-cyan-400 bg-clip-text text-transparent">y Navegación Táctica en Carros</span>
+                </h1>
+
+                <p class="text-slate-300 text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
+                    Un sistema donde el cuartelero o la central despacha la clave, los celulares de los bomberos suenan con su tono dedicado rompiendo el silencio, y la tablet del carro se enciende con la ruta y los grifos.
+                </p>
+
+                <!-- Botón Inicio -->
+                <div class="pt-4 flex justify-center space-x-4">
+                    <button onclick="nextSlide()" class="px-8 py-3.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-sm tracking-wider uppercase transition shadow-lg shadow-red-600/30 flex items-center space-x-2">
+                        <span>Ver Cómo Funciona en Vivo</span>
+                        <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 2: EL FLUJO REAL DE UN DESPACHO -->
+        <!-- ========================================================================= -->
+        <section id="slide-1" class="slide flex-col justify-center px-6 md:px-12 max-w-6xl mx-auto">
+            <div class="space-y-6">
+                <div>
+                    <div class="text-xs font-bold text-red-400 uppercase tracking-widest">El Ciclo Operativo Real</div>
+                    <h2 class="text-3xl font-black font-display text-white">¿Qué pasa exactamente cuando entra una alarma?</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+                    <!-- Paso 1 -->
+                    <div class="glass-card p-4 rounded-2xl border-t-4 border-red-500 space-y-2">
+                        <div class="text-red-400 font-mono font-black text-lg">01. DESPACHO</div>
+                        <div class="font-bold text-white text-sm">Central / Cuartel (CAD)</div>
+                        <p class="text-slate-300">
+                            El operador digita la clave (<span class="text-red-400 font-bold">10-0-1</span>), escribe la dirección y asigna los carros (<span class="text-white font-bold">B-1, BX-1</span>). Presiona <strong>DESPACHAR</strong>.
+                        </p>
+                    </div>
+
+                    <!-- Paso 2 -->
+                    <div class="glass-card p-4 rounded-2xl border-t-4 border-cyan-400 space-y-2">
+                        <div class="text-cyan-400 font-mono font-black text-lg">02. ALARMA</div>
+                        <div class="font-bold text-white text-sm">App Móvil (ONE)</div>
+                        <p class="text-slate-300">
+                            A todos los bomberos les suena el <strong>audio real de la clave 10-0</strong> a volumen máximo (aunque el teléfono esté en silencio). Con un toque confirman asistencia.
+                        </p>
+                    </div>
+
+                    <!-- Paso 3 -->
+                    <div class="glass-card p-4 rounded-2xl border-t-4 border-amber-400 space-y-2">
+                        <div class="text-amber-400 font-mono font-black text-lg">03. RUTA Y GRIFOS</div>
+                        <div class="font-bold text-white text-sm">Tablet Carro (NAV)</div>
+                        <p class="text-slate-300">
+                            En la cabina del carro se traza la ruta hacia el lugar, muestra los grifos y el maquinista presiona <strong class="text-red-400">6-0 SALIDA</strong>.
+                        </p>
+                    </div>
+
+                    <!-- Paso 4 -->
+                    <div class="glass-card p-4 rounded-2xl border-t-4 border-green-400 space-y-2">
+                        <div class="text-green-400 font-mono font-black text-lg">04. BITÁCORA Y CIERRE</div>
+                        <div class="font-bold text-white text-sm">Control Total</div>
+                        <p class="text-slate-300">
+                            Tiempos 6-0, 6-3, 6-9, 6-10 y 6-8 con odómetro en KM quedan registrados automáticamente en la Bitácora Oficial.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="glass-panel p-4 rounded-xl border border-white/10 flex items-center justify-between text-xs">
+                    <span class="text-slate-200">
+                        ⚡ <strong>Todo en menos de 1 segundo:</strong> Sin intermediarios, sin cobros por SMS y sin desfase de comunicación.
+                    </span>
+                    <button onclick="goToSlide(2)" class="px-4 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-black uppercase text-[11px]">
+                        Probar Simulación en Vivo →
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 3: DEMOSTRACIÓN EN VIVO: SENTINEL CAD + SENTINEL ONE -->
+        <!-- ========================================================================= -->
+        <section id="slide-2" class="slide flex-col justify-center px-4 md:px-10 max-w-7xl mx-auto">
+            <div class="space-y-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="text-xs font-bold text-red-400 uppercase tracking-widest">Demostración en Tiempo Real</div>
+                        <h2 class="text-2xl md:text-3xl font-black font-display text-white">SENTINEL CAD Despacha ➔ SENTINEL ONE Recibe la Alarma</h2>
+                    </div>
+                    <!-- Selector de Audios Reales -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-xs text-slate-400 font-bold hidden sm:inline">Seleccionar Clave 10:</span>
+                        <select id="selectClaveReal" onchange="changeClaveDemo(this.value)" class="bg-slate-900 text-white font-bold text-xs px-3 py-1.5 rounded-lg border border-white/20">
+                            <option value="c10_0">10-0 (Fuego Estructural)</option>
+                            <option value="c10_1">10-1 (Incendio Vehicular)</option>
+                            <option value="c10_2">10-2 (Pastizales / Forestal)</option>
+                            <option value="c10_3">10-3 (Rescate Personas)</option>
+                            <option value="c10_4">10-4 (Rescate Vehicular)</option>
+                            <option value="c10_5">10-5 (Materiales Peligrosos)</option>
+                            <option value="c10_12">10-12 (Apoyo a Otros Cuerpos)</option>
+                            <option value="c10_30">10-30 (Incendio Declarado)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Lado a Lado: CAD (Consola) y ONE (Celular) -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+                    
+                    <!-- LADO CAD: CONSOLA DE DESPACHO -->
+                    <div class="lg:col-span-7 glass-panel p-5 rounded-2xl border border-red-500/40 space-y-4">
+                        <div class="flex items-center justify-between border-b border-white/10 pb-2.5">
+                            <div class="flex items-center space-x-2">
+                                <img src="assets/logos/SENTINEL CAD.png" class="h-6 w-auto">
+                                <span class="text-xs font-black text-white uppercase">Consola de Despacho Operativo</span>
+                            </div>
+                            <span class="text-xs font-mono text-green-400 font-bold">● Sistema Conectado</span>
+                        </div>
+
+                        <!-- Formulario de Despacho Real -->
+                        <div class="space-y-3 text-xs">
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="text-[10px] text-slate-400 font-bold uppercase">Clave de Emergencia:</label>
+                                    <div id="dispClaveName" class="p-2 rounded-lg bg-red-950/60 border border-red-500/50 font-black text-red-400 text-sm mt-0.5">
+                                        10-0 FUEGO ESTRUCTURAL
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-[10px] text-slate-400 font-bold uppercase">Material Mayor (Carros):</label>
+                                    <div class="p-2 rounded-lg bg-slate-900 border border-white/10 font-bold text-white text-sm mt-0.5">
+                                        B-1, BX-1
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="text-[10px] text-slate-400 font-bold uppercase">Dirección / Lugar de la Emergencia:</label>
+                                <input id="dispAddressInput" type="text" value="AV. O'HIGGINS / MIRAFLORES (SECTOR CENTRO)" class="w-full p-2.5 rounded-lg bg-slate-900 border border-white/20 font-bold text-white text-xs mt-0.5 uppercase focus:outline-none focus:border-cyan-400">
+                            </div>
+
+                            <div>
+                                <label class="text-[10px] text-slate-400 font-bold uppercase">Preinforme Radial:</label>
+                                <input id="dispPreinformeInput" type="text" value="fuego en casa habitacion de material ligero con peligro de propagacion" class="w-full p-2 rounded-lg bg-slate-900/80 border border-white/10 text-slate-300 text-xs mt-0.5 lowercase focus:outline-none">
+                            </div>
+
+                            <!-- Botón Acción Despacho -->
+                            <div class="pt-2 flex space-x-3">
+                                <button id="btnRealDespacho" onclick="executeRealDispatch()" class="flex-1 py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-wider transition shadow-lg shadow-red-600/30 flex items-center justify-center space-x-2">
+                                    <i data-lucide="radio" class="w-4 h-4"></i>
+                                    <span>ENVIAR DESPACHO AHORA</span>
+                                </button>
+                                <button onclick="resetRealDispatch()" class="px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs">
+                                    Reset
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Mini Log de Central -->
+                        <div id="cadLiveLog" class="bg-black/50 p-2.5 rounded-xl border border-white/5 font-mono text-[10px] text-slate-400 h-16 overflow-y-auto">
+                            [19:14:00] Central a la escucha. Unidades B-1 y BX-1 disponibles en Cuartel (0-9).
+                        </div>
+                    </div>
+
+                    <!-- LADO ONE: SMARTPHONE DEL BOMBERO -->
+                    <div class="lg:col-span-5 flex justify-center">
+                        <div class="phone-frame">
+                            <div class="phone-notch"></div>
+                            
+                            <!-- Pantalla del Celular -->
+                            <div class="h-full w-full p-4 pt-7 flex flex-col justify-between text-white text-xs">
+                                <!-- Top Bar Celular -->
+                                <div class="flex justify-between items-center text-[10px] text-slate-400">
+                                    <span class="font-bold">SENTINEL ONE</span>
+                                    <div class="flex space-x-1 items-center">
+                                        <span>🔇 (Silencio)</span>
+                                        <span class="text-green-400 font-bold">100%</span>
+                                    </div>
+                                </div>
+
+                                <!-- Estado del Bombero o Alerta Activa -->
+                                <div id="phoneAlertContainer" class="space-y-3 my-auto">
+                                    <div class="text-center p-4 bg-slate-900/80 rounded-2xl border border-white/10 space-y-2">
+                                        <div class="w-10 h-10 rounded-full bg-green-500/20 border border-green-500/50 flex items-center justify-center mx-auto text-green-400">
+                                            <i data-lucide="shield-check" class="w-5 h-5"></i>
+                                        </div>
+                                        <div class="font-bold text-white text-sm">ESTADO: 0-9 DISPONIBLE</div>
+                                        <div class="text-[11px] text-slate-400">Esperando despacho...</div>
+                                    </div>
+                                </div>
+
+                                <!-- Botón de Prueba de Citación 12-10 -->
+                                <div class="space-y-1.5 pt-2">
+                                    <button onclick="trigger12_10()" class="w-full py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-400 hover:bg-amber-500/30 font-bold text-[10px] uppercase">
+                                        📢 Simular Citación 12-10 (Conductor)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 4: VISTAS REALES DE LA APP MÓVIL SENTINEL ONE -->
+        <!-- ========================================================================= -->
+        <section id="slide-3" class="slide flex-col justify-center px-6 md:px-12 max-w-6xl mx-auto">
+            <div class="space-y-4">
+                <div>
+                    <div class="text-xs font-bold text-cyan-400 uppercase tracking-widest">Interfaz Móvil Oficial</div>
+                    <h2 class="text-2xl md:text-3xl font-black font-display text-white">Vistas Reales de SENTINEL ONE (Android & iOS)</h2>
+                    <p class="text-xs text-slate-300">Así es como cada voluntario ve sus despachos, dotación en vivo, historial de asistencia y grifos.</p>
+                </div>
+
+                <!-- Grilla de Capturas Reales -->
+                <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pt-2">
+                    <!-- Vista 1 -->
+                    <div class="glass-card p-2 rounded-xl text-center space-y-1.5">
+                        <img src="assets/screenshots/ANDROID 1.jpeg" class="h-48 w-auto mx-auto rounded-lg object-contain border border-white/10 shadow-md">
+                        <div class="text-[10px] font-bold text-white">Inicio & Estado 0-9</div>
+                    </div>
+
+                    <!-- Vista 2 -->
+                    <div class="glass-card p-2 rounded-xl text-center space-y-1.5">
+                        <img src="assets/screenshots/ANDROID 2.jpeg" class="h-48 w-auto mx-auto rounded-lg object-contain border border-white/10 shadow-md">
+                        <div class="text-[10px] font-bold text-red-400">Alerta de Despacho</div>
+                    </div>
+
+                    <!-- Vista 3 -->
+                    <div class="glass-card p-2 rounded-xl text-center space-y-1.5">
+                        <img src="assets/screenshots/ANDROID 3.jpeg" class="h-48 w-auto mx-auto rounded-lg object-contain border border-white/10 shadow-md">
+                        <div class="text-[10px] font-bold text-cyan-400">Dotación en Camino</div>
+                    </div>
+
+                    <!-- Vista 4 -->
+                    <div class="glass-card p-2 rounded-xl text-center space-y-1.5">
+                        <img src="assets/screenshots/ANDROID 4.jpeg" class="h-48 w-auto mx-auto rounded-lg object-contain border border-white/10 shadow-md">
+                        <div class="text-[10px] font-bold text-amber-400">Historial & Abonos</div>
+                    </div>
+
+                    <!-- Vista 5 -->
+                    <div class="glass-card p-2 rounded-xl text-center space-y-1.5">
+                        <img src="assets/screenshots/ANDROID 5.jpeg" class="h-48 w-auto mx-auto rounded-lg object-contain border border-white/10 shadow-md">
+                        <div class="text-[10px] font-bold text-green-400">Mapa con Grifos</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 5: 🚒 SENTINEL NAV EN LA CABINA DEL CARRO -->
+        <!-- ========================================================================= -->
+        <section id="slide-4" class="slide flex-col justify-center px-6 md:px-16 max-w-6xl mx-auto">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                <div class="lg:col-span-5 space-y-4">
+                    <img src="assets/logos/SENTINEL NAV.png" alt="SENTINEL NAV" class="h-14 w-auto object-contain">
+                    <div class="text-xs font-bold text-amber-400 uppercase tracking-widest">En la Cabina del Móvil</div>
+                    <h2 class="text-3xl font-black font-display text-white">SENTINEL NAV: La Tablet Táctica a Bordo</h2>
+                    <p class="text-sm text-slate-300 leading-relaxed">
+                        El maquinista no necesita mirar celulares ni pedir ubicaciones por radio. La tablet del carro se enciende automáticamente con la ruta y los grifos.
+                    </p>
+                    <div class="space-y-2 pt-2 text-xs">
+                        <div class="flex items-center space-x-2 text-slate-200">
+                            <span class="text-amber-400 font-bold">●</span>
+                            <span><strong>Ciclo Táctico:</strong> 6-0 (Salida) ➔ 6-3 (Lugar) ➔ 6-9 (Retorno) ➔ 6-10 (Cuartel) ➔ 6-8 (Fin con Odómetro KM).</span>
+                        </div>
+                        <div class="flex items-center space-x-2 text-slate-200">
+                            <span class="text-amber-400 font-bold">●</span>
+                            <span><strong>Salidas Especiales:</strong> 6-13 (Trámites) y 6-14 (Combustible).</span>
+                        </div>
+                        <div class="flex items-center space-x-2 text-slate-200">
+                            <span class="text-amber-400 font-bold">●</span>
+                            <span><strong>Control de Dotación:</strong> Asignación de Chofer y OBAC antes de salir.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mockup Interactivo de la Cabina -->
+                <div class="lg:col-span-7">
+                    <div class="glass-panel p-5 rounded-2xl border border-amber-500/40 space-y-3">
+                        <div class="flex justify-between items-center border-b border-white/10 pb-2 text-xs">
+                            <div class="flex items-center space-x-2">
+                                <span class="px-2 py-0.5 rounded bg-red-600 font-black text-white">B-1</span>
+                                <span class="font-bold text-white">AV. O'HIGGINS / MIRAFLORES</span>
+                            </div>
+                            <span class="text-cyan-400 font-mono font-bold">48 KM/H — RUTA ACTIVA</span>
+                        </div>
+
+                        <!-- Panel de Maniobra -->
+                        <div class="bg-slate-900/90 p-3 rounded-xl border border-white/10 flex items-center space-x-4">
+                            <div class="w-12 h-12 rounded-xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-2xl">
+                                ↗️
+                            </div>
+                            <div>
+                                <div class="text-xs text-cyan-400 font-bold">En 180 metros (Grifo a la derecha)</div>
+                                <div class="text-sm font-black text-white">Gire a la derecha hacia el lugar del llamado</div>
+                            </div>
+                        </div>
+
+                        <!-- Botones Tácticos Reales -->
+                        <div class="grid grid-cols-4 gap-2 pt-2 text-xs font-bold">
+                            <button class="py-2.5 rounded-xl bg-red-600 text-white font-black hover:bg-red-500">
+                                6-0 SALIDA
+                            </button>
+                            <button class="py-2.5 rounded-xl bg-green-600 text-white font-black hover:bg-green-500">
+                                6-3 LUGAR
+                            </button>
+                            <button class="py-2.5 rounded-xl bg-amber-600 text-white font-black hover:bg-amber-500">
+                                6-9 RETORNO
+                            </button>
+                            <button class="py-2.5 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700">
+                                6-8 KM
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 6: CITACIONES REALES: 12-10 CONDUCTOR Y 6-6 PERSONAL -->
+        <!-- ========================================================================= -->
+        <section id="slide-5" class="slide flex-col justify-center px-6 md:px-16 max-w-6xl mx-auto">
+            <div class="space-y-6">
+                <div>
+                    <div class="text-xs font-bold text-amber-400 uppercase tracking-widest">Respaldo Operativo Inmediato</div>
+                    <h2 class="text-3xl md:text-4xl font-black font-display text-white">¿Qué pasa si falta maquinista o personal en el cuartel?</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Clave 12-10 -->
+                    <div class="glass-card p-6 rounded-2xl border-l-4 border-amber-500 space-y-3">
+                        <div class="flex items-center space-x-3 text-amber-400 font-black text-lg">
+                            <i data-lucide="key" class="w-6 h-6"></i>
+                            <span>Citación 12-10: "Se Solicita Conductor"</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Si una unidad despachada no tiene chofer en el cuartel, la Central emite una citación <strong>12-10</strong> con un solo clic.
+                        </p>
+                        <div class="p-3 bg-amber-950/40 rounded-xl border border-amber-500/20 text-xs space-y-1">
+                            <div class="font-bold text-amber-400">Filtro Inteligente:</div>
+                            <div class="text-slate-300">Suena <strong>únicamente en los celulares de los bomberos habilitados como Maquinistas</strong> que estén en estado 0-9 (Disponible).</div>
+                        </div>
+                    </div>
+
+                    <!-- Clave 6-6 -->
+                    <div class="glass-card p-6 rounded-2xl border-l-4 border-cyan-500 space-y-3">
+                        <div class="flex items-center space-x-3 text-cyan-400 font-black text-lg">
+                            <i data-lucide="users" class="w-6 h-6"></i>
+                            <span>Citación 6-6: "Se Solicita Personal"</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            Para reforzar la dotación de una unidad o llamado que requiere más personal de trabajo.
+                        </p>
+                        <div class="p-3 bg-cyan-950/40 rounded-xl border border-cyan-500/20 text-xs space-y-1">
+                            <div class="font-bold text-cyan-400">Alerta General:</div>
+                            <div class="text-slate-300">Suena con el tono <code>alerta.mp3</code> a todos los voluntarios disponibles de la compañía.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 7: PRUEBA RADIAL (11-5) Y CONTROL DE PERSONAL -->
+        <!-- ========================================================================= -->
+        <section id="slide-6" class="slide flex-col justify-center px-6 md:px-16 max-w-6xl mx-auto">
+            <div class="space-y-6">
+                <div>
+                    <div class="text-xs font-bold text-blue-400 uppercase tracking-widest">Rutina Operativa Diaria</div>
+                    <h2 class="text-3xl md:text-4xl font-black font-display text-white">Prueba Radial (11-5) y Estados de Personal</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <!-- 11-5 -->
+                    <div class="glass-card p-4 rounded-2xl border border-blue-500/30 space-y-2">
+                        <div class="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 font-black text-lg">
+                            11-5
+                        </div>
+                        <div class="font-bold text-white text-sm">Prueba Radial Diaria</div>
+                        <p class="text-slate-300">
+                            Módulo en la central para registrar la prueba radial de unidades y cuarteles con reporte de señal y operador a cargo.
+                        </p>
+                    </div>
+
+                    <!-- 0-8 y 0-9 -->
+                    <div class="glass-card p-4 rounded-2xl border border-amber-500/30 space-y-2">
+                        <div class="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 font-black text-lg">
+                            0-8
+                        </div>
+                        <div class="font-bold text-white text-sm">Fuera de Servicio Justificado</div>
+                        <p class="text-slate-300">
+                            Carros o bomberos fuera de servicio con motivo explícito (falla mecánica o mantención). La app móvil silencia automáticamente las alarmas.
+                        </p>
+                    </div>
+
+                    <!-- Abonos -->
+                    <div class="glass-card p-4 rounded-2xl border border-green-500/30 space-y-2">
+                        <div class="w-10 h-10 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 font-black text-lg">
+                            %
+                        </div>
+                        <div class="font-bold text-white text-sm">Fórmula Oficial de Abonos</div>
+                        <p class="text-slate-300">
+                            Cálculo de asistencias y abonos según el reglamento de Bomberos de Chile para premios de constancia y calificación anual.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 8: SEGURIDAD, DATOS Y SOBERANÍA DEL CUERPO -->
+        <!-- ========================================================================= -->
+        <section id="slide-7" class="slide flex-col justify-center px-6 md:px-16 max-w-6xl mx-auto">
+            <div class="space-y-6">
+                <div>
+                    <div class="text-xs font-bold text-green-400 uppercase tracking-widest">Confianza y Soberanía</div>
+                    <h2 class="text-3xl md:text-4xl font-black font-display text-white">Los Datos Pertenecen 100% a su Cuerpo de Bomberos</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
+                    <div class="glass-card p-5 rounded-2xl border border-white/10 space-y-3">
+                        <div class="text-base font-black text-white flex items-center space-x-2">
+                            <i data-lucide="database" class="w-5 h-5 text-cyan-400"></i>
+                            <span>Base de Datos Aislada y Segura</span>
+                        </div>
+                        <p class="text-slate-300 leading-relaxed">
+                            Cada Cuerpo de Bomberos tiene su propia base de datos independiente. Ninguna otra institución tiene acceso a sus despachos, personal ni bitácoras.
+                        </p>
+                    </div>
+
+                    <div class="glass-card p-5 rounded-2xl border border-white/10 space-y-3">
+                        <div class="text-base font-black text-white flex items-center space-x-2">
+                            <i data-lucide="cloud-check" class="w-5 h-5 text-green-400"></i>
+                            <span>Respaldos Diarios Automáticos</span>
+                        </div>
+                        <p class="text-slate-300 leading-relaxed">
+                            Copias de seguridad redundantes en la nube. Si se apaga el computador de la central o se corta la luz, la información no se pierde.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 9: MODELO DE LICENCIA Y ACOMPAÑAMIENTO -->
+        <!-- ========================================================================= -->
+        <section id="slide-8" class="slide flex-col justify-center px-6 md:px-16 max-w-6xl mx-auto">
+            <div class="space-y-6">
+                <div>
+                    <div class="text-xs font-bold text-cyan-400 uppercase tracking-widest">Modalidad de Trabajo</div>
+                    <h2 class="text-3xl md:text-4xl font-black font-display text-white">Soporte Directo, Capacitación y Actualizaciones</h2>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div class="glass-card p-4 rounded-2xl border border-white/10 space-y-2">
+                        <div class="font-bold text-cyan-400 text-sm">✓ Actualizaciones Incluidas</div>
+                        <p class="text-slate-300">
+                            Todas las mejoras de software y nuevas funciones se aplican automáticamente sin costo extra.
+                        </p>
+                    </div>
+
+                    <div class="glass-card p-4 rounded-2xl border border-white/10 space-y-2">
+                        <div class="font-bold text-amber-400 text-sm">✓ Capacitación Presencial</div>
+                        <p class="text-slate-300">
+                            Enseñamos a los operadores, cuarteleros y maquinistas cómo usar cada módulo paso a paso.
+                        </p>
+                    </div>
+
+                    <div class="glass-card p-4 rounded-2xl border border-white/10 space-y-2">
+                        <div class="font-bold text-green-400 text-sm">✓ Soporte Permanente</div>
+                        <p class="text-slate-300">
+                            Atención técnica directa ante cualquier duda o ajuste que requiera el Cuerpo.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========================================================================= -->
+        <!-- SLIDE 10: CIERRE Y PREGUNTAS -->
+        <!-- ========================================================================= -->
+        <section id="slide-9" class="slide flex-col items-center justify-center text-center px-6">
+            <div class="max-w-3xl mx-auto space-y-6">
+                <img src="assets/logos/logo 1.png" alt="SENTINEL" class="h-20 w-auto mx-auto object-contain drop-shadow-[0_0_20px_rgba(239,68,68,0.4)]">
+
+                <h2 class="text-3xl sm:text-4xl md:text-5xl font-black font-display text-white">
+                    SENTINEL al Servicio de su <br>
+                    <span class="text-red-400">Cuerpo de Bomberos</span>
+                </h2>
+
+                <p class="text-slate-300 text-base max-w-xl mx-auto">
+                    Quedamos a su completa disposición para resolver dudas, realizar pruebas en vivo en sus propios celulares o coordinar la marcha blanca.
+                </p>
+
+                <div class="pt-6 flex justify-center space-x-4">
+                    <button onclick="goToSlide(2)" class="px-8 py-3.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs uppercase tracking-wider transition shadow-lg shadow-red-600/30">
+                        Probar Despacho Nuevamente
+                    </button>
+                    <button onclick="goToSlide(0)" class="px-6 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase transition border border-white/10">
+                        Volver al Inicio
+                    </button>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- ========================================================================= -->
+    <!-- BARRA INFERIOR FIJA -->
+    <!-- ========================================================================= -->
+    <footer class="no-print absolute bottom-0 left-0 right-0 h-16 glass-panel border-t border-white/10 z-50 flex items-center justify-between px-6">
+        <div class="flex items-center space-x-3">
+            <button onclick="prevSlide()" id="prevBtn" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center space-x-1.5 transition border border-white/10">
+                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                <span>Anterior (←)</span>
+            </button>
+            <button onclick="nextSlide()" id="nextBtn" class="px-5 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-black flex items-center space-x-1.5 transition shadow-md shadow-red-600/20">
+                <span>Siguiente (→ / Espacio)</span>
+                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </button>
+        </div>
+
+        <!-- Barra de Progreso -->
+        <div class="hidden md:flex items-center space-x-2 max-w-md w-full mx-6">
+            <div class="w-full bg-slate-800/80 h-2 rounded-full overflow-hidden border border-white/5">
+                <div id="progressBar" class="bg-gradient-to-r from-red-500 to-cyan-500 h-full rounded-full transition-all duration-300" style="width: 10%;"></div>
+            </div>
+        </div>
+
+        <div class="text-[11px] text-slate-400 hidden sm:flex items-center space-x-2 font-mono">
+            <span>F11: Pantalla Completa</span>
+        </div>
+    </footer>
+
+    <!-- Audio Player Oculto para Sonidos Reales -->
+    <audio id="realAudioPlayer" preload="auto"></audio>
+
+    <!-- ========================================================================= -->
+    <!-- JAVASCRIPT REAL DE DEMOSTRACIÓN -->
+    <!-- ========================================================================= -->
+    <script>
+        lucide.createIcons();
+
+        const totalSlides = 10;
+        let currentSlide = 0;
+
+        const slideTitles = [
+            "01. Portada Oficial",
+            "02. El Ciclo de Despacho Real",
+            "03. DEMO EN VIVO: CAD ➔ ONE",
+            "04. Vistas Reales de SENTINEL ONE",
+            "05. SENTINEL NAV en el Carro",
+            "06. Citaciones 12-10 y 6-6",
+            "07. Prueba Radial (11-5) y Estados",
+            "08. Seguridad y Soberanía de Datos",
+            "09. Licencia y Acompañamiento",
+            "10. Cierre y Preguntas"
+        ];
+
+        let selectedClaveAudio = "c10_0";
+
+        function changeClaveDemo(claveKey) {
+            selectedClaveAudio = claveKey;
+            const names = {
+                "c10_0": "10-0 FUEGO ESTRUCTURAL",
+                "c10_1": "10-1 INCENDIO VEHICULAR",
+                "c10_2": "10-2 PASTIZALES / FORESTAL",
+                "c10_3": "10-3 RESCATE PERSONAS",
+                "c10_4": "10-4 RESCATE VEHICULAR",
+                "c10_5": "10-5 MATERIALES PELIGROSOS",
+                "c10_12": "10-12 APOYO A OTROS CUERPOS",
+                "c10_30": "10-30 INCENDIO DECLARADO"
+            };
+            document.getElementById('dispClaveName').textContent = names[claveKey] || claveKey;
+        }
+
+        function playRealClaveAudio(audioName) {
+            const player = document.getElementById('realAudioPlayer');
+            player.src = `assets/audio/${audioName}.mp3`;
+            player.currentTime = 0;
+            player.play().catch(e => {
+                console.log("Audio play prevented:", e);
+            });
+        }
+
+        // Ejecutar Despacho Real en la Demo
+        function executeRealDispatch() {
+            playRealClaveAudio(selectedClaveAudio);
+
+            const addr = document.getElementById('dispAddressInput').value;
+            const claveText = document.getElementById('dispClaveName').textContent.trim();
+
+            // Log en CAD
+            const logEl = document.getElementById('cadLiveLog');
+            logEl.innerHTML += `<div>[${new Date().toLocaleTimeString()}] <span class="text-red-400 font-bold">DESPACHO ENVIADO:</span> ${claveText} -> B-1, BX-1</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+
+            // Pantalla de Celular ONE
+            const phoneEl = document.getElementById('phoneAlertContainer');
+            phoneEl.innerHTML = `
+                <div class="p-3.5 bg-red-900/60 border-2 border-red-500 rounded-2xl text-center space-y-2 pulse-alarm">
+                    <div class="text-[10px] font-black text-red-400 tracking-widest uppercase">🚨 ALERTA DE DESPACHO</div>
+                    <div class="text-base font-black text-white font-display leading-tight">${claveText}</div>
+                    <div class="text-xs text-slate-200 font-bold">${addr}</div>
+                    <div class="text-[10px] text-cyan-300 font-mono">🔊 Suena Alarma (Bypass de Silencio)</div>
+                </div>
+
+                <div class="space-y-1.5 pt-1">
+                    <button onclick="simOneRespond('ASISTE')" class="w-full py-2.5 rounded-xl bg-green-500 hover:bg-green-400 text-slate-950 font-black text-xs uppercase shadow-md shadow-green-500/20 flex items-center justify-center space-x-1.5">
+                        <i data-lucide="check" class="w-4 h-4"></i>
+                        <span>ASISTIR AL LLAMADO</span>
+                    </button>
+                    <button onclick="simOneRespond('NO_ASISTE')" class="w-full py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 font-bold text-xs uppercase">
+                        No Puedo Asistir
+                    </button>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        function simOneRespond(type) {
+            const phoneEl = document.getElementById('phoneAlertContainer');
+            const logEl = document.getElementById('cadLiveLog');
+
+            if (type === 'ASISTE') {
+                phoneEl.innerHTML = `
+                    <div class="p-4 bg-slate-900/90 rounded-2xl border border-green-500/40 text-center space-y-2">
+                        <div class="w-8 h-8 rounded-full bg-green-500/20 text-green-400 flex items-center justify-center mx-auto">
+                            <i data-lucide="check" class="w-4 h-4"></i>
+                        </div>
+                        <div class="font-black text-green-400 text-sm">ASISTENCIA CONFIRMADA</div>
+                        <div class="text-[10px] text-slate-300">Dotación actualizada en Central y Carro</div>
+                        <div class="p-2 bg-black/40 rounded-lg text-[10px] text-slate-400 text-left">
+                            <strong>Personal en Camino (4):</strong><br>
+                            101 (Conductor), C-1 (OBAC), 104, 108
+                        </div>
+                    </div>
+                `;
+                logEl.innerHTML += `<div>[${new Date().toLocaleTimeString()}] <span class="text-green-400 font-bold">BOMBERO 101:</span> ASISTE AL SERVICIO</div>`;
+            } else {
+                phoneEl.innerHTML = `
+                    <div class="p-4 bg-slate-900/90 rounded-2xl border border-white/10 text-center space-y-2">
+                        <div class="font-bold text-slate-400 text-sm">NO ASISTE AL SERVICIO</div>
+                        <div class="text-[10px] text-slate-500">Segundo tono cancelado</div>
+                    </div>
+                `;
+                logEl.innerHTML += `<div>[${new Date().toLocaleTimeString()}] <span class="text-slate-400">BOMBERO 101:</span> NO ASISTE</div>`;
+            }
+            logEl.scrollTop = logEl.scrollHeight;
+            lucide.createIcons();
+        }
+
+        function trigger12_10() {
+            playRealClaveAudio('alerta');
+            const phoneEl = document.getElementById('phoneAlertContainer');
+            const logEl = document.getElementById('cadLiveLog');
+
+            phoneEl.innerHTML = `
+                <div class="p-3.5 bg-amber-950/60 border-2 border-amber-500 rounded-2xl text-center space-y-2 pulse-alarm">
+                    <div class="text-[10px] font-black text-amber-400 tracking-widest uppercase">📢 CITACIÓN 12-10</div>
+                    <div class="text-sm font-black text-white">SE SOLICITA CONDUCTOR PARA B-1</div>
+                    <div class="text-[10px] text-slate-300">Alerta recibida porque estás calificado como Conductor (0-9)</div>
+                </div>
+            `;
+            logEl.innerHTML += `<div>[${new Date().toLocaleTimeString()}] <span class="text-amber-400 font-bold">CITACIÓN 12-10 EMITIDA:</span> Solicitud de Maquinista B-1</div>`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function resetRealDispatch() {
+            document.getElementById('cadLiveLog').innerHTML = `[19:14:00] Central a la escucha. Unidades B-1 y BX-1 disponibles en Cuartel (0-9).`;
+            document.getElementById('phoneAlertContainer').innerHTML = `
+                <div class="text-center p-4 bg-slate-900/80 rounded-2xl border border-white/10 space-y-2">
+                    <div class="w-10 h-10 rounded-full bg-green-500/20 border border-green-500/50 flex items-center justify-center mx-auto text-green-400">
+                        <i data-lucide="shield-check" class="w-5 h-5"></i>
+                    </div>
+                    <div class="font-bold text-white text-sm">ESTADO: 0-9 DISPONIBLE</div>
+                    <div class="text-[11px] text-slate-400">Esperando despacho...</div>
+                </div>
+            `;
+            lucide.createIcons();
+        }
+
+        // Navegación
+        function goToSlide(index) {
+            if (index < 0 || index >= totalSlides) return;
+            document.querySelectorAll('.slide').forEach((s, idx) => {
+                s.classList.remove('active');
+                if (idx === index) s.classList.add('active');
+            });
+            currentSlide = index;
+            updateUI();
+        }
+
+        function nextSlide() {
+            if (currentSlide < totalSlides - 1) goToSlide(currentSlide + 1);
+        }
+
+        function prevSlide() {
+            if (currentSlide > 0) goToSlide(currentSlide - 1);
+        }
+
+        function updateUI() {
+            const num = (currentSlide + 1).toString().padStart(2, '0');
+            const total = totalSlides.toString().padStart(2, '0');
+            document.getElementById('slideIndicator').textContent = `${num} / ${total}`;
+            document.getElementById('slideTitleHeader').textContent = slideTitles[currentSlide];
+
+            const progress = ((currentSlide + 1) / totalSlides) * 100;
+            document.getElementById('progressBar').style.width = `${progress}%`;
+
+            document.getElementById('prevBtn').disabled = (currentSlide === 0);
+            document.getElementById('prevBtn').style.opacity = (currentSlide === 0) ? '0.4' : '1';
+            lucide.createIcons();
+        }
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {});
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+                e.preventDefault();
+                nextSlide();
+            } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+                e.preventDefault();
+                prevSlide();
+            }
+        });
+
+        updateUI();
+    </script>
+</body>
+</html>

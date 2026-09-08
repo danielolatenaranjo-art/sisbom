@@ -21,15 +21,40 @@ struct MainView: View {
     var showFullscreenAlert: Dispatch? {
         guard let user = viewModel.currentUser, !viewModel.isCentralActive else { return nil }
         let userStatus = user.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        let is09 = userStatus == "0-9"
+        let isSpecial = userStatus.contains("SUSPENDIDO") || userStatus == "CDS" || userStatus.contains("LICENCIA") || userStatus == "PERMISO"
+        if isSpecial { return nil }
+        
+        let is09 = userStatus == "0-9" || userStatus.isEmpty || userStatus == "DISPONIBLE"
         let is08 = userStatus == "0-8" || userStatus == "10-8"
-        guard let fId = viewModel.fullscreenDispatchId, (is09 || is08) else { return nil }
-        guard let d = viewModel.dispatchesList.first(where: { $0.idServicio == fId && $0.operadorFinal.isEmpty }) else { return nil }
-        let isAttending = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) == fId
-        let isEscalationAlarm = d.clave.contains("10-30") || d.clave.uppercased().contains("FORESTAL")
-        if !isAttending && (isEscalationAlarm || (is09 && userStatus != "NO ASISTIR")) {
-            return d
+        
+        // 1. If explicit fullscreen dispatch requested (by push notification or real-time event)
+        if let fId = viewModel.fullscreenDispatchId {
+            if let d = viewModel.dispatchesList.first(where: { $0.idServicio == fId && $0.operadorFinal.isEmpty }) {
+                let userEnServicio = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
+                let isAttending = userEnServicio == fId
+                let hasDeclined = userEnServicio == "-\(fId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(fId))
+                
+                if !isAttending && !hasDeclined {
+                    return d
+                }
+            }
         }
+        
+        // 2. Fallback: If there is an active dispatch without answer and user is 0-9 (or 0-8 on escalation)
+        if let activeDispatch = viewModel.dispatchesList.first(where: { $0.operadorFinal.isEmpty }) {
+            let dId = activeDispatch.idServicio
+            let userEnServicio = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isAttending = userEnServicio == dId
+            let hasDeclined = userEnServicio == "-\(dId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(dId))
+            let isEscalationAlarm = activeDispatch.clave.contains("10-30") || activeDispatch.clave.uppercased().contains("FORESTAL")
+            
+            if !isAttending && !hasDeclined {
+                if isEscalationAlarm || is09 {
+                    return activeDispatch
+                }
+            }
+        }
+        
         return nil
     }
 
@@ -58,7 +83,7 @@ struct MainView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 175) // Space for TopAppBarView
+                    .padding(.top, 210) // Space for TopAppBarView without overlapping tab contents
                     .padding(.bottom, 80) // Space for BottomNavigationBarView
 
                     // Floating Top Header & Firefighter Card (Exact Android Layout)
@@ -69,7 +94,7 @@ struct MainView: View {
                             }
                         })
                     }
-                    .padding(.top, 44) // Status bar safe area
+                    .padding(.top, 4) // Positioned immediately under dynamic island / status bar
 
                     // Floating Bottom Navigation Dock (Exact Android Layout)
                     VStack {
@@ -115,8 +140,9 @@ struct MainView: View {
             // Emergency Fullscreen Overlay Alert
             if let dispatch = showFullscreenAlert {
                 FullscreenEmergencyAlertView(dispatch: dispatch, viewModel: viewModel)
-                    .transition(.opacity)
-                    .zIndex(100)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .zIndex(999)
+                    .ignoresSafeArea()
             }
         }
         .onAppear {
@@ -465,169 +491,343 @@ struct BottomNavigationBarView: View {
     }
 }
 
-// MARK: - Profile Drawer Content
+// MARK: - Profile Drawer Content (Exact Android SENTINEL ONE 1:1 Parity)
 struct ProfileDrawerContent: View {
     @ObservedObject var viewModel: SisBomViewModel
     @Binding var isDrawerOpen: Bool
     @Binding var showingChangePassword: Bool
+    @State private var isOpeningDoor: Bool = false
+    @State private var doorMessage: String = ""
 
     var body: some View {
         let isDark = viewModel.isDarkMode
-        
-        VStack(alignment: .leading, spacing: 0) {
-            // Profile Card Top Area
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    // Close button
+        let user = viewModel.currentUser
+        let textColor = isDark ? Color.white : Color(red: 0.118, green: 0.161, blue: 0.231)
+        let textSecColor = isDark ? Color(red: 0.580, green: 0.639, blue: 0.722) : Color(red: 0.392, green: 0.455, blue: 0.545)
+        let cardBg = isDark ? Color(red: 0.118, green: 0.161, blue: 0.231).opacity(0.3) : Color.white
+        let cardBorder = isDark ? Color.white.opacity(0.12) : Color(red: 0.886, green: 0.910, blue: 0.941)
+
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: 0) {
+                // 1. Profile Top Header Row
+                HStack(alignment: .center, spacing: 12) {
+                    // Avatar (rounded square 10dp)
+                    ZStack {
+                        if let user = user, !user.foto.isEmpty, let url = URL(string: user.foto) {
+                            AsyncImage(url: url) { image in
+                                image.resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Image(uiImage: viewModel.getInstitutionLogo())
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                            }
+                            .frame(width: 50, height: 50)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                        } else {
+                            Image(uiImage: viewModel.getInstitutionLogo())
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(width: 50, height: 50)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                        }
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isDark ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1)
+                    )
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(user?.nombreBombero.uppercased() ?? "BOMBERO")
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundColor(textColor)
+                            .lineLimit(2)
+
+                        Text(user?.cargo.uppercased() ?? "VOLUNTARIO")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.bomberosRed)
+                    }
+
+                    Spacer()
+
+                    // Close Button
                     Button(action: {
                         withAnimation(.spring()) {
                             isDrawerOpen = false
                         }
                     }) {
                         Image(systemName: "xmark")
-                            .foregroundColor(isDark ? .white : .textDark)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(isDark ? .white : textSecColor)
+                            .frame(width: 34, height: 34)
+                            .background(isDark ? Color(red: 0.118, green: 0.161, blue: 0.231) : Color(red: 0.945, green: 0.961, blue: 0.976))
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.08), lineWidth: 1)
+                            )
                     }
-                    
-                    Spacer()
                 }
-                
-                // User info
-                if let user = viewModel.currentUser {
-                    HStack(spacing: 12) {
-                        // User Avatar Image or Placeholder
-                        if !user.foto.isEmpty, let url = URL(string: user.foto) {
-                            AsyncImage(url: url) { image in
-                                image.resizable()
-                                     .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                                    .resizable()
-                                    .foregroundColor(.textSecondary)
+                .padding(.horizontal, 20)
+                .padding(.top, 56)
+                .padding(.bottom, 16)
+
+                Divider()
+                    .background(isDark ? Color.white.opacity(0.08) : Color.black.opacity(0.08))
+                    .padding(.horizontal, 20)
+
+                VStack(alignment: .leading, spacing: 20) {
+                    // 2. IDENTIFICACIÓN OFICIAL
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("IDENTIFICACIÓN OFICIAL")
+                            .font(.system(size: 10, weight: .black))
+                            .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                            .tracking(0.5)
+
+                        HStack(spacing: 10) {
+                            // N° Registro
+                            VStack(spacing: 4) {
+                                Text("N° REGISTRO")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                                Text(user?.idRegistro ?? "—")
+                                    .font(.system(size: 20, weight: .black))
+                                    .foregroundColor(textColor)
                             }
-                            .frame(width: 54, height: 54)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                        } else {
-                            Image(systemName: "person.crop.square.fill")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(isDark ? Color(red: 0.118, green: 0.161, blue: 0.231).opacity(0.4) : Color(red: 0.973, green: 0.980, blue: 0.988))
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(cardBorder, lineWidth: 1)
+                            )
+
+                            // ID Radial
+                            VStack(spacing: 4) {
+                                Text("ID RADIAL")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(Color(red: 0.937, green: 0.267, blue: 0.267))
+                                Text(user?.idRadial.isEmpty ?? true ? (user?.idRegistro ?? "—") : (user?.idRadial ?? "—"))
+                                    .font(.system(size: 20, weight: .black))
+                                    .foregroundColor(isDark ? Color(red: 0.973, green: 0.443, blue: 0.443) : Color(red: 0.725, green: 0.110, blue: 0.110))
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(isDark ? Color(red: 0.192, green: 0.063, blue: 0.063).opacity(0.3) : Color(red: 0.996, green: 0.949, blue: 0.949))
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(isDark ? Color.bomberosRed.opacity(0.2) : Color(red: 0.996, green: 0.886, blue: 0.886), lineWidth: 1)
+                            )
+                        }
+                    }
+
+                    // 3. APARIENCIA DE LA APP
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("APARIENCIA DE LA APP")
+                            .font(.system(size: 10, weight: .black))
+                            .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                            .tracking(0.5)
+
+                        HStack {
+                            Text("Modo Visual")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(textColor)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { viewModel.isDarkMode },
+                                set: { viewModel.setDarkModeEnabled($0) }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(SwitchToggleStyle(tint: Color(red: 0.231, green: 0.510, blue: 0.965)))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(cardBg)
+                        .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(cardBorder, lineWidth: 1)
+                        )
+                    }
+
+                    // 4. MODO DE NOTIFICACIONES
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("MODO DE NOTIFICACIONES")
+                            .font(.system(size: 10, weight: .black))
+                            .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                            .tracking(0.5)
+
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Modo Avión (0-8 Absoluto)")
+                                    .font(.system(size: 13, weight: .bold))
+                                    .foregroundColor(textColor)
+                                Text("Silencia y bloquea toda alerta")
+                                    .font(.system(size: 10, weight: .regular))
+                                    .foregroundColor(textSecColor)
+                            }
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { viewModel.isAirplaneMode },
+                                set: { viewModel.setAirplaneModeEnabled($0) }
+                            ))
+                            .labelsHidden()
+                            .disabled(viewModel.isCentralActive)
+                            .toggleStyle(SwitchToggleStyle(tint: Color.bomberosRed))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                        .background(cardBg)
+                        .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(cardBorder, lineWidth: 1)
+                        )
+                    }
+
+                    // 5. SEGURIDAD
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("SEGURIDAD")
+                            .font(.system(size: 10, weight: .black))
+                            .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                            .tracking(0.5)
+
+                        Button(action: {
+                            showingChangePassword = true
+                            withAnimation(.spring()) {
+                                isDrawerOpen = false
+                            }
+                        }) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(textSecColor)
+                                Text("CAMBIAR CONTRASEÑA")
+                                    .font(.system(size: 11, weight: .black))
+                                    .foregroundColor(textColor)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                            .background(isDark ? Color(red: 0.118, green: 0.161, blue: 0.231).opacity(0.4) : Color(red: 0.945, green: 0.961, blue: 0.976))
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(cardBorder, lineWidth: 1)
+                            )
+                        }
+                    }
+
+                    // 6. ACCESOS (APERTURA DE PUERTA)
+                    let isComandante = (user?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "COMANDANTE")
+                    let isCentralOperator = viewModel.isCentralActive
+                    let hasPuertaPermission = user?.puerta ?? false
+
+                    if isComandante || isCentralOperator || hasPuertaPermission {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("ACCESOS")
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                                .tracking(0.5)
+
+                            Button(action: {
+                                isOpeningDoor = true
+                                viewModel.openDoor(
+                                    onSuccess: {
+                                        isOpeningDoor = false
+                                        doorMessage = "Puerta abierta con éxito"
+                                    },
+                                    onFailure: { err in
+                                        isOpeningDoor = false
+                                        doorMessage = "Error: \(err.localizedDescription)"
+                                    }
+                                )
+                            }) {
+                                HStack(spacing: 8) {
+                                    if isOpeningDoor {
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    } else {
+                                        Image(systemName: "lock.open.fill")
+                                            .font(.system(size: 14))
+                                        Text("APERTURA DE PUERTA")
+                                            .font(.system(size: 11, weight: .black))
+                                    }
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(Color(red: 0.306, green: 0.729, blue: 0.525)) // #4EBA86 / GoGreen
+                                .cornerRadius(16)
+                            }
+                            .disabled(isOpeningDoor)
+
+                            if !doorMessage.isEmpty {
+                                Text(doorMessage)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(Color.goGreen)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                            }
+                        }
+                    }
+
+                    // 7. TURNO CENTRAL DE ALARMAS
+                    let isOpActive = !viewModel.centralOperatorName.isEmpty
+                    let isComandanteOp = (user?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "COMANDANTE") && ["1", "01", "2", "02", "3", "03"].contains(user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+                    let canCloseOp = isOpActive && (viewModel.isCentralActive || (!viewModel.centralOperatorId.isEmpty && viewModel.centralOperatorId == user?.idRegistro) || isComandanteOp)
+
+                    if canCloseOp {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("TURNO CENTRAL DE ALARMAS")
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.46, blue: 0.55))
+                                .tracking(0.5)
+
+                            Button(action: {
+                                viewModel.closeCentralOperatorSession()
+                                withAnimation(.spring()) {
+                                    isDrawerOpen = false
+                                }
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 12, weight: .bold))
+                                    Text("CERRAR TURNO DE CENTRAL")
+                                        .font(.system(size: 11, weight: .black))
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 44)
+                                .background(Color(red: 0.863, green: 0.149, blue: 0.149))
+                                .cornerRadius(16)
+                            }
+                        }
+                    }
+
+                    // 8. Footer (Logo + Version)
+                    VStack(spacing: 4) {
+                        if let logoImg = UIImage(named: isDark ? "sentinel_one_logo" : "sentinel_one_logo_light") {
+                            Image(uiImage: logoImg)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
-                                .frame(width: 54, height: 54)
-                                .foregroundColor(.textSecondary)
-                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .frame(height: 32)
                         }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(user.nombreBombero)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(isDark ? .white : .textDark)
-                                .lineLimit(1)
-                            
-                            Text("Radial: \(user.idRadial.isEmpty ? user.idRegistro : user.idRadial)")
-                                .font(.system(size: 12))
-                                .foregroundColor(.textSecondary)
-                        }
+                        Text("V 2.1.4")
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundColor(Color(red: 0.851, green: 0.467, blue: 0.024)) // Amber #D97706
+                            .tracking(0.5)
                     }
-                    
-                    if !user.cargo.isEmpty {
-                        Text(user.cargo.uppercased())
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.bomberosRed)
-                            .cornerRadius(4)
-                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 12)
+                    .padding(.bottom, 24)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
             }
-            .padding(24)
-            .padding(.top, 50)
-            .background(isDark ? Color.navyDark : Color(red: 0.96, green: 0.97, blue: 0.98))
-            
-            // Drawer Menu List Items
-            VStack(alignment: .leading, spacing: 20) {
-                // Dark Mode Switcher Row
-                HStack {
-                    Image(systemName: isDark ? "moon.stars.fill" : "sun.max.fill")
-                        .foregroundColor(Color.bomberosRed)
-                        .frame(width: 24)
-                    Text("Modo Oscuro")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundColor(isDark ? .white : .textDark)
-                    Spacer()
-                    Toggle("", isOn: $viewModel.isDarkMode)
-                        .labelsHidden()
-                        .toggleStyle(SwitchToggleStyle(tint: Color.bomberosRed))
-                }
-                
-                // Change Password Menu Button
-                Button(action: {
-                    showingChangePassword = true
-                    withAnimation(.spring()) {
-                        isDrawerOpen = false
-                    }
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "key.fill")
-                            .foregroundColor(Color.bomberosRed)
-                            .frame(width: 24)
-                        Text("Cambiar Contraseña")
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(isDark ? .white : .textDark)
-                    }
-                }
-                
-                // Central operator shortcut (Only for dispatchers)
-                if viewModel.isCentralActive {
-                    Button(action: {
-                        viewModel.currentTab = .despacho
-                        withAnimation(.spring()) {
-                            isDrawerOpen = false
-                        }
-                    }) {
-                        HStack(spacing: 12) {
-                            Image(systemName: "phone.fill")
-                                .foregroundColor(Color.bomberosRed)
-                                .frame(width: 24)
-                            Text("Consola Despacho")
-                                .font(.system(size: 14, weight: .medium))
-                                .foregroundColor(isDark ? .white : .textDark)
-                        }
-                    }
-                }
-                
-                Spacer()
-                
-                // Logout Button at Bottom
-                Button(action: {
-                    viewModel.logout()
-                }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .foregroundColor(Color.bomberosRed)
-                            .frame(width: 24)
-                        Text("Cerrar Sesión")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(Color.bomberosRed)
-                    }
-                }
-                
-                VStack(spacing: 4) {
-                    Image(isDark ? "sentinel_one_logo" : "sentinel_one_logo_light")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 28)
-                    Text("V 2.1.4")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color(red: 0.85, green: 0.47, blue: 0.02))
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.top, 12)
-                .padding(.bottom, 30)
-            }
-            .padding(24)
-            .background(isDark ? Color.navyDeep : Color.white)
         }
         .frame(maxHeight: .infinity)
-        .background(isDark ? Color.navyDeep : Color.white)
+        .background(isDark ? Color(red: 0.059, green: 0.090, blue: 0.165) : Color.white)
         .edgesIgnoringSafeArea(.vertical)
     }
 }
@@ -811,123 +1011,224 @@ struct ChangelogDialog: View {
 struct FullscreenEmergencyAlertView: View {
     let dispatch: Dispatch
     @ObservedObject var viewModel: SisBomViewModel
+    @State private var pulseGlow: Bool = false
 
     var body: some View {
         ZStack {
-            Color(red: 0.725, green: 0.11, blue: 0.11) // #B91C1C
-                .ignoresSafeArea()
+            // Intense Emergency Red Gradient Background
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.88, green: 0.12, blue: 0.12),
+                    Color(red: 0.65, green: 0.05, blue: 0.05),
+                    Color(red: 0.40, green: 0.02, blue: 0.02)
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+
+            // Subtle pulsing background glow
+            Circle()
+                .fill(Color.red.opacity(pulseGlow ? 0.35 : 0.15))
+                .frame(width: 320, height: 320)
+                .blur(radius: 50)
+                .offset(y: -100)
+                .animation(Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulseGlow)
 
             VStack(spacing: 0) {
-                // Header: Logo and Title
-                VStack(spacing: 8) {
-                    Image(uiImage: viewModel.getInstitutionLogo())
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 72, height: 72)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                // Header: Logo and Emergency Header
+                VStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .stroke(Color.white.opacity(0.3), lineWidth: 4)
+                            .frame(width: 78, height: 78)
+                            .scaleEffect(pulseGlow ? 1.12 : 1.0)
+                            .opacity(pulseGlow ? 0.8 : 0.4)
+                            .animation(Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseGlow)
+
+                        Image(uiImage: viewModel.getInstitutionLogo())
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 72, height: 72)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
+                            .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 3)
+                    }
 
                     Text("🚨 DESPACHO DE EMERGENCIA 🚨")
-                        .font(.system(size: 18, weight: .black))
+                        .font(.system(size: 20, weight: .black))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
+                        .shadow(color: Color.black.opacity(0.5), radius: 4, x: 0, y: 2)
 
                     Text("¡CONFIRMA TU ASISTENCIA AHORA!")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Color.white.opacity(0.9))
-                        .multilineTextAlignment(.center)
+                        .font(.system(size: 13, weight: .heavy))
+                        .foregroundColor(Color.white.opacity(0.95))
+                        .tracking(1)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.3))
+                        .cornerRadius(12)
                 }
-                .padding(.top, 40)
+                .padding(.top, 48)
 
-                Spacer()
+                Spacer(minLength: 12)
 
-                // Center: Clave, Time, Date, Preinforme, Units
+                // Center Card: Emergency Clave, Location, Details
                 VStack(spacing: 12) {
-                    Text("CLAVE")
-                        .font(.system(size: 15, weight: .heavy))
-                        .tracking(2)
-                        .foregroundColor(Color.white.opacity(0.75))
+                    Text("CLAVE DE ACTUACIÓN")
+                        .font(.system(size: 13, weight: .black))
+                        .tracking(2.5)
+                        .foregroundColor(Color.white.opacity(0.8))
 
                     let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
                     Text(claveText)
-                        .font(.system(size: claveText.count > 5 ? 64 : 80, weight: .black))
+                        .font(.system(size: claveText.count > 6 ? 56 : 74, weight: .black))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
-                        .minimumScaleFactor(0.6)
+                        .minimumScaleFactor(0.5)
                         .lineLimit(1)
+                        .shadow(color: Color.black.opacity(0.6), radius: 8, x: 0, y: 4)
 
-                    HStack(spacing: 14) {
+                    // Location / Address Pill
+                    if !dispatch.lugar.isEmpty {
+                        HStack(alignment: .center, spacing: 6) {
+                            Image(systemName: "mappin.and.ellipse")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                            Text(dispatch.lugar)
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundColor(.white)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.35))
+                        .cornerRadius(14)
+                        .padding(.horizontal, 20)
+                    }
+
+                    // Time & Date Pills
+                    HStack(spacing: 12) {
                         let hora = dispatch.horaDespacho.isEmpty ? "--:--" : dispatch.horaDespacho
-                        Text("HORA: \(hora)")
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundColor(.white)
-
-                        Text("•")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundColor(Color.white.opacity(0.6))
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.fill")
+                                .font(.system(size: 12))
+                            Text(hora)
+                                .font(.system(size: 14, weight: .black))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.18))
+                        .cornerRadius(10)
 
                         let fecha = dispatch.fechaDespacho.isEmpty ? DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none) : dispatch.fechaDespacho
-                        Text("FECHA: \(fecha)")
-                            .font(.system(size: 16, weight: .black))
-                            .foregroundColor(.white)
+                        HStack(spacing: 4) {
+                            Image(systemName: "calendar")
+                                .font(.system(size: 12))
+                            Text(fecha)
+                                .font(.system(size: 14, weight: .black))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.white.opacity(0.18))
+                        .cornerRadius(10)
                     }
 
                     if !dispatch.preinforme.isEmpty {
                         Text(dispatch.preinforme)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundColor(Color.white.opacity(0.9))
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.white.opacity(0.95))
                             .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .padding(.horizontal, 24)
-                            .padding(.top, 6)
+                            .lineLimit(3)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 8)
+                            .background(Color.black.opacity(0.25))
+                            .cornerRadius(12)
+                            .padding(.horizontal, 20)
                     }
 
                     if !dispatch.carros.isEmpty {
-                        Text("UNIDADES: \(dispatch.carros)")
-                            .font(.system(size: 15, weight: .black))
-                            .foregroundColor(Color(red: 0.98, green: 0.75, blue: 0.14)) // Amber #FBBF24
-                            .multilineTextAlignment(.center)
-                            .padding(.top, 4)
+                        HStack(spacing: 6) {
+                            Image(systemName: "flame.fill")
+                                .font(.system(size: 13))
+                            Text("UNIDADES: \(dispatch.carros)")
+                                .font(.system(size: 15, weight: .black))
+                        }
+                        .foregroundColor(Color(red: 0.99, green: 0.85, blue: 0.25)) // Amber/Yellow
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(12)
                     }
                 }
 
-                Spacer()
+                Spacer(minLength: 16)
 
                 // Action Buttons: ASISTIR & NO ASISTIR
                 VStack(spacing: 12) {
                     Button(action: {
-                        viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
-                        viewModel.fullscreenDispatchId = nil
+                        let impact = UIImpactFeedbackGenerator(style: .heavy)
+                        impact.impactOccurred()
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
+                            viewModel.fullscreenDispatchId = nil
+                        }
                     }) {
-                        Text("ASISTIR")
-                            .font(.system(size: 18, weight: .black))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 56)
-                            .background(Color(red: 0.06, green: 0.73, blue: 0.51)) // #10B981
-                            .cornerRadius(18)
+                        HStack(spacing: 10) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 22, weight: .bold))
+                            Text("ASISTIR")
+                                .font(.system(size: 19, weight: .black))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
+                        .background(
+                            LinearGradient(
+                                colors: [Color(red: 0.1, green: 0.78, blue: 0.55), Color(red: 0.05, green: 0.62, blue: 0.42)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .cornerRadius(20)
+                        .shadow(color: Color(red: 0.05, green: 0.62, blue: 0.42).opacity(0.5), radius: 8, x: 0, y: 4)
                     }
 
                     Button(action: {
-                        viewModel.declineService(dispatchId: dispatch.idServicio)
-                        viewModel.fullscreenDispatchId = nil
+                        let impact = UIImpactFeedbackGenerator(style: .medium)
+                        impact.impactOccurred()
+                        withAnimation(.easeOut(duration: 0.25)) {
+                            viewModel.declineService(dispatchId: dispatch.idServicio)
+                            viewModel.fullscreenDispatchId = nil
+                        }
                     }) {
-                        Text("NO ASISTIR")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .background(Color.black.opacity(0.45))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 18)
-                                    .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
-                            )
-                            .cornerRadius(18)
+                        HStack(spacing: 8) {
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 18, weight: .bold))
+                            Text("NO ASISTIR")
+                                .font(.system(size: 15, weight: .heavy))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color.black.opacity(0.45))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18)
+                                .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
+                        )
+                        .cornerRadius(18)
                     }
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 44)
+                .padding(.bottom, 48)
             }
+        }
+        .onAppear {
+            pulseGlow = true
         }
     }
 }

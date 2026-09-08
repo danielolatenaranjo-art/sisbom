@@ -637,7 +637,10 @@ input::-webkit-credentials-auto-fill-button {
                 <div id="loginError" class="text-red-500 text-xs font-bold text-center h-5 mt-4 mb-2 flex items-center justify-center gap-2 transition-opacity"></div>
                 <button type="submit" id="btnLogin" class="w-full py-4 bg-bomberos-red hover:bg-bomberos-dark text-white font-bold rounded-xl btn-login-shadow hover:-translate-y-0.5 transition-all duration-200 text-sm uppercase tracking-widest flex items-center justify-center gap-2"><i class="fas fa-sign-in-alt"></i> Ingresar al Sistema</button>
             </form>
-            <p id="sisbom-version" class="mt-8 text-white font-bold tracking-widest uppercase transition-opacity" style="font-size: 11px; letter-spacing: 0.15em; text-shadow: 0 1px 4px rgba(0,0,0,0.6);">SENTINEL CAD • V.2.1.1</p>
+            <div id="sisbom-version" class="mt-8 flex items-center justify-center gap-3 transition-opacity">
+                <img src="SENTINEL CAD.png" alt="SENTINEL CAD" class="h-8 md:h-9 object-contain" style="filter: drop-shadow(0 2px 8px rgba(0,0,0,0.5));" onerror="this.onerror=null; this.src='sentinel_cad_logo.png';">
+                <span class="text-white/90 font-black tracking-widest uppercase text-xs md:text-sm" style="letter-spacing: 0.15em; text-shadow: 0 1px 4px rgba(0,0,0,0.7);">V.2.1.1</span>
+            </div>
         </div>
         <script>
             (function() {
@@ -721,6 +724,67 @@ input::-webkit-credentials-auto-fill-button {
                 <button type="button" onclick="window.closeChangeKeyModal()" class="flex-1 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors">Cancelar</button>
                 <button type="button" onclick="window.confirmChangeKey()" class="flex-1 py-2.5 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 shadow-sm rounded-xl transition-colors">Actualizar</button>
             </div>
+        </div>
+    <!-- MODAL SOLICITAR UBICACIÓN (SENTINEL LINK) EN SERVICIO ACTIVO -->
+    <div id="modal-solicitar-geo-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4 transition-opacity duration-200 opacity-0" style="z-index: 8500;">
+        <div class="bg-slate-900 border border-slate-700/80 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden transform scale-95 transition-transform duration-200 p-6 text-center relative" id="modal-solicitar-geo-activo-content">
+            <div class="w-14 h-14 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center text-2xl mx-auto mb-3 border border-blue-500/30 shadow-lg">
+                <i class="fas fa-location-crosshairs animate-pulse"></i>
+            </div>
+            <h3 class="font-black text-lg text-white mb-1 uppercase tracking-wider">SOLICITAR UBICACIÓN GPS</h3>
+            <p class="text-xs text-slate-300 font-medium mb-4">
+                Envíe el enlace de rastreo satelital vía <span class="text-emerald-400 font-bold">SENTINEL LINK</span> al alertante por SMS o WhatsApp.
+            </p>
+
+            <div class="bg-slate-950/80 border border-slate-800 rounded-2xl p-4 mb-4 text-left">
+                <label class="text-[10px] font-black uppercase text-slate-400 tracking-wider block mb-1.5">
+                    Número de Celular del Alertante
+                </label>
+                <div class="flex items-center gap-2 mb-3">
+                    <div class="px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl flex items-center gap-1.5 text-red-400 font-black text-xs select-none shrink-0">
+                        <i class="fas fa-phone text-xs"></i>
+                        <span>+56 9</span>
+                    </div>
+                    <input type="tel" id="active-svc-geo-phone" maxlength="8" class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-black text-base outline-none focus:border-blue-500 transition-colors" placeholder="12345678" oninput="this.value = this.value.replace(/[^0-9]/g, '').slice(0, 8); if(window.updateActiveSvcPreviewLink) window.updateActiveSvcPreviewLink();">
+                </div>
+
+                <div class="flex justify-between items-center mb-1">
+                    <label class="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                        Enlace de Geolocalización
+                    </label>
+                    <button type="button" onclick="window.copyActiveServiceGeoLink()" id="btn-copy-active-geo-link" class="text-[11px] text-blue-400 hover:text-blue-300 font-black flex items-center gap-1">
+                        <i class="fas fa-copy"></i> Copiar
+                    </button>
+                </div>
+                <div class="p-2.5 bg-slate-900/90 border border-slate-800/80 rounded-xl text-[10px] text-blue-400 font-mono break-all select-all" id="active-svc-geo-link-preview">
+                    https://sentinel.web.app/geo.html?id=...
+                </div>
+            </div>
+
+            <!-- Estado de Alertante si ya transmitió -->
+            <div id="active-svc-alertante-status-box" class="hidden mb-4 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl text-center">
+                <div class="flex items-center justify-center gap-2 text-emerald-400 text-xs font-black mb-0.5">
+                    <i class="fas fa-circle-check"></i>
+                    <span>¡ALERTANTE CONECTADO Y TRANSMITIENDO!</span>
+                </div>
+                <span id="active-svc-alertante-status-tag" class="text-[10px] text-slate-300 font-semibold">Precisión GPS disponible en Mapa Táctico</span>
+            </div>
+
+            <!-- Botones de Acción -->
+            <div class="grid grid-cols-2 gap-2.5 mb-3">
+                <button type="button" onclick="window.sendActiveServiceGeoLink('sms')" class="py-2.5 px-3 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 text-white font-black text-xs rounded-xl shadow-lg shadow-blue-900/40 flex items-center justify-center gap-1.5 transition-transform active:scale-95">
+                    <i class="fas fa-paper-plane text-xs"></i>
+                    <span>ENVIAR SMS</span>
+                </button>
+                <button type="button" onclick="window.sendActiveServiceGeoLink('whatsapp')" class="py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-black text-xs rounded-xl shadow-lg shadow-emerald-900/40 flex items-center justify-center gap-1.5 transition-transform active:scale-95">
+                    <i class="fab fa-whatsapp text-sm"></i>
+                    <span>WHATSAPP</span>
+                </button>
+            </div>
+
+            <button type="button" onclick="window.closeRequestAlertanteGeoModal()" class="w-full py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition-colors">
+                Cerrar
+            </button>
         </div>
     </div>
 
@@ -995,8 +1059,39 @@ input::-webkit-credentials-auto-fill-button {
 
             <!-- BARRA LATERAL -->
             <aside class="group bg-slate-900 text-slate-300 flex flex-col shadow-2xl shrink-0 transition-all duration-300 absolute h-full z-40 w-64 md:w-20 hover:w-64 overflow-hidden whitespace-nowrap -translate-x-full md:translate-x-0 left-0 top-0 border-r border-slate-800" id="main-sidebar">
-                <div class="py-4 flex flex-col gap-1 overflow-y-auto overflow-x-hidden flex-1 sidebar-scroll">
-                    <div class="font-semibold text-slate-500 uppercase tracking-widest mb-2 mt-2 px-6 transition-opacity duration-200 md:opacity-0 group-hover:opacity-100" style="font-size: 10px;">Operaciones</div>
+                <div class="py-3 px-2 flex flex-col gap-1 overflow-y-auto overflow-x-hidden flex-1 sidebar-scroll">
+                    
+                    <!-- WIDGET DE LLAMADA ENTRANTE / ALERTANTE EN BARRA LATERAL -->
+                    <div id="sidebar-caller-widget" onclick="window.acceptCallAndDispatch()" class="hidden w-full p-2 mb-2 rounded-2xl bg-gradient-to-r from-red-950/90 to-slate-900 border border-red-500/70 shadow-lg shadow-red-950/60 flex items-center gap-3 transition-all duration-300 overflow-hidden cursor-pointer group/caller hover:border-red-400" title="Click para abrir despacho con datos del alertante">
+                        <!-- ÍCONO LLAMADA ACTIVA (Siempre visible y centrado en ancho colapsado 20) -->
+                        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600 to-rose-700 flex items-center justify-center text-white text-base shadow-md shrink-0 animate-pulse relative">
+                            <i class="fas fa-phone-volume"></i>
+                            <span class="absolute -top-1 -right-1 flex h-3 w-3">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                            </span>
+                        </div>
+                        <!-- DATOS DEL ALERTANTE (Visibles al expandir la barra lateral) -->
+                        <div class="flex-1 min-w-0 flex flex-col justify-center transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">
+                            <div class="flex items-center justify-between gap-1">
+                                <span id="sidebar-caller-badge" class="text-[9px] font-black uppercase text-red-400 tracking-wider truncate">LLAMADA ENTRANTE</span>
+                                <span id="sidebar-caller-time" class="text-[9px] font-bold text-slate-400 shrink-0">--:--</span>
+                            </div>
+                            <div id="sidebar-caller-phone" class="text-sm font-black text-white font-mono truncate select-all tracking-tight my-0.5">
+                                +56 9 ...
+                            </div>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <button type="button" onclick="event.stopPropagation(); window.acceptCallAndDispatch()" class="px-2 py-0.5 bg-red-600 hover:bg-red-500 text-white rounded text-[10px] font-black tracking-wide flex items-center gap-1 shadow-sm transition-transform active:scale-95">
+                                    <i class="fas fa-satellite-dish text-[9px]"></i> Despachar
+                                </button>
+                                <button type="button" onclick="event.stopPropagation(); window.hideIncomingCallNotification(true)" class="p-1 text-slate-400 hover:text-white rounded hover:bg-slate-800 text-[10px] transition-colors" title="Descartar aviso">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="font-semibold text-slate-500 uppercase tracking-widest mb-2 mt-1 px-4 transition-opacity duration-200 md:opacity-0 group-hover:opacity-100" style="font-size: 10px;">Operaciones</div>
                     
                     <button type="button" onclick="window.navigate('despacho', 'despacho.html', this)" class="nav-btn active" id="nav-btn-despacho"><div class="flex items-center"><i class="fas fa-satellite-dish shrink-0"></i><span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Despachos</span></div></button>
                     <button type="button" onclick="window.navigate('personal', 'personal.html', this)" class="nav-btn"><div class="flex items-center"><i class="fas fa-users shrink-0"></i><span class="transition-opacity duration-200 md:opacity-0 group-hover:opacity-100">Personal</span></div></button>
@@ -1054,11 +1149,15 @@ input::-webkit-credentials-auto-fill-button {
                                     <div class="header-card border-l-4 border-l-red-500 relative overflow-hidden flex flex-col justify-between">
                                         <!-- Header: Servicio + Horas + WhatsApp -->
                                         <div class="flex justify-between items-center mb-1">
-                                            <div class="card-label flex items-center gap-1.5">
+                                            <div class="card-label flex items-center gap-1.5 flex-wrap">
                                                 <span>SERVICIO:</span>
                                                 <span id="svc-id" class="text-slate-200 font-bold">--</span>
-                                                <button type="button" onclick="window.copyDispatchWhatsAppActiveService()" class="w-5 h-5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center text-[10px] shadow transition-transform hover:scale-110 ml-1" title="Enviar / Copiar a WhatsApp Desktop">
+                                                <button type="button" onclick="window.copyDispatchWhatsAppActiveService()" class="w-5 h-5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white flex items-center justify-center text-[10px] shadow transition-transform hover:scale-110 ml-0.5" title="Enviar / Copiar a WhatsApp Desktop">
                                                     <i class="fab fa-whatsapp"></i>
+                                                </button>
+                                                <button type="button" onclick="window.openRequestAlertanteGeoModal()" class="px-2 py-0.5 rounded-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-extrabold text-[10px] shadow flex items-center gap-1 transition-all transform hover:scale-105 active:scale-95 ml-1" title="Solicitar Ubicación GPS al Alertante vía SENTINEL LINK">
+                                                    <i class="fas fa-location-crosshairs text-[10px]"></i>
+                                                    <span>SOLICITAR UBICACIÓN</span>
                                                 </button>
                                             </div>
                                             <div class="flex items-center gap-1.5">
@@ -1218,7 +1317,10 @@ input::-webkit-credentials-auto-fill-button {
                                         </div>
                                     </div>
                                     
-                                    <div class="card-map-wrapper cursor-pointer group hover:border-blue-500/80 transition-all flex flex-col min-h-[160px]" onclick="window.openTacticalMapForCurrentService()" title="Click para abrir Mapa Táctico">
+                                    <div class="card-map-wrapper cursor-pointer group hover:border-blue-500/80 transition-all flex flex-col min-h-[160px] relative" onclick="window.openTacticalMapForCurrentService()" title="Click para abrir Mapa Táctico">
+                                        <!-- Capa transparente de captura absoluta de clic -->
+                                        <div class="absolute inset-0 z-[500] cursor-pointer" onclick="window.openTacticalMapForCurrentService()"></div>
+
                                         <!-- Map container ocupando el 100% de la tarjeta con curvas en las 4 esquinas -->
                                         <div id="svc-card-mini-map" class="pointer-events-none"></div>
 
@@ -1338,6 +1440,66 @@ input::-webkit-credentials-auto-fill-button {
 
                 <!-- CONTENEDOR TOASTS (Siempre por encima de modales y mapa táctico) -->
                 <div id="index-toast-container" class="fixed bottom-5 right-5 flex flex-col gap-3 pointer-events-none" style="z-index: 100005;"></div>
+
+                <!-- MODAL SOLICITAR UBICACIÓN EN SERVICIO ACTIVO (SENTINEL LINK) -->
+                <div id="modal-solicitar-geo-activo" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[100000] hidden items-center justify-center p-4">
+                    <div class="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden text-slate-100 animate-in fade-in zoom-in duration-200">
+                        <!-- Header -->
+                        <div class="px-5 py-4 bg-gradient-to-r from-blue-950 to-slate-900 border-b border-slate-800 flex items-center justify-between">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-8 h-8 rounded-xl bg-blue-600/30 border border-blue-500/50 flex items-center justify-center text-blue-400">
+                                    <i class="fas fa-location-crosshairs text-sm"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-black text-white uppercase tracking-wider">SOLICITAR UBICACIÓN</h3>
+                                    <p class="text-[10px] text-slate-400 font-semibold">SENTINEL LINK • LOCALIZACIÓN EN VIVO</p>
+                                </div>
+                            </div>
+                            <button type="button" onclick="window.closeRequestAlertanteGeoModal()" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors">
+                                <i class="fas fa-times text-sm"></i>
+                            </button>
+                        </div>
+
+                        <!-- Body -->
+                        <div class="p-5 space-y-4">
+                            <div>
+                                <label class="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1.5">
+                                    Teléfono del Alertante
+                                </label>
+                                <div class="relative">
+                                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                                        <i class="fas fa-phone-alt text-xs"></i>
+                                    </div>
+                                    <input type="tel" id="geo-activo-phone-input" class="w-full bg-slate-950 border border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-white font-mono text-sm rounded-xl pl-9 pr-3 py-2.5 outline-none transition-all placeholder:text-slate-600" placeholder="+56 9 1234 5678" oninput="window.updateActiveServiceGeoPreview()">
+                                </div>
+                                <p class="text-[10px] text-slate-400 mt-1">Se enviará un enlace seguro con ID del servicio para que el alertante comparta su posición GPS.</p>
+                            </div>
+
+                            <!-- Preview Link -->
+                            <div class="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-1">
+                                <span class="text-[9px] font-bold uppercase text-slate-500 tracking-wider">Enlace a Generar</span>
+                                <p id="geo-activo-link-preview" class="text-[11px] font-mono text-blue-400 break-all select-all">https://sentinel.web.app/geo.html?id=--</p>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="grid grid-cols-2 gap-2 pt-1">
+                                <button type="button" onclick="window.sendActiveServiceGeoLink('sms')" class="py-2.5 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow flex items-center justify-center gap-2 transition-all active:scale-95">
+                                    <i class="fas fa-comment-sms text-sm"></i>
+                                    <span>ENVIAR SMS</span>
+                                </button>
+                                <button type="button" onclick="window.sendActiveServiceGeoLink('whatsapp')" class="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow flex items-center justify-center gap-2 transition-all active:scale-95">
+                                    <i class="fab fa-whatsapp text-sm"></i>
+                                    <span>WHATSAPP</span>
+                                </button>
+                            </div>
+
+                            <button type="button" onclick="window.copyActiveServiceGeoLink()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-colors">
+                                <i class="fas fa-copy text-xs"></i>
+                                <span id="geo-activo-copy-lbl">Copiar Enlace Directo</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </main>
         </div>
     </div>
@@ -1376,8 +1538,8 @@ input::-webkit-credentials-auto-fill-button {
             let lng = parseFloat(localStorage.getItem('tenant_lng'));
             let comuna = localStorage.getItem('tenant_comuna') || '';
             if (!lat || isNaN(lat) || (Math.abs(lat - (-33.4489)) < 0.05 && Math.abs(lng - (-70.6693)) < 0.05)) {
-                lat = -34.636994;
-                lng = -71.115296;
+                lat = -34.636808;
+                lng = -71.119757;
                 comuna = comuna || "Placilla";
                 try {
                     localStorage.setItem('tenant_lat', String(lat));
@@ -1403,6 +1565,7 @@ input::-webkit-credentials-auto-fill-button {
         let serviceDistanceLine = null;
         let serviceUnitsLayer = null;
         let serviceGrifosLayer = null;
+        let cachedGrifosCentral = [];
         let serviceRoutingLayers = {
             units: null,
             cuartel: null,
@@ -1653,9 +1816,11 @@ input::-webkit-credentials-auto-fill-button {
         window.openTacticalMapForCurrentService = function() {
             try {
                 let svc = null;
-                if (currentModalIndex >= 0 && activeServices && activeServices.at(currentModalIndex)) {
-                    svc = activeServices.at(currentModalIndex);
-                } else if (activeServices && activeServices.length > 0) {
+                if (typeof currentModalIndex !== 'undefined' && currentModalIndex !== null && currentModalIndex >= 0 && activeServices) {
+                    svc = activeServices[Number(currentModalIndex)] || (typeof activeServices.at === 'function' ? activeServices.at(currentModalIndex) : null);
+                }
+                
+                if (!svc && activeServices && activeServices.length > 0) {
                     svc = activeServices[0];
                 }
                 
@@ -1684,18 +1849,22 @@ input::-webkit-credentials-auto-fill-button {
                 }
                 
                 if (!svc) {
-                    if (typeof window.showToast === 'function') window.showToast("No hay servicio activo seleccionado", "warning");
-                    return;
+                    svc = {
+                        id: 'emergency_' + Date.now(),
+                        key: '10-0',
+                        location: 'Ubicación de Emergencia',
+                        units: []
+                    };
                 }
                 currentTacticalService = svc;
                 
                 const modal = document.getElementById('service-tactical-map-modal');
                 if (!modal) {
-                    console.error("Modal #service-tactical-map-modal no encontrado");
+                    console.error("Modal #service-tactical-map-modal no encontrado en DOM");
                     return;
                 }
                 
-                const incidentVisuals = window.getIncidentKeyVisuals(svc.key, svc.claveApoyo);
+                const incidentVisuals = (typeof window.getIncidentKeyVisuals === 'function') ? window.getIncidentKeyVisuals(svc.key, svc.claveApoyo) : { color: '#dc2626', iconHtml: '<i class="fas fa-location-dot"></i>', label: 'EMERGENCIA' };
                 const keyBadge = document.getElementById('service-map-key-badge');
                 if (keyBadge) {
                     const labelText = (svc.key === '10-12' && svc.claveApoyo) ? `${svc.key} (${svc.claveApoyo})` : (svc.key || 'EMERGENCIA');
@@ -1709,11 +1878,17 @@ input::-webkit-credentials-auto-fill-button {
                 const timeBadge = document.getElementById('service-map-time-badge');
                 if (timeBadge) timeBadge.innerText = `⏱️ Despacho: ${String(svc.startTime || '--:--').replace(/['"]/g, '').trim().substring(0, 5)}`;
 
-                modal.style.display = 'flex';
+                modal.style.setProperty('display', 'flex', 'important');
+                modal.style.setProperty('visibility', 'visible', 'important');
+                modal.style.setProperty('opacity', '1', 'important');
+                modal.style.setProperty('z-index', '99999', 'important');
+                modal.style.setProperty('pointer-events', 'auto', 'important');
                 modal.classList.remove('hidden');
                 modal.classList.add('flex');
 
-                window.switchServiceTacticalTab('unidades');
+                if (typeof window.switchServiceTacticalTab === 'function') {
+                    window.switchServiceTacticalTab('unidades');
+                }
 
                 try { window.renderServiceTacticalUnits(svc); } catch(e){ console.error("Error renderServiceTacticalUnits", e); }
                 try { window.renderServiceAttendance(svc.id); } catch(e){ console.error("Error renderServiceAttendance", e); }
@@ -1723,22 +1898,18 @@ input::-webkit-credentials-auto-fill-button {
                         window.initServiceTacticalMap(svc);
                         if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
                     } catch(e) { console.error("Error initServiceTacticalMap", e); }
-                }, 50);
+                }, 30);
 
-                setTimeout(() => {
-                    if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
-                }, 200);
-
-                setTimeout(() => {
-                    if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
-                }, 500);
-
-                setTimeout(() => {
-                    if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
-                }, 900);
+                [100, 250, 500, 800].forEach(delay => {
+                    setTimeout(() => {
+                        if (serviceTacticalMap) serviceTacticalMap.invalidateSize(true);
+                    }, delay);
+                });
 
                 // Iniciar escucha en tiempo real del Alertante
-                window.startTacticalAlertanteListener(svc.id);
+                if (typeof window.startTacticalAlertanteListener === 'function') {
+                    window.startTacticalAlertanteListener(svc.id);
+                }
 
                 // Refresco periódico de asistencia mientras el modal esté abierto
                 if (tacticalAttendancePollTimer) clearInterval(tacticalAttendancePollTimer);
@@ -2127,6 +2298,9 @@ input::-webkit-credentials-auto-fill-button {
             }
 
             if (!serviceTacticalMap) {
+                if (mapEl._leaflet_id) {
+                    mapEl._leaflet_id = null;
+                }
                 serviceTacticalMap = L.map('service-tactical-map', {
                     zoomControl: false,
                     attributionControl: false
@@ -2209,22 +2383,26 @@ input::-webkit-credentials-auto-fill-button {
             `).openPopup();
 
             // Actualizar Marcador y Widget de Alertante
-            window.updateAlertanteTacticalUI(alertGeo, svc);
+            try { window.updateAlertanteTacticalUI(alertGeo, svc); } catch(e){ console.warn("Error updateAlertanteTacticalUI", e); }
 
             // Calcular y Trazar Rutas con Estimación de Tiempos (ETA)
-            await window.calculateTacticalRoutesAndETA();
+            try { await window.calculateTacticalRoutesAndETA(); } catch(e){ console.warn("Error calculateTacticalRoutesAndETA", e); }
 
-            await window.loadServiceGrifos(lat, lng);
+            try { await window.loadServiceGrifos(lat, lng); } catch(e){ console.warn("Error loadServiceGrifos", e); }
 
             // Auto-activar rastreo de bomberos en camino
-            isPersonnelGpsActive = true;
-            const btnGps = document.getElementById('btn-service-map-toggle-personnel-gps');
-            const lblGps = document.getElementById('lbl-service-personnel-gps');
-            if (btnGps) {
-                btnGps.className = 'px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 rounded-lg text-xs font-black transition flex items-center gap-1 shadow-lg ring-2 ring-blue-400/40 animate-pulse';
-            }
-            if (lblGps) lblGps.innerText = 'Ocultar Bomberos';
-            window.startPersonnelGpsListener(svc.id);
+            try {
+                isPersonnelGpsActive = true;
+                const btnGps = document.getElementById('btn-service-map-toggle-personnel-gps');
+                const lblGps = document.getElementById('lbl-service-personnel-gps');
+                if (btnGps) {
+                    btnGps.className = 'px-2.5 py-1.5 bg-blue-600 hover:bg-blue-500 text-white border border-blue-400 rounded-lg text-xs font-black transition flex items-center gap-1 shadow-lg ring-2 ring-blue-400/40 animate-pulse';
+                }
+                if (lblGps) lblGps.innerText = 'Ocultar Bomberos';
+                if (typeof window.startPersonnelGpsListener === 'function') {
+                    window.startPersonnelGpsListener(svc.id);
+                }
+            } catch(e){ console.warn("Error startPersonnelGpsListener", e); }
         };
 
         window.updateAlertanteTacticalUI = function(alertGeo, svc) {
@@ -3117,7 +3295,7 @@ input::-webkit-credentials-auto-fill-button {
                         <div class="flex items-center gap-1.5 shrink-0">
                             ${gpsBtn}
                             <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded ${isSi ? 'bg-green-600 text-white' : 'bg-red-900/60 text-red-400'}">
-                                ${isSi ? 'EN CAMINO' : 'NO ASISTE'}
+                                ${isSi ? 'EN CAMINO' : 'NO ASISTIRÁ'}
                             </span>
                         </div>
                     </div>
@@ -3141,26 +3319,92 @@ input::-webkit-credentials-auto-fill-button {
         };
 
         // --- CONTROL Y RENDERIZADO TÁCTICO DE UNIDADES (MATERIAL MAYOR) ---
+        window.extractPersonnelRadialId = function(val) {
+            if (!val || String(val).trim() === '' || String(val).trim() === '0') return '';
+            let rawStr = String(val).trim();
+            if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+            
+            let candidateId = rawStr;
+            let candidateName = '';
+            if (rawStr.includes(' - ')) {
+                const parts = rawStr.split(' - ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' • ')) {
+                const parts = rawStr.split(' • ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' – ')) {
+                const parts = rawStr.split(' – ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            }
+
+            const cleanIdUpper = candidateId.toUpperCase();
+            
+            const person = (personnelData || []).find(p => 
+                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+            );
+
+            if (person) {
+                return String(person.idRadial || person.radio || candidateId).trim();
+            }
+
+            return candidateId;
+        };
+
         window.resolvePersonnelShortName = function(id) {
             if (!id || String(id).trim() === '' || String(id).trim() === '0') return '';
-            const cleanId = String(id).split('-')[0].trim().toUpperCase();
-            if (cleanId === 'S/I' || cleanId === 'GESTION' || cleanId === 'GESTIÓN') return cleanId;
-            const person = (personnelData || []).find(p => p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanId);
+            let rawStr = String(id).trim();
+            if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+
+            let candidateId = rawStr;
+            let candidateName = '';
+            if (rawStr.includes(' - ')) {
+                const parts = rawStr.split(' - ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' • ')) {
+                const parts = rawStr.split(' • ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' – ')) {
+                const parts = rawStr.split(' – ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            }
+
+            const cleanIdUpper = candidateId.toUpperCase();
+
+            const person = (personnelData || []).find(p => 
+                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+            );
+
             if (person) {
                 const cleanName = (person.nombreBombero || person.nombre || '').replace(/,/g, ' ').trim();
                 const parts = cleanName.split(/\s+/).filter(Boolean);
                 let shortName = cleanName;
                 if (parts.length >= 3) {
-                    // Primer nombre y penúltima palabra (primer apellido / apellido paterno)
                     shortName = `${parts[0]} ${parts[parts.length - 2]}`;
                 } else if (parts.length === 2) {
                     shortName = `${parts[0]} ${parts[1]}`;
                 } else if (parts.length === 1) {
                     shortName = parts[0];
                 }
-                return `${person.idRadial} - ${shortName}`;
+                const rad = person.idRadial || person.radio || candidateId;
+                return `${rad} - ${shortName}`;
             }
-            return String(id).trim();
+            return candidateId;
         };
 
         window.handleTacticalUnitInputLive = function(unitIndex, field, value) {
@@ -3185,7 +3429,10 @@ input::-webkit-credentials-auto-fill-button {
             const svc = currentTacticalService;
             if (!svc.units || !svc.units[unitIndex]) return;
             const unit = svc.units[unitIndex];
-            const cleanVal = String(value || '').trim();
+            let cleanVal = String(value || '').trim();
+            if (field === 'driverRad' || field === 'obacRad') {
+                cleanVal = window.extractPersonnelRadialId(cleanVal);
+            }
             unit[field] = cleanVal;
             svc.lastLocalUpdate = Date.now();
             localStorage.setItem('activeServices', JSON.stringify(activeServices));
@@ -3193,9 +3440,13 @@ input::-webkit-credentials-auto-fill-button {
             if (field === 'driverRad') {
                 const lbl = document.getElementById(`tac-driver-lbl-${unitIndex}`);
                 if (lbl) lbl.innerText = window.resolvePersonnelShortName(cleanVal);
+                const inp = document.getElementById(`tac-driver-${unitIndex}`);
+                if (inp && inp.value !== cleanVal && document.activeElement !== inp) inp.value = cleanVal;
             } else if (field === 'obacRad') {
                 const lbl = document.getElementById(`tac-obac-lbl-${unitIndex}`);
                 if (lbl) lbl.innerText = window.resolvePersonnelShortName(cleanVal);
+                const inp = document.getElementById(`tac-obac-${unitIndex}`);
+                if (inp && inp.value !== cleanVal && document.activeElement !== inp) inp.value = cleanVal;
             }
 
             const unitKey = String(unit.name || '').trim();
@@ -3604,17 +3855,33 @@ input::-webkit-credentials-auto-fill-button {
 
         window.loadServiceGrifos = async function(centerLat, centerLng) {
             try {
-                if (cachedGrifosCentral.length === 0) {
+                if (!Array.isArray(cachedGrifosCentral) || cachedGrifosCentral.length === 0) {
                     const cached = localStorage.getItem('sisbom_grifos_cache') || localStorage.getItem('db_grifos');
-                    if (cached) cachedGrifosCentral = JSON.parse(cached);
-                    if (!cachedGrifosCentral || cachedGrifosCentral.length === 0) {
-                        const res = await fetch('./db_grifos.json');
-                        if (res.ok) cachedGrifosCentral = await res.json();
+                    if (cached) {
+                        try {
+                            const parsed = JSON.parse(cached);
+                            if (Array.isArray(parsed)) cachedGrifosCentral = parsed;
+                        } catch(e){}
+                    }
+                    if (!Array.isArray(cachedGrifosCentral) || cachedGrifosCentral.length === 0) {
+                        try {
+                            const res = await fetch('./db_grifos.json');
+                            if (res.ok) {
+                                const parsed = await res.json();
+                                if (Array.isArray(parsed)) cachedGrifosCentral = parsed;
+                            }
+                        } catch(e){}
                     }
                 }
-            } catch(e){}
+            } catch(e){
+                console.warn("loadServiceGrifos fetch warning:", e);
+            }
 
-            if (serviceGrifosLayer) serviceGrifosLayer.clearLayers();
+            if (!Array.isArray(cachedGrifosCentral)) cachedGrifosCentral = [];
+
+            if (serviceGrifosLayer) {
+                try { serviceGrifosLayer.clearLayers(); } catch(e){}
+            }
 
             const grifoIcon = L.divIcon({
                 className: 'service-grifo-pin',
@@ -3623,10 +3890,10 @@ input::-webkit-credentials-auto-fill-button {
                 iconAnchor: [10, 10]
             });
 
-            (cachedGrifosCentral || []).forEach(g => {
-                if (g.lat && g.lng) {
+            cachedGrifosCentral.forEach(g => {
+                if (g && g.lat && g.lng) {
                     const marker = L.marker([g.lat, g.lng], { icon: grifoIcon }).bindPopup(`
-                        <div style="font-size: 11px; text-transform: uppercase;">
+                        <div style="font-family: inherit; font-size: 11px; text-transform: uppercase;">
                             <b style="color: #2563eb;">💧 GRIFO ${g.codigo || g.id}</b><br>
                             <span>${g.calle || ''}</span><br>
                             <span style="color: ${g.condicion === 'OPERATIVO' ? '#16a34a' : '#ea580c'}; font-weight: bold;">${g.condicion || g.estado || 'OPERATIVO'}</span>
@@ -3638,26 +3905,30 @@ input::-webkit-credentials-auto-fill-button {
 
             const barContainer = document.getElementById('service-nearest-grifos-bar');
             if (centerLat && centerLng && cachedGrifosCentral.length > 0) {
-                const origin = L.latLng(centerLat, centerLng);
-                const sorted = cachedGrifosCentral
-                    .filter(g => g.lat && g.lng)
-                    .map(g => ({ ...g, dist: Math.round(origin.distanceTo(L.latLng(g.lat, g.lng))) }))
-                    .sort((a, b) => a.dist - b.dist)
-                    .slice(0, 4);
+                try {
+                    const origin = L.latLng(centerLat, centerLng);
+                    const sorted = cachedGrifosCentral
+                        .filter(g => g && g.lat && g.lng)
+                        .map(g => ({ ...g, dist: Math.round(origin.distanceTo(L.latLng(g.lat, g.lng))) }))
+                        .sort((a, b) => a.dist - b.dist)
+                        .slice(0, 4);
 
-                const bar = document.getElementById('service-grifos-items-container');
-                if (bar && sorted.length > 0) {
-                    if (barContainer) barContainer.classList.remove('hidden');
-                    bar.innerHTML = `<span class="text-xs font-bold text-slate-400 shrink-0 mr-2"><i class="fas fa-faucet-drip text-blue-400 mr-1"></i> GRIFOS CERCANOS:</span>` +
-                        sorted.map(g => `
-                            <div class="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer hover:border-blue-500 transition" onclick="serviceTacticalMap.panTo([${g.lat}, ${g.lng}])">
-                                <span class="text-xs font-black text-blue-400">💧 ${g.codigo || g.id}</span>
-                                <span class="text-xs font-bold text-white">${g.dist}m</span>
-                                <span class="text-[10px] text-slate-400 truncate max-w-[120px]">${g.calle || ''}</span>
-                            </div>
-                        `).join('');
-                } else if (barContainer) {
-                    barContainer.classList.add('hidden');
+                    const bar = document.getElementById('service-grifos-items-container');
+                    if (bar && sorted.length > 0) {
+                        if (barContainer) barContainer.classList.remove('hidden');
+                        bar.innerHTML = `<span class="text-xs font-bold text-slate-400 shrink-0 mr-2"><i class="fas fa-faucet-drip text-blue-400 mr-1"></i> GRIFOS CERCANOS:</span>` +
+                            sorted.map(g => `
+                                <div class="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-xl flex items-center gap-2 shrink-0 cursor-pointer hover:border-blue-500 transition" onclick="serviceTacticalMap.panTo([${g.lat}, ${g.lng}])">
+                                    <span class="text-xs font-black text-blue-400">💧 ${g.codigo || g.id}</span>
+                                    <span class="text-xs font-bold text-white">${g.dist}m</span>
+                                    <span class="text-[10px] text-slate-400 truncate max-w-[120px]">${g.calle || ''}</span>
+                                </div>
+                            `).join('');
+                    } else if (barContainer) {
+                        barContainer.classList.add('hidden');
+                    }
+                } catch(e) {
+                    if (barContainer) barContainer.classList.add('hidden');
                 }
             } else if (barContainer) {
                 barContainer.classList.add('hidden');
@@ -3718,18 +3989,39 @@ input::-webkit-credentials-auto-fill-button {
             return String(val).trim();
         };
 
-        window.showToast = function(msg) {
+        window.showToast = function(msg, type = 'info') {
             const container = document.getElementById('index-toast-container');
             if (!container) return;
             const toastId = 'toast-' + Date.now() + Math.floor(Math.random() * 100);
             const toast = document.createElement('div');
             toast.id = toastId;
-            toast.className = `transform transition-all duration-500 translate-y-full opacity-0 w-80 shadow-2xl rounded-2xl pointer-events-auto bg-white border-l-4 border-blue-500 overflow-hidden flex flex-col mb-3`;
+
+            let borderCol = 'border-blue-500';
+            let bgCol = 'bg-blue-50/50';
+            let iconBg = 'bg-blue-100 border-blue-200 text-blue-500';
+            let iconClass = 'fa-info-circle';
+            let title = 'Aviso de Sistema';
+
+            if (type === 'warning' || type === 'error' || type === 'declined') {
+                borderCol = 'border-red-500';
+                bgCol = 'bg-red-50/50';
+                iconBg = 'bg-red-100 border-red-200 text-red-500';
+                iconClass = 'fa-user-xmark';
+                title = 'Asistencia Declinada';
+            } else if (type === 'success') {
+                borderCol = 'border-emerald-500';
+                bgCol = 'bg-emerald-50/50';
+                iconBg = 'bg-emerald-100 border-emerald-200 text-emerald-500';
+                iconClass = 'fa-user-check';
+                title = 'Bombero en Camino';
+            }
+
+            toast.className = `transform transition-all duration-500 translate-y-full opacity-0 w-80 shadow-2xl rounded-2xl pointer-events-auto bg-white border-l-4 ${borderCol} overflow-hidden flex flex-col mb-3`;
             toast.innerHTML = `
-                <div class="p-4 w-full flex items-start gap-4 bg-blue-50/50">
-                    <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0 border border-blue-200"><i class="fas fa-info-circle text-lg text-blue-500"></i></div>
+                <div class="p-4 w-full flex items-start gap-4 ${bgCol}">
+                    <div class="w-10 h-10 ${iconBg} rounded-full flex items-center justify-center shrink-0 border"><i class="fas ${iconClass} text-lg"></i></div>
                     <div class="flex flex-col mt-0.5 min-w-0">
-                        <p class="font-bold text-slate-500 uppercase tracking-widest leading-tight" style="font-size: 10px;">Aviso de Sistema</p>
+                        <p class="font-bold text-slate-500 uppercase tracking-widest leading-tight" style="font-size: 10px;">${title}</p>
                         <p class="text-sm font-bold text-slate-800 mt-1">${msg}</p>
                     </div>
                 </div>`;
@@ -3817,16 +4109,44 @@ input::-webkit-credentials-auto-fill-button {
             if(window.speakText) window.speakText('Unidad ' + unitName + ' a ' + String(clave).replace(new RegExp('-', 'g'), ' '));
         };
 
-        // Función para resolver y guardar "ID - Nombre"
+        // Función para resolver y guardar "Radial - Nombre"
         window.resolvePersonnelFullName = function(id) {
             if (!id) return '';
-            const cleanId = String(id).trim().toUpperCase();
-            if (cleanId === 'S/I' || cleanId === 'GESTION' || cleanId === 'GESTIÓN') return cleanId;
-            const person = personnelData.find(p => p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanId);
-            if (person) {
-                return `${person.idRadial} - ${person.nombreBombero}`;
+            let rawStr = String(id).trim();
+            if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+
+            let candidateId = rawStr;
+            let candidateName = '';
+            if (rawStr.includes(' - ')) {
+                const parts = rawStr.split(' - ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' • ')) {
+                const parts = rawStr.split(' • ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' – ')) {
+                const parts = rawStr.split(' – ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
             }
-            return cleanId; // Si no lo encuentra, guarda lo que escribió
+
+            const cleanIdUpper = candidateId.toUpperCase();
+
+            const person = (personnelData || []).find(p => 
+                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+            );
+
+            if (person) {
+                const rad = person.idRadial || person.radio || candidateId;
+                return `${rad} - ${person.nombreBombero}`;
+            }
+            return candidateId; // Si no lo encuentra, guarda lo que escribió
         };
 
         // === COMUNICACION CON OTROS IFRAMES LOCALES ===
@@ -4648,11 +4968,16 @@ input::-webkit-credentials-auto-fill-button {
             svc.controlTime = timeStr;
             svc.lastLocalUpdate = Date.now();
             localStorage.setItem('activeServices', JSON.stringify(activeServices));
+            const btn = document.getElementById('btn-6-7-control');
+            if (btn) {
+                btn.classList.add('hidden');
+                btn.style.setProperty('display', 'none', 'important');
+            }
             window.renderControl67(svc);
             window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ hora67: timeStr, fecha67: dateStr }));
             window.notifyLocalIframes();
             if (typeof window.showToast === 'function') {
-                window.showToast(`Emergencia declarada controlada a las ${timeStr}`);
+                window.showToast(`Emergencia declarada controlada a las ${timeStr}`, 'info');
             }
         };
 
@@ -4971,8 +5296,8 @@ input::-webkit-credentials-auto-fill-button {
 
             // 4. Default si no hay nada guardado
             if (lat === null || lng === null || isNaN(lat) || isNaN(lng)) {
-                lat = -34.637373;
-                lng = -71.125741;
+                lat = (typeof DEFAULT_CUARTEL_COORDS !== 'undefined' && DEFAULT_CUARTEL_COORDS.lat) ? DEFAULT_CUARTEL_COORDS.lat : -34.636808;
+                lng = (typeof DEFAULT_CUARTEL_COORDS !== 'undefined' && DEFAULT_CUARTEL_COORDS.lng) ? DEFAULT_CUARTEL_COORDS.lng : -71.119757;
             }
 
             const locLabel = document.getElementById('svc-card-map-loc');
@@ -4988,6 +5313,9 @@ input::-webkit-credentials-auto-fill-button {
             });
 
             if (!serviceCardMiniMap) {
+                if (mapEl._leaflet_id) {
+                    mapEl._leaflet_id = null;
+                }
                 serviceCardMiniMap = L.map('svc-card-mini-map', {
                     zoomControl: false,
                     attributionControl: false,
@@ -5001,6 +5329,10 @@ input::-webkit-credentials-auto-fill-button {
 
                 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(serviceCardMiniMap);
                 serviceCardMiniMarker = L.marker([lat, lng], { icon: pinIcon }).addTo(serviceCardMiniMap);
+
+                serviceCardMiniMap.on('click', function() {
+                    window.openTacticalMapForCurrentService();
+                });
             } else {
                 serviceCardMiniMap.invalidateSize();
                 serviceCardMiniMap.setView([lat, lng], 14);
@@ -5107,39 +5439,75 @@ input::-webkit-credentials-auto-fill-button {
 
         window.getPersonnelLabel = function(id) {
             if (!id || String(id).trim() === '0' || String(id).trim() === '' || String(id).trim() === '---') return '---';
-            const cleanId = String(id).trim();
+            let rawStr = String(id).trim();
+            if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return `<span class="font-bold text-slate-800 uppercase">${rawStr}</span>`;
+
+            let candidateId = rawStr;
+            let candidateName = '';
+            if (rawStr.includes(' - ')) {
+                const parts = rawStr.split(' - ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' • ')) {
+                const parts = rawStr.split(' • ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' – ')) {
+                const parts = rawStr.split(' – ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            }
+
+            const cleanIdUpper = candidateId.toUpperCase();
+
             const person = (personnelData || []).find(p => 
-                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanId.toUpperCase()) ||
-                (p.idRegistro && String(p.idRegistro).trim() === cleanId) ||
-                (p.ID && String(p.ID).trim() === cleanId) ||
-                (cleanId.startsWith(String(p.idRadial || '').trim() + ' -')) ||
-                (p.nombreBombero && cleanId.toUpperCase().includes(p.nombreBombero.toUpperCase()))
+                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
             );
+
             if (person) {
                 const nombre = person.nombreBombero || '';
-                const shortNombre = nombre.split(' ').slice(0, 2).join(' ');
-                const rad = person.idRadial || cleanId;
+                const parts = nombre.replace(/,/g, ' ').split(/\s+/).filter(Boolean);
+                let shortNombre = nombre;
+                if (parts.length >= 3) {
+                    shortNombre = `${parts[0]} ${parts[parts.length - 2]}`;
+                } else if (parts.length >= 1) {
+                    shortNombre = parts.slice(0, 2).join(' ');
+                }
+                const rad = person.idRadial || person.radio || candidateId;
                 return `<span class="font-bold text-slate-800">${rad}</span><span class="text-slate-400 mx-1.5">|</span><span class="font-bold text-slate-600 uppercase">${shortNombre}</span>`;
             }
-            return `<span class="font-bold text-slate-800 uppercase">${cleanId}</span>`;
+            return `<span class="font-bold text-slate-800 uppercase">${candidateId}</span>`;
         };
 
         window.renderControl67 = function(svc) {
             const btn = document.getElementById('btn-6-7-control');
             const container = document.getElementById('control-time-container');
             const valEl = document.getElementById('svc-control-time');
-            if (svc.controlTime && String(svc.controlTime).trim() !== '0') {
-                if (btn) btn.classList.add('hidden');
+            if (svc.controlTime && String(svc.controlTime).trim() !== '0' && String(svc.controlTime).trim() !== '') {
+                if (btn) {
+                    btn.classList.add('hidden');
+                    btn.style.setProperty('display', 'none', 'important');
+                }
                 if (container) {
                     container.classList.remove('hidden');
                     container.classList.add('inline-flex');
+                    container.style.setProperty('display', 'inline-flex', 'important');
                     if (valEl) valEl.innerText = String(svc.controlTime).replace(/['"]/g, '').trim().substring(0, 5);
                 }
             } else {
-                if (btn) btn.classList.remove('hidden');
+                if (btn) {
+                    btn.classList.remove('hidden');
+                    btn.style.removeProperty('display');
+                }
                 if (container) {
                     container.classList.add('hidden');
                     container.classList.remove('inline-flex');
+                    container.style.setProperty('display', 'none', 'important');
                 }
             }
         };
@@ -5779,8 +6147,10 @@ input::-webkit-credentials-auto-fill-button {
             
             const updatedUnidades = new Object();
             svc.units.forEach(u => {
-                const finalDriver = (window.resolvePersonnelFullName && u.driverRad) ? window.resolvePersonnelFullName(u.driverRad) : (u.driverRad || '');
-                const finalObac = (window.resolvePersonnelFullName && u.obacRad) ? window.resolvePersonnelFullName(u.obacRad) : (u.obacRad || '');
+                const radDriver = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(u.driverRad) : (u.driverRad || '');
+                const radObac = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(u.obacRad) : (u.obacRad || '');
+                const finalDriver = (window.resolvePersonnelFullName && radDriver) ? window.resolvePersonnelFullName(radDriver) : (radDriver || '');
+                const finalObac = (window.resolvePersonnelFullName && radObac) ? window.resolvePersonnelFullName(radObac) : (radObac || '');
                 Reflect.set(updatedUnidades, u.name, new Object({
                     estado: u.status || 'pending_departure',
                     status: u.status || 'pending_departure',
@@ -5792,8 +6162,8 @@ input::-webkit-credentials-auto-fill-button {
                     is615: u.is615 || false,
                     conductor: finalDriver,
                     obac: finalObac,
-                    driverRad: u.driverRad || '',
-                    obacRad: u.obacRad || '',
+                    driverRad: radDriver,
+                    obacRad: radObac,
                     count: u.count || '0',
                     cuantosBomberos: u.count || '0',
                     solicitudConductorAt: u.solicitudConductorAt || '',
@@ -5963,15 +6333,17 @@ input::-webkit-credentials-auto-fill-button {
             let finalValueToSave = newValue;
 
             if(field === 'driver') { 
-                finalValueToSave = window.resolvePersonnelFullName(newValue);
+                const radDriver = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(newValue) : newValue;
+                finalValueToSave = window.resolvePersonnelFullName(radDriver || newValue);
                 changeLog = `Cambio Cond: ${unit.driverRad} -> ${finalValueToSave}`; 
-                unit.driverRad = newValue; 
+                unit.driverRad = radDriver || newValue; 
                 updatePayload = new Object({ conductor: finalValueToSave }); 
             } 
             else if(field === 'obac') { 
-                finalValueToSave = newValue ? window.resolvePersonnelFullName(newValue) : "";
+                const radObac = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(newValue) : newValue;
+                finalValueToSave = newValue ? window.resolvePersonnelFullName(radObac || newValue) : "";
                 changeLog = `Cambio OBAC: ${unit.obacRad || '---'} -> ${finalValueToSave || '---'}`; 
-                unit.obacRad = newValue; 
+                unit.obacRad = radObac || newValue; 
                 updatePayload = new Object({ obac: finalValueToSave }); 
             } 
             else if(field === 'count') { 
@@ -6451,11 +6823,30 @@ input::-webkit-credentials-auto-fill-button {
         };
 
         window.updateObacData = function() {
-            const svc = activeServices.at(currentModalIndex); const numInput = document.getElementById('svc-obac-num'); let inputValue = numInput.value.trim();
-            if (inputValue && new RegExp('^\\d+$').test(inputValue)) { const bombero = personnelData.find(p => String(p.idRadial) === inputValue); document.getElementById('svc-obac-name').value = bombero ? `${bombero.cargo || 'Vol.'} ${bombero.nombreBombero || ''}` : "No encontrado"; } 
-            else if (!inputValue) document.getElementById('svc-obac-name').value = "";
+            const svc = activeServices.at(currentModalIndex);
+            if (!svc) return;
+            const numInput = document.getElementById('svc-obac-num');
+            let inputValue = numInput ? numInput.value.trim() : '';
+            if (inputValue) {
+                const rad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(inputValue) : inputValue;
+                const bombero = (personnelData || []).find(p => 
+                    (p.idRadial && String(p.idRadial).trim().toUpperCase() === String(rad).trim().toUpperCase()) ||
+                    (p.idRegistro && String(p.idRegistro).trim() === inputValue) ||
+                    (p.ID && String(p.ID).trim() === inputValue)
+                );
+                if (bombero) {
+                    const r = bombero.idRadial || rad;
+                    if (numInput && numInput.value !== r && document.activeElement !== numInput) numInput.value = r;
+                    document.getElementById('svc-obac-name').value = `${r} - ${bombero.cargo || 'Vol.'} ${bombero.nombreBombero || ''}`;
+                } else {
+                    document.getElementById('svc-obac-name').value = "No encontrado";
+                }
+            } else {
+                document.getElementById('svc-obac-name').value = "";
+            }
             svc.obacNameDisplay = document.getElementById('svc-obac-name').value || inputValue;
-            svc.lastLocalUpdate = Date.now(); localStorage.setItem('activeServices', JSON.stringify(activeServices));
+            svc.lastLocalUpdate = Date.now();
+            localStorage.setItem('activeServices', JSON.stringify(activeServices));
             window.queueFirebaseWrite('update', 'despachos', svc.id, new Object({ obacServicio: svc.obacNameDisplay }));
         };
         
@@ -7067,14 +7458,7 @@ input::-webkit-credentials-auto-fill-button {
                             const currentEnServicio = window.normalizeEmpty(data.enServicio);
                             const prevEnServicio = window.normalizeEmpty(Reflect.get(window.prevPersonnelState, id));
                             
-                            if (!isFirstLoad && prevEnServicio === '0' && currentEnServicio !== '0') {
-                                const conductorRaw = window.normalizeEmpty(data.conductor);
-                                const isCond = (conductorRaw === 'SI' || conductorRaw === '1' || conductorRaw === 'S');
-                                
-                                let svcKey = 'la emergencia';
-                                const svc = activeServices.find(s => String(s.id) === currentEnServicio);
-                                if (svc && svc.key) svcKey = String(svc.key).replace(new RegExp('-', 'g'), ' ');
-                                
+                            if (!isFirstLoad && prevEnServicio !== currentEnServicio && currentEnServicio !== '0') {
                                 let cleanName = String(data.nombreBombero || '').replace(new RegExp(',', 'g'), ' ').trim();
                                 let nameParts = cleanName.split(new RegExp('\\s+'));
                                 let shortName = cleanName;
@@ -7083,9 +7467,27 @@ input::-webkit-credentials-auto-fill-button {
                                     shortName = nameParts.at(0) + ' ' + nameParts.at(nameParts.length - 2);
                                 }
                                 
-                                const msgBody = isCond ? `${shortName} ASIGNADO CONDUCTOR EN ${svcKey.toUpperCase()}` : `${shortName} EN CAMINO A ${svcKey.toUpperCase()}`;
-                                window.showToast(msgBody);
-                                window.playSoundInfo(); // SOLUCIÓN: Cambiado a sonido. Sin TTS.
+                                if (currentEnServicio.startsWith('-')) {
+                                    const cleanSvcId = currentEnServicio.replace('-', '').trim();
+                                    let svcKey = 'la emergencia';
+                                    const svc = activeServices.find(s => String(s.id) === cleanSvcId);
+                                    if (svc && svc.key) svcKey = String(svc.key).replace(new RegExp('-', 'g'), ' ');
+
+                                    const msgBody = `${shortName} NO ASISTIRÁ A ${svcKey.toUpperCase()}`;
+                                    window.showToast(msgBody, 'warning');
+                                    window.playSoundInfo();
+                                } else {
+                                    const conductorRaw = window.normalizeEmpty(data.conductor);
+                                    const isCond = (conductorRaw === 'SI' || conductorRaw === '1' || conductorRaw === 'S');
+                                    
+                                    let svcKey = 'la emergencia';
+                                    const svc = activeServices.find(s => String(s.id) === currentEnServicio);
+                                    if (svc && svc.key) svcKey = String(svc.key).replace(new RegExp('-', 'g'), ' ');
+                                    
+                                    const msgBody = isCond ? `${shortName} ASIGNADO CONDUCTOR EN ${svcKey.toUpperCase()}` : `${shortName} EN CAMINO A ${svcKey.toUpperCase()}`;
+                                    window.showToast(msgBody, 'success');
+                                    window.playSoundInfo();
+                                }
                             }
                             Reflect.set(window.prevPersonnelState, id, currentEnServicio);
                         });
@@ -7247,8 +7649,8 @@ input::-webkit-credentials-auto-fill-button {
                                     arrivalTime = log.hora63 || log.horaLlegada || null;
                                     time69 = log.hora69 || '';
                                     time610 = log.hora610 || '';
-                                    driverRad = log.conductor || '';
-                                    obacRad = log.obac || '';
+                                    driverRad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(log.conductor || '') : (log.conductor || '');
+                                    obacRad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(log.obac || '') : (log.obac || '');
                                     count = log.tripulantes || log.cuantosBomberos || '';
                                     report = log.informe63 || '';
                                     tripInfo = log.preInforme || '';
@@ -7276,8 +7678,10 @@ input::-webkit-credentials-auto-fill-button {
                                     if (uMapRef.hora69 || uMapRef.retorno69At) time69 = uMapRef.hora69 || uMapRef.retorno69At;
                                     if (uMapRef.hora610 || uMapRef.llegada610At) time610 = uMapRef.hora610 || uMapRef.llegada610At;
                                     if (uMapRef.is615) is615 = true;
-                                    if (uMapRef.conductor || uMapRef.driverRad || uMapRef.driver) driverRad = uMapRef.conductor || uMapRef.driverRad || uMapRef.driver;
-                                    if (uMapRef.obac || uMapRef.obacRad) obacRad = uMapRef.obac || uMapRef.obacRad;
+                                    const rawDriver = uMapRef.driverRad || uMapRef.driver || uMapRef.conductor;
+                                    const rawObac = uMapRef.obacRad || uMapRef.obac || uMapRef.aCargo;
+                                    if (rawDriver) driverRad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(rawDriver) : rawDriver;
+                                    if (rawObac) obacRad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(rawObac) : rawObac;
                                     if (uMapRef.count !== undefined || uMapRef.cuantosBomberos !== undefined || uMapRef.tripulantes !== undefined) {
                                         count = uMapRef.count !== undefined ? uMapRef.count : (uMapRef.cuantosBomberos !== undefined ? uMapRef.cuantosBomberos : uMapRef.tripulantes);
                                     }
@@ -7297,8 +7701,8 @@ input::-webkit-credentials-auto-fill-button {
                                 if (!driverRad || !obacRad) {
                                     const vMatch = (vehiclesData || []).find(v => String(v.idCarro || v.ID || '').trim().toUpperCase() === cleanCarro.toUpperCase() || String(v.idCarro || v.ID || '').replace(/-/g, '').toUpperCase() === cleanCarro.replace(/-/g, '').toUpperCase());
                                     if (vMatch) {
-                                        if (!driverRad && vMatch.conductor) driverRad = vMatch.conductor;
-                                        if (!obacRad && (vMatch.obac || vMatch.aCargo)) obacRad = vMatch.obac || vMatch.aCargo;
+                                        if (!driverRad && vMatch.conductor) driverRad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(vMatch.conductor) : vMatch.conductor;
+                                        if (!obacRad && (vMatch.obac || vMatch.aCargo)) obacRad = window.extractPersonnelRadialId ? window.extractPersonnelRadialId(vMatch.obac || vMatch.aCargo) : (vMatch.obac || vMatch.aCargo);
                                     }
                                 }
 
@@ -7475,6 +7879,98 @@ input::-webkit-credentials-auto-fill-button {
                     }, 15000);
                 };
 
+                // Pre-Auth y Sincronización en tiempo real de Sesión Central (SENTINEL LINK <-> SENTINEL CAD)
+                let unsubCentralAccess = null;
+                window.startCentralAccessListener = function() {
+                    if (unsubCentralAccess) {
+                        try { unsubCentralAccess(); } catch(e){}
+                        unsubCentralAccess = null;
+                    }
+                    if (!window.fbDb || !window.fbDoc || !window.fbOnSnapshot) return;
+                    
+                    try {
+                        const centralDocRef = window.fbDoc(window.fbDb, 'accesos', 'central');
+                        unsubCentralAccess = window.fbOnSnapshot(centralDocRef, async (snap) => {
+                            if (!snap || !snap.exists()) return;
+                            const data = snap.data();
+                            console.log("[SENTINEL CAD] Estado de accesos/central recibido:", data);
+                            
+                            // Si la central NO tiene sesión activa localmente y Firestore reporta estado activo (iniciado por LINK o remoto)
+                            if (data && data.estado === 'activo' && !window.isSystemLoggedIn) {
+                                console.log("⚡ [SENTINEL CAD] Sesión remota detectada desde SENTINEL LINK. Abriendo sesión automática de operador...");
+                                window.showLoader();
+                                
+                                let user = null;
+                                if (Array.isArray(personnelData) && personnelData.length > 0) {
+                                    user = personnelData.find(x => 
+                                        (data.idRegistro && String(x.idRegistro) === String(data.idRegistro)) || 
+                                        (x.nombreBombero && data.nombreBombero && x.nombreBombero.trim().toLowerCase() === data.nombreBombero.trim().toLowerCase()) ||
+                                        (x.nombreBombero && data.operador && x.nombreBombero.trim().toLowerCase() === data.operador.trim().toLowerCase())
+                                    );
+                                }
+                                
+                                const pass = (user && user.contrasena) ? user.contrasena : "sentinel_auto";
+                                const userId = (user && user.idRegistro) ? String(user.idRegistro) : (data.idRegistro || "CUARTELERO");
+                                const userName = (user && user.nombreBombero) ? user.nombreBombero : (data.nombreBombero || data.operador || "Operador de Guardia");
+                                const userCargo = (user && user.cargo) ? user.cargo : (data.cargo || "Cuartelero Residente");
+                                const userRadial = (user && user.idRadial) ? user.idRadial : "";
+
+                                localStorage.setItem('authUserId', userId);
+                                localStorage.setItem('authPasswordSecure', pass + "_secure_sisbom");
+                                
+                                try {
+                                    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                                        const diskAuthObj = new Object({ authUserId: userId, authPasswordSecure: pass + "_secure_sisbom", nombreBombero: userName });
+                                        await window.pywebview.api.save_local_db('central/auth_session.json', JSON.stringify(diskAuthObj));
+                                    }
+                                } catch(diskErr){}
+
+                                await window.authenticateFirebase();
+                                
+                                const sessionID = data.idInicio || String(Date.now());
+                                localStorage.setItem('sisbom_last_session_id', String(sessionID));
+                                
+                                const sessionData = new Object({
+                                    idIngreso: String(sessionID),
+                                    idInicio: sessionID,
+                                    idRegistro: userId,
+                                    idRadial: userRadial,
+                                    cargo: userCargo,
+                                    nombreBombero: userName,
+                                    fechaIngreso: data.fechaIngreso || window.getFormattedDate(),
+                                    horaIngreso: data.horaIngreso || window.getFormattedTime()
+                                });
+                                localStorage.setItem('adminUser', JSON.stringify(sessionData));
+                                
+                                if (window.setupMainListeners) {
+                                    window.setupMainListeners();
+                                }
+                                
+                                window.restoreSession(sessionData);
+                            } else if (data && data.estado === 'cerrado' && window.isSystemLoggedIn) {
+                                console.log("🔒 [SENTINEL CAD] Cierre de turno remoto detectado desde SENTINEL LINK. Finalizando sesión activa en CAD...");
+                                window.showLoader();
+                                localStorage.removeItem('adminUser');
+                                localStorage.removeItem('authUserId');
+                                localStorage.removeItem('authPasswordSecure');
+                                try {
+                                    if (window.pywebview && window.pywebview.api && window.pywebview.api.save_local_db) {
+                                        await window.pywebview.api.save_local_db('central/auth_session.json', '');
+                                    }
+                                } catch(e){}
+                                window.isSystemLoggedIn = false;
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 300);
+                            }
+                        }, (err) => {
+                            console.warn("[SENTINEL CAD] Error en listener de accesos/central:", err.message);
+                        });
+                    } catch(e) {
+                        console.warn("[SENTINEL CAD] Error inicializando listener accesos/central:", e);
+                    }
+                };
+
                 // En lugar de disparar y olvidar, usamos await para evitar la "carrera de caballos"
                 (async () => {
                     try {
@@ -7483,8 +7979,10 @@ input::-webkit-credentials-auto-fill-button {
                             await window.authenticateFirebase();
                             window.setupMainListeners();
                         } else {
-                            console.log("No active session detected. Postponing Firebase listener setup until login.");
+                            console.log("No active session detected. Setting up Central access watcher for remote login...");
+                            await window.authenticateFirebase();
                         }
+                        window.startCentralAccessListener();
                     } catch(ex) {
                         console.error("Error setting up listeners after auth:", ex);
                     }
@@ -7810,20 +8308,250 @@ input::-webkit-credentials-auto-fill-button {
         };
 
         // =========================================================================
-        // CALLER ID EN TIEMPO REAL (SISBOM TEL -> CENTRAL SISBOM.EXE)
+        // SOLICITUD DE GEOLOCALIZACIÓN DEL ALERTANTE EN SERVICIO ACTIVO (SENTINEL LINK)
+        // =========================================================================
+        const PUBLIC_GEO_BASE_URL = 'https://sentinel.web.app/geo.html';
+
+        window.buildActiveServiceGeoLink = function(phoneDigits) {
+            let cleanDigits = String(phoneDigits || '').replace(/[^0-9]/g, '');
+            let fullPhone = '';
+            if (cleanDigits.startsWith('569')) {
+                fullPhone = `+${cleanDigits}`;
+            } else if (cleanDigits.startsWith('9') && cleanDigits.length === 9) {
+                fullPhone = `+56${cleanDigits}`;
+            } else if (cleanDigits.length === 8) {
+                fullPhone = `+569${cleanDigits}`;
+            } else if (cleanDigits) {
+                fullPhone = `+569${cleanDigits.slice(-8)}`;
+            }
+
+            const svc = (currentModalIndex >= 0 && activeServices.at(currentModalIndex)) ? activeServices.at(currentModalIndex) : null;
+            const serviceId = svc ? svc.id : '';
+
+            const rawOrg = localStorage.getItem('nombreMostrar') || 'Cuerpo de Bomberos';
+            const orgParam = encodeURIComponent(rawOrg);
+            let tenantParams = '';
+            try {
+                const storedCfg = localStorage.getItem("firebaseConfig");
+                if (storedCfg) {
+                    const parsed = JSON.parse(storedCfg);
+                    const minCfg = {
+                        apiKey: parsed.apiKey,
+                        authDomain: parsed.authDomain,
+                        projectId: parsed.projectId,
+                        storageBucket: parsed.storageBucket,
+                        messagingSenderId: parsed.messagingSenderId,
+                        appId: parsed.appId
+                    };
+                    tenantParams = `&p=${encodeURIComponent(parsed.projectId || '')}&cfg=${encodeURIComponent(btoa(JSON.stringify(minCfg)))}`;
+                }
+            } catch(e){}
+
+            return `${PUBLIC_GEO_BASE_URL}?id=${serviceId || ''}${fullPhone ? '&phone=' + encodeURIComponent(fullPhone) : ''}&org=${orgParam}${tenantParams}`;
+        };
+
+        window.updateActiveSvcPreviewLink = function() {
+            const phoneDigits = (document.getElementById('active-svc-geo-phone')?.value || '').trim();
+            const fullLink = window.buildActiveServiceGeoLink(phoneDigits);
+            const linkDiv = document.getElementById('active-svc-geo-link-preview');
+            if (linkDiv) linkDiv.innerText = fullLink;
+        };
+
+        window.openRequestAlertanteGeoModal = function() {
+            const svc = (currentModalIndex >= 0 && activeServices.at(currentModalIndex)) ? activeServices.at(currentModalIndex) : null;
+            if (!svc) {
+                if (typeof window.showToast === 'function') window.showToast("No hay un servicio activo seleccionado.", "error");
+                return;
+            }
+
+            const phoneInput = document.getElementById('active-svc-geo-phone');
+            if (phoneInput) {
+                let foundPhone = '';
+                if (svc.geolocalizacionAlertante && svc.geolocalizacionAlertante.telefono) {
+                    foundPhone = svc.geolocalizacionAlertante.telefono;
+                } else if (svc.smsSolicitudGeo && svc.smsSolicitudGeo.telefono) {
+                    foundPhone = svc.smsSolicitudGeo.telefono;
+                } else if (svc.telefonoAlertante) {
+                    foundPhone = svc.telefonoAlertante;
+                } else {
+                    try {
+                        const rawCall = localStorage.getItem('sisbom_last_incoming_call');
+                        if (rawCall) {
+                            const parsed = JSON.parse(rawCall);
+                            if (parsed && parsed.telefono) foundPhone = parsed.telefono;
+                        }
+                    } catch(e){}
+                }
+
+                if (foundPhone) {
+                    let clean = foundPhone.replace(/[^0-9]/g, '');
+                    if (clean.startsWith('569')) clean = clean.slice(3);
+                    else if (clean.startsWith('9')) clean = clean.slice(1);
+                    if (clean.length >= 8) phoneInput.value = clean.slice(0, 8);
+                } else {
+                    phoneInput.value = '';
+                }
+            }
+
+            const statusBox = document.getElementById('active-svc-alertante-status-box');
+            const statusTag = document.getElementById('active-svc-alertante-status-tag');
+            if (statusBox && statusTag) {
+                if (svc.geolocalizacionAlertante && svc.geolocalizacionAlertante.lat && svc.geolocalizacionAlertante.lng) {
+                    statusBox.classList.remove('hidden');
+                    statusTag.innerText = `Última señal GPS recibida a las ${svc.geolocalizacionAlertante.hora || '--:--'} (Precisión: ±${svc.geolocalizacionAlertante.accuracy || 10}m)`;
+                } else {
+                    statusBox.classList.add('hidden');
+                }
+            }
+
+            window.updateActiveSvcPreviewLink();
+
+            const modal = document.getElementById('modal-solicitar-geo-activo');
+            if (modal) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    const c = document.getElementById('modal-solicitar-geo-activo-content');
+                    if (c) c.classList.remove('scale-95');
+                }, 10);
+            }
+        };
+
+        window.closeRequestAlertanteGeoModal = function() {
+            const modal = document.getElementById('modal-solicitar-geo-activo');
+            if (modal) {
+                modal.classList.add('opacity-0');
+                const c = document.getElementById('modal-solicitar-geo-activo-content');
+                if (c) c.classList.add('scale-95');
+                setTimeout(() => {
+                    modal.classList.remove('flex');
+                    modal.classList.add('hidden');
+                }, 200);
+            }
+        };
+
+        window.copyActiveServiceGeoLink = function() {
+            const phoneDigits = (document.getElementById('active-svc-geo-phone')?.value || '').trim();
+            const fullLink = window.buildActiveServiceGeoLink(phoneDigits);
+            if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(fullLink).catch(() => {});
+                const copyBtn = document.getElementById('btn-copy-active-geo-link');
+                if (copyBtn) {
+                    copyBtn.innerHTML = `<i class="fas fa-check text-emerald-400"></i> ¡Copiado!`;
+                    setTimeout(() => {
+                        copyBtn.innerHTML = `<i class="fas fa-copy"></i> Copiar`;
+                    }, 2000);
+                }
+                if (typeof window.showToast === 'function') window.showToast("Enlace copiado al portapapeles");
+            }
+        };
+
+        window.sendActiveServiceGeoLink = function(canal = 'sms') {
+            const svc = (currentModalIndex >= 0 && activeServices.at(currentModalIndex)) ? activeServices.at(currentModalIndex) : null;
+            if (!svc) {
+                if (typeof window.showToast === 'function') window.showToast("Error: no hay servicio activo seleccionado", "error");
+                return;
+            }
+
+            const phoneDigits = (document.getElementById('active-svc-geo-phone')?.value || '').trim();
+            const cleanDigits = phoneDigits.replace(/[^0-9]/g, '');
+            if (!cleanDigits || cleanDigits.length < 8) {
+                const phoneInput = document.getElementById('active-svc-geo-phone');
+                if (phoneInput) {
+                    phoneInput.focus();
+                    phoneInput.classList.add('border-red-500');
+                    setTimeout(() => phoneInput.classList.remove('border-red-500'), 2000);
+                }
+                if (typeof window.showToast === 'function') window.showToast("Ingrese los 8 dígitos del celular (+56 9 XXXXXXXX)", "error");
+                return;
+            }
+
+            const fullPhone = `+569${cleanDigits}`;
+            const fullLink = window.buildActiveServiceGeoLink(cleanDigits);
+            const msgText = `CUERPO DE BOMBEROS: Por favor presione el siguiente enlace para compartir su ubicacion exacta con la Central de Alarmas: ${fullLink}`;
+
+            const payload = {
+                smsSolicitudGeo: {
+                    telefono: fullPhone,
+                    timestamp: Date.now(),
+                    estado: "ENVIADO",
+                    enlace: fullLink,
+                    canal: canal,
+                    horaEnvio: window.getFormattedTime(),
+                    fechaEnvio: window.getFormattedDate()
+                }
+            };
+            svc.smsSolicitudGeo = payload.smsSolicitudGeo;
+            localStorage.setItem('activeServices', JSON.stringify(activeServices));
+
+            if (window.queueFirebaseWrite) {
+                window.queueFirebaseWrite('update', 'despachos', String(svc.id), payload);
+            }
+
+            if (canal === 'sms') {
+                const queueId = `${Date.now()}_${cleanDigits}`;
+                if (window.queueFirebaseWrite) {
+                    window.queueFirebaseWrite('set', 'sms_queue', queueId, {
+                        id: queueId,
+                        idDespacho: String(svc.id),
+                        telefono: fullPhone,
+                        mensaje: msgText,
+                        enlace: fullLink,
+                        estado: "PENDIENTE",
+                        fecha: window.getFormattedDate(),
+                        hora: window.getFormattedTime(),
+                        timestamp: Date.now(),
+                        canal: 'sms',
+                        origen: 'SENTINEL CAD'
+                    });
+                }
+                if (typeof window.showToast === 'function') window.showToast(`SMS para ${fullPhone} puesto en cola para SENTINEL LINK`);
+            } else if (canal === 'whatsapp') {
+                const waPhone = `569${cleanDigits}`;
+                const waProtocol = `whatsapp://send?phone=${waPhone}&text=${encodeURIComponent(msgText)}`;
+                const a = document.createElement('a');
+                a.href = waProtocol;
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(() => a.remove(), 100);
+                if (typeof window.showToast === 'function') window.showToast(`Abriendo WhatsApp para ${fullPhone}...`);
+            }
+
+            window.closeRequestAlertanteGeoModal();
+        };
+
+        window.copyDispatchWhatsAppActiveService = function() {
+            const svc = (currentModalIndex >= 0 && activeServices.at(currentModalIndex)) ? activeServices.at(currentModalIndex) : null;
+            if (!svc) return;
+
+            const timeStr = svc.startTime || '';
+            const keyStr = svc.key || '';
+            const locStr = svc.location || '';
+            const unitsStr = (svc.units || []).map(u => u.name).join(', ') || 'Sin unidades';
+            const text = `🚨 *DESPACHO DE EMERGENCIA*\n*Servicio:* #${svc.id}\n*Clave:* ${keyStr}\n*Lugar:* ${locStr}\n*Hora:* ${timeStr}\n*Unidades:* ${unitsStr}`;
+
+            if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).catch(() => {});
+                if (typeof window.showToast === 'function') window.showToast("Información del despacho copiada para WhatsApp");
+            }
+        };
+
+        // =========================================================================
+        // CALLER ID EN TIEMPO REAL (SENTINEL LINK -> BARRA LATERAL SENTINEL CAD)
         // =========================================================================
         window.lastAnnouncedCallNumber = "";
         window.lastDismissedCallNumber = "";
 
         window.showIncomingCallNotification = function(phone, estado, data) {
-            const banner = document.getElementById('incoming-call-banner');
-            if (!banner) return;
+            const widget = document.getElementById('sidebar-caller-widget');
+            if (!widget) return;
 
             if (window.lastDismissedCallNumber === phone + '_' + estado) return;
 
-            const phoneEl = document.getElementById('call-card-phone');
-            const badgeEl = document.getElementById('call-card-badge');
-            const timeEl = document.getElementById('call-card-time');
+            const phoneEl = document.getElementById('sidebar-caller-phone');
+            const badgeEl = document.getElementById('sidebar-caller-badge');
+            const timeEl = document.getElementById('sidebar-caller-time');
 
             let clean = String(phone).replace(/[^0-9+]/g, '');
             let formatted = phone;
@@ -7836,37 +8564,32 @@ input::-webkit-credentials-auto-fill-button {
             }
 
             if (phoneEl) phoneEl.innerText = formatted;
-            if (timeEl) timeEl.innerText = data.hora || new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+            if (timeEl) timeEl.innerText = (data && data.hora) || new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
 
             if (badgeEl) {
                 if (estado === 'TIMBRANDO') {
-                    badgeEl.innerText = '📞 LLAMADA ENTRANTE (TIMBRANDO)';
-                    badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wider uppercase bg-red-500/20 border border-red-500/40 text-red-300 animate-pulse';
+                    badgeEl.innerText = 'LLAMADA ENTRANTE';
+                    badgeEl.className = 'text-[9px] font-black uppercase text-red-400 tracking-wider truncate animate-pulse';
                 } else if (estado === 'ATENDIDA' || estado === 'EN_LLAMADA') {
-                    badgeEl.innerText = '📞 EN LLAMADA CON ALERTANTE';
-                    badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wider uppercase bg-emerald-500/20 border border-emerald-500/40 text-emerald-300';
+                    badgeEl.innerText = 'EN LLAMADA';
+                    badgeEl.className = 'text-[9px] font-black uppercase text-emerald-400 tracking-wider truncate';
                 } else {
-                    badgeEl.innerText = `📞 ${estado}`;
-                    badgeEl.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-black tracking-wider uppercase bg-blue-500/20 border border-blue-500/40 text-blue-300';
+                    badgeEl.innerText = estado;
+                    badgeEl.className = 'text-[9px] font-black uppercase text-blue-400 tracking-wider truncate';
                 }
             }
 
-            if (estado === 'TIMBRANDO' && window.lastAnnouncedCallNumber !== phone) {
-                window.lastAnnouncedCallNumber = phone;
-                if (window.speakText) {
-                    window.speakText('Llamada entrante de emergencia');
-                }
-            }
+            // Removido aviso de voz TTS según requerimiento de usuario ("no es necesario que hable")
 
-            banner.classList.remove('hidden');
+            widget.classList.remove('hidden');
         };
 
         window.hideIncomingCallNotification = function(userDismissed = false) {
-            const banner = document.getElementById('incoming-call-banner');
-            if (!banner) return;
-            banner.classList.add('hidden');
+            const widget = document.getElementById('sidebar-caller-widget');
+            if (!widget) return;
+            widget.classList.add('hidden');
             if (userDismissed) {
-                const phoneEl = document.getElementById('call-card-phone');
+                const phoneEl = document.getElementById('sidebar-caller-phone');
                 const p = phoneEl ? phoneEl.innerText : '';
                 window.lastDismissedCallNumber = p + '_TIMBRANDO';
             }
@@ -7912,6 +8635,135 @@ input::-webkit-credentials-auto-fill-button {
             window.hideIncomingCallNotification();
         };
 
+        window.openRequestAlertanteGeoModal = function() {
+            const modal = document.getElementById('modal-solicitar-geo-activo');
+            if (!modal) return;
+            const phoneInput = document.getElementById('geo-activo-phone-input');
+            
+            let phone = '';
+            if (typeof currentTacticalService !== 'undefined' && currentTacticalService) {
+                phone = currentTacticalService.telefono || currentTacticalService.phone || currentTacticalService.alertanteTelefono || '';
+            }
+            if (!phone) {
+                try {
+                    const raw = localStorage.getItem('sisbom_last_incoming_call');
+                    if (raw) phone = JSON.parse(raw).telefono || '';
+                } catch(e){}
+            }
+            if (phoneInput) {
+                phoneInput.value = phone;
+            }
+            window.updateActiveServiceGeoPreview();
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        };
+
+        window.closeRequestAlertanteGeoModal = function() {
+            const modal = document.getElementById('modal-solicitar-geo-activo');
+            if (!modal) return;
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        };
+
+        window.buildActiveServiceGeoLink = function() {
+            let dispatchId = '';
+            if (typeof currentTacticalService !== 'undefined' && currentTacticalService) {
+                dispatchId = currentTacticalService.id || currentTacticalService.idServicio || currentTacticalService.dispatchId || '';
+            }
+            return `https://sentinel.web.app/geo.html?id=${encodeURIComponent(dispatchId)}`;
+        };
+
+        window.updateActiveServiceGeoPreview = function() {
+            const prev = document.getElementById('geo-activo-link-preview');
+            if (prev) {
+                prev.innerText = window.buildActiveServiceGeoLink();
+            }
+        };
+
+        window.copyActiveServiceGeoLink = function() {
+            const link = window.buildActiveServiceGeoLink();
+            navigator.clipboard.writeText(link).then(() => {
+                const lbl = document.getElementById('geo-activo-copy-lbl');
+                if (lbl) {
+                    const orig = lbl.innerText;
+                    lbl.innerText = '¡Enlace Copiado!';
+                    setTimeout(() => { lbl.innerText = orig; }, 2000);
+                }
+                if (typeof window.showToast === 'function') {
+                    window.showToast("Enlace de SENTINEL LINK copiado al portapapeles", "success");
+                }
+            }).catch(err => {
+                console.error("Error al copiar enlace:", err);
+            });
+        };
+
+        window.sendActiveServiceGeoLink = function(canal) {
+            const phoneInput = document.getElementById('geo-activo-phone-input');
+            const rawPhone = phoneInput ? phoneInput.value.trim() : '';
+            if (!rawPhone) {
+                if (typeof window.showToast === 'function') {
+                    window.showToast("Ingresa el número de teléfono del alertante", "warning");
+                }
+                return;
+            }
+
+            let cleanPhone = rawPhone.replace(/[^0-9+]/g, '');
+            if (cleanPhone.startsWith('9') && cleanPhone.length === 9) {
+                cleanPhone = '56' + cleanPhone;
+            } else if (cleanPhone.startsWith('+56')) {
+                cleanPhone = cleanPhone.replace('+', '');
+            }
+
+            const link = window.buildActiveServiceGeoLink();
+            const mensaje = `BOMBEROS DE CHILE: Por favor pulsa el siguiente enlace para compartir tu ubicación GPS en tiempo real para el despacho de unidades: ${link}`;
+
+            if (canal === 'sms') {
+                try {
+                    if (window.fbDb && window.fbCollection && window.fbAddDoc) {
+                        window.fbAddDoc(window.fbCollection(window.fbDb, 'sms_queue'), {
+                            telefono: cleanPhone,
+                            mensaje: mensaje,
+                            timestamp: new Date().toISOString(),
+                            estado: 'pendiente',
+                            origen: 'SENTINEL_CAD_ACTIVE_SERVICE'
+                        }).then(() => {
+                            if (typeof window.showToast === 'function') {
+                                window.showToast("SMS encolado para envío automático vía SENTINEL LINK", "success");
+                            }
+                            window.closeRequestAlertanteGeoModal();
+                        }).catch(err => {
+                            console.error("Error al encolar SMS:", err);
+                            if (typeof window.showToast === 'function') {
+                                window.showToast("Error al encolar SMS", "error");
+                            }
+                        });
+                    } else {
+                        if (typeof window.showToast === 'function') {
+                            window.showToast("No hay conexión con base de datos para SMS", "error");
+                        }
+                    }
+                } catch(e) {
+                    console.error("Excepción al enviar SMS:", e);
+                }
+            } else if (canal === 'whatsapp') {
+                const waUrl = `whatsapp://send?phone=${cleanPhone}&text=${encodeURIComponent(mensaje)}`;
+                const waWebUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(mensaje)}`;
+                
+                try {
+                    window.location.href = waUrl;
+                    setTimeout(() => {
+                        window.open(waWebUrl, '_blank');
+                    }, 800);
+                } catch(e) {
+                    window.open(waWebUrl, '_blank');
+                }
+                if (typeof window.showToast === 'function') {
+                    window.showToast("Abriendo WhatsApp con enlace de localización", "success");
+                }
+                window.closeRequestAlertanteGeoModal();
+            }
+        };
+
         window.onload = function() { 
             window.startClock(); 
             window.initSystem(); 
@@ -7923,56 +8775,5 @@ input::-webkit-credentials-auto-fill-button {
         };
 
     </script>
-
-    <!-- ========================================================
-         TARJETA FLOTANTE DE LLAMADA ENTRANTE (CALLER ID EN TIEMPO REAL)
-         ======================================================== -->
-    <div id="incoming-call-banner" class="hidden fixed bottom-6 right-6 z-[9999] max-w-sm w-full transition-all duration-300">
-        <div class="relative overflow-hidden rounded-3xl p-4 shadow-2xl border-2 backdrop-blur-xl bg-slate-900/95 border-red-500 shadow-red-900/50">
-            <div class="absolute -right-8 -top-8 w-28 h-28 bg-red-600/20 rounded-full blur-2xl animate-pulse pointer-events-none"></div>
-            <div class="absolute -left-8 -bottom-8 w-28 h-28 bg-amber-500/20 rounded-full blur-2xl animate-pulse pointer-events-none"></div>
-
-            <div class="relative z-10 flex flex-col gap-2.5">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2">
-                        <div class="relative flex h-3 w-3">
-                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
-                        </div>
-                        <span id="call-card-badge" class="px-2 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase bg-red-500/20 border border-red-500/40 text-red-300 animate-pulse">
-                            📞 LLAMADA ENTRANTE
-                        </span>
-                        <span id="call-card-time" class="text-[10px] font-bold text-slate-400">13:00</span>
-                    </div>
-                    <button type="button" onclick="window.hideIncomingCallNotification(true)" class="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800/60 transition-colors" title="Descartar">
-                        <i class="fas fa-times text-xs"></i>
-                    </button>
-                </div>
-
-                <div class="flex items-center gap-3 bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800">
-                    <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-red-600 to-amber-600 flex items-center justify-center text-white text-lg shadow-lg shrink-0">
-                        <i class="fas fa-phone-volume animate-pulse"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-[9px] uppercase tracking-wider font-extrabold text-slate-400">Alertante / Llamante</div>
-                        <div id="call-card-phone" class="text-xl font-black tracking-tight text-white select-all font-mono">
-                            +56 9 ...
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-2 pt-0.5">
-                    <button type="button" onclick="window.acceptCallAndDispatch()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-extrabold text-xs shadow-lg shadow-red-900/30 flex items-center justify-center gap-1.5 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
-                        <i class="fas fa-satellite-dish text-[11px]"></i>
-                        <span>DESPACHAR</span>
-                    </button>
-                    <button type="button" onclick="window.acceptCallAndSmsGeo()" class="px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white font-extrabold text-xs shadow-lg shadow-blue-900/30 flex items-center justify-center gap-1.5 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
-                        <i class="fas fa-location-crosshairs text-[11px]"></i>
-                        <span>SOLICITAR GPS</span>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 </body>
 </html>
