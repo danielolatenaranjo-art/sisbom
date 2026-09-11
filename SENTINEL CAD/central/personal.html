@@ -325,6 +325,17 @@
         .btn-chip.active-perm { background-color: rgba(249, 115, 22, 0.2) !important; color: #ffedd5 !important; border-color: rgba(249, 115, 22, 0.4) !important; }
         .btn-chip.active-licencia { background-color: rgba(6, 182, 212, 0.2) !important; color: #cffafe !important; border-color: rgba(6, 182, 212, 0.4) !important; }
 
+        .btn-chip.btn-release-svc {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.25), rgba(249, 115, 22, 0.25)) !important;
+            border-color: rgba(239, 68, 68, 0.5) !important;
+            color: #fecaca !important;
+        }
+        .btn-chip.btn-release-svc:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.45), rgba(249, 115, 22, 0.45)) !important;
+            border-color: var(--primary-red) !important;
+            color: #ffffff !important;
+        }
+
         /* Input de Búsqueda (Como en la tarjeta central de la imagen) */
         .search-input {
             width: 100%; height: 56px; padding-right: 16px; 
@@ -588,10 +599,19 @@
         <div class="bg-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col" id="status-select-content">
             <div class="p-5 border-b border-slate-700 bg-slate-900 flex items-center gap-3">
                 <div class="w-10 h-10 rounded-full bg-[rgba(59,130,246,0.2)] text-blue-400 flex items-center justify-center text-lg shadow-sm border border-[rgba(59,130,246,0.4)]"><i class="fas fa-exchange-alt"></i></div>
-                <div>
+                <div class="flex-1 min-w-0">
                     <h3 class="font-black text-slate-100 tracking-tight leading-tight uppercase">Cambiar Estado</h3>
-                    <p class="text-xs font-bold text-slate-400 tracking-widest mt-0.5">BOMBERO: <span id="visual-select-name" class="text-red-400"></span></p>
+                    <div class="flex items-center justify-between mt-0.5 flex-wrap gap-1">
+                        <p class="text-xs font-bold text-slate-400 tracking-widest truncate">BOMBERO: <span id="visual-select-name" class="text-red-400"></span></p>
+                        <div id="visual-select-service-badge" class="hidden"></div>
+                    </div>
                 </div>
+            </div>
+            
+            <div id="visual-modal-release-container" class="hidden px-5 pt-4 pb-0 bg-transparent">
+                <button onclick="window.confirmVisualRelease('0-8')" class="btn-modal-status w-full py-3 rounded-xl font-black text-xs shadow-md bg-red-600/30 hover:bg-red-600/50 text-red-200 border-red-500/60 flex items-center justify-center gap-2 transition-colors">
+                    <i class="fas fa-unlock-alt text-sm text-amber-400"></i> LIBERAR DEL SERVICIO (0-8)
+                </button>
             </div>
             
             <div class="p-5 space-y-3 bg-transparent">
@@ -1184,8 +1204,15 @@
             if (isConfirming) {
                 const target = element.dataset.pending;
                 
-                if (!target || target === 'en-servicio-lock') {
+                if (!target) {
                     window.resetCompactCard(element);
+                    return;
+                }
+
+                if (target === 'release-08' || target === 'release-09') {
+                    const releaseTarget = target === 'release-09' ? '0-9' : '0-8';
+                    window.resetCompactCard(element);
+                    window.releasePersonnelFromService(id, releaseTarget);
                     return;
                 }
                 
@@ -1198,15 +1225,15 @@
 
             if (inService) {
                 element.classList.add('confirming-en-servicio');
-                element.dataset.pending = 'en-servicio-lock';
+                element.dataset.pending = 'release-08';
 
                 const serviceKey = element.getAttribute('data-service-key') || 'ACTO';
                 const overlay = element.querySelector('.confirmation-overlay');
                 if(overlay) {
-                    overlay.innerHTML = `<div class="text-xl font-bold mb-1 break-words px-2 text-center leading-tight">${serviceKey}</div><div class="text-xs font-normal opacity-90"><i class="fas fa-lock"></i> En Acto</div>`;
+                    overlay.innerHTML = `<div class="text-xs font-black mb-0.5 text-amber-300 truncate max-w-full px-1">${serviceKey}</div><i class="fas fa-unlock text-xl mb-1 text-amber-300"></i><span class="text-[10px] font-black text-white leading-tight">¿LIBERAR?</span>`;
                 }
 
-                const timer = setTimeout(() => { window.resetCompactCard(element); }, 3000);
+                const timer = setTimeout(() => { window.resetCompactCard(element); }, 3500);
                 element.dataset.timerId = timer;
                 return;
             }
@@ -1745,15 +1772,51 @@
             else if (!is09 && !isInService && !isNoAsistir && !operadorActive) cls08 = 'active-bad';
             
             // Los botones quedan inhabilitados SOLO si hay un castigo/licencia que lo fuerce desde BD,
-            // si está metido en una emergencia (asistiendo o no asistiendo), o si es el Operador activo, si es Honorario, o si no hay sesión activa.
-            const isDisabled = isForced08 || isInService || !localStorage.getItem('authUserId');
+            // si es el Operador activo, si es Honorario, o si no hay sesión activa.
+            const hasAuth = !!localStorage.getItem('authUserId');
+            const isDisabled = isForced08 || !hasAuth;
             
             const shortName = window.formatShortName(p.nombreBombero);
+
+            const renderActionButtons = () => {
+                if (isInService || isNoAsistir) {
+                    return `
+                    <div class="flex flex-col gap-1 w-full mt-auto pt-2 card-actions-box">
+                        <div class="flex gap-1 w-full">
+                            <button class="btn-chip btn-release-svc w-full" onclick="event.stopPropagation(); window.releasePersonnelFromService('${p.idRegistro}', '0-8')" title="Liberar del servicio y dejar en 0-8" ${!hasAuth ? 'disabled' : ''}>
+                                <i class="fas fa-unlock text-amber-400"></i> LIBERAR (0-8)
+                            </button>
+                            <button class="btn-chip btn-09 shrink-0 px-2.5" onclick="event.stopPropagation(); window.releasePersonnelFromService('${p.idRegistro}', '0-9')" title="Liberar del servicio y dejar en 0-9" ${!hasAuth ? 'disabled' : ''}>
+                                <i class="fas fa-check"></i> 0-9
+                            </button>
+                        </div>
+                        <div class="flex gap-1 w-full">
+                            <button class="btn-chip btn-cds ${clsCds}" onclick="event.stopPropagation(); window.releasePersonnelFromService('${p.idRegistro}', 'CDS')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-briefcase"></i> C.D.S.</button>
+                            <button class="btn-chip btn-perm ${clsPerm}" onclick="event.stopPropagation(); window.releasePersonnelFromService('${p.idRegistro}', 'PERMISO')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-file-signature"></i> PERM.</button>
+                            <button class="btn-chip btn-licencia ${clsLicencia}" onclick="event.stopPropagation(); window.releasePersonnelFromService('${p.idRegistro}', 'LICENCIA')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-notes-medical"></i> L.M.</button>
+                        </div>
+                    </div>`;
+                } else {
+                    return `
+                    <div class="flex flex-col gap-1 w-full mt-auto pt-2 card-actions-box">
+                        <div class="flex gap-1 w-full">
+                            <button class="btn-chip btn-09 ${cls09}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', '0-9')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-check"></i> 0-9</button>
+                            <button class="btn-chip btn-08 ${cls08}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', '0-8')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-ban"></i> 0-8</button>
+                        </div>
+                        <div class="flex gap-1 w-full">
+                            <button class="btn-chip btn-cds ${clsCds}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'CDS')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-briefcase"></i> C.D.S.</button>
+                            <button class="btn-chip btn-perm ${clsPerm}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'PERMISO')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-file-signature"></i> PERM.</button>
+                            <button class="btn-chip btn-licencia ${clsLicencia}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'LICENCIA')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-notes-medical"></i> L.M.</button>
+                        </div>
+                    </div>`;
+                }
+            };
 
             if (!card) {
                 card = document.createElement('div');
                 card.id = cardId;
                 card.className = "card animate-enter card-status-" + cardAttr;
+                card.dataset.inService = String(isInService || isNoAsistir);
                 
                 if (allowCompactEvents) {
                     card.onclick = function(e) { 
@@ -1806,17 +1869,7 @@
                                 <span class="status-text ${statusClass}">${statusText}</span>
                             </div>
                         </div>
-                        <div class="flex flex-col gap-1 w-full mt-auto pt-2">
-                            <div class="flex gap-1 w-full">
-                                <button class="btn-chip btn-09 ${cls09}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', '0-9')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-check"></i> 0-9</button>
-                                <button class="btn-chip btn-08 ${cls08}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', '0-8')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-ban"></i> 0-8</button>
-                            </div>
-                            <div class="flex gap-1 w-full">
-                                <button class="btn-chip btn-cds ${clsCds}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'CDS')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-briefcase"></i> C.D.S.</button>
-                                <button class="btn-chip btn-perm ${clsPerm}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'PERMISO')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-file-signature"></i> PERM.</button>
-                                <button class="btn-chip btn-licencia ${clsLicencia}" onclick="event.stopPropagation(); window.changeStatus('${p.idRegistro}', 'LICENCIA')" ${isDisabled ? 'disabled' : ''}><i class="fas fa-notes-medical"></i> L.M.</button>
-                            </div>
-                        </div>
+                        ${renderActionButtons()}
                     </div>`;
                 grid.appendChild(card);
             } else {
@@ -1849,39 +1902,48 @@
                         visName.innerText = shortName;
                     }
 
-                    const btn09 = card.querySelector('.btn-09');
-                    if (btn09) {
-                        const newClass09 = `btn-chip btn-09 ${cls09}`;
-                        if(btn09.className !== newClass09) btn09.className = newClass09;
-                        btn09.disabled = isDisabled;
-                    }
+                    const actionsBox = card.querySelector('.card-actions-box');
+                    const currentIsInSvcAttr = card.dataset.inService === 'true';
+                    const targetIsInSvc = (isInService || isNoAsistir);
 
-                    const btnCds = card.querySelector('.btn-cds');
-                    if (btnCds) {
-                        const newClassCds = `btn-chip btn-cds ${clsCds}`;
-                        if(btnCds.className !== newClassCds) btnCds.className = newClassCds;
-                        btnCds.disabled = isDisabled;
-                    }
+                    if (actionsBox && currentIsInSvcAttr !== targetIsInSvc) {
+                        card.dataset.inService = String(targetIsInSvc);
+                        actionsBox.outerHTML = renderActionButtons();
+                    } else {
+                        const btn09 = card.querySelector('.btn-09');
+                        if (btn09) {
+                            const newClass09 = `btn-chip btn-09 ${cls09}`;
+                            if(btn09.className !== newClass09) btn09.className = newClass09;
+                            btn09.disabled = isDisabled;
+                        }
 
-                    const btnPerm = card.querySelector('.btn-perm');
-                    if (btnPerm) {
-                        const newClassPerm = `btn-chip btn-perm ${clsPerm}`;
-                        if(btnPerm.className !== newClassPerm) btnPerm.className = newClassPerm;
-                        btnPerm.disabled = isDisabled;
-                    }
+                        const btnCds = card.querySelector('.btn-cds');
+                        if (btnCds) {
+                            const newClassCds = `btn-chip btn-cds ${clsCds}`;
+                            if(btnCds.className !== newClassCds) btnCds.className = newClassCds;
+                            btnCds.disabled = isDisabled;
+                        }
 
-                    const btnLicencia = card.querySelector('.btn-licencia');
-                    if (btnLicencia) {
-                        const newClassLicencia = `btn-chip btn-licencia ${clsLicencia}`;
-                        if(btnLicencia.className !== newClassLicencia) btnLicencia.className = newClassLicencia;
-                        btnLicencia.disabled = isDisabled;
-                    }
+                        const btnPerm = card.querySelector('.btn-perm');
+                        if (btnPerm) {
+                            const newClassPerm = `btn-chip btn-perm ${clsPerm}`;
+                            if(btnPerm.className !== newClassPerm) btnPerm.className = newClassPerm;
+                            btnPerm.disabled = isDisabled;
+                        }
 
-                    const btn08 = card.querySelector('.btn-08');
-                    if (btn08) {
-                        const newClass08 = `btn-chip btn-08 ${cls08}`;
-                        if(btn08.className !== newClass08) btn08.className = newClass08;
-                        btn08.disabled = isDisabled;
+                        const btnLicencia = card.querySelector('.btn-licencia');
+                        if (btnLicencia) {
+                            const newClassLicencia = `btn-chip btn-licencia ${clsLicencia}`;
+                            if(btnLicencia.className !== newClassLicencia) btnLicencia.className = newClassLicencia;
+                            btnLicencia.disabled = isDisabled;
+                        }
+
+                        const btn08 = card.querySelector('.btn-08');
+                        if (btn08) {
+                            const newClass08 = `btn-chip btn-08 ${cls08}`;
+                            if(btn08.className !== newClass08) btn08.className = newClass08;
+                            btn08.disabled = isDisabled;
+                        }
                     }
                 }
             }
@@ -1895,14 +1957,29 @@
             const p = personnel.find(per => String(per.idRegistro) === String(idRegistro));
             if (!p) return;
 
-            const enServicioVal = String(p.enServicio || '').trim();
-            const isReallyInService = window.isInServiceValue(enServicioVal) && !enServicioVal.startsWith('-');
-            if (window.isSpecialState(p) || isReallyInService || window.isHonorary(p)) {
+            if (window.isSpecialState(p) || window.isHonorary(p)) {
                 return;
             }
 
             window.visualSelectedId = idRegistro;
             document.getElementById('visual-select-name').innerText = window.formatShortName(p.nombreBombero);
+
+            const enServicioVal = String(p.enServicio || '').trim();
+            const isInSvc = window.isInServiceValue(enServicioVal) && !enServicioVal.startsWith('-');
+            const relContainer = document.getElementById('visual-modal-release-container');
+            const svcBadge = document.getElementById('visual-select-service-badge');
+
+            if (isInSvc) {
+                const clave = dispatchesMap.get(enServicioVal) || 'ACTO';
+                if (svcBadge) {
+                    svcBadge.innerHTML = `<span class="bg-blue-600/30 text-blue-300 border border-blue-500/50 px-2 py-0.5 rounded text-[10px] font-bold"><i class="fas fa-truck-fire mr-1"></i>EN ACTO: ${clave}</span>`;
+                    svcBadge.classList.remove('hidden');
+                }
+                if (relContainer) relContainer.classList.remove('hidden');
+            } else {
+                if (svcBadge) svcBadge.classList.add('hidden');
+                if (relContainer) relContainer.classList.add('hidden');
+            }
 
             const modal = document.getElementById('status-select-modal');
             const content = document.getElementById('status-select-content');
@@ -1930,9 +2007,75 @@
 
         window.confirmVisualStatusChange = function(newStatus) {
             if (window.visualSelectedId) {
-                window.changeStatus(window.visualSelectedId, newStatus);
+                const p = personnel.find(per => String(per.idRegistro) === String(window.visualSelectedId));
+                if (p && window.isInServiceValue(p.enServicio)) {
+                    window.releasePersonnelFromService(window.visualSelectedId, newStatus);
+                } else {
+                    window.changeStatus(window.visualSelectedId, newStatus);
+                }
             }
             window.closeVisualStatusModal();
+        };
+
+        window.confirmVisualRelease = function(targetStatus = '0-8') {
+            if (window.visualSelectedId) {
+                window.releasePersonnelFromService(window.visualSelectedId, targetStatus);
+            }
+            window.closeVisualStatusModal();
+        };
+
+        window.releasePersonnelFromService = async function(idRegistro, targetStatus = '0-8') {
+            if (!localStorage.getItem('authUserId')) {
+                window.showToast("INICIE SESION EN LA VENTANA PRINCIPAL PARA EDITAR");
+                return;
+            }
+            const p = personnel.find(per => String(per.idRegistro) === String(idRegistro));
+            if (!p || window.isSpecialState(p) || window.isHonorary(p)) return;
+
+            p.enServicio = "0";
+            p.estado = targetStatus;
+
+            const isOffline = !navigator.onLine;
+            if (isOffline) {
+                p.offlineModified = true;
+                p.lastUpdateLocal = 0;
+            } else {
+                p.offlineModified = false;
+                p.lastUpdateLocal = Date.now();
+            }
+
+            window.updateLocalStorage();
+            window.sortPersonnel();
+            window.renderGrid();
+
+            if (!isOffline) {
+                window.queueFirebaseWrite('update', 'personal', String(idRegistro), new Object({
+                    enServicio: "0",
+                    estado: targetStatus
+                }));
+
+                try {
+                    const now = new Date();
+                    const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth() + 1).padStart(2, '0')}-${now.getFullYear()}`;
+                    const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+                    const nextIdStr = String(Date.now());
+
+                    window.queueFirebaseWrite('set', `personal/${idRegistro}/estados`, nextIdStr, new Object({
+                        estado: targetStatus,
+                        fecha: dStr,
+                        hora: tStr,
+                        idEstado: nextIdStr,
+                        timestamp: Date.now()
+                    }));
+                } catch (e) {
+                    console.error("Error guardando historial de estado al liberar del acto:", e);
+                }
+            }
+
+            window.playSound('success');
+            const isDriver = window.isTrueValue(p.conductor);
+            const label = targetStatus === '0-9' ? 'DISPONIBLE (0-9)' : (targetStatus === '0-8' ? '0-8' : targetStatus);
+            window.showStatusToast(p.idRadial, p.nombreBombero, `LIBERADO DEL ACTO: ${label}`, isDriver);
         };
 
         window.changeStatus = async function(idRegistro, newStatus) {
@@ -1942,7 +2085,10 @@
             
             const serviceIdVal = String(p.enServicio).trim();
             const inService = window.isInServiceValue(serviceIdVal) && !serviceIdVal.startsWith('-');
-            if (inService) return;
+            if (inService) {
+                window.releasePersonnelFromService(idRegistro, newStatus);
+                return;
+            }
 
             if (String(p.estado).trim() === newStatus) return;
 

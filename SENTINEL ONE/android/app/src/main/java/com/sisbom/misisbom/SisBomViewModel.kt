@@ -839,19 +839,22 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                         if (!knownDispatchIds.contains(d.idServicio)) {
                             knownDispatchIds.add(d.idServicio)
                             val hasCDS = currentUser?.hasActiveCDS() == true
-                            if (!isFirstCheck && d.operadorFinal.isEmpty() && currentUser?.estado != "0-8" && !hasCDS && !isCentralActive) {
+                            val cleanClaveUpper = d.clave.trim().uppercase()
+                            val is1030OrEscalation = cleanClaveUpper.contains("10-30") || cleanClaveUpper.contains("10_30") ||
+                                    cleanClaveUpper.contains("FORESTAL") ||
+                                    cleanClaveUpper == "9-0" || cleanClaveUpper == "9.0" || cleanClaveUpper == "9_0" ||
+                                    cleanClaveUpper.contains("COMANDANCIA") || cleanClaveUpper.contains("LLAMADO")
+                            val is08 = currentUser?.estado == "0-8" || currentUser?.estado == "10-8"
+                            val shouldNotify = if (is08) is1030OrEscalation else (currentUser?.estado != "0-8")
+
+                            if (!isFirstCheck && d.operadorFinal.isEmpty() && shouldNotify && !hasCDS && !isCentralActive) {
                                 if (d.idServicio.isNotEmpty()) {
                                     if (!PlayedSoundsTracker.hasPlayed(d.idServicio)) {
                                         PlayedSoundsTracker.markPlayed(d.idServicio)
                                         val isTooOld = TimeValidation.isTooOld(d.fechaDespacho, d.horaDespacho)
                                         val inService = currentUser?.let { it.enServicio.isNotEmpty() && it.enServicio != "0" && !it.enServicio.startsWith("-") } ?: false
                                         if (!isTooOld && !isAirplaneMode && !inService) {
-                                            val cleanClaveUpper = d.clave.trim().uppercase()
-                                            val soundToPlay = if (cleanClaveUpper.contains("10-30") || cleanClaveUpper.contains("10_30") ||
-                                                cleanClaveUpper.contains("FORESTAL") ||
-                                                cleanClaveUpper == "9-0" || cleanClaveUpper == "9.0" || cleanClaveUpper == "9_0" ||
-                                                cleanClaveUpper.contains("COMANDANCIA") || cleanClaveUpper.contains("LLAMADO")
-                                            ) {
+                                            val soundToPlay = if (is1030OrEscalation) {
                                                 "c10_30"
                                             } else {
                                                 var cleanClave = d.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
@@ -864,9 +867,7 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                                             SoundPlayer.triggerVibration(context, true)
                                             NotificationHelper.scheduleRepeatAlert(context, d.idServicio, d.clave, true)
 
-                                            if (MainActivity.isAppInForeground) {
-                                                fullscreenDispatchId = d.idServicio
-                                            }
+                                            fullscreenDispatchId = d.idServicio
                                         }
                                     }
                                 }

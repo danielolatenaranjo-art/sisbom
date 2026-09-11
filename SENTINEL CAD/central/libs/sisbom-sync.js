@@ -1,5 +1,12 @@
 // sisbom-sync.js - Shared Synchronization and Caching Layer for AppUnificada
 (function() {
+    // Ensure security and developer console are loaded
+    if (!window.__sentinel_security_installed__) {
+        const devScript = document.createElement('script');
+        devScript.src = './libs/sentinel-devconsole.js';
+        document.head.appendChild(devScript);
+    }
+
     const isParent = window.location.pathname.endsWith('index.html');
     const isCentral = window.location.pathname.includes('/central/');
     

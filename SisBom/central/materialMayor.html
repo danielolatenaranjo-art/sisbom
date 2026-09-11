@@ -4,10 +4,13 @@
     <script src="./libs/sisbom-sync.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Material Mayor - SisBom</title>
+    <title>Material Mayor - SENTINEL CAD</title>
     <!-- Tailwind CSS -->
     <link rel="stylesheet" href="./libs/tailwind.css">
     <link href="./libs/font-awesome/css/all.min.css" rel="stylesheet" onerror="this.onerror=null;this.href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css';">
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="./libs/leaflet/leaflet.css" onerror="this.onerror=null;this.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';">
+    <script src="./libs/leaflet/leaflet.js" onerror="this.onerror=null;this.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';"></script>
     <style>
         /* REGLA MAESTRA: TODO EN MAYÚSCULAS */
         body, input, textarea, select, button, a, p, span, div, h1, h2, h3, h4, h5, h6, label, th, td {
@@ -73,6 +76,61 @@
         }
         .button-10:active { transform: scale(0.96); }
         .button-10:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* --- MAPA GENERAL DE MATERIAL MAYOR --- */
+        .fleet-unit-map-marker {
+            background: transparent;
+            border: none;
+        }
+        .fleet-unit-marker-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: #ffffff;
+            font-weight: 900;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 8px;
+            border: 1.5px solid #ffffff;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.6);
+            white-space: nowrap;
+            cursor: pointer;
+            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            user-select: none;
+        }
+        .fleet-unit-marker-badge:hover {
+            transform: scale(1.1);
+            z-index: 9999 !important;
+        }
+        .fleet-unit-marker-badge.status-09 {
+            background: linear-gradient(135deg, #10b981, #047857);
+        }
+        .fleet-unit-marker-badge.status-service {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+        }
+        .fleet-unit-marker-badge.status-special {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+        }
+        .fleet-unit-marker-badge.status-08 {
+            background: linear-gradient(135deg, #ef4444, #b91c1c);
+        }
+        .unit-sidebar-item {
+            transition: all 0.2s ease;
+        }
+        .unit-sidebar-item:hover {
+            background-color: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateX(2px);
+        }
+        #fleet-leaflet-map .leaflet-popup-content-wrapper {
+            background-color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+            padding: 4px;
+        }
+        #fleet-leaflet-map .leaflet-popup-tip {
+            background-color: #ffffff;
+        }
     </style>
 </head>
 <body class="p-4 md:p-6 pb-24 flex flex-col min-h-screen">
@@ -88,6 +146,17 @@
 
 
         
+        <!-- CONTROLES SUPERIORES (BOTONES AL COSTADO DERECHO) -->
+        <div id="header-controls" class="flex justify-end items-center gap-3 pb-2 pt-1">
+            <button type="button" onclick="App.openFleetMapModal()" id="btn-fleet-map" class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2.5 rounded-xl font-black text-xs shadow-md transition-all flex items-center gap-2.5 border border-blue-400/40 active:scale-95 cursor-pointer">
+                <i class="fas fa-map-location-dot text-sm"></i>
+                <span class="tracking-wider">VER MAPA</span>
+            </button>
+            <button type="button" onclick="window.detachWindow()" id="btn-detach-window" class="bg-[#1e293b] hover:bg-[#334155] border border-slate-700 text-slate-200 px-5 py-2.5 rounded-xl font-bold text-xs shadow-sm transition-colors hidden sm:flex items-center gap-2 cursor-pointer" title="Abrir en otra pantalla">
+                <i class="fas fa-external-link-alt text-xs"></i> <span class="tracking-wider">OTRA PANTALLA</span>
+            </button>
+        </div>
+
         <!-- GRID DE TARJETAS DE VEHÍCULOS -->
         <div id="fleet-grid" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
             <div class="col-span-full py-20 text-center text-slate-400 italic flex flex-col items-center gap-3">
@@ -254,6 +323,75 @@
         </div>
     </div>
 
+    <!-- MODAL MAPA GENERAL DE UNIDADES (FLEET MAP) -->
+    <div id="modal-fleet-map" class="fixed inset-0 hidden bg-slate-950/85 backdrop-blur-md items-center justify-center p-1 sm:p-2 transition-opacity duration-200 opacity-0" style="z-index: 9500;">
+        <div class="bg-[#0f172a] rounded-2xl shadow-2xl w-full h-full max-w-full overflow-hidden transform scale-95 transition-transform duration-200 flex flex-col border border-slate-700" id="modal-fleet-map-content">
+            
+            <!-- Header del Modal -->
+            <div class="px-4 py-2.5 border-b border-slate-800 bg-[#1e293b] flex items-center justify-between shrink-0 gap-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center text-sm border border-blue-500/30 shrink-0">
+                        <i class="fas fa-map-location-dot"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-black text-slate-100 text-sm tracking-tight leading-none uppercase flex items-center gap-2">
+                            Mapa General de Unidades
+                            <span id="map-units-count" class="bg-blue-500/20 text-blue-300 border border-blue-500/30 text-[10px] font-black px-2 py-0.5 rounded-full">0 Unidades</span>
+                        </h3>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-2">
+                    <!-- Selector de Capas MapStreet / Satélite -->
+                    <div class="flex bg-slate-900 border border-slate-700 rounded-lg p-0.5 text-[11px] font-bold">
+                        <button type="button" id="btn-layer-street" onclick="App.setFleetMapLayer('street')" class="px-2.5 py-1 rounded-md bg-blue-600 text-white shadow-sm transition-all cursor-pointer">
+                            <i class="fas fa-map mr-1"></i> CALLES
+                        </button>
+                        <button type="button" id="btn-layer-sat" onclick="App.setFleetMapLayer('satellite')" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition-all cursor-pointer">
+                            <i class="fas fa-satellite mr-1"></i> SATÉLITE
+                        </button>
+                    </div>
+
+                    <button type="button" onclick="App.recenterFleetMap()" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold border border-slate-700 transition flex items-center gap-1.5 cursor-pointer" title="Enfocar todas las unidades">
+                        <i class="fas fa-crosshairs text-blue-400"></i> <span class="hidden sm:inline">Enfocar Todas</span>
+                    </button>
+                    <button type="button" onclick="App.closeFleetMapModal()" class="w-8 h-8 rounded-lg bg-slate-800 hover:bg-red-600 hover:text-white text-slate-400 flex items-center justify-center transition border border-slate-700 focus:outline-none cursor-pointer">
+                        <i class="fas fa-times text-sm"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Contenedor Principal: Mapa a la izquierda + Barra Lateral a la derecha -->
+            <div class="flex-1 flex flex-row overflow-hidden relative w-full h-full" style="min-height: 0;">
+                
+                <!-- Contenedor del Mapa Leaflet (Izquierda - Ocupa todo el resto) -->
+                <div class="flex-1 h-full relative bg-slate-200" style="min-width: 0;">
+                    <div id="fleet-leaflet-map" style="width: 100%; height: 100%; min-height: 100%;"></div>
+                    
+                    <!-- Leyenda flotante en el mapa -->
+                    <div class="absolute bottom-4 left-4 z-[1000] bg-slate-900/90 backdrop-blur-sm border border-slate-700/80 rounded-xl p-2.5 shadow-xl text-[10px] font-bold space-y-1 text-slate-300 pointer-events-auto">
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span> <span>Disponible (0-9)</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span> <span>En Servicio / Acto</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-amber-500"></span> <span>6-13 / 6-14 Especial</span></div>
+                        <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-red-500"></span> <span>Fuera de Servicio (0-8)</span></div>
+                    </div>
+                </div>
+
+                <!-- Barra Lateral Derecha de Unidades (Siempre al costado derecho) -->
+                <div class="w-64 sm:w-72 md:w-80 bg-[#0b0f19] border-l border-slate-800 flex flex-col shrink-0 h-full">
+                    <div class="p-3 border-b border-slate-800/80 bg-slate-900/50 flex items-center justify-between shrink-0">
+                        <span class="text-[11px] font-black tracking-wider text-slate-300 uppercase flex items-center gap-2"><i class="fas fa-truck text-blue-400"></i> Flota de Unidades</span>
+                        <span class="text-[9px] font-bold text-slate-500">Click para enfocar</span>
+                    </div>
+                    <div id="map-units-list" class="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scrollbar">
+                        <!-- Generado dinámicamente -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
     <!-- TOAST NOTIFICATION -->
     <div id="toast-container" class="fixed bottom-5 right-5 flex flex-col gap-2 pointer-events-none" style="z-index: 9999;"></div>
 
@@ -307,20 +445,42 @@
 
         window.resolvePersonnelFullNameLocal = function(idOrName) {
             if (!idOrName) return '';
-            const cleanVal = String(idOrName).trim().toUpperCase();
-            if (cleanVal.includes(' - ') || cleanVal.includes(' – ')) return idOrName;
+            let rawStr = String(idOrName).trim();
+            if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+
+            let candidateId = rawStr;
+            let candidateName = '';
+            if (rawStr.includes(' - ')) {
+                const parts = rawStr.split(' - ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' • ')) {
+                const parts = rawStr.split(' • ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            } else if (rawStr.includes(' – ')) {
+                const parts = rawStr.split(' – ');
+                candidateId = parts[0].trim();
+                candidateName = parts.slice(1).join(' ').trim();
+            }
+
+            const cleanIdUpper = candidateId.toUpperCase();
             
-            const person = window.App && window.App.personalData ? window.App.personalData.find(p => p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanVal) : null;
+            const person = window.App && window.App.personalData ? window.App.personalData.find(p => 
+                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+            ) : null;
+
             if (person) {
-                return `${person.idRadial} - ${person.nombreBombero}`;
+                const rad = person.idRadial || person.radio || candidateId;
+                return `${rad} - ${person.nombreBombero}`;
             }
             
-            const personByName = window.App && window.App.personalData ? window.App.personalData.find(p => p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanVal)) : null;
-            if (personByName) {
-                return `${personByName.idRadial} - ${personByName.nombreBombero}`;
-            }
-            
-            return idOrName;
+            return candidateId;
         };
 
         window.sanitizeTimeForInput = function(val) {
@@ -495,6 +655,9 @@
             bitacoraData: new Array(),
             despachosData: new Array(),
             allDespachosData: new Array(),
+            
+            fleetMap: null,
+            fleetMapMarkers: {},
             
             unsubVehiculos: null,
             unsubPersonal: null,
@@ -897,6 +1060,9 @@
                 this.populateDateFilter();
                 this.renderFleet();
                 this.renderHistory();
+                if (document.getElementById('modal-fleet-map') && !document.getElementById('modal-fleet-map').classList.contains('hidden')) {
+                    this.updateFleetMap();
+                }
             },
 
             // --- RENDERIZADO FLOTA (TARJETAS COMPACTAS) ---
@@ -1009,7 +1175,10 @@
                                         <span class="font-bold text-slate-400 tracking-widest mt-0.5" style="font-size: 10px;">${unit.patente || 'S/P'}</span>
                                     </div>
                                 </div>
-                                <span class="px-2 py-1 rounded font-black tracking-widest border shrink-0 shadow-sm ${badgeClass}" style="font-size: 9px;">${statusText}</span>
+                                <div class="flex items-center gap-1.5 shrink-0">
+                                    <button type="button" onclick="App.openFleetMapModal('${unit.idCarro}')" class="text-slate-400 hover:text-blue-400 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer" title="Ver en mapa"><i class="fas fa-location-dot text-sm"></i></button>
+                                    <span class="px-2 py-1 rounded font-black tracking-widest border shrink-0 shadow-sm ${badgeClass}" style="font-size: 9px;">${statusText}</span>
+                                </div>
                             </div>
                             
                             <div class="flex-1 flex flex-col justify-center" style="min-height: 60px;">
@@ -1786,26 +1955,42 @@
 
             getBomberoLabel(id) {
                 if (!id || id === '0' || id === '---') return '---';
-                if (String(id).includes(' • ') || String(id).includes(' - ') || String(id).includes(' – ')) return id;
-                const cleanId = String(id).trim().toUpperCase();
-                if (cleanId === 'S/I') return 'S/I';
-                if (cleanId === 'GESTION' || cleanId === 'GESTIÓN') return 'GESTIÓN';
+                let rawStr = String(id).trim();
+                if (rawStr === 'S/I' || rawStr === 'GESTION' || rawStr === 'GESTIÓN') return rawStr;
+
+                let candidateId = rawStr;
+                let candidateName = '';
+                if (rawStr.includes(' • ')) {
+                    const parts = rawStr.split(' • ');
+                    candidateId = parts[0].trim();
+                    candidateName = parts.slice(1).join(' ').trim();
+                } else if (rawStr.includes(' - ')) {
+                    const parts = rawStr.split(' - ');
+                    candidateId = parts[0].trim();
+                    candidateName = parts.slice(1).join(' ').trim();
+                } else if (rawStr.includes(' – ')) {
+                    const parts = rawStr.split(' – ');
+                    candidateId = parts[0].trim();
+                    candidateName = parts.slice(1).join(' ').trim();
+                }
+
+                const cleanIdUpper = candidateId.toUpperCase();
                 
                 let found = (this.personalData || []).find(p => 
-                    String(p.idRadial || '').trim().toUpperCase() === cleanId ||
-                    String(p.idRegistro || p.ID || p.id || '').trim() === cleanId
+                    (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
+                    (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
+                    (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
+                    (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
+                    (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
+                    (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
                 );
-                
-                if (!found) {
-                    found = (this.personalData || []).find(p => String(p.nombreBombero || '').trim().toUpperCase().includes(cleanId));
-                }
                 
                 if (found) {
                     const shortName = this.formatShortName(found.nombreBombero);
-                    const rad = found.idRadial || cleanId;
+                    const rad = found.idRadial || found.radio || candidateId;
                     return `${rad} • ${shortName}`;
                 }
-                return this.formatShortName(cleanId);
+                return this.formatShortName(candidateId);
             },
 
             getClaveForTrip(row) {
@@ -1822,6 +2007,301 @@
                     }
                 }
                 return rawClave || 'S/C';
+            },
+
+            // --- MAPA GENERAL DE UNIDADES ---
+            getUnitCoordinates(unit) {
+                let lat = null;
+                let lng = null;
+
+                if (unit.lat !== undefined && unit.lng !== undefined && unit.lat !== null && unit.lng !== null && unit.lat !== '' && unit.lng !== '') {
+                    lat = parseFloat(unit.lat);
+                    lng = parseFloat(unit.lng);
+                } else if (unit.latitude !== undefined && unit.longitude !== undefined && unit.latitude !== null && unit.longitude !== null && unit.latitude !== '' && unit.longitude !== '') {
+                    lat = parseFloat(unit.latitude);
+                    lng = parseFloat(unit.longitude);
+                } else if (unit.posicionGps && typeof unit.posicionGps === 'object') {
+                    lat = parseFloat(unit.posicionGps.lat || unit.posicionGps.latitude || 0);
+                    lng = parseFloat(unit.posicionGps.lng || unit.posicionGps.longitude || 0);
+                } else if (unit.ubicacionGps && typeof unit.ubicacionGps === 'object') {
+                    lat = parseFloat(unit.ubicacionGps.lat || unit.ubicacionGps.latitude || 0);
+                    lng = parseFloat(unit.ubicacionGps.lng || unit.ubicacionGps.longitude || 0);
+                }
+
+                if ((!lat || !lng || isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) && String(unit.enServicio || '0') !== '0') {
+                    const svcId = String(unit.enServicio).trim();
+                    const dispatches = this.allDespachosData || this.despachosData || [];
+                    const match = dispatches.find(d => String(d.idServicio || d.id || '').trim() === svcId);
+                    if (match) {
+                        if (match.lat && match.lng) {
+                            lat = parseFloat(match.lat);
+                            lng = parseFloat(match.lng);
+                        } else if (match.posicionGps) {
+                            lat = parseFloat(match.posicionGps.lat || match.posicionGps.latitude || 0);
+                            lng = parseFloat(match.posicionGps.lng || match.posicionGps.longitude || 0);
+                        }
+                    }
+                }
+
+                if (!lat || !lng || isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) {
+                    if (unit.cuartelLat && unit.cuartelLng) {
+                        lat = parseFloat(unit.cuartelLat);
+                        lng = parseFloat(unit.cuartelLng);
+                    } else {
+                        lat = -33.4489;
+                        lng = -70.6693;
+                    }
+                }
+
+                return { lat, lng };
+            },
+
+            initFleetMap() {
+                if (this.fleetMap) return;
+                if (typeof L === 'undefined') {
+                    console.error("Leaflet no está cargado");
+                    return;
+                }
+                const mapEl = document.getElementById('fleet-leaflet-map');
+                if (!mapEl) return;
+
+                this.fleetMap = L.map('fleet-leaflet-map', {
+                    zoomControl: true,
+                    attributionControl: false
+                }).setView([-33.4489, -70.6693], 13);
+
+                // Capas: Street (OpenStreetMap) y Satélite Híbrido (Google Satélite con nombres de calles y direcciones)
+                this.fleetTileLayers = {
+                    street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        maxZoom: 19,
+                        attribution: '&copy; OpenStreetMap'
+                    }),
+                    satellite: L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+                        maxZoom: 20,
+                        attribution: 'Google Maps Sat'
+                    })
+                };
+
+                this.currentFleetTile = 'street';
+                this.fleetTileLayers.street.addTo(this.fleetMap);
+            },
+
+            setFleetMapLayer(layerName) {
+                if (!this.fleetMap || !this.fleetTileLayers) return;
+                if (layerName === this.currentFleetTile) return;
+
+                if (this.currentFleetTile && this.fleetTileLayers[this.currentFleetTile]) {
+                    this.fleetMap.removeLayer(this.fleetTileLayers[this.currentFleetTile]);
+                }
+
+                if (this.fleetTileLayers[layerName]) {
+                    this.fleetTileLayers[layerName].addTo(this.fleetMap);
+                    this.currentFleetTile = layerName;
+                }
+
+                const btnStreet = document.getElementById('btn-layer-street');
+                const btnSat = document.getElementById('btn-layer-sat');
+                if (btnStreet && btnSat) {
+                    if (layerName === 'street') {
+                        btnStreet.className = "px-2.5 py-1 rounded-md bg-blue-600 text-white shadow-sm transition-all cursor-pointer";
+                        btnSat.className = "px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition-all cursor-pointer";
+                    } else {
+                        btnSat.className = "px-2.5 py-1 rounded-md bg-blue-600 text-white shadow-sm transition-all cursor-pointer";
+                        btnStreet.className = "px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition-all cursor-pointer";
+                    }
+                }
+            },
+
+            openFleetMapModal(focusUnitId = null) {
+                const modal = document.getElementById('modal-fleet-map');
+                const content = document.getElementById('modal-fleet-map-content');
+                if (!modal) return;
+
+                document.body.classList.add('overflow-hidden');
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+
+                setTimeout(() => {
+                    modal.classList.remove('opacity-0');
+                    if (content) content.classList.remove('scale-95');
+                }, 10);
+
+                if (!this.fleetMap) {
+                    this.initFleetMap();
+                }
+
+                setTimeout(() => {
+                    if (this.fleetMap) {
+                        this.fleetMap.invalidateSize();
+                    }
+                    this.updateFleetMap();
+
+                    if (focusUnitId) {
+                        this.focusUnitOnMap(focusUnitId);
+                    } else {
+                        this.recenterFleetMap();
+                    }
+                }, 200);
+            },
+
+            closeFleetMapModal() {
+                const modal = document.getElementById('modal-fleet-map');
+                const content = document.getElementById('modal-fleet-map-content');
+                if (!modal) return;
+
+                if (content) content.classList.add('scale-95');
+                modal.classList.add('opacity-0');
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                    document.body.classList.remove('overflow-hidden');
+                }, 200);
+            },
+
+            updateFleetMap() {
+                if (!this.fleetMap || typeof L === 'undefined') return;
+
+                if (this.fleetMapMarkers) {
+                    Object.values(this.fleetMapMarkers).forEach(m => {
+                        try { this.fleetMap.removeLayer(m); } catch(e) {}
+                    });
+                }
+                this.fleetMapMarkers = {};
+
+                const countEl = document.getElementById('map-units-count');
+                if (countEl) {
+                    countEl.innerText = `${this.fleetData.length} UNIDADES`;
+                }
+
+                const listContainer = document.getElementById('map-units-list');
+                if (listContainer) {
+                    listContainer.innerHTML = '';
+                }
+
+                this.fleetData.forEach(unit => {
+                    const statusRaw = String(unit.estado || '1').trim();
+                    const enServicio = String(unit.enServicio || '0').trim();
+                    const trip = unit.currentTrip;
+                    const coords = this.getUnitCoordinates(unit);
+
+                    let statusClass = 'status-09';
+                    let statusText = 'DISPONIBLE (0-9)';
+                    let statusShortText = '0-9';
+                    let dotColor = '#10b981';
+                    let badgeClassSidebar = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+
+                    if (statusRaw === '0-8') {
+                        statusClass = 'status-08';
+                        statusText = '0-8 FUERA SERVICIO';
+                        statusShortText = '0-8';
+                        dotColor = '#ef4444';
+                        badgeClassSidebar = 'bg-red-500/20 text-red-400 border-red-500/30';
+                    } else if (enServicio !== '0') {
+                        statusClass = 'status-service';
+                        statusText = 'EN SERVICIO';
+                        statusShortText = 'ACTO';
+                        dotColor = '#3b82f6';
+                        badgeClassSidebar = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                    } else if (trip && (trip.tipo === '6-13' || trip.tipo === '6-14')) {
+                        statusClass = 'status-special';
+                        statusText = trip.tipo;
+                        statusShortText = trip.tipo;
+                        dotColor = '#f59e0b';
+                        badgeClassSidebar = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
+                    }
+
+                    // Marcador en Mapa Leaflet
+                    const customIcon = L.divIcon({
+                        className: 'fleet-unit-map-marker',
+                        html: `<div class="fleet-unit-marker-badge ${statusClass}" title="${unit.idCarro} - ${statusText}"><i class="fas fa-truck"></i><span>${unit.idCarro}</span></div>`,
+                        iconSize: [68, 24],
+                        iconAnchor: [34, 12]
+                    });
+
+                    const marker = L.marker([coords.lat, coords.lng], { icon: customIcon }).addTo(this.fleetMap);
+
+                    const condName = trip ? this.getBomberoLabel(trip.conductor || unit.conductor) : '';
+                    const obacName = trip ? this.getBomberoLabel(trip.obac || unit.obac || unit.aCargo) : '';
+                    const countVol = trip ? (trip.cuantosBomberos || trip.tripulantes || unit.numTripulantes || '0') : '';
+
+                    const popupHtml = `
+                        <div style="min-width: 190px; padding: 4px; font-family: 'Segoe UI', sans-serif; text-transform: uppercase;">
+                            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 6px;">
+                                <span style="font-size: 14px; font-weight: 900; color: #0f172a;">${unit.idCarro}</span>
+                                <span style="font-size: 9px; font-weight: 800; padding: 2px 6px; border-radius: 4px; background-color: #f1f5f9; color: #475569;">${unit.patente || 'S/P'}</span>
+                            </div>
+                            <div style="font-size: 11px; margin-bottom: 3px;">
+                                <span style="color: #64748b; font-weight: 700;">ESTADO:</span> 
+                                <strong style="color: ${dotColor};">${statusText}</strong>
+                            </div>
+                            <div style="font-size: 11px; margin-bottom: 3px;">
+                                <span style="color: #64748b; font-weight: 700;">ODÓMETRO:</span> 
+                                <strong style="color: #1e293b;">${unit.kmActual || '0'} KM</strong>
+                            </div>
+                            ${enServicio !== '0' && trip ? `
+                                <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px; font-size: 10px; margin-top: 5px; line-height: 1.35;">
+                                    <div><span style="color: #64748b; font-weight: 700;">OBAC:</span> <span style="color: #0f172a; font-weight: 800;">${obacName}</span></div>
+                                    <div><span style="color: #64748b; font-weight: 700;">COND:</span> <span style="color: #0f172a; font-weight: 800;">${condName}</span></div>
+                                    <div><span style="color: #64748b; font-weight: 700;">TRIPULACIÓN:</span> <span style="color: #0f172a; font-weight: 800;">${countVol} VOL.</span></div>
+                                </div>
+                            ` : ''}
+                            ${statusRaw === '0-8' && unit.Observacion ? `
+                                <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 6px; padding: 5px; font-size: 10px; margin-top: 5px; color: #991b1b;">
+                                    <span style="font-weight: 700;">MOTIVO:</span> ${unit.Observacion}
+                                </div>
+                            ` : ''}
+                        </div>
+                    `;
+                    marker.bindPopup(popupHtml);
+                    this.fleetMapMarkers[unit.idCarro] = marker;
+
+                    // Entrada en Sidebar (costado derecho)
+                    if (listContainer) {
+                        const item = document.createElement('div');
+                        item.className = "unit-sidebar-item flex items-center justify-between p-2.5 rounded-xl bg-slate-900 border border-slate-800 cursor-pointer text-slate-200 hover:bg-slate-800/80 hover:border-slate-700 transition";
+                        item.onclick = () => this.focusUnitOnMap(unit.idCarro);
+                        item.innerHTML = `
+                            <div class="flex items-center gap-2.5">
+                                <span class="w-3 h-3 rounded-full shrink-0 shadow-sm" style="background-color: ${dotColor};"></span>
+                                <div class="flex flex-col">
+                                    <span class="font-black text-xs text-white leading-tight">${unit.idCarro}</span>
+                                    <span class="text-[9px] text-slate-400 font-bold">${unit.patente || 'S/P'}</span>
+                                </div>
+                            </div>
+                            <div class="flex flex-col items-end gap-0.5">
+                                <span class="text-[9px] font-black px-2 py-0.5 rounded border ${badgeClassSidebar}">${statusShortText}</span>
+                                <span class="text-[8px] text-slate-400 font-bold">${unit.kmActual || '0'} KM</span>
+                            </div>
+                        `;
+                        listContainer.appendChild(item);
+                    }
+                });
+            },
+
+            focusUnitOnMap(unitId) {
+                if (!this.fleetMap) return;
+                const marker = this.fleetMapMarkers[unitId];
+                if (marker) {
+                    this.fleetMap.flyTo(marker.getLatLng(), 16, { duration: 0.8 });
+                    setTimeout(() => {
+                        marker.openPopup();
+                    }, 850);
+                }
+            },
+
+            recenterFleetMap() {
+                if (!this.fleetMap) return;
+                const markers = Object.values(this.fleetMapMarkers);
+                if (markers.length > 0) {
+                    const group = L.featureGroup(markers);
+                    try {
+                        this.fleetMap.fitBounds(group.getBounds().pad(0.15));
+                    } catch(e) {
+                        this.fleetMap.setView([-33.4489, -70.6693], 13);
+                    }
+                } else {
+                    this.fleetMap.setView([-33.4489, -70.6693], 13);
+                }
             },
 
             // --- UI HELPERS ---

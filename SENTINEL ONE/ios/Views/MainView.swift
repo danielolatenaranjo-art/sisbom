@@ -255,7 +255,7 @@ struct TopAppBarView: View {
                     Image(uiImage: logoImg)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 24)
+                        .frame(height: 48)
                         .padding(.top, 2)
                         .padding(.bottom, 2)
                 }

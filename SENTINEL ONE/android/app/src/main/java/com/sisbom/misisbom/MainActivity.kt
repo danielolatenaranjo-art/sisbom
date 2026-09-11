@@ -297,20 +297,30 @@ object NotificationHelper {
                             return@launch
                         }
                         // Still active! Sound the alarm again!
-                        var cleanClave = clave.trim().replace("-", "_").replace(" ", "_").lowercase()
-                        if (cleanClave.isEmpty()) {
-                            val fullText = (doc.getString("clave") ?: "").lowercase()
-                            val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15", "10_30")
-                            for (k in keys) {
-                                if (fullText.contains(k.replace("_", "-")) || fullText.contains(k)) {
-                                    cleanClave = k
-                                    break
+                        val claveUpper = clave.trim().uppercase()
+                        val docClaveUpper = (doc.getString("clave") ?: "").trim().uppercase()
+                        val is1030 = claveUpper.contains("10-30") || claveUpper.contains("10_30") || docClaveUpper.contains("10-30") || docClaveUpper.contains("10_30") || claveUpper.contains("ALARMA GENERAL") || docClaveUpper.contains("ALARMA GENERAL")
+                        val isForestal = claveUpper.contains("FORESTAL") || docClaveUpper.contains("FORESTAL") || claveUpper.contains("INCENDIO FORESTAL") || docClaveUpper.contains("INCENDIO FORESTAL")
+                        val is90 = claveUpper == "9-0" || claveUpper == "9.0" || claveUpper == "9_0" || docClaveUpper == "9-0" || docClaveUpper == "9.0" || docClaveUpper == "9_0" || claveUpper.contains("COMANDANCIA") || docClaveUpper.contains("COMANDANCIA") || claveUpper.contains("LLAMADO") || docClaveUpper.contains("LLAMADO")
+
+                        val soundToPlay = if (is1030 || isForestal || is90) {
+                            "c10_30"
+                        } else {
+                            var cleanClave = clave.trim().replace("-", "_").replace(" ", "_").lowercase()
+                            if (cleanClave.isEmpty()) {
+                                val fullText = (doc.getString("clave") ?: "").lowercase()
+                                val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15", "10_30")
+                                for (k in keys) {
+                                    if (fullText.contains(k.replace("_", "-")) || fullText.contains(k)) {
+                                        cleanClave = k
+                                        break
+                                    }
                                 }
                             }
+                            val possibleSound = if (cleanClave.startsWith("c10") || cleanClave.startsWith("c9")) cleanClave else "c$cleanClave"
+                            val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
+                            if (resId != 0) possibleSound else "despacho"
                         }
-                        val possibleSound = if (cleanClave.startsWith("c10")) cleanClave else "c$cleanClave"
-                        val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
-                        val soundToPlay = if (resId != 0) possibleSound else "despacho"
                         
                         // Set volumes loud
                         val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -568,18 +578,17 @@ object NotificationHelper {
             val cleanKeyUpper = claveOpt.trim().uppercase()
             val fullTextUpper = "$title $message".uppercase()
 
-            val soundToPlay = if (is1210 || is66) {
-                "alerta"
-            } else if (isEscalationAlarm ||
+            val is1030OrEscalation = isEscalationAlarm ||
                 cleanKeyUpper.contains("10-30") || cleanKeyUpper.contains("10_30") ||
                 cleanKeyUpper.contains("FORESTAL") ||
                 cleanKeyUpper == "9-0" || cleanKeyUpper == "9.0" || cleanKeyUpper == "9_0" ||
                 cleanKeyUpper.contains("COMANDANCIA") || cleanKeyUpper.contains("LLAMADO") ||
                 fullTextUpper.contains("10-30") || fullTextUpper.contains("FORESTAL") ||
                 fullTextUpper.contains("COMANDANCIA") || fullTextUpper.contains("9-0")
-            ) {
+
+            val soundToPlay = if (is1030OrEscalation) {
                 "c10_30"
-            } else if (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
+            } else if (type == "DISPATCH" || type == "DISPATCH_UPDATE" || is1210 || is66) {
                 var detectedKey = claveOpt.trim().replace("-", "_").replace(".", "_").replace(" ", "_").lowercase()
                 if (detectedKey.isEmpty()) {
                     val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15")
@@ -617,7 +626,7 @@ object NotificationHelper {
                         scheduleRepeatAlert(context, payloadId, claveOpt.ifEmpty { soundToPlay }, true)
                     }
                 }
-            } else if (playLoud && type != "DISPATCH_UPDATE") {
+            } else if (playLoud && (type != "DISPATCH_UPDATE" || is1210 || is66)) {
                 SoundPlayer.playSound(context, soundToPlay)
             }
 
@@ -1520,8 +1529,12 @@ fun SisBomApp(viewModel: SisBomViewModel) {
             val fId = viewModel.fullscreenDispatchId
             if (fId != null && (is09 || is08)) {
                 val d = dispatches.firstOrNull { it.idServicio == fId && it.operadorFinal.isEmpty() }
+                val claveUp = d?.clave?.trim()?.uppercase() ?: ""
+                val isEscalationAlarm = claveUp.contains("10-30") || claveUp.contains("10_30") ||
+                        claveUp.contains("FORESTAL") ||
+                        claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" ||
+                        claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
                 val isAttending = user.enServicio.trim() == fId
-                val isEscalationAlarm = d?.clave?.contains("10-30") == true || d?.clave?.uppercase()?.contains("FORESTAL") == true
                 if (!isAttending && (isEscalationAlarm || (is09 && user.estado.trim().uppercase() != "NO ASISTIR"))) {
                     d
                 } else null
@@ -1533,12 +1546,14 @@ fun SisBomApp(viewModel: SisBomViewModel) {
         val dispatch = showFullscreenAlert
         val context = androidx.compose.ui.platform.LocalContext.current
 
-        val is1030 = dispatch.clave.contains("10-30")
-        val isForestal = dispatch.clave.uppercase().contains("FORESTAL")
-        val escalationKey = if (is1030) "10-30" else if (isForestal) "FORESTAL" else ""
+        val claveUp = dispatch.clave.trim().uppercase()
+        val is1030 = claveUp.contains("10-30") || claveUp.contains("10_30")
+        val isForestal = claveUp.contains("FORESTAL")
+        val is90 = claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" || claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
+        val escalationKey = if (is1030) "10-30" else if (isForestal) "FORESTAL" else if (is90) "9-0" else ""
 
         androidx.compose.runtime.LaunchedEffect(dispatch.idServicio, escalationKey) {
-            val soundToPlay = if (is1030 || isForestal || dispatch.clave.trim() == "9-0" || dispatch.clave.trim() == "9.0" || dispatch.clave.uppercase().contains("COMANDANCIA")) {
+            val soundToPlay = if (is1030 || isForestal || is90) {
                 "c10_30"
             } else {
                 var c = dispatch.clave.trim().replace("-", "_").replace(" ", "_").lowercase()

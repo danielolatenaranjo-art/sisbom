@@ -1,7 +1,8 @@
 {
   "projects": {
     "default": "sisbom-de5f8",
-    "central": "sisbom-central"
+    "central": "sisbom-central",
+    "pruebas": "pruebas-sisbom"
   },
   "targets": {
     "sisbom-de5f8": {

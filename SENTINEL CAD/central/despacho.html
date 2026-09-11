@@ -264,10 +264,10 @@
         .btn-clean:hover { background: rgba(255,255,255,0.05); color: var(--text-main); border-style: solid; }
 
         /* --- OVERLAY & MODAL --- */
-        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); z-index: 100; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); z-index: 99998; display: flex; flex-direction: column; justify-content: center; align-items: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .overlay.active { opacity: 1; pointer-events: auto; }
         
-        .modal-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 7, 18, 0.8); backdrop-filter: blur(8px); z-index: 150; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
+        .modal-bg { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(3, 7, 18, 0.8); backdrop-filter: blur(8px); z-index: 99999; display: flex; align-items: center; justify-content: center; opacity: 0; pointer-events: none; transition: opacity 0.3s; }
         .modal-bg.active { opacity: 1; pointer-events: auto; }
         .modal-box { background: rgba(15, 23, 42, 0.95); padding: 32px; border-radius: var(--card-radius); border: 1px solid #ef4444; width: 90%; max-width: 400px; text-align: center; transform: scale(0.95) translateY(20px); transition: transform 0.4s var(--ease-out-expo); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
         .modal-bg.active .modal-box { transform: scale(1) translateY(0); }
@@ -457,7 +457,7 @@
                     </button>
                 </div>
                 <div class="p-2.5 bg-slate-950/80 border border-slate-800 rounded-lg text-[11px] text-blue-400 font-mono break-all select-all" id="sms-generated-link">
-                    https://sentinel.web.app/geo.html?id=...
+                    https://sentinellink.web.app/geo.html?id=...
                 </div>
             </div>
 
@@ -478,13 +478,15 @@
                 <span id="sms-accuracy-tag" class="text-[10px] text-green-300 font-bold">Precisión: ±5 metros</span>
             </div>
 
-            <div class="modal-btns flex flex-wrap gap-2">
-                <button onclick="closeSmsGeoModal()" class="btn-modal btn-cancel focus:outline-none flex-1">Cerrar</button>
-                <button onclick="enviarSmsGeolocalizacion('whatsapp')" class="btn-modal focus:outline-none bg-green-600 hover:bg-green-700 text-white flex-1" style="background: #16a34a;" title="Enviar por WhatsApp Web o Móvil">
-                    <i class="fab fa-whatsapp mr-1"></i> WHATSAPP
+            <div class="modal-btns flex gap-2.5 mt-5">
+                <button type="button" onclick="closeSmsGeoModal()" class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer flex-1">
+                    Cerrar
                 </button>
-                <button onclick="enviarSmsGeolocalizacion('sms')" class="btn-modal btn-confirm focus:outline-none flex-1" id="btn-send-sms-action">
-                    <i class="fas fa-paper-plane mr-1"></i> ENVIAR SMS
+                <button type="button" onclick="enviarSmsGeolocalizacion('whatsapp')" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold border border-emerald-500/50 shadow-lg transition cursor-pointer flex items-center justify-center gap-1.5 flex-1" title="Enviar enlace por WhatsApp">
+                    <i class="fab fa-whatsapp text-sm"></i> WhatsApp
+                </button>
+                <button type="button" onclick="enviarSmsGeolocalizacion('sms')" id="btn-send-sms-action" class="px-4 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold border border-red-500/50 shadow-lg transition cursor-pointer flex items-center justify-center gap-1.5 flex-1" title="Enviar enlace por SMS de texto">
+                    <i class="fas fa-paper-plane text-sm"></i> Enviar SMS
                 </button>
             </div>
         </div>
@@ -504,12 +506,13 @@
                     </div>
                 </div>
                 <div class="flex items-center gap-2 shrink-0">
-                    <button type="button" onclick="centerAlertanteLocation()" id="btn-modal-center-alertante" class="hidden px-2.5 py-1 bg-sky-900/80 text-sky-300 hover:bg-sky-800 border border-sky-600/50 rounded text-[11px] font-bold transition flex items-center gap-1"><i class="fas fa-person-rays"></i> Alertante</button>
-                    <button type="button" onclick="centerEmergencyLocation()" id="btn-modal-center-emergency" class="hidden px-2.5 py-1 bg-red-950/80 text-red-300 hover:bg-red-900 border border-red-600/50 rounded text-[11px] font-bold transition flex items-center gap-1"><i class="fas fa-fire"></i> Incidente</button>
-                    <button type="button" onclick="switchMapTileLayer('osm')" id="btn-modal-tile-osm" class="px-2.5 py-1 bg-slate-800 text-white rounded text-[11px] font-bold transition">Calles</button>
-                    <button type="button" onclick="switchMapTileLayer('sat')" id="btn-modal-tile-sat" class="px-2.5 py-1 bg-slate-800/60 text-slate-300 hover:text-white rounded text-[11px] font-bold transition">Satelital</button>
-                    <button type="button" onclick="toggleGrifosLayer()" class="px-2.5 py-1 bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded text-[11px] font-bold transition">Grifos</button>
-                    <button type="button" onclick="toggleMapModal(false)" class="w-7 h-7 rounded bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white flex items-center justify-center transition ml-1">
+                    <button type="button" onclick="centerAlertanteLocation()" id="btn-modal-center-alertante" class="hidden px-2.5 py-1 bg-sky-900/80 text-sky-300 hover:bg-sky-800 border border-sky-600/50 rounded text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"><i class="fas fa-person-rays"></i> Alertante</button>
+                    <button type="button" onclick="centerEmergencyLocation()" id="btn-modal-center-emergency" class="hidden px-2.5 py-1 bg-red-950/80 text-red-300 hover:bg-red-900 border border-red-600/50 rounded text-[11px] font-bold transition flex items-center gap-1 cursor-pointer"><i class="fas fa-fire"></i> Incidente</button>
+                    <div class="inline-flex rounded-lg bg-slate-800/90 p-0.5 border border-slate-700/60 shadow-sm">
+                        <button type="button" onclick="switchMapTileLayer('osm')" id="btn-modal-tile-osm" class="px-3 py-1 bg-red-600 text-white font-black rounded text-[11px] shadow transition cursor-pointer">Calles</button>
+                        <button type="button" onclick="switchMapTileLayer('sat')" id="btn-modal-tile-sat" class="px-3 py-1 text-slate-300 hover:text-white hover:bg-slate-700/60 font-bold rounded text-[11px] transition cursor-pointer">Satelital</button>
+                    </div>
+                    <button type="button" onclick="toggleMapModal(false)" class="w-7 h-7 rounded bg-slate-800 hover:bg-red-600 text-slate-400 hover:text-white flex items-center justify-center transition ml-1 cursor-pointer" title="Cerrar Mapa">
                         <i class="fas fa-times text-xs"></i>
                     </button>
                 </div>
@@ -618,8 +621,8 @@
                     <div class="flex flex-col gap-1.5">
                         <div class="flex justify-between items-center">
                             <label class="input-label mb-0" style="font-size: 0.85rem;"><i class="fas fa-map-location-dot mr-1 text-red-500"></i> Ubicación del Incidente</label>
-                            <button type="button" onclick="openSmsGeoModal()" class="px-2.5 py-1 bg-red-600/20 hover:bg-red-600/40 text-red-400 hover:text-white border border-red-500/30 rounded text-[10px] font-bold tracking-wider transition-all flex items-center gap-1.5 shadow-sm" title="Solicitar ubicación GPS por SMS o WhatsApp">
-                                <i class="fas fa-location-crosshairs text-xs"></i> <span>Solicitar Ubicación</span>
+                            <button type="button" onclick="window.openSmsGeoModal()" class="px-2.5 py-1 bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 rounded-lg text-[10px] font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm" title="Solicitar ubicación GPS por SMS o WhatsApp">
+                                <i class="fas fa-location-crosshairs text-sky-400"></i> <span>Solicitar Ubicación</span>
                             </button>
                         </div>
                         <div class="relative">
@@ -664,7 +667,7 @@
                     <!-- Preinforme -->
                     <div style="flex: 1; display: flex; flex-direction: column; min-height: 140px;">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-                            <label class="input-label" style="margin-bottom: 0;"><i class="fas fa-file-alt mr-1"></i> Pre-informe (Automático)</label>
+                            <label class="input-label" style="margin-bottom: 0;"><i class="fas fa-file-alt mr-1 text-red-500"></i> Pre-informe (Automático)</label>
                         </div>
                         <textarea id="svcObs" class="input-pill textarea-pill flex-1" placeholder="Seleccione una clave para generar el informe..." oninput="guardarBorrador()"></textarea>
                     </div>
@@ -708,16 +711,13 @@
                             </span>
                             <div class="flex items-center gap-1">
                                 <div class="inline-flex rounded-lg bg-slate-800/90 p-0.5 border border-slate-700/60 shadow-sm">
-                                    <button type="button" onclick="window.switchMapTileLayer('osm')" id="btn-tile-osm" class="px-2 py-0.5 bg-red-600 text-white rounded-md text-[9px] font-bold transition">Calles</button>
-                                    <button type="button" onclick="window.switchMapTileLayer('sat')" id="btn-tile-sat" class="px-2 py-0.5 text-slate-400 hover:text-white rounded-md text-[9px] font-bold transition">Sat</button>
+                                    <button type="button" onclick="window.switchMapTileLayer('osm')" id="btn-tile-osm" class="px-2.5 py-1 bg-red-600 text-white font-black rounded-md text-[9px] shadow transition cursor-pointer">Calles</button>
+                                    <button type="button" onclick="window.switchMapTileLayer('sat')" id="btn-tile-sat" class="px-2.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700/60 font-bold rounded-md text-[9px] transition cursor-pointer">Satelital</button>
                                 </div>
-                                <button type="button" onclick="window.toggleGrifosLayer()" id="btn-toggle-grifos" class="p-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-400 hover:text-white rounded-lg text-[9px] font-bold transition" title="Ver / Ocultar Grifos">
-                                    <i class="fas fa-faucet-drip"></i>
-                                </button>
-                                <button type="button" onclick="window.centerMapDefault()" class="p-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-400 hover:text-white rounded-lg text-[9px] font-bold transition" title="Centrar en Comuna">
+                                <button type="button" onclick="window.centerMapDefault()" class="p-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-400 hover:text-white rounded-lg text-[9px] font-bold transition cursor-pointer" title="Centrar en Comuna">
                                     <i class="fas fa-crosshairs"></i>
                                 </button>
-                                <button type="button" onclick="window.toggleMapModal(true)" class="p-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-400 hover:text-white rounded-lg text-[9px] font-bold transition" title="Pantalla Completa">
+                                <button type="button" onclick="window.toggleMapModal(true)" class="p-1.5 bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 text-slate-400 hover:text-white rounded-lg text-[9px] font-bold transition cursor-pointer" title="Pantalla Completa">
                                     <i class="fas fa-expand"></i>
                                 </button>
                             </div>
@@ -1078,10 +1078,15 @@
                     scrollWheelZoom: true
                 }).setView(DEFAULT_COORDS, DEFAULT_ZOOM);
 
-                // Capas (OpenStreetMap Street Estándar)
+                // Capas
                 tileLayers.mini.osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' });
                 tileLayers.mini.sat = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', { maxZoom: 20, attribution: 'Google Maps Sat' });
-                tileLayers.mini.osm.addTo(dispatchMap);
+                
+                if (activeTileLayerType === 'sat') {
+                    tileLayers.mini.sat.addTo(dispatchMap);
+                } else {
+                    tileLayers.mini.osm.addTo(dispatchMap);
+                }
 
                 // Escala métrica (regla de distancia)
                 L.control.scale({ metric: true, imperial: false, position: 'bottomleft', maxWidth: 90 }).addTo(dispatchMap);
@@ -1089,40 +1094,19 @@
                 // Capa de Grifos
                 grifosLayerGroup = L.layerGroup().addTo(dispatchMap);
 
-                // Clic en Mapa: Mueve o fija el foco del incidente con confirmación si ya existe
+                // Clic en Mapa: Fija o mueve directamente el foco del incidente
                 dispatchMap.on('click', (e) => {
-                    if (emergencyMarker && currentEmergencyGeo) {
-                        const newLat = parseFloat(Number(e.latlng.lat).toFixed(6));
-                        const newLng = parseFloat(Number(e.latlng.lng).toFixed(6));
-                        const popupHtml = `
-                            <div style="font-family: inherit; font-size: 11px; text-align: center; min-width: 170px; padding: 4px;">
-                                <b style="color: #dc2626; text-transform: uppercase;"><i class="fas fa-arrows-rotate mr-1"></i> ¿Cambiar Lugar?</b>
-                                <div style="font-size: 10px; color: #334155; margin: 4px 0 8px 0; font-weight: 600;">¿Desea cambiar el foco del despacho a este nuevo punto?</div>
-                                <div style="display: flex; gap: 6px; justify-content: center;">
-                                    <button onclick="window.confirmMoveEmergencyLocation(${newLat}, ${newLng})" style="background: #dc2626; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 10px;">CAMBIAR</button>
-                                    <button onclick="dispatchMap.closePopup()" style="background: #64748b; color: white; border: none; padding: 4px 10px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 10px;">CANCELAR</button>
-                                </div>
-                            </div>
-                        `;
-                        L.popup()
-                            .setLatLng([newLat, newLng])
-                            .setContent(popupHtml)
-                            .openOn(dispatchMap);
-                    } else {
-                        window.setEmergencyLocation(e.latlng.lat, e.latlng.lng, 'manual', null);
-                    }
+                    window.setEmergencyLocation(e.latlng.lat, e.latlng.lng, 'manual', null);
                 });
 
-                window.confirmMoveEmergencyLocation = function(lat, lng) {
-                    if (dispatchMap) dispatchMap.closePopup();
-                    if (expandedMap) expandedMap.closePopup();
-                    window.setEmergencyLocation(lat, lng, 'manual', null);
-                };
-
-                // Si ya existe borrador con punto de emergencia fijado, mantenerlo y enfocarlo
+                // Si ya existe borrador con punto de emergencia fijado, renderizarlo y enfocarlo
                 if (currentEmergencyGeo && currentEmergencyGeo.lat && currentEmergencyGeo.lng) {
                     dispatchMap.setView([currentEmergencyGeo.lat, currentEmergencyGeo.lng], 16);
-                    window.setEmergencyLocation(currentEmergencyGeo.lat, currentEmergencyGeo.lng, currentEmergencyGeo.origen || 'manual', currentEmergencyGeo.accuracy, document.getElementById('svcLocation')?.value);
+                    window.renderEmergencyMarkers();
+                }
+
+                if (currentAlertanteGeo) {
+                    window.setAlertanteLocation(currentAlertanteGeo);
                 }
 
                 // Cargar Grifos Aprobados
@@ -1475,6 +1459,71 @@
             };
         };
 
+        // --- RENDERIZADO Y SINCRONIZACIÓN DE MARCADOR DE INCIDENTE ---
+        window.renderEmergencyMarkers = function() {
+            if (!currentEmergencyGeo || isNaN(Number(currentEmergencyGeo.lat)) || isNaN(Number(currentEmergencyGeo.lng)) || typeof L === 'undefined') {
+                return;
+            }
+            const lat = currentEmergencyGeo.lat;
+            const lng = currentEmergencyGeo.lng;
+            const currentKeyVal = document.getElementById('svcKey')?.value || '10-0';
+            const visuals = window.getIncidentKeyVisuals(currentKeyVal, currentSupportKey);
+
+            const redPinHtml = `<div style="background: ${visuals.color}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 14px ${visuals.glow}; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">${visuals.iconHtml}</div>`;
+            const redPinIcon = L.divIcon({
+                className: 'emergency-pin',
+                html: redPinHtml,
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+
+            const popupHtml = `<b style="color: ${visuals.color};">${visuals.iconHtml} ${visuals.label}</b><br><span style="font-size: 9px; color: #94a3b8;">Arrástrelo para ajustar | Doble clic para quitar</span>`;
+
+            // 1. Mini Mapa
+            if (dispatchMap) {
+                if (!emergencyMarker) {
+                    emergencyMarker = L.marker([lat, lng], { icon: redPinIcon, draggable: true, zIndexOffset: 1000 }).addTo(dispatchMap);
+                    emergencyMarker.bindPopup(popupHtml);
+                    emergencyMarker.on('dragend', (ev) => {
+                        const newPos = ev.target.getLatLng();
+                        window.setEmergencyLocation(newPos.lat, newPos.lng, 'drag', null);
+                    });
+                    emergencyMarker.on('dblclick', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        window.removeEmergencyLocation();
+                    });
+                } else {
+                    emergencyMarker.setIcon(redPinIcon);
+                    emergencyMarker.setLatLng([lat, lng]);
+                    if (!dispatchMap.hasLayer(emergencyMarker)) {
+                        emergencyMarker.addTo(dispatchMap);
+                    }
+                }
+            }
+
+            // 2. Mapa Expandido
+            if (expandedMap) {
+                if (!expandedEmergencyMarker) {
+                    expandedEmergencyMarker = L.marker([lat, lng], { icon: redPinIcon, draggable: true, zIndexOffset: 1000 }).addTo(expandedMap);
+                    expandedEmergencyMarker.bindPopup(popupHtml);
+                    expandedEmergencyMarker.on('dragend', (ev) => {
+                        const newPos = ev.target.getLatLng();
+                        window.setEmergencyLocation(newPos.lat, newPos.lng, 'drag', null);
+                    });
+                    expandedEmergencyMarker.on('dblclick', (e) => {
+                        L.DomEvent.stopPropagation(e);
+                        window.removeEmergencyLocation();
+                    });
+                } else {
+                    expandedEmergencyMarker.setIcon(redPinIcon);
+                    expandedEmergencyMarker.setLatLng([lat, lng]);
+                    if (!expandedMap.hasLayer(expandedEmergencyMarker)) {
+                        expandedEmergencyMarker.addTo(expandedMap);
+                    }
+                }
+            }
+        };
+
         // --- MANEJO DE UBICACIÓN DE LA EMERGENCIA (PIN DINÁMICO SEGÚN CLAVE) ---
         window.setEmergencyLocation = async function(lat, lng, origen = 'manual', accuracy = null, customAddress = null) {
             currentEmergencyGeo = {
@@ -1490,52 +1539,13 @@
                 coordsDisplay.innerHTML = `<i class="fas fa-location-dot text-red-500 mr-1"></i> ${lat.toFixed(5)}, ${lng.toFixed(5)} ${accuracy ? ' (±' + Math.round(accuracy) + 'm)' : ''}`;
             }
 
-            const currentKeyVal = document.getElementById('svcKey')?.value || '10-0';
-            const visuals = window.getIncidentKeyVisuals(currentKeyVal, currentSupportKey);
-
-            const redPinHtml = `<div style="background: ${visuals.color}; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 14px ${visuals.glow}; display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;">${visuals.iconHtml}</div>`;
-            const redPinIcon = L.divIcon({
-                className: 'emergency-pin',
-                html: redPinHtml,
-                iconSize: [24, 24],
-                iconAnchor: [12, 12]
-            });
+            // Renderizar y sincronizar marcadores en ambos mapas
+            window.renderEmergencyMarkers();
 
             if (dispatchMap) {
-                if (!emergencyMarker) {
-                    emergencyMarker = L.marker([lat, lng], { icon: redPinIcon, draggable: true, zIndexOffset: 1000 }).addTo(dispatchMap);
-                    emergencyMarker.bindPopup(`<b style="color: ${visuals.color};">${visuals.iconHtml} ${visuals.label}</b><br><span style="font-size: 9px; color: #94a3b8;">Arrástrelo para ajustar | Doble clic para quitar</span>`);
-                    emergencyMarker.on('dragend', (ev) => {
-                        const newPos = ev.target.getLatLng();
-                        window.setEmergencyLocation(newPos.lat, newPos.lng, 'drag', null);
-                    });
-                    emergencyMarker.on('dblclick', (e) => {
-                        L.DomEvent.stopPropagation(e);
-                        window.removeEmergencyLocation();
-                    });
-                } else {
-                    emergencyMarker.setIcon(redPinIcon);
-                    emergencyMarker.setLatLng([lat, lng]);
-                }
                 dispatchMap.panTo([lat, lng], { animate: true });
             }
-
             if (expandedMap) {
-                if (!expandedEmergencyMarker) {
-                    expandedEmergencyMarker = L.marker([lat, lng], { icon: redPinIcon, draggable: true, zIndexOffset: 1000 }).addTo(expandedMap);
-                    expandedEmergencyMarker.bindPopup(`<b style="color: ${visuals.color};">${visuals.iconHtml} ${visuals.label}</b><br><span style="font-size: 9px; color: #94a3b8;">Arrástrelo para ajustar | Doble clic para quitar</span>`);
-                    expandedEmergencyMarker.on('dragend', (ev) => {
-                        const newPos = ev.target.getLatLng();
-                        window.setEmergencyLocation(newPos.lat, newPos.lng, 'drag', null);
-                    });
-                    expandedEmergencyMarker.on('dblclick', (e) => {
-                        L.DomEvent.stopPropagation(e);
-                        window.removeEmergencyLocation();
-                    });
-                } else {
-                    expandedEmergencyMarker.setIcon(redPinIcon);
-                    expandedEmergencyMarker.setLatLng([lat, lng]);
-                }
                 expandedMap.panTo([lat, lng], { animate: true });
             }
 
@@ -1976,29 +1986,48 @@
                     if (expandedMap) {
                         expandedMap.invalidateSize();
                         const targetCoords = currentEmergencyGeo ? [currentEmergencyGeo.lat, currentEmergencyGeo.lng] : (currentAlertanteGeo ? [currentAlertanteGeo.lat, currentAlertanteGeo.lng] : DEFAULT_COORDS);
-                        expandedMap.setView(targetCoords, 16);
+                        expandedMap.setView(targetCoords, currentEmergencyGeo ? 17 : (DEFAULT_ZOOM + 1));
+                        if (currentEmergencyGeo) window.renderEmergencyMarkers();
                     }
-                }, 150);
+                }, 100);
                 setTimeout(() => {
-                    if (expandedMap) expandedMap.invalidateSize();
-                }, 400);
+                    if (expandedMap) {
+                        expandedMap.invalidateSize();
+                        if (currentEmergencyGeo) window.renderEmergencyMarkers();
+                    }
+                }, 350);
             } else {
                 modal.classList.remove('active');
+                setTimeout(() => {
+                    if (dispatchMap) {
+                        dispatchMap.invalidateSize();
+                        if (currentEmergencyGeo) {
+                            window.renderEmergencyMarkers();
+                            dispatchMap.setView([currentEmergencyGeo.lat, currentEmergencyGeo.lng], 16);
+                        }
+                    }
+                }, 100);
             }
         };
 
         window.initExpandedMap = function() {
             const expEl = document.getElementById('expanded-map');
-            if (!expEl) return;
+            if (!expEl || typeof L === 'undefined') return;
 
             if (!expandedMap) {
+                const initialCoords = currentEmergencyGeo ? [currentEmergencyGeo.lat, currentEmergencyGeo.lng] : (currentAlertanteGeo ? [currentAlertanteGeo.lat, currentAlertanteGeo.lng] : DEFAULT_COORDS);
                 expandedMap = L.map('expanded-map', {
                     attributionControl: false
-                }).setView(currentEmergencyGeo ? [currentEmergencyGeo.lat, currentEmergencyGeo.lng] : DEFAULT_COORDS, DEFAULT_ZOOM + 1);
+                }).setView(initialCoords, currentEmergencyGeo ? 17 : (DEFAULT_ZOOM + 1));
 
                 tileLayers.expanded.osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' });
                 tileLayers.expanded.sat = L.tileLayer('https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', { maxZoom: 20, attribution: 'Google Maps Sat' });
-                tileLayers.expanded.osm.addTo(expandedMap);
+                
+                if (activeTileLayerType === 'sat') {
+                    tileLayers.expanded.sat.addTo(expandedMap);
+                } else {
+                    tileLayers.expanded.osm.addTo(expandedMap);
+                }
 
                 // Escala métrica en modal
                 L.control.scale({ metric: true, imperial: false, position: 'bottomleft', maxWidth: 130 }).addTo(expandedMap);
@@ -2010,21 +2039,30 @@
                 });
 
                 window.renderGrifosMarkers();
-                if (currentAlertanteGeo) {
-                    window.setAlertanteLocation(currentAlertanteGeo);
-                }
             } else {
+                // Sincronizar capa satelital/calles si cambió mientras estaba cerrado
+                if (activeTileLayerType === 'sat') {
+                    if (tileLayers.expanded.osm && expandedMap.hasLayer(tileLayers.expanded.osm)) expandedMap.removeLayer(tileLayers.expanded.osm);
+                    if (tileLayers.expanded.sat && !expandedMap.hasLayer(tileLayers.expanded.sat)) expandedMap.addLayer(tileLayers.expanded.sat);
+                } else {
+                    if (tileLayers.expanded.sat && expandedMap.hasLayer(tileLayers.expanded.sat)) expandedMap.removeLayer(tileLayers.expanded.sat);
+                    if (tileLayers.expanded.osm && !expandedMap.hasLayer(tileLayers.expanded.osm)) expandedMap.addLayer(tileLayers.expanded.osm);
+                }
                 expandedMap.invalidateSize();
-                if (currentEmergencyGeo) {
-                    expandedMap.setView([currentEmergencyGeo.lat, currentEmergencyGeo.lng], 16);
-                }
-                if (currentAlertanteGeo) {
-                    window.setAlertanteLocation(currentAlertanteGeo);
-                }
             }
+
+            // Sincronizar marcadores existentes siempre
+            if (currentEmergencyGeo) {
+                window.renderEmergencyMarkers();
+                expandedMap.setView([currentEmergencyGeo.lat, currentEmergencyGeo.lng], 17);
+            }
+            if (currentAlertanteGeo) {
+                window.setAlertanteLocation(currentAlertanteGeo);
+            }
+            window.updateDistanceBetweenAlertanteAndEmergency();
         };
 
-        const PUBLIC_GEO_BASE_URL = 'https://sentinel.web.app/geo.html';
+        const PUBLIC_GEO_BASE_URL = 'https://sentinellink.web.app/geo.html';
 
         window.switchMapTileLayer = function(type) {
             activeTileLayerType = type;
@@ -2032,24 +2070,33 @@
             // Actualizar mapa principal de la columna 3
             if (dispatchMap) {
                 if (type === 'sat') {
-                    dispatchMap.removeLayer(tileLayers.mini.osm);
-                    dispatchMap.addLayer(tileLayers.mini.sat);
+                    if (tileLayers.mini.osm && dispatchMap.hasLayer(tileLayers.mini.osm)) dispatchMap.removeLayer(tileLayers.mini.osm);
+                    if (tileLayers.mini.sat && !dispatchMap.hasLayer(tileLayers.mini.sat)) dispatchMap.addLayer(tileLayers.mini.sat);
                 } else {
-                    dispatchMap.removeLayer(tileLayers.mini.sat);
-                    dispatchMap.addLayer(tileLayers.mini.osm);
+                    if (tileLayers.mini.sat && dispatchMap.hasLayer(tileLayers.mini.sat)) dispatchMap.removeLayer(tileLayers.mini.sat);
+                    if (tileLayers.mini.osm && !dispatchMap.hasLayer(tileLayers.mini.osm)) dispatchMap.addLayer(tileLayers.mini.osm);
                 }
             }
 
             // Actualizar mapa expandido si está abierto
             if (expandedMap) {
                 if (type === 'sat') {
-                    expandedMap.removeLayer(tileLayers.expanded.osm);
-                    expandedMap.addLayer(tileLayers.expanded.sat);
+                    if (tileLayers.expanded.osm && expandedMap.hasLayer(tileLayers.expanded.osm)) expandedMap.removeLayer(tileLayers.expanded.osm);
+                    if (tileLayers.expanded.sat && !expandedMap.hasLayer(tileLayers.expanded.sat)) expandedMap.addLayer(tileLayers.expanded.sat);
                 } else {
-                    expandedMap.removeLayer(tileLayers.expanded.sat);
-                    expandedMap.addLayer(tileLayers.expanded.osm);
+                    if (tileLayers.expanded.sat && expandedMap.hasLayer(tileLayers.expanded.sat)) expandedMap.removeLayer(tileLayers.expanded.sat);
+                    if (tileLayers.expanded.osm && !expandedMap.hasLayer(tileLayers.expanded.osm)) expandedMap.addLayer(tileLayers.expanded.osm);
                 }
             }
+
+            // Mantener y re-asegurar marcadores visibles en el mapa activo
+            if (currentEmergencyGeo) {
+                window.renderEmergencyMarkers();
+            }
+            if (currentAlertanteGeo) {
+                window.setAlertanteLocation(currentAlertanteGeo);
+            }
+            window.updateDistanceBetweenAlertanteAndEmergency();
 
             // Actualizar estado visual de los botones
             const btnOsm = document.getElementById('btn-tile-osm');
@@ -2057,16 +2104,22 @@
             const btnModOsm = document.getElementById('btn-modal-tile-osm');
             const btnModSat = document.getElementById('btn-modal-tile-sat');
 
+            const activeClassesMini = 'px-2.5 py-1 bg-red-600 text-white font-black rounded-md text-[9px] shadow transition cursor-pointer';
+            const inactiveClassesMini = 'px-2.5 py-1 text-slate-300 hover:text-white hover:bg-slate-700/60 font-bold rounded-md text-[9px] transition cursor-pointer';
+
+            const activeClassesMod = 'px-3 py-1 bg-red-600 text-white font-black rounded text-[11px] shadow transition cursor-pointer';
+            const inactiveClassesMod = 'px-3 py-1 text-slate-300 hover:text-white hover:bg-slate-700/60 font-bold rounded text-[11px] transition cursor-pointer';
+
             if (type === 'sat') {
-                if (btnOsm) btnOsm.className = 'px-2 py-0.5 bg-slate-800/60 text-slate-400 hover:text-white rounded text-[9px] font-bold transition';
-                if (btnSat) btnSat.className = 'px-2 py-0.5 bg-slate-800 text-white rounded text-[9px] font-bold transition';
-                if (btnModOsm) btnModOsm.className = 'px-2.5 py-1 bg-slate-800/60 text-slate-300 hover:text-white rounded text-[11px] font-bold transition';
-                if (btnModSat) btnModSat.className = 'px-2.5 py-1 bg-slate-800 text-white rounded text-[11px] font-bold transition';
+                if (btnOsm) btnOsm.className = inactiveClassesMini;
+                if (btnSat) btnSat.className = activeClassesMini;
+                if (btnModOsm) btnModOsm.className = inactiveClassesMod;
+                if (btnModSat) btnModSat.className = activeClassesMod;
             } else {
-                if (btnOsm) btnOsm.className = 'px-2 py-0.5 bg-slate-800 text-white rounded text-[9px] font-bold transition';
-                if (btnSat) btnSat.className = 'px-2 py-0.5 bg-slate-800/60 text-slate-400 hover:text-white rounded text-[9px] font-bold transition';
-                if (btnModOsm) btnModOsm.className = 'px-2.5 py-1 bg-slate-800 text-white rounded text-[11px] font-bold transition';
-                if (btnModSat) btnModSat.className = 'px-2.5 py-1 bg-slate-800/60 text-slate-300 hover:text-white rounded text-[11px] font-bold transition';
+                if (btnOsm) btnOsm.className = activeClassesMini;
+                if (btnSat) btnSat.className = inactiveClassesMini;
+                if (btnModOsm) btnModOsm.className = activeClassesMod;
+                if (btnModSat) btnModSat.className = inactiveClassesMod;
             }
         };
 
@@ -2085,7 +2138,16 @@
         window.buildAlertanteGeoLink = function(phoneDigits) {
             const cleanDigits = (phoneDigits || '').replace(/[^0-9]/g, '');
             const fullPhone = cleanDigits ? `+569${cleanDigits}` : '';
-            const orgParam = encodeURIComponent((localStorage.getItem('nombreMostrar') || 'SISBOM').trim());
+            let corpsName = '';
+            try {
+                corpsName = localStorage.getItem('nombreMostrar') || '';
+                if (!corpsName) {
+                    const adminUser = JSON.parse(localStorage.getItem('adminUser') || '{}');
+                    corpsName = adminUser.cuerpo || adminUser.nombreCuerpo || '';
+                }
+            } catch(e){}
+            if (!corpsName) corpsName = 'CUERPO DE BOMBEROS';
+            const orgParam = encodeURIComponent(corpsName.trim());
             
             let tenantParams = '';
             try {
@@ -2178,7 +2240,7 @@
 
             const fullPhone = `+569${cleanDigits}`;
             const fullLink = window.buildAlertanteGeoLink(cleanDigits);
-            const msgText = `CUERPO DE BOMBEROS: Por favor presione el siguiente enlace para compartir su ubicacion exacta con la Central de Alarmas: ${fullLink}`;
+            const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${fullLink}`;
 
             if (currentDispatchId) {
                 try {
@@ -3631,7 +3693,7 @@
             const phoneInput = document.getElementById('sms-caller-phone');
             if (phoneInput) phoneInput.value = "";
             const generatedLink = document.getElementById('sms-generated-link');
-            if (generatedLink) generatedLink.innerText = "https://sentinel.web.app/geo.html?id=...";
+            if (generatedLink) generatedLink.innerText = "https://sentinellink.web.app/geo.html?id=...";
             const mapBadge = document.getElementById('map-alertante-badge');
             if (mapBadge) mapBadge.classList.add('hidden');
             const smsWait = document.getElementById('sms-waiting-status');

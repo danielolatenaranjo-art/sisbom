@@ -441,7 +441,7 @@ fun TopAppBarView(viewModel: SisBomViewModel, onMenuClick: () -> Unit) {
             ),
             contentDescription = "SENTINEL ONE",
             modifier = Modifier
-                .height(24.dp)
+                .height(48.dp)
                 .padding(bottom = 6.dp),
             contentScale = androidx.compose.ui.layout.ContentScale.Fit
         )

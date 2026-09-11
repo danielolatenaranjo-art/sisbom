@@ -201,11 +201,16 @@ class SisBomTelService : Service() {
         }
     }
 
+    private val processingSmsIds = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+
     private fun startSmsQueueMonitoring() {
         serviceScope.launch {
             repository.getSmsQueueFlow().collectLatest { queueList ->
                 for (item in queueList) {
                     if (item.estado == "PENDIENTE" && item.telefono.isNotBlank()) {
+                        if (item.id.isNotBlank() && !processingSmsIds.add(item.id)) {
+                            continue
+                        }
                         sendNativeSms(item)
                     }
                 }
@@ -225,9 +230,9 @@ class SisBomTelService : Service() {
             val text = if (item.mensaje.isNotBlank()) {
                 item.mensaje
             } else if (item.enlace.isNotBlank()) {
-                "CUERPO DE BOMBEROS: Por favor presione el siguiente enlace para compartir su ubicacion exacta con la Central: ${item.enlace}"
+                "BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${item.enlace}"
             } else {
-                "CUERPO DE BOMBEROS: Mensaje informativo de la Central de Alarmas."
+                "BOMBEROS: Mensaje informativo de la Central de Alarmas."
             }
 
             val parts = smsManager.divideMessage(text)
@@ -245,6 +250,7 @@ class SisBomTelService : Service() {
             totalSmsSentCount++
         } catch (e: Exception) {
             e.printStackTrace()
+            processingSmsIds.remove(item.id)
             repository.updateSmsStatus(
                 smsId = item.id,
                 idDespacho = item.idDespacho,

@@ -908,6 +908,23 @@ exit
         print(f"JS LOG: {msg}", flush=True)
         return True
 
+    def open_devtools(self):
+        try:
+            if self._window and hasattr(self._window, 'native'):
+                native = self._window.native
+                if hasattr(native, 'Browser') and hasattr(native.Browser, 'CoreWebView2') and native.Browser.CoreWebView2:
+                    native.Browser.CoreWebView2.OpenDevToolsWindow()
+                    return True
+                elif hasattr(native, 'CoreWebView2') and native.CoreWebView2:
+                    native.CoreWebView2.OpenDevToolsWindow()
+                    return True
+                elif hasattr(native, 'browser') and hasattr(native.browser, 'CoreWebView2') and native.browser.CoreWebView2:
+                    native.browser.CoreWebView2.OpenDevToolsWindow()
+                    return True
+        except Exception as e:
+            print(f"Error abriendo DevTools nativo: {e}", flush=True)
+        return False
+
 def is_newer_version(latest, current):
     try:
         l_parts = [int(x) for x in latest.split('.')]
@@ -1068,7 +1085,7 @@ def main():
     win.events.closing += on_closing
     
     # Start the webview GUI loop
-    webview.start(debug=True, private_mode=False)
+    webview.start(debug=False, private_mode=False)
 
 if __name__ == '__main__':
     main()
