@@ -673,11 +673,16 @@ class FirebaseRepository {
             )
         }
         
-        val data = hashMapOf(
+        val data = hashMapOf<String, Any?>(
             "id" to idServicio,
             "idServicio" to idServicio,
+            "idDespacho" to idServicio,
+            "idRegistro" to idServicio,
+            "ID" to idServicio,
             "estado" to "activa",
             "clave" to clave,
+            "claveApoyo" to "",
+            "comunaApoyo" to "",
             "lugar" to lugar,
             "preinforme" to preinforme,
             "fechaDespacho" to fechaDespacho,
@@ -698,6 +703,9 @@ class FirebaseRepository {
             "source" to "despacho.html",
             "createdAt" to System.currentTimeMillis(),
             "unidades" to unidadesData,
+            "solicitarConfirmacion" to false,
+            "geo" to null,
+            "ubicacionGps" to null,
             "pushSent" to false
         )
         

@@ -186,7 +186,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     object: nil,
                     userInfo: ["chatId": payloadId]
                 )
-            } else if type == "DISPATCH", let payloadId = userInfo["payloadId"] as? String {
+            } else if (type == "DISPATCH" || type == "DISPATCH_UPDATE"), let payloadId = userInfo["payloadId"] as? String {
                 if actionIdentifier == "ATTEND_ACTION" {
                     NotificationCenter.default.post(
                         name: NSNotification.Name("AttendDispatch"),

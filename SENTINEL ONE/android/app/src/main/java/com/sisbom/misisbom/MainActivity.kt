@@ -357,6 +357,81 @@ object NotificationHelper {
         }
     }
 
+    fun scheduleRepeat1210or66(
+        context: Context,
+        idServicio: String,
+        unitName: String,
+        is1210: Boolean,
+        clave: String,
+        lugar: String
+    ) {
+        val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+        serviceScope.launch {
+            kotlinx.coroutines.delay(60000) // 60 seconds
+            try {
+                val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val userId = prefs.getString("USER_ID", "") ?: ""
+                val cachedUser = prefs.getString("fire_user", null)
+                val userStatus = if (cachedUser != null) {
+                    try {
+                        val userObj = org.json.JSONObject(cachedUser)
+                        userObj.optString("estado", "").trim().uppercase()
+                    } catch (_: Exception) { "" }
+                } else { "" }
+                val is09 = userStatus == "0-9"
+                if (!is09) return@launch
+
+                val db = FirebaseFirestore.getInstance()
+                val task = db.collection("despachos").document(idServicio).get()
+                val doc = Tasks.await(task, 5, TimeUnit.SECONDS)
+                if (doc.exists()) {
+                    val operadorFinal = doc.getString("operadorFinal") ?: ""
+                    if (operadorFinal.isNotEmpty()) return@launch
+
+                    val unidadesMap = doc.get("unidades") as? Map<*, *>
+                    val uMap = unidadesMap?.get(unitName) as? Map<*, *>
+                    if (uMap != null) {
+                        val isPending = if (is1210) {
+                            val solCondAt = uMap["solicitudConductorAt"]?.toString() ?: ""
+                            val solCondTs = (uMap["solicitudConductorTimestamp"] as? Number)?.toLong() ?: 0L
+                            val conductor = uMap["conductor"]?.toString() ?: ""
+                            (solCondAt.isNotEmpty() || solCondTs > 0L) && conductor.isEmpty()
+                        } else {
+                            val solPersAt = uMap["solicitudPersonalAt"]?.toString() ?: ""
+                            val solPersTs = (uMap["solicitudPersonalTimestamp"] as? Number)?.toLong() ?: 0L
+                            val count = (uMap["cuantosBomberos"] ?: uMap["count"])?.toString()?.toIntOrNull() ?: 0
+                            (solPersAt.isNotEmpty() || solPersTs > 0L) && count == 0
+                        }
+
+                        if (isPending) {
+                            val title = if (is1210) "RECORDATORIO 12-10: $unitName" else "RECORDATORIO 6-6: $unitName"
+                            val message = if (is1210) {
+                                "Reiteración: Se solicita Conductor para la unidad $unitName ($clave en $lugar)"
+                            } else {
+                                "Reiteración: Se solicita Personal para la unidad $unitName ($clave en $lugar)"
+                            }
+
+                            sendNotification(
+                                context = context,
+                                title = title,
+                                message = message,
+                                payloadId = idServicio,
+                                userId = userId,
+                                type = "DISPATCH_UPDATE",
+                                isFromFCM = false,
+                                claveOpt = clave,
+                                gradoAlerta = "3",
+                                forceSilent = false
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     fun sendNotification(
         context: Context,
         title: String,
@@ -812,6 +887,23 @@ object NotificationHelper {
                 notify(notificationId, builder.build())
             }
         }
+
+        if ((type == "DISPATCH" || is1030 || isForestal) && !is08 && !isCentral && !forceSilent && payloadId.isNotEmpty()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(context)) {
+                try {
+                    val overlayIntent = Intent(context, MainActivity::class.java).apply {
+                        action = Intent.ACTION_MAIN
+                        addCategory(Intent.CATEGORY_LAUNCHER)
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        putExtra("DISPATCH_ID", payloadId)
+                        putExtra("SHOW_FULLSCREEN_ALERT", true)
+                    }
+                    context.startActivity(overlayIntent)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
     }
 }
 
@@ -1007,6 +1099,16 @@ class DispatchForegroundService : Service() {
                                                         gradoAlerta = "3",
                                                         forceSilent = isTooOld
                                                     )
+                                                    if (!isTooOld) {
+                                                        NotificationHelper.scheduleRepeat1210or66(
+                                                            context = this@DispatchForegroundService,
+                                                            idServicio = idServicio,
+                                                            unitName = uName,
+                                                            is1210 = true,
+                                                            clave = clave,
+                                                            lugar = lugar
+                                                        )
+                                                    }
                                                 }
                                             }
 
@@ -1029,6 +1131,16 @@ class DispatchForegroundService : Service() {
                                                         gradoAlerta = "3",
                                                         forceSilent = isTooOld
                                                     )
+                                                    if (!isTooOld) {
+                                                        NotificationHelper.scheduleRepeat1210or66(
+                                                            context = this@DispatchForegroundService,
+                                                            idServicio = idServicio,
+                                                            unitName = uName,
+                                                            is1210 = false,
+                                                            clave = clave,
+                                                            lugar = lugar
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -1302,9 +1414,20 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: SisBomViewModel
 
-    private val requestPermissionLauncher = registerForActivityResult(
+    private val requestBackgroundLocationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
+
+    private val requestMultiplePermissionsLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED)
+        if (fineGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                requestBackgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
+        }
+    }
 
     override fun onResume() {
         super.onResume()
@@ -1437,7 +1560,11 @@ class MainActivity : ComponentActivity() {
             ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isNotEmpty()) {
-            requestPermissionLauncher.launch(missing.first())
+            requestMultiplePermissionsLauncher.launch(missing.toTypedArray())
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                requestBackgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            }
         }
     }
 }
@@ -2079,8 +2206,19 @@ fun scheduleDailyReminders(context: Context) {
 
 class DailyReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == "android.intent.action.QUICKBOOT_POWERON") {
+        if (intent.action == Intent.ACTION_BOOT_COMPLETED || 
+            intent.action == "android.intent.action.QUICKBOOT_POWERON" || 
+            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             scheduleDailyReminders(context)
+            try {
+                val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val userId = prefs.getString("USER_ID", "") ?: ""
+                if (userId.isNotEmpty()) {
+                    DispatchForegroundService.startService(context)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
             return
         }
         

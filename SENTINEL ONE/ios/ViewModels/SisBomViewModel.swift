@@ -7,6 +7,7 @@ import FirebaseAuth
 import AVFoundation
 import AudioToolbox
 import UIKit
+import MediaPlayer
 
 // Screen definitions matching Android enum classes
 enum AppScreen: String, Codable {
@@ -437,6 +438,22 @@ class SisBomViewModel: ObservableObject {
                             if !self.isFirstCheck && is09 && !hasDeclined {
                                 self.playSound(soundName: "alerta")
                                 self.triggerVibration()
+                                
+                                // Re-trigger reminder tone after 60 seconds if still unassigned
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+                                    guard let self = self else { return }
+                                    if let currentDisp = self.dispatchesList.first(where: { $0.idServicio == d.idServicio }),
+                                       currentDisp.operadorFinal.isEmpty,
+                                       let currentUnit = currentDisp.unidades[unitName] {
+                                        let stillPending = (currentUnit.solicitudConductorTimestamp > 0 || !currentUnit.solicitudConductorAt.isEmpty) && currentUnit.conductor.isEmpty
+                                        let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
+                                        let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                        if stillPending && isStill09 && userEnServicio != d.idServicio && !userEnServicio.hasPrefix("-") {
+                                            self.playSound(soundName: "alerta")
+                                            self.triggerVibration()
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -451,6 +468,23 @@ class SisBomViewModel: ObservableObject {
                             if !self.isFirstCheck && is09 && !hasDeclined {
                                 self.playSound(soundName: "alerta")
                                 self.triggerVibration()
+                                
+                                // Re-trigger reminder tone after 60 seconds if still unassigned
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+                                    guard let self = self else { return }
+                                    if let currentDisp = self.dispatchesList.first(where: { $0.idServicio == d.idServicio }),
+                                       currentDisp.operadorFinal.isEmpty,
+                                       let currentUnit = currentDisp.unidades[unitName] {
+                                        let count = Int(currentUnit.cuantosBomberos.isEmpty ? currentUnit.count : currentUnit.cuantosBomberos) ?? 0
+                                        let stillPending = (currentUnit.solicitudPersonalTimestamp > 0 || !currentUnit.solicitudPersonalAt.isEmpty) && count == 0
+                                        let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
+                                        let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                        if stillPending && isStill09 && userEnServicio != d.idServicio && !userEnServicio.hasPrefix("-") {
+                                            self.playSound(soundName: "alerta")
+                                            self.triggerVibration()
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -855,25 +889,38 @@ class SisBomViewModel: ObservableObject {
         let dispatchData: [String: Any] = [
             "id": nextId,
             "idServicio": nextId,
+            "idDespacho": nextId,
+            "idRegistro": nextId,
+            "ID": nextId,
             "estado": "activa",
             "clave": clave,
+            "claveApoyo": "",
+            "comunaApoyo": "",
             "lugar": lugar,
             "preinforme": preinforme,
+            "fechaDespacho": dateStr,
+            "horaDespacho": timeStr,
             "carros": vehicleClaves,
             "carrosTexto": carrosTexto,
-            "horaDespacho": timeStr,
-            "fechaDespacho": dateStr,
-            "quienDespacha": opName,
-            "operadorInicial": opName,
-            "operadorFinal": "",
-            "hora67": "",
-            "source": "despacho.html",
             "unidades": unidadesMap,
             "obacServicio": "",
             "informeObac": "",
+            "fecha67": "",
+            "hora67": "",
             "fechaTermino": "",
+            "horaTermino": "",
+            "operadorInicial": opName,
+            "operadorFinal": "",
+            "observacion": "",
+            "idListaPrincipal": NSNull(),
+            "visibleMovil": true,
+            "source": "despacho.html",
             "createdAt": Int64(Date().timeIntervalSince1970 * 1000),
+            "solicitarConfirmacion": false,
+            "geo": NSNull(),
+            "ubicacionGps": NSNull(),
             "pushSent": false,
+            "quienDespacha": opName,
             "cuerpoId": safeCuerpo
         ]
         
@@ -920,6 +967,34 @@ class SisBomViewModel: ObservableObject {
         }
     }
     
+    private func forceSystemVolumeMax() {
+        DispatchQueue.main.async {
+            let volumeView = MPVolumeView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
+            volumeView.isHidden = false
+            volumeView.alpha = 0.01
+            let keyWindow = UIApplication.shared.connectedScenes
+                .filter({$0.activationState == .foregroundActive})
+                .compactMap({$0 as? UIWindowScene})
+                .first?.windows
+                .filter({$0.isKeyWindow}).first ?? UIApplication.shared.windows.first
+            
+            if let window = keyWindow {
+                window.addSubview(volumeView)
+                for subview in volumeView.subviews {
+                    if let slider = subview as? UISlider {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                            slider.setValue(1.0, animated: false)
+                        }
+                        break
+                    }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    volumeView.removeFromSuperview()
+                }
+            }
+        }
+    }
+    
     func playSound(soundName: String) {
         if hasActiveCDS { return }
         setupVolumeObserver()
@@ -931,9 +1006,11 @@ class SisBomViewModel: ObservableObject {
         }
         
         do {
-            // Configure Audio Session for playing sounds even if phone is on silent switch (ambient/playback)
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
+            // Configure Audio Session for playing sounds at max priority even if phone is on silent
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
             try AVAudioSession.sharedInstance().setActive(true)
+            
+            forceSystemVolumeMax()
             
             audioPlayer = try AVAudioPlayer(contentsOf: url)
             audioPlayer?.volume = 1.0
