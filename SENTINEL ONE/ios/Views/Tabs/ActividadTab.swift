@@ -743,7 +743,7 @@ struct IncidentWebView: UIViewRepresentable {
         <body>
             <div id="map"></div>
             <script>
-                var targetY = 160;
+                var targetY = 135;
                 var cardHeight = window.innerHeight || document.documentElement.clientHeight || 300;
                 var dy = (cardHeight / 2) - targetY;
                 var metersPerPixel = (156543.03392 * Math.cos(\(lat) * Math.PI / 180.0)) / Math.pow(2.0, 16.0);

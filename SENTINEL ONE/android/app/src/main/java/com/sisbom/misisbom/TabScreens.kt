@@ -825,7 +825,7 @@ fun IncidentMapPreview(
             val h = mapView.height
             val w = mapView.width
             if (h > 0 && w > 0) {
-                val targetYPx = 160f * density
+                val targetYPx = 135f * density
                 val dyPx = (h / 2f) - targetYPx
                 val metersPerPixel = (156543.03392 * Math.cos(Math.toRadians(finalLat))) / Math.pow(2.0, zoomLevel)
                 val dLatPerPixel = metersPerPixel / 111139.0
