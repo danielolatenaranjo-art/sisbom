@@ -352,27 +352,18 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
         ) {
-            // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (anchored so pin stays fixed at y=155dp when card expands downwards)
+            // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (fills exact card height, marker anchored dynamically at y=160dp)
             val finalLat = if (hasValidLocation) dispatch.lat!! else -34.637373
             val finalLng = if (hasValidLocation) dispatch.lng!! else -71.125741
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .clip(RoundedCornerShape(24.dp))
-            ) {
-                IncidentMapPreview(
-                    lat = finalLat,
-                    lng = finalLng,
-                    isPending = !hasValidLocation,
-                    clave = dispatch.clave,
-                    lugar = dispatch.lugar,
-                    isDark = isDark,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .requiredHeight(800.dp)
-                        .offset(y = (-245).dp)
-                )
-            }
+            IncidentMapPreview(
+                lat = finalLat,
+                lng = finalLng,
+                isPending = !hasValidLocation,
+                clave = dispatch.clave,
+                lugar = dispatch.lugar,
+                isDark = isDark,
+                modifier = Modifier.matchParentSize()
+            )
 
             // LAYER 1: CONTENT WITH TOP & BOTTOM DARK RED GRADIENT OVERLAYS
             Column(
@@ -824,9 +815,27 @@ fun IncidentMapPreview(
     val claveColor = getClaveTacticalColor(clave)
 
     val context = androidx.compose.ui.platform.LocalContext.current
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
 
     val mapViewRef = remember { mutableStateOf<org.osmdroid.views.MapView?>(null) }
     val markerRef = remember { mutableStateOf<org.osmdroid.views.overlay.Marker?>(null) }
+
+    fun updateMapCenter(mapView: org.osmdroid.views.MapView) {
+        mapView.post {
+            val h = mapView.height
+            val w = mapView.width
+            if (h > 0 && w > 0) {
+                val targetYPx = 160f * density
+                val dyPx = (h / 2f) - targetYPx
+                val metersPerPixel = (156543.03392 * Math.cos(Math.toRadians(finalLat))) / Math.pow(2.0, zoomLevel)
+                val dLatPerPixel = metersPerPixel / 111139.0
+                val centerLat = finalLat - (dyPx * dLatPerPixel)
+                val centerPoint = org.osmdroid.util.GeoPoint(centerLat, finalLng)
+                mapView.controller.setCenter(centerPoint)
+                mapView.controller.setZoom(zoomLevel)
+            }
+        }
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -849,8 +858,14 @@ fun IncidentMapPreview(
                     setMultiTouchControls(false)
                     zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
                     isTilesScaledToDpi = true
-                    controller.setZoom(zoomLevel)
-                    controller.setCenter(org.osmdroid.util.GeoPoint(finalLat, finalLng))
+                    
+                    updateMapCenter(this)
+
+                    addOnLayoutChangeListener { _, _, top, _, bottom, _, _, oldTop, oldBottom ->
+                        if (bottom - top != oldBottom - oldTop) {
+                            updateMapCenter(this)
+                        }
+                    }
 
                     if (!isPending) {
                         val marker = org.osmdroid.views.overlay.Marker(this).apply {
@@ -883,9 +898,7 @@ fun IncidentMapPreview(
                 }
             },
             update = { mapView ->
-                val point = org.osmdroid.util.GeoPoint(finalLat, finalLng)
-                mapView.controller.setCenter(point)
-                mapView.controller.setZoom(zoomLevel)
+                updateMapCenter(mapView)
 
                 // Update theme color filter dynamically on recomposition / mode switch
                 if (isDark) {
@@ -904,9 +917,10 @@ fun IncidentMapPreview(
                 }
 
                 if (!isPending) {
+                    val markerPoint = org.osmdroid.util.GeoPoint(finalLat, finalLng)
                     if (markerRef.value == null) {
                         val marker = org.osmdroid.views.overlay.Marker(mapView).apply {
-                            position = point
+                            position = markerPoint
                             setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
                             icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
                             setInfoWindow(null)
@@ -914,7 +928,7 @@ fun IncidentMapPreview(
                         markerRef.value = marker
                         mapView.overlays.add(marker)
                     } else {
-                        markerRef.value?.position = point
+                        markerRef.value?.position = markerPoint
                         markerRef.value?.icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
                     }
                 } else {

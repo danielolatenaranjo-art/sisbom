@@ -374,22 +374,14 @@ struct DispatchItemCard: View {
         }
         
         ZStack {
-            // LAYER 0: MAP / RADAR AS THE INMERSIVE BACKGROUND CANVAS (anchored so pin stays fixed at y=155pt when card expands downwards)
-            GeometryReader { geo in
-                let mapHeight: CGFloat = 800
-                let pinTargetY: CGFloat = 155
-                
-                Group {
-                    if hasValidLocation, let lat = dispatch.lat, let lng = dispatch.lng {
-                        IncidentMapPreview(lat: lat, lng: lng, clave: dispatch.clave, lugar: dispatch.lugar, isDark: isDark)
-                    } else {
-                        TacticalRadarScanner(clave: dispatch.clave, isDark: isDark, compact: false)
-                    }
-                }
-                .frame(width: geo.size.width, height: mapHeight)
-                .position(x: geo.size.width / 2, y: pinTargetY)
+            // LAYER 0: MAP / RADAR AS THE INMERSIVE BACKGROUND CANVAS (fills exact card height, marker anchored at y=160pt)
+            if hasValidLocation, let lat = dispatch.lat, let lng = dispatch.lng {
+                IncidentMapPreview(lat: lat, lng: lng, clave: dispatch.clave, lugar: dispatch.lugar, isDark: isDark)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                TacticalRadarScanner(clave: dispatch.clave, isDark: isDark, compact: false)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .clipped()
             
             // LAYER 1: CONTENT WITH TOP & BOTTOM DARK RED GRADIENT OVERLAYS
             VStack(spacing: 0) {
@@ -751,6 +743,13 @@ struct IncidentWebView: UIViewRepresentable {
         <body>
             <div id="map"></div>
             <script>
+                var targetY = 160;
+                var cardHeight = window.innerHeight || document.documentElement.clientHeight || 300;
+                var dy = (cardHeight / 2) - targetY;
+                var metersPerPixel = (156543.03392 * Math.cos(\(lat) * Math.PI / 180.0)) / Math.pow(2.0, 16.0);
+                var dLatPerPixel = metersPerPixel / 111139.0;
+                var centerLat = \(lat) - (dy * dLatPerPixel);
+
                 var map = L.map('map', {
                     zoomControl: false,
                     attributionControl: false,
@@ -760,7 +759,7 @@ struct IncidentWebView: UIViewRepresentable {
                     scrollWheelZoom: false,
                     boxZoom: false,
                     keyboard: false
-                }).setView([\(lat), \(lng)], 16);
+                }).setView([centerLat, \(lng)], 16);
 
                 var tacticalLayer = L.tileLayer('\(tileUrl)', {
                     maxZoom: 20,
