@@ -225,8 +225,81 @@ struct UnitInfo: Codable, Equatable {
     var driverRad: String = ""
     var obacRad: String = ""
     var count: String = ""
+    var cuantosBomberos: String = ""
     var status: String = ""
+    var conductor: String = ""
+    var obac: String = ""
+
+    enum CodingKeys: String, CodingKey {
+        case solicitudConductorAt, solicitudConductorTimestamp
+        case solicitudPersonalAt, solicitudPersonalTimestamp
+        case driverRad, obacRad, count, cuantosBomberos, status, conductor, obac
+    }
+
+    init(
+        solicitudConductorAt: String = "",
+        solicitudConductorTimestamp: Int64 = 0,
+        solicitudPersonalAt: String = "",
+        solicitudPersonalTimestamp: Int64 = 0,
+        driverRad: String = "",
+        obacRad: String = "",
+        count: String = "",
+        cuantosBomberos: String = "",
+        status: String = "",
+        conductor: String = "",
+        obac: String = ""
+    ) {
+        self.solicitudConductorAt = solicitudConductorAt
+        self.solicitudConductorTimestamp = solicitudConductorTimestamp
+        self.solicitudPersonalAt = solicitudPersonalAt
+        self.solicitudPersonalTimestamp = solicitudPersonalTimestamp
+        self.driverRad = driverRad
+        self.obacRad = obacRad
+        self.count = count
+        self.cuantosBomberos = cuantosBomberos
+        self.status = status
+        self.conductor = conductor.isEmpty ? driverRad : conductor
+        self.obac = obac.isEmpty ? obacRad : obac
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        solicitudConductorAt = try container.decodeIfPresent(String.self, forKey: .solicitudConductorAt) ?? ""
+        if let ts = try? container.decodeIfPresent(Int64.self, forKey: .solicitudConductorTimestamp) {
+            solicitudConductorTimestamp = ts
+        } else if let s = try? container.decodeIfPresent(String.self, forKey: .solicitudConductorTimestamp), let parsed = Int64(s) {
+            solicitudConductorTimestamp = parsed
+        } else {
+            solicitudConductorTimestamp = 0
+        }
+
+        solicitudPersonalAt = try container.decodeIfPresent(String.self, forKey: .solicitudPersonalAt) ?? ""
+        if let ts = try? container.decodeIfPresent(Int64.self, forKey: .solicitudPersonalTimestamp) {
+            solicitudPersonalTimestamp = ts
+        } else if let s = try? container.decodeIfPresent(String.self, forKey: .solicitudPersonalTimestamp), let parsed = Int64(s) {
+            solicitudPersonalTimestamp = parsed
+        } else {
+            solicitudPersonalTimestamp = 0
+        }
+
+        let dRad = try container.decodeIfPresent(String.self, forKey: .driverRad) ?? ""
+        let cRad = try container.decodeIfPresent(String.self, forKey: .conductor) ?? ""
+        driverRad = dRad.isEmpty ? cRad : dRad
+        conductor = cRad.isEmpty ? dRad : cRad
+
+        let oRad = try container.decodeIfPresent(String.self, forKey: .obacRad) ?? ""
+        let oStr = try container.decodeIfPresent(String.self, forKey: .obac) ?? ""
+        obacRad = oRad.isEmpty ? oStr : oRad
+        obac = oStr.isEmpty ? oRad : oStr
+
+        count = try container.decodeIfPresent(String.self, forKey: .count) ?? ""
+        cuantosBomberos = try container.decodeIfPresent(String.self, forKey: .cuantosBomberos) ?? ""
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+    }
 }
+
+typealias SisBomUser = UserPersonal
+
 
 // MARK: - Dispatch Model
 struct Dispatch: Identifiable, Codable, Equatable {

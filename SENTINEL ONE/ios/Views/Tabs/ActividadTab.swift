@@ -482,8 +482,8 @@ struct DispatchItemCard: View {
                             HStack(spacing: 8) {
                                 ForEach(carrosList, id: \.self) { carroName in
                                     let vehicleData = dispatch.unidades[carroName]
-                                    let solConductor = vehicleData?["solicitudConductorAt"] as? String ?? ""
-                                    let solPersonal = vehicleData?["solicitudPersonalAt"] as? String ?? ""
+                                    let solConductor = vehicleData?.solicitudConductorAt ?? ""
+                                    let solPersonal = vehicleData?.solicitudPersonalAt ?? ""
                                     let emoji = getVehicleEmoji(carro: carroName)
                                     
                                     HStack(spacing: 6) {

@@ -264,7 +264,7 @@ class FirebaseRepository {
         }
     }
     
-    func solicitarAperturaPuerta(user: SisBomUser, completion: @escaping (Result<Void, Error>) -> Void) {
+    func solicitarAperturaPuerta(user: UserPersonal, completion: @escaping (Result<Void, Error>) -> Void) {
         let requestData: [String: Any] = [
             "idBombero": user.id,
             "idRadial": user.idRadial,
