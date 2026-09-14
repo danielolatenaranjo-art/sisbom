@@ -746,9 +746,8 @@ struct IncidentWebView: UIViewRepresentable {
                 var targetY = 135;
                 var cardHeight = window.innerHeight || document.documentElement.clientHeight || 300;
                 var dy = (cardHeight / 2) - targetY;
-                var metersPerPixel = (156543.03392 * Math.cos(\(lat) * Math.PI / 180.0)) / Math.pow(2.0, 16.0);
-                var dLatPerPixel = metersPerPixel / 111139.0;
-                var centerLat = \(lat) - (dy * dLatPerPixel);
+                var dLatPerDp = 0.0000154;
+                var centerLat = \(lat) - (dy * dLatPerDp);
 
                 var map = L.map('map', {
                     zoomControl: false,

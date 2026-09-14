@@ -352,7 +352,7 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
         ) {
-            // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (fills exact card height, marker anchored dynamically at y=160dp)
+            // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (fills exact card height)
             val finalLat = if (hasValidLocation) dispatch.lat!! else -34.637373
             val finalLng = if (hasValidLocation) dispatch.lng!! else -71.125741
             IncidentMapPreview(
@@ -825,11 +825,11 @@ fun IncidentMapPreview(
             val h = mapView.height
             val w = mapView.width
             if (h > 0 && w > 0) {
-                val targetYPx = 135f * density
-                val dyPx = (h / 2f) - targetYPx
-                val metersPerPixel = (156543.03392 * Math.cos(Math.toRadians(finalLat))) / Math.pow(2.0, zoomLevel)
-                val dLatPerPixel = metersPerPixel / 111139.0
-                val centerLat = finalLat - (dyPx * dLatPerPixel)
+                val hDp = h / density
+                val targetYDp = 135f
+                val dyDp = (hDp / 2f) - targetYDp
+                val dLatPerDp = 0.0000154
+                val centerLat = finalLat - (dyDp * dLatPerDp)
                 val centerPoint = org.osmdroid.util.GeoPoint(centerLat, finalLng)
                 mapView.controller.setCenter(centerPoint)
                 mapView.controller.setZoom(zoomLevel)
