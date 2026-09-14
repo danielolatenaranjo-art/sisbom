@@ -2,6 +2,7 @@ package com.sisbom.misisbom
 
 import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ArrowBack
@@ -56,6 +58,8 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -72,6 +76,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -179,140 +184,117 @@ fun ActividadTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            top = paddingValues.calculateTopPadding() + 16.dp,
+            top = paddingValues.calculateTopPadding() + 8.dp,
             bottom = paddingValues.calculateBottomPadding() + 16.dp,
             start = 16.dp,
             end = 16.dp
         ),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         item {
-            GlassCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        val isOpActive = viewModel.centralOperatorName.isNotEmpty()
-                        val isComandante = user.cargo.trim().uppercase() == "COMANDANTE" && listOf("1", "01", "2", "02", "3", "03").contains(user.idRadial.trim())
-                        val canCloseOp = isOpActive && (viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro) || isComandante)
+            val isOpActive = viewModel.centralOperatorName.isNotEmpty()
+            val formattedOpName = if (isOpActive) formatOperatorCadName(viewModel.centralOperatorName).uppercase() else "SIN OPERADOR"
 
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .background(if (isOpActive) Color(0x2610B981) else Color.Gray.copy(alpha = 0.15f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isOpActive) Icons.Filled.CheckCircle else Icons.Filled.Info,
-                                contentDescription = null,
-                                tint = if (isOpActive) Color(0xFF10B981) else Color.Gray,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
+            var isRequested by remember { mutableStateOf(false) }
+            var isRequesting by remember { mutableStateOf(false) }
+            val context = androidx.compose.ui.platform.LocalContext.current
 
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "OPERADOR CENTRAL DE ALARMAS",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
-                            )
-                            Text(
-                                text = if (isOpActive) "EN CONSOLA: ${viewModel.centralOperatorName.uppercase()}" else "CENTRAL CERRADA / SIN OPERADOR",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (isDark) Color.White else Color(0xFF1E293B)
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .background(if (isOpActive) Color(0x2610B981) else Color.Black.copy(alpha = 0.05f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = if (isOpActive) "ACTIVO" else "CERRADA",
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Black,
-                                color = if (isOpActive) Color(0xFF10B981) else Color.Gray
-                            )
-                        }
-                    }
-
-                    val isOpActive = viewModel.centralOperatorName.isNotEmpty()
-                    val isComandante = user.cargo.trim().uppercase() == "COMANDANTE" && listOf("1", "01", "2", "02", "3", "03").contains(user.idRadial.trim())
-                    val canCloseOp = isOpActive && (viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro) || isComandante)
-
-                    if (canCloseOp) {
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Button(
-                            onClick = { viewModel.closeCentralOperatorSession() },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Color(0xFFDC2626),
-                                contentColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier.fillMaxWidth().height(36.dp),
-                            contentPadding = PaddingValues(0.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = Color.White
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "CERRAR TURNO DE CENTRAL",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                    }
+            LaunchedEffect(isRequested) {
+                if (isRequested) {
+                    kotlinx.coroutines.delay(30_000L)
+                    isRequested = false
                 }
             }
-        }
 
-        if (activeDispatches.isEmpty()) {
-            item {
-                GlassCard(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(if (isOpActive) Color(0xFF10B981) else Color.Gray.copy(alpha = 0.6f), CircleShape)
+                    )
+
+                    Text(
+                        text = "OPERADOR CAD: $formattedOpName",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Black,
+                        color = if (isDark) Color.White else Color(0xFF1E293B),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Botón TIMBRE para solicitar apertura de puerta al Operador CAD (con cooldown de 30 segundos)
+                    Button(
+                        onClick = {
+                            if (!isRequested && !isRequesting) {
+                                isRequesting = true
+                                viewModel.solicitarAperturaPuerta(
+                                    onSuccess = {
+                                        isRequesting = false
+                                        isRequested = true
+                                        android.widget.Toast.makeText(context, "Timbre tocado: Notificación enviada al Operador", android.widget.Toast.LENGTH_SHORT).show()
+                                    },
+                                    onFailure = {
+                                        isRequesting = false
+                                        android.widget.Toast.makeText(context, "Error: ${it.message}", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        },
+                        enabled = !isRequested && !isRequesting,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isRequested) Color(0xFF10B981).copy(alpha = 0.2f) else if (isDark) Color(0xFF7F1D1D).copy(alpha = 0.6f) else Color(0xFFDC2626).copy(alpha = 0.15f),
+                            contentColor = if (isRequested) Color(0xFF10B981) else if (isDark) Color(0xFFFCA5A5) else Color(0xFFDC2626),
+                            disabledContainerColor = if (isRequested) Color(0xFF10B981).copy(alpha = 0.2f) else Color.Gray.copy(alpha = 0.15f),
+                            disabledContentColor = if (isRequested) Color(0xFF10B981) else Color.Gray
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                        modifier = Modifier.height(30.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .background(Color.White.copy(alpha = 0.15f), CircleShape)
-                                .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x33000000), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = null,
-                                tint = if (isDark) Color.White else TextDark,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Sin emergencias activas en este momento",
-                            color = if (isDark) Color.White else TextDark,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center
+                            text = if (isRequested) "TOCADO" else "TIMBRE",
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Black
                         )
                     }
                 }
             }
-        } else {
-            items(activeDispatches) { dispatch ->
-                DispatchItemCard(dispatch, viewModel)
-            }
         }
+
+        items(activeDispatches) { dispatch ->
+            DispatchItemCard(dispatch, viewModel)
+        }
+    }
+}
+
+fun getVehicleEmoji(carro: String): String {
+    val upper = carro.trim().uppercase()
+    return when {
+        upper.startsWith("B") || upper.startsWith("BX") || upper.startsWith("BF") -> "🚒"
+        upper.startsWith("R") || upper.startsWith("RX") || upper.startsWith("RH") -> "🚑"
+        upper.startsWith("Q") || upper.startsWith("M") || upper.startsWith("MX") -> "🪜"
+        upper.startsWith("Z") || upper.startsWith("BT") -> "🚚"
+        upper.startsWith("K") || upper.startsWith("J") || upper.startsWith("UT") -> "🚙"
+        upper.startsWith("H") || upper.startsWith("HZ") -> "☣️"
+        else -> "🚒"
+    }
+}
+
+fun formatOperatorCadName(fullName: String): String {
+    val words = fullName.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    return when {
+        words.isEmpty() -> ""
+        words.size == 1 -> words[0]
+        words.size == 2 -> "${words[0]} ${words[1]}"
+        else -> "${words.first()} ${words[words.size - 2]}"
     }
 }
 
@@ -327,119 +309,198 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
     val inService = user.enServicio.trim() != "0" && user.enServicio.trim().isNotEmpty() && !user.enServicio.trim().startsWith("-")
     val isSpecial = baseState.contains("SUSPENDIDO") || baseState == "CDS" || baseState.contains("LICENCIA") || baseState == "PERMISO"
     
+    val claveColor = getClaveTacticalColor(dispatch.clave)
+    val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
+    
     val cardBorderColor = if (isAttending) {
-        Color(0xFF10B981)
+        GoGreen
     } else {
-        if (isDark) Color(0xFFB91C1C) else Color(0xFFEF4444).copy(alpha = 0.5f)
+        if (isDark) Color(0xFF7F1D1D) else Color(0xFFEF4444).copy(alpha = 0.6f)
     }
     
     val titleText = if (isAttending) "SALIENDO A SERVICIO" else "¡DESPACHO ACTIVO!"
-    val titleColor = if (isAttending) GoGreen else BomberosRedLight
+    val titleColor = if (isAttending) GoGreen else Color(0xFFEF4444)
+    val operadorName = dispatch.quienDespacha.ifEmpty { dispatch.operadorFinal }
     
-    GlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        borderColor = cardBorderColor,
-        isDarkTheme = isDark
+    val openNavigation: () -> Unit = {
+        if (hasValidLocation) {
+            try {
+                val label = if (dispatch.lugar.isNotBlank()) "${dispatch.clave} - ${dispatch.lugar}" else "Emergencia ${dispatch.clave}"
+                val uri = android.net.Uri.parse("geo:${dispatch.lat},${dispatch.lng}?q=${dispatch.lat},${dispatch.lng}(${android.net.Uri.encode(label)})")
+                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+                context.startActivity(android.content.Intent.createChooser(intent, "Navegar a la emergencia con:"))
+            } catch (_: Exception) {
+                try {
+                    val webUri = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=${dispatch.lat},${dispatch.lng}")
+                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, webUri)
+                    context.startActivity(webIntent)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+    
+    androidx.compose.material3.Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFF140303)),
+        border = androidx.compose.foundation.BorderStroke(1.2.dp, cardBorderColor)
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
-            ) {
-                Column {
-                    Text(
-                        text = titleText,
-                        color = titleColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                }
-                val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" },
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .background(if (isDark) Color(0x66000000) else Color(0x1A000000), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
-            val claveText = if (dispatch.clave == "10-12" && dispatch.claveApoyo.isNotEmpty()) {
-                "${dispatch.clave} (${dispatch.claveApoyo})"
-            } else {
-                dispatch.clave
-            }
-            Text(
-                text = claveText,
-                color = if (isDark) Color.White else TextDark,
-                fontSize = 30.sp,
-                fontWeight = FontWeight.Black,
-                lineHeight = 34.sp
-            )
-            Text(
-                text = dispatch.lugar.ifEmpty { "Ubicación no precisada" },
-                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                lineHeight = 18.sp
-            )
-            val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
-            if (hasValidLocation) {
-                Spacer(modifier = Modifier.height(10.dp))
-                IncidentMapPreview(
-                    lat = dispatch.lat!!,
-                    lng = dispatch.lng!!,
-                    isPending = false,
-                    clave = dispatch.clave,
-                    lugar = dispatch.lugar,
-                    isDark = isDark
-                )
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            
-            val cleanPreinforme = dispatch.preinforme.trim().replace("---", "").trim()
-            
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+        ) {
+            // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (anchored so pin stays fixed at y=155dp when card expands downwards)
+            val finalLat = if (hasValidLocation) dispatch.lat!! else -34.637373
+            val finalLng = if (hasValidLocation) dispatch.lng!! else -71.125741
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .background(if (isDark) Color(0x4D000000) else Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
-                    .border(1.dp, if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000), RoundedCornerShape(12.dp))
-                    .padding(12.dp)
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(24.dp))
             ) {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    if (cleanPreinforme.isNotEmpty() && !cleanPreinforme.contains("A la espera", ignoreCase = true)) {
+                IncidentMapPreview(
+                    lat = finalLat,
+                    lng = finalLng,
+                    isPending = !hasValidLocation,
+                    clave = dispatch.clave,
+                    lugar = dispatch.lugar,
+                    isDark = isDark,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .requiredHeight(800.dp)
+                        .offset(y = (-245).dp)
+                )
+            }
+
+            // LAYER 1: CONTENT WITH TOP & BOTTOM DARK RED GRADIENT OVERLAYS
+            Column(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                // TOP HEADER: Dark Red Gradient fading downwards into transparency over the map
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0xFA2D0606),
+                                    Color(0xF0250505),
+                                    Color(0xD91E0404),
+                                    Color(0x80160303),
+                                    Color.Transparent
+                                )
+                            )
+                        )
+                        .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
+                ) {
+                    // Top row: ¡DESPACHO ACTIVO! and Time
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Text(
-                            text = "PRE-INFORME:",
-                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                            fontSize = 10.sp,
+                            text = titleText,
+                            color = titleColor,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = 0.5.sp
+                        )
+
+                        Text(
+                            text = cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" },
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = cleanPreinforme,
-                            color = if (isDark) Color.White else TextDark,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        androidx.compose.material3.Divider(
-                            color = if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000),
-                            thickness = 1.dp
-                        )
                     }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
+                    // Clave (Large bold title)
+                    val claveText = if (dispatch.clave == "10-12" && dispatch.claveApoyo.isNotEmpty()) {
+                        "${dispatch.clave} (${dispatch.claveApoyo})"
+                    } else {
+                        dispatch.clave.ifEmpty { "10-0" }
+                    }
+
                     Text(
-                        text = "UNIDADES DESPACHADAS:",
-                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 6.dp)
+                        text = claveText,
+                        color = Color.White,
+                        fontSize = 34.sp,
+                        fontWeight = FontWeight.Black,
+                        lineHeight = 38.sp
                     )
 
+                    // Location / Address (Primary address below Clave)
+                    Text(
+                        text = if (dispatch.lugar.isNotBlank()) dispatch.lugar.uppercase() else "UBICACIÓN EN PROCESO DE GEORREFERENCIACIÓN",
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        lineHeight = 17.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                // CENTER VIEWPORT: Compact transparent clickable area to view and tap the map
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(75.dp)
+                        .clickable { openNavigation() }
+                )
+
+                // BOTTOM CONTROLS: Dark Red Gradient fading upwards into transparency over the map
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color(0x80160303),
+                                    Color(0xD91A0404),
+                                    Color(0xF0150303),
+                                    Color(0xFA100202)
+                                )
+                            )
+                        )
+                        .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
+                ) {
+                    // Pre-informe (if available)
+                    val cleanPreinforme = dispatch.preinforme.trim().replace("---", "").trim()
+                    if (cleanPreinforme.isNotEmpty() && !cleanPreinforme.contains("A la espera", ignoreCase = true)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x4D000000), RoundedCornerShape(14.dp))
+                                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(14.dp))
+                                .padding(10.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "📋 PRE-INFORME:",
+                                    color = Color(0xFF94A3B8),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = cleanPreinforme,
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+
+                    // UNIDADES DESPACHADAS (Direct mini-cards without outer card wrapper)
                     val carrosList = dispatch.carros.split(Regex("[,/ ]+"))
                         .map { it.trim() }
                         .filter { it.isNotEmpty() }
@@ -447,21 +508,21 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                     if (carrosList.isEmpty()) {
                         Text(
                             text = "---",
-                            color = if (isDark) Color(0xFFF87171) else Color(0xFFB91C1C),
-                            fontSize = 15.sp,
+                            color = Color(0xFFF87171),
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Black
                         )
                     } else if (carrosList.size == 1 && carrosList[0].equals("PERSONAL", ignoreCase = true)) {
                         Text(
-                            text = "PERSONAL",
-                            color = if (isDark) Color(0xFFF87171) else Color(0xFFB91C1C),
-                            fontSize = 15.sp,
+                            text = "🧑‍🚒 PERSONAL",
+                            color = Color(0xFFF87171),
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Black
                         )
                     } else {
                         @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
                         androidx.compose.foundation.layout.FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -469,56 +530,194 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                 val vehicleData = dispatch.unidades[carroName]
                                 val solConductor = vehicleData?.get("solicitudConductorAt")?.toString() ?: ""
                                 val solPersonal = vehicleData?.get("solicitudPersonalAt")?.toString() ?: ""
+                                val emoji = getVehicleEmoji(carroName)
 
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                Box(
                                     modifier = Modifier
-                                        .background(if (isDark) Color(0x1AFFFFFF) else Color(0x0D000000), RoundedCornerShape(8.dp))
-                                        .border(1.dp, if (isDark) Color(0x0DFFFFFF) else Color(0x0D000000), RoundedCornerShape(8.dp))
-                                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                                        .background(
+                                            Color(0x66000000),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            Color(0x33FFFFFF),
+                                            RoundedCornerShape(10.dp)
+                                        )
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
                                 ) {
-                                    // Carro rectangle
-                                    Box(
-                                        modifier = Modifier
-                                            .background(if (isDark) Color(0xFFB91C1C) else Color(0xFFEF4444), RoundedCornerShape(4.dp))
-                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
+                                        Text(text = emoji, fontSize = 15.sp)
                                         Text(
                                             text = carroName,
                                             color = Color.White,
                                             fontWeight = FontWeight.Black,
-                                            fontSize = 12.sp
+                                            fontSize = 13.sp
                                         )
-                                    }
 
-                                    if (solConductor.isNotEmpty()) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0xFFF59E0B).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                                .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                        if (solConductor.isNotEmpty()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0xFFF59E0B).copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                                                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "12-10",
+                                                    color = Color(0xFFFBBF24),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                        }
+
+                                        if (solPersonal.isNotEmpty()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .background(Color(0xFF3B82F6).copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                                                    .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                                                    .padding(horizontal = 5.dp, vertical = 2.dp)
+                                            ) {
+                                                Text(
+                                                    text = "6-6",
+                                                    color = Color(0xFF60A5FA),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Black
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    val clean67 = cleanSheetPrefix(dispatch.hora67)
+                    if (clean67.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(if (isDark) Color(0x1A10B981) else Color(0x1A34D399), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .padding(8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "✓ CONTROL DE EMERGENCIA (6-7): $clean67",
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF059669),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Black
+                            )
+                        }
+                    }
+
+                    // Action Buttons: Visible only when firefighter is 0-9 or already attending
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = (baseState == "0-9" || isAttending) && !isSpecial,
+                        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(300)) +
+                                androidx.compose.animation.slideInVertically(
+                                    initialOffsetY = { it / 2 },
+                                    animationSpec = androidx.compose.animation.core.tween(300)
+                                ) +
+                                androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(300)),
+                        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(200)) +
+                               androidx.compose.animation.slideOutVertically(
+                                   targetOffsetY = { it / 2 },
+                                   animationSpec = androidx.compose.animation.core.tween(200)
+                               ) +
+                               androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(200))
+                    ) {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            val isDeclined = user.enServicio == "-${dispatch.idServicio}"
+
+                            if (isAttending) {
+                                Button(
+                                    onClick = { viewModel.attendService(dispatch.idServicio, false) },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = if (isDark) Color(0x26EF4444) else Color(0x1AEF4444),
+                                        contentColor = Color(0xFFEF4444)
+                                    ),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(48.dp)
+                                ) {
+                                    Text(
+                                        text = "CANCELAR ASISTENCIA",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Black
+                                    )
+                                }
+                            } else {
+                                val canAttend = baseState == "0-9" && !inService && !isSpecial
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    // ASISTIR (Crimson / Ruby Red Filled Pill Button)
+                                    Button(
+                                        onClick = { viewModel.attendService(dispatch.idServicio, true) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (canAttend) Color(0xFF881A1A) else if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000),
+                                            contentColor = if (canAttend) Color.White else if (isDark) Color(0xFF475569) else Color(0xFF94A3B8)
+                                        ),
+                                        enabled = canAttend,
+                                        shape = RoundedCornerShape(20.dp),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
                                         ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Check,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = "12-10 ($solConductor)",
-                                                color = Color(0xFFD97706),
-                                                fontSize = 9.sp,
+                                                text = "ASISTIR",
+                                                fontSize = 13.sp,
                                                 fontWeight = FontWeight.Black
                                             )
                                         }
                                     }
 
-                                    if (solPersonal.isNotEmpty()) {
-                                        Box(
-                                            modifier = Modifier
-                                                .background(Color(0xFF3B82F6).copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                                .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                    // NO ASISTIR (Outlined Pill Button)
+                                    Button(
+                                        onClick = { viewModel.declineService(dispatch.idServicio) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = if (isDeclined) Color(0xFFEF4444) else Color(0x1A000000),
+                                            contentColor = if (isDeclined) Color.White else Color(0xFFEF4444)
+                                        ),
+                                        enabled = !isDeclined && !inService && baseState == "0-9",
+                                        shape = RoundedCornerShape(20.dp),
+                                        border = if (isDeclined) null else androidx.compose.foundation.BorderStroke(1.2.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .height(48.dp)
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.Center
                                         ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Close,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
                                             Text(
-                                                text = "6-6 ($solPersonal)",
-                                                color = Color(0xFF2563EB),
-                                                fontSize = 9.sp,
+                                                text = if (isDeclined) "NO ASISTIRÉ" else "NO ASISTIR",
+                                                fontSize = 13.sp,
                                                 fontWeight = FontWeight.Black
                                             )
                                         }
@@ -527,119 +726,24 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                             }
                         }
                     }
-                }
-            }
-            
-            val clean67 = cleanSheetPrefix(dispatch.hora67)
-            if (clean67.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(if (isDark) Color(0x1A10B981) else Color(0x1A34D399), RoundedCornerShape(8.dp))
-                        .border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
-                        .padding(8.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            text = "✓ CONTROL DE EMERGENCIA (6-7)",
-                            color = if (isDark) Color(0xFF34D399) else Color(0xFF059669),
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = TextAlign.Center
-                        )
-                        Text(
-                            text = clean67,
-                            color = if (isDark) Color(0xFF34D399) else Color(0xFF059669),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(12.dp))
-            
-            val isDeclined = user.enServicio == "-${dispatch.idServicio}"
 
-            if (isAttending) {
-                Button(
-                    onClick = { viewModel.attendService(dispatch.idServicio, false) },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDark) Color(0x26EF4444) else Color(0x1AEF4444),
-                        contentColor = Color(0xFFEF4444)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "CANCELAR ASISTENCIA",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                }
-            } else {
-                val canAttend = baseState == "0-9" && !inService && !isSpecial
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { viewModel.attendService(dispatch.idServicio, true) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (canAttend) GoGreen else if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000),
-                            contentColor = if (canAttend) Color.White else if (isDark) Color(0xFF475569) else Color(0xFF94A3B8)
-                        ),
-                        enabled = canAttend,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
+                    // Operator Console Badge ("EN CONSOLA: ...")
+                    if (operadorName.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0x4D000000), RoundedCornerShape(14.dp))
+                                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 12.dp, vertical = 9.dp),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.CheckCircle,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "ASISTIR",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-                    }
-
-                    Button(
-                        onClick = { viewModel.declineService(dispatch.idServicio) },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isDeclined) Color(0xFFEF4444) else if (isDark) Color(0x26EF4444) else Color(0x1AEF4444),
-                            contentColor = if (isDeclined) Color.White else Color(0xFFEF4444)
-                        ),
-                        enabled = !isDeclined && !inService && baseState == "0-9",
-                        shape = RoundedCornerShape(12.dp),
-                        border = if (isDeclined || !(!isDeclined && !inService && baseState == "0-9")) null else androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFEF4444).copy(alpha = 0.5f)),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.Close,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isDeclined) "NO ASISTIRÉ" else "NO ASISTIR",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Black
+                                text = "EN CONSOLA: ${formatOperatorCadName(operadorName).uppercase()}",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.5.sp
                             )
                         }
                     }
@@ -649,40 +753,49 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
     }
 }
 
-private fun createIncidentMarkerDrawable(context: android.content.Context, colorInt: Int): android.graphics.drawable.Drawable {
-    val size = 80
+private fun createIncidentMarkerDrawable(
+    context: android.content.Context,
+    colorInt: Int,
+    clave: String
+): android.graphics.drawable.Drawable {
+    val size = 100
     val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
     val canvas = android.graphics.Canvas(bitmap)
 
+    // Outer translucent tactical radar aura
     val paintHalo = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-        color = androidx.core.graphics.ColorUtils.setAlphaComponent(colorInt, 65)
+        color = androidx.core.graphics.ColorUtils.setAlphaComponent(colorInt, 50)
         style = android.graphics.Paint.Style.FILL
     }
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paintHalo)
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 3f, paintHalo)
 
+    // Concentric tactical perimeter ring
     val paintHaloBorder = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = androidx.core.graphics.ColorUtils.setAlphaComponent(colorInt, 180)
         style = android.graphics.Paint.Style.STROKE
-        strokeWidth = 2.5f
+        strokeWidth = 2f
     }
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 5f, paintHaloBorder)
+    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 4f, paintHaloBorder)
 
+    // Solid core circle filled with clave tactical color
     val paintCore = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = colorInt
         style = android.graphics.Paint.Style.FILL
     }
-    canvas.drawCircle(size / 2f, size / 2f, 20f, paintCore)
+    canvas.drawCircle(size / 2f, size / 2f, 22f, paintCore)
 
+    // Crisp high-contrast white border
     val paintCoreBorder = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
         style = android.graphics.Paint.Style.STROKE
         strokeWidth = 3f
     }
-    canvas.drawCircle(size / 2f, size / 2f, 20f, paintCoreBorder)
+    canvas.drawCircle(size / 2f, size / 2f, 22f, paintCoreBorder)
 
+    // Inner Glyph / Exclamation badge
     val paintText = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = android.graphics.Color.WHITE
-        textSize = 20f
+        textSize = 22f
         typeface = android.graphics.Typeface.DEFAULT_BOLD
         textAlign = android.graphics.Paint.Align.CENTER
     }
@@ -702,55 +815,18 @@ fun IncidentMapPreview(
     isDark: Boolean = true,
     modifier: Modifier = Modifier
 ) {
-    if (lat == 0.0 || lng == 0.0 || isPending) {
-        return
-    }
-
-    val cleanKey = clave.trim().uppercase()
-    val pinColorHex = when (cleanKey) {
-        "10-0" -> "#DC2626"
-        "10-1" -> "#EA580C"
-        "10-2" -> "#B45309"
-        "10-3", "10-8" -> "#0284C7"
-        "10-4" -> "#E11D48"
-        "10-5" -> "#7C3AED"
-        "10-6" -> "#0D9488"
-        "10-7" -> "#EAB308"
-        "10-9" -> "#C2410C"
-        "10-10" -> "#0369A1"
-        "10-11" -> "#2563EB"
-        "10-12" -> "#4F46E5"
-        "10-14" -> "#059669"
-        else -> "#DC2626"
-    }
-    val pinColorInt = android.graphics.Color.parseColor(pinColorHex)
-
     val finalLat = if (lat == 0.0) -34.637373 else lat
     val finalLng = if (lng == 0.0) -71.125741 else lng
-    val zoomLevel = if (isPending) 14.5 else 16.0
+    val zoomLevel = 16.2
+
+    val pinColorHex = getClavePinHex(clave)
+    val pinColorInt = android.graphics.Color.parseColor(pinColorHex)
+    val claveColor = getClaveTacticalColor(clave)
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    val openNavigation: () -> Unit = {
-        if (!isPending && finalLat != 0.0 && finalLng != 0.0) {
-            try {
-                val label = if (lugar.isNotBlank()) "$clave - $lugar" else "Emergencia $clave"
-                val uri = android.net.Uri.parse("geo:$finalLat,$finalLng?q=$finalLat,$finalLng(${android.net.Uri.encode(label)})")
-                val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
-                context.startActivity(android.content.Intent.createChooser(intent, "Navegar a la emergencia con:"))
-            } catch (_: Exception) {
-                try {
-                    val webUri = android.net.Uri.parse("https://www.google.com/maps/search/?api=1&query=$finalLat,$finalLng")
-                    val webIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, webUri)
-                    context.startActivity(webIntent)
-                } catch (_: Exception) {}
-            }
-        }
-    }
-
     val mapViewRef = remember { mutableStateOf<org.osmdroid.views.MapView?>(null) }
     val markerRef = remember { mutableStateOf<org.osmdroid.views.overlay.Marker?>(null) }
-    val circleRef = remember { mutableStateOf<org.osmdroid.views.overlay.Polygon?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -761,16 +837,12 @@ fun IncidentMapPreview(
 
     Box(
         modifier = modifier
-            .fillMaxWidth()
-            .height(180.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFF0F172A))
-            .border(1.dp, if (isDark) Color(0x33FFFFFF) else Color(0x33000000), RoundedCornerShape(14.dp))
+            .background(Color(0xFF140303))
     ) {
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->
                 org.osmdroid.config.Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE))
-                org.osmdroid.config.Configuration.getInstance().userAgentValue = "SENTINEL ONE/2.1 (Android Bomberos Emergency App)"
+                org.osmdroid.config.Configuration.getInstance().userAgentValue = "SENTINEL ONE/2.2.0 (Android Bomberos Emergency App)"
 
                 org.osmdroid.views.MapView(ctx).apply {
                     setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
@@ -779,6 +851,34 @@ fun IncidentMapPreview(
                     isTilesScaledToDpi = true
                     controller.setZoom(zoomLevel)
                     controller.setCenter(org.osmdroid.util.GeoPoint(finalLat, finalLng))
+
+                    if (!isPending) {
+                        val marker = org.osmdroid.views.overlay.Marker(this).apply {
+                            position = org.osmdroid.util.GeoPoint(finalLat, finalLng)
+                            setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
+                            icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
+                            setInfoWindow(null)
+                        }
+                        markerRef.value = marker
+                        overlays.add(marker)
+                    }
+
+                    // Adaptive Tactical Map Styling (Dark tactical in dark mode, crisp natural light map in light mode)
+                    if (isDark) {
+                        val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                            -0.75f, 0f, 0f, 0f, 210f,
+                            0f, -0.75f, 0f, 0f, 210f,
+                            0f, 0f, -0.75f, 0f, 215f,
+                            0f, 0f, 0f, 1f, 0f
+                        ))
+                        val darkTactical = android.graphics.ColorMatrix()
+                        darkTactical.setSaturation(0.2f)
+                        inverseMatrix.preConcat(darkTactical)
+                        overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
+                    } else {
+                        overlayManager.tilesOverlay.setColorFilter(null)
+                    }
+
                     mapViewRef.value = this
                 }
             },
@@ -787,20 +887,35 @@ fun IncidentMapPreview(
                 mapView.controller.setCenter(point)
                 mapView.controller.setZoom(zoomLevel)
 
+                // Update theme color filter dynamically on recomposition / mode switch
+                if (isDark) {
+                    val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                        -0.75f, 0f, 0f, 0f, 210f,
+                        0f, -0.75f, 0f, 0f, 210f,
+                        0f, 0f, -0.75f, 0f, 215f,
+                        0f, 0f, 0f, 1f, 0f
+                    ))
+                    val darkTactical = android.graphics.ColorMatrix()
+                    darkTactical.setSaturation(0.2f)
+                    inverseMatrix.preConcat(darkTactical)
+                    mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
+                } else {
+                    mapView.overlayManager.tilesOverlay.setColorFilter(null)
+                }
+
                 if (!isPending) {
-                    // Marcador de incidente
                     if (markerRef.value == null) {
                         val marker = org.osmdroid.views.overlay.Marker(mapView).apply {
                             position = point
                             setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
-                            icon = createIncidentMarkerDrawable(context, pinColorInt)
+                            icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
                             setInfoWindow(null)
                         }
                         markerRef.value = marker
                         mapView.overlays.add(marker)
                     } else {
                         markerRef.value?.position = point
-                        markerRef.value?.icon = createIncidentMarkerDrawable(context, pinColorInt)
+                        markerRef.value?.icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
                     }
                 } else {
                     markerRef.value?.let {
@@ -813,100 +928,6 @@ fun IncidentMapPreview(
             },
             modifier = Modifier.fillMaxSize()
         )
-
-        // Overlay transparente interactivo
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = if (isPending) 0.55f else 0.05f))
-                .clickable(enabled = !isPending) { openNavigation() }
-        )
-
-        if (isPending) {
-            // Radar loader animado
-            Column(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Box(
-                    modifier = Modifier.size(50.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(34.dp)
-                            .background(Color(0xFF0F172A).copy(alpha = 0.9f), CircleShape)
-                            .border(1.5.dp, Color(0xFFF59E0B), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.LocationOn,
-                            contentDescription = "Buscando ubicación",
-                            tint = Color(0xFFF59E0B),
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "ESPERANDO UBICACIÓN DE CENTRAL...",
-                    color = Color(0xFFF1F5F9),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.5.sp
-                )
-            }
-
-            // Badge superior "UBICACIÓN PENDIENTE"
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
-                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .background(Color(0xFFF59E0B), CircleShape)
-                )
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "UBICACIÓN PENDIENTE",
-                    color = Color(0xFFFDE68A),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 0.5.sp
-                )
-            }
-        }
-
-        // Badge inferior izquierdo: Dirección del incidente
-        if (lugar.isNotBlank()) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp)
-                    .background(Color.Black.copy(alpha = 0.85f), RoundedCornerShape(6.dp))
-                    .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = lugar.uppercase(),
-                    color = Color(0xFFCBD5E1),
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                )
-            }
-        }
     }
 }
 
@@ -1536,9 +1557,13 @@ fun OrdenesTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
 @Composable
 fun OrdenItemCard(orden: Alert, viewModel: SisBomViewModel) {
     var showDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val isDark = LocalDarkMode.current
     val isConforme = orden.conforme.split(",").map { it.trim().uppercase() }
         .contains(viewModel.currentUser?.idRadial?.uppercase())
+    val isComandante = viewModel.currentUser?.let {
+        it.idRadial == "1" || it.idRadial == "01" || it.cargo.uppercase().contains("COMANDANTE")
+    } ?: false
 
     GlassCard(
         modifier = Modifier
@@ -1552,87 +1577,141 @@ fun OrdenItemCard(orden: Alert, viewModel: SisBomViewModel) {
         borderColor = if (isConforme) GoGreen.copy(alpha = 0.5f) else Color.Gray.copy(alpha = 0.3f),
         isDarkTheme = isDark
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 20.dp, horizontal = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(CircleShape)
-                    .background(if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Assignment,
-                    contentDescription = null,
-                    tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-            
-            Spacer(modifier = Modifier.height(14.dp))
-            
-            Text(
-                text = "N°  ${cleanSheetPrefix(orden.numeroOrden)}",
-                color = if (isDark) Color.White else TextDark,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Black,
-                textAlign = TextAlign.Center
-            )
-            
-            Spacer(modifier = Modifier.height(2.dp))
-            
-            Text(
-                text = cleanSheetPrefix(orden.fechaOrden),
-                color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            
-            Spacer(modifier = Modifier.height(14.dp))
-            Divider(color = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0), thickness = 1.dp)
-            Spacer(modifier = Modifier.height(10.dp))
-            
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (isConforme) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            if (isComandante) {
+                IconButton(
+                    onClick = { showDeleteConfirm = true },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(28.dp)
+                ) {
                     Icon(
-                        imageVector = Icons.Filled.Check,
-                        contentDescription = null,
-                        tint = GoGreen,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "VISTO",
-                        color = GoGreen,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Filled.Close,
-                        contentDescription = null,
-                        tint = BomberosRed,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = "PENDIENTE",
-                        color = BomberosRed,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Black
+                        imageVector = Icons.Filled.Delete,
+                        contentDescription = "Eliminar Orden",
+                        tint = BomberosRed.copy(alpha = 0.8f),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 20.dp, horizontal = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Assignment,
+                        contentDescription = null,
+                        tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(14.dp))
+                
+                Text(
+                    text = "N°  ${cleanSheetPrefix(orden.numeroOrden)}",
+                    color = if (isDark) Color.White else TextDark,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(2.dp))
+                
+                Text(
+                    text = cleanSheetPrefix(orden.fechaOrden),
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
+                )
+                
+                Spacer(modifier = Modifier.height(14.dp))
+                Divider(color = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0), thickness = 1.dp)
+                Spacer(modifier = Modifier.height(10.dp))
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isConforme) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = GoGreen,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "VISTO",
+                            color = GoGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = null,
+                            tint = BomberosRed,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "PENDIENTE",
+                            color = BomberosRed,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = {
+                Text(
+                    text = "Eliminar Orden del Día",
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else TextDark
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Está seguro de eliminar permanentemente la Orden N° ${orden.numeroOrden}?",
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deleteAlert(orden.idAlerta)
+                    }
+                ) {
+                    Text("ELIMINAR", color = BomberosRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("CANCELAR", color = if (isDark) Color.White else TextDark)
+                }
+            },
+            containerColor = if (isDark) Color(0xFF1E293B) else Color.White
+        )
     }
 
     if (showDialog) {
@@ -2159,11 +2238,15 @@ fun AlertasTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
 @Composable
 fun AlertItemCard(alert: Alert, viewModel: SisBomViewModel, onChatClick: () -> Unit) {
     var showDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
     val myRadial = viewModel.currentUser?.idRadial ?: ""
     val isPinned = alert.fijar.split(",").map { it.trim().uppercase() }.contains(myRadial.uppercase())
     val isConforme = alert.conforme.split(",").map { it.trim().uppercase() }.contains(myRadial.uppercase())
     val isChat = alert.duracion.trim().uppercase() == "C"
     val isDark = LocalDarkMode.current
+    val isComandante = viewModel.currentUser?.let {
+        it.idRadial == "1" || it.idRadial == "01" || it.cargo.uppercase().contains("COMANDANTE")
+    } ?: false
 
     val borderColor = when (alert.gradoAlerta) {
         "3" -> BomberosRed
@@ -2338,7 +2421,7 @@ fun AlertItemCard(alert: Alert, viewModel: SisBomViewModel, onChatClick: () -> U
                             Text("RESPONDER", fontSize = 10.sp, fontWeight = FontWeight.Black)
                         }
                         
-                        Spacer(modifier = Modifier.width(12.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         
                         IconButton(
                             onClick = { viewModel.toggleAlertPin(alert) },
@@ -2369,6 +2452,31 @@ fun AlertItemCard(alert: Alert, viewModel: SisBomViewModel, onChatClick: () -> U
                                 modifier = Modifier.size(16.dp)
                             )
                         }
+
+                        if (isComandante) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            IconButton(
+                                onClick = { showDeleteConfirm = true },
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        if (isDark) Color(0xFFEF4444).copy(alpha = 0.15f) else Color(0xFFEF4444).copy(alpha = 0.08f),
+                                        RoundedCornerShape(10.dp)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        BomberosRed.copy(alpha = 0.3f),
+                                        RoundedCornerShape(10.dp)
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Delete,
+                                    contentDescription = "Eliminar",
+                                    tint = BomberosRed,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -2386,19 +2494,36 @@ fun AlertItemCard(alert: Alert, viewModel: SisBomViewModel, onChatClick: () -> U
                 isDarkTheme = isDark
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
-                    IconButton(
-                        onClick = { viewModel.toggleAlertPin(alert) },
+                    Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .size(32.dp)
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = if (isPinned) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                            contentDescription = "Pin",
-                            tint = if (isPinned) AlertAmber else if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
-                            modifier = Modifier.size(16.dp)
-                        )
+                        if (isComandante) {
+                            IconButton(
+                                onClick = { showDeleteConfirm = true },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Delete,
+                                    contentDescription = "Eliminar",
+                                    tint = BomberosRed.copy(alpha = 0.8f),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        IconButton(
+                            onClick = { viewModel.toggleAlertPin(alert) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPinned) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                contentDescription = "Pin",
+                                tint = if (isPinned) AlertAmber else if (isDark) Color(0xFF64748B) else Color(0xFF94A3B8),
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
                     }
 
                     Column(
@@ -2627,6 +2752,41 @@ fun AlertItemCard(alert: Alert, viewModel: SisBomViewModel, onChatClick: () -> U
                 }
             }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = {
+                Text(
+                    text = "Eliminar Alerta",
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else TextDark
+                )
+            },
+            text = {
+                Text(
+                    text = "¿Está seguro de eliminar esta alerta permanentemente de la cartelera?",
+                    color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirm = false
+                        viewModel.deleteAlert(alert.idAlerta)
+                    }
+                ) {
+                    Text("ELIMINAR", color = BomberosRed, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("CANCELAR", color = if (isDark) Color.White else TextDark)
+                }
+            },
+            containerColor = if (isDark) Color(0xFF1E293B) else Color.White
+        )
     }
 }
 

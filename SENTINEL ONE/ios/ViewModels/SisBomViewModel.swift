@@ -81,6 +81,8 @@ class SisBomViewModel: ObservableObject {
     private var knownDispatchIds = Set<String>()
     private var knownAlertIds = Set<String>()
     private var isFirstCheck = true
+    private var isFirstDispatchesSync = true
+    private var isFirstAlertsSync = true
     
     // Bloqueo temporal para evitar efecto rebote (race conditions de Firestore)
     private var lastStatusChangeTime: Date = Date.distantPast
@@ -176,7 +178,7 @@ class SisBomViewModel: ObservableObject {
         }
         
         let lastSeenVersion = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
-        if lastSeenVersion != "2.1.4" {
+        if lastSeenVersion != "2.1.6" {
             self.showChangelogDialog = true
         }
     }
@@ -209,7 +211,7 @@ class SisBomViewModel: ObservableObject {
     
     func dismissChangelog() {
         showChangelogDialog = false
-        UserDefaults.standard.set("2.1.4", forKey: "last_seen_version")
+        UserDefaults.standard.set("2.2.0", forKey: "last_seen_version")
     }
     
     func openChatRoom(chatId: String) {
@@ -268,6 +270,8 @@ class SisBomViewModel: ObservableObject {
     
     func startFirebaseSync(userId: String) {
         isSyncing = true
+        isFirstDispatchesSync = true
+        isFirstAlertsSync = true
         
         // Unsubscribe from previous listeners if any
         stopFirebaseSync()
@@ -349,6 +353,14 @@ class SisBomViewModel: ObservableObject {
             self.dispatchesList = list
             self.saveCache(list, key: "cache_dispatches")
             
+            if self.isFirstDispatchesSync {
+                self.isFirstDispatchesSync = false
+                for d in list {
+                    self.knownDispatchIds.insert(d.idServicio)
+                }
+                return
+            }
+            
             for d in list {
                 let oldDispatch = oldList.first(where: { $0.idServicio == d.idServicio })
                 let oldClave = oldDispatch?.clave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
@@ -371,12 +383,12 @@ class SisBomViewModel: ObservableObject {
                 let isAttending = !userEnServicio.isEmpty && userEnServicio == d.idServicio
 
                 // 1. Escalamiento a alarma declarada (10-0 -> 10-30 o 10-2 -> FORESTAL)
-                if isEscalation && d.operadorFinal.isEmpty && !self.isFirstCheck {
+                if isEscalation && d.operadorFinal.isEmpty {
                     if !self.knownDispatchIds.contains(trackerKey1030) {
                         self.knownDispatchIds.insert(trackerKey1030)
                         self.knownDispatchIds.insert(d.idServicio)
 
-                        if !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive {
+                        if !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive && !self.isAirplaneMode {
                             self.playSound(soundName: "c10_30")
                             self.triggerVibration()
                             DispatchQueue.main.async {
@@ -389,7 +401,7 @@ class SisBomViewModel: ObservableObject {
                     self.knownDispatchIds.insert(d.idServicio)
                     
                     // Alarma 10-30: Suena c10_30 para 0-9 (sin asistir o no asistir) y 0-8 (sin silencio absoluto)
-                    if !self.isFirstCheck && !isSpecial && !isAbsoluteSilence && !isAttending {
+                    if !isSpecial && !isAbsoluteSilence && !isAttending && !self.isAirplaneMode {
                         self.playSound(soundName: "c10_30")
                         self.triggerVibration()
                         if d.operadorFinal.isEmpty && !self.isCentralActive && (is09 || is08) {
@@ -406,7 +418,7 @@ class SisBomViewModel: ObservableObject {
                     self.knownDispatchIds.insert(d.idServicio)
                     let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
                     
-                    if !self.isFirstCheck && !is08 && !isSpecial && !isAbsoluteSilence {
+                    if !is08 && !isSpecial && !isAbsoluteSilence && !self.isAirplaneMode {
                         self.playSound(soundName: soundName)
                         self.triggerVibration()
                     }
@@ -435,7 +447,7 @@ class SisBomViewModel: ObservableObject {
                         let key1210 = "\(d.idServicio)_1210_\(unitName)_\(condTs > 0 ? String(condTs) : condAt)"
                         if !self.knownDispatchIds.contains(key1210) {
                             self.knownDispatchIds.insert(key1210)
-                            if !self.isFirstCheck && is09 && !hasDeclined {
+                            if is09 && !hasDeclined && !self.isAirplaneMode {
                                 self.playSound(soundName: "alerta")
                                 self.triggerVibration()
                                 
@@ -448,7 +460,7 @@ class SisBomViewModel: ObservableObject {
                                         let stillPending = (currentUnit.solicitudConductorTimestamp > 0 || !currentUnit.solicitudConductorAt.isEmpty) && currentUnit.conductor.isEmpty
                                         let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
                                         let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                                        if stillPending && isStill09 && userEnServicio != d.idServicio && !userEnServicio.hasPrefix("-") {
+                                        if stillPending && isStill09 && userEnServicio != d.idServicio && !userEnServicio.hasPrefix("-") && !self.isAirplaneMode {
                                             self.playSound(soundName: "alerta")
                                             self.triggerVibration()
                                         }
@@ -465,7 +477,7 @@ class SisBomViewModel: ObservableObject {
                         let key66 = "\(d.idServicio)_66_\(unitName)_\(persTs > 0 ? String(persTs) : persAt)"
                         if !self.knownDispatchIds.contains(key66) {
                             self.knownDispatchIds.insert(key66)
-                            if !self.isFirstCheck && is09 && !hasDeclined {
+                            if is09 && !hasDeclined && !self.isAirplaneMode {
                                 self.playSound(soundName: "alerta")
                                 self.triggerVibration()
                                 
@@ -479,7 +491,7 @@ class SisBomViewModel: ObservableObject {
                                         let stillPending = (currentUnit.solicitudPersonalTimestamp > 0 || !currentUnit.solicitudPersonalAt.isEmpty) && count == 0
                                         let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
                                         let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                                        if stillPending && isStill09 && userEnServicio != d.idServicio && !userEnServicio.hasPrefix("-") {
+                                        if stillPending && isStill09 && userEnServicio != d.idServicio && !userEnServicio.hasPrefix("-") && !self.isAirplaneMode {
                                             self.playSound(soundName: "alerta")
                                             self.triggerVibration()
                                         }
@@ -501,10 +513,6 @@ class SisBomViewModel: ObservableObject {
                     }
                 }
             }
-            
-            if self.isFirstCheck {
-                self.isFirstCheck = false
-            }
         }
         listeners.append(l3)
         
@@ -514,12 +522,49 @@ class SisBomViewModel: ObservableObject {
             self.alertsList = list
             self.saveCache(list, key: "cache_alerts")
             
+            if self.isFirstAlertsSync {
+                self.isFirstAlertsSync = false
+                for a in list {
+                    self.knownAlertIds.insert(a.idAlerta)
+                }
+                return
+            }
+            
             for a in list {
                 if !self.knownAlertIds.contains(a.idAlerta) {
                     self.knownAlertIds.insert(a.idAlerta)
-                    if !self.isFirstCheck {
-                        self.playSound(soundName: "alerta")
-                        self.triggerVibration()
+                    
+                    // Exclusión de alertas emitidas por el propio usuario (Comandante o emisor)
+                    let myId = self.currentUser?.idRegistro.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                    let myName = self.currentUser?.nombreBombero.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                    let myRadial = self.currentUser?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+                    let alertSender = a.quienAlerta.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let isSelfAlert = (!myId.isEmpty && alertSender.contains(myId)) ||
+                                      (!myName.isEmpty && alertSender.contains(myName)) ||
+                                      (!myRadial.isEmpty && (alertSender == myRadial || alertSender.hasPrefix("\(myRadial) ") || alertSender.hasPrefix("\(myRadial)-")))
+                    
+                    let userStatus = self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+                    let isSpecial = userStatus.contains("SUSPENDIDO") || userStatus == "CDS" || userStatus.contains("LICENCIA") || userStatus == "PERMISO"
+                    let isAbsoluteSilence = UserDefaults.standard.bool(forKey: "SILENCIO_ABSOLUTO") || userStatus.contains("ABSOLUTO")
+                    let is08 = userStatus == "0-8" || userStatus == "10-8"
+                    let isExcluded = isSpecial || isAbsoluteSilence || self.isAirplaneMode || self.isCentralActive || isSelfAlert
+                    
+                    if !isExcluded {
+                        let grado = a.gradoAlerta.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if grado == "3" {
+                            // Grado 3: Para 0-9 sonido fuerte + vibración fuerte. Para 0-8 tono alerta + vibración fuerte
+                            self.playSound(soundName: "alerta")
+                            self.triggerVibration()
+                        } else if grado == "2" {
+                            // Grado 2: Tono alerta + vibración normal
+                            if !is08 {
+                                self.playSound(soundName: "alerta")
+                            }
+                            self.triggerVibration()
+                        } else {
+                            // Grado 1: Notificación estándar / vibración
+                            self.triggerVibration()
+                        }
                     }
                 }
             }
@@ -787,6 +832,37 @@ class SisBomViewModel: ObservableObject {
             list.append(myRadial)
             let finalString = list.joined(separator: ",")
             repository.updateAlertConforme(alertId: alert.idAlerta, newConforme: finalString) { _ in }
+        }
+    }
+    
+    // ELIMINAR ALERTA U ORDEN DEL DÍA
+    func deleteAlert(alertId: String, completion: ((Bool) -> Void)? = nil) {
+        repository.deleteAlert(alertId: alertId) { [weak self] result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self?.alertsList.removeAll { $0.idAlerta == alertId }
+                    completion?(true)
+                case .failure(let error):
+                    print("Error deleting alert: \(error.localizedDescription)")
+                    completion?(false)
+                }
+            }
+        }
+    }
+    
+    // SOLICITAR APERTURA DE PUERTA (TIMBRE)
+    func solicitarAperturaPuerta(onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
+        guard let user = currentUser else { return }
+        repository.solicitarAperturaPuerta(user: user) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    onSuccess()
+                case .failure(let error):
+                    onFailure(error)
+                }
+            }
         }
     }
     

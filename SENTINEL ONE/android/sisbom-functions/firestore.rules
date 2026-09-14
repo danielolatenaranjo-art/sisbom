@@ -173,16 +173,11 @@ service cloud.firestore {
 
     // accesos collection
     match /accesos/central {
-      allow read: if isAuthenticated();
-      allow create: if isComandanteOrAdmin() || (isActiveUser() && request.resource.data.idRegistro == request.auth.uid);
-      allow update: if isComandanteOrAdmin() || (isActiveUser() && (resource.data.idRegistro == request.auth.uid || request.resource.data.idRegistro == request.auth.uid));
+      allow read, write: if true;
     }
 
     match /accesos/central/registros/{id} {
-      allow read: if isAuthenticated();
-      allow create: if isComandanteOrAdmin() || (isActiveUser() && request.resource.data.idRegistro == request.auth.uid);
-      allow update: if isComandanteOrAdmin() || (isActiveUser() && (resource.data.idRegistro == request.auth.uid || request.resource.data.idRegistro == request.auth.uid));
-      allow delete: if isComandanteOrAdmin();
+      allow read, write: if true;
     }
 
     match /accesos/comandancia/{document=**} {
@@ -190,9 +185,14 @@ service cloud.firestore {
       allow read: if isAuthenticated();
     }
 
+    // solicitudes_puerta collection (Timbre de acceso a la Central)
+    match /solicitudes_puerta/{id} {
+      allow read, write: if true;
+    }
+
     // fcm_tokens collection
     match /fcm_tokens/{token} {
-      allow read, write: if isAuthenticated();
+      allow read, write: if true;
     }
 
     // saas_clientes collection

@@ -83,10 +83,32 @@ struct MainView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 210) // Space for TopAppBarView without overlapping tab contents
+                    .padding(.top, 235) // Space for TopAppBarView without overlapping tab contents
                     .padding(.bottom, 80) // Space for BottomNavigationBarView
 
                     // Floating Top Header & Firefighter Card (Exact Android Layout)
+                    VStack(spacing: 0) {
+                        // Top backdrop gradient to cover status bar and logo area
+                        LinearGradient(
+                            colors: isDark ? [
+                                Color(red: 0.059, green: 0.004, blue: 0.004),
+                                Color(red: 0.059, green: 0.004, blue: 0.004).opacity(0.95),
+                                Color(red: 0.059, green: 0.004, blue: 0.004).opacity(0.8),
+                                Color.clear
+                            ] : [
+                                Color(red: 0.988, green: 0.984, blue: 0.973),
+                                Color(red: 0.988, green: 0.984, blue: 0.973).opacity(0.95),
+                                Color(red: 0.988, green: 0.984, blue: 0.973).opacity(0.8),
+                                Color.clear
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 110)
+                        .ignoresSafeArea(edges: .top)
+                        Spacer()
+                    }
+
                     VStack(spacing: 0) {
                         TopAppBarView(viewModel: viewModel, onMenuClick: {
                             withAnimation(.spring()) {
@@ -457,13 +479,13 @@ struct BottomNavigationBarView: View {
         .frame(height: 68)
         .background(
             RoundedRectangle(cornerRadius: 28)
-                .fill(isDark ? Color(red: 0.059, green: 0.090, blue: 0.165).opacity(0.95) : Color.white.opacity(0.95))
+                .fill(isDark ? Color.black.opacity(0.98) : Color.white.opacity(0.95))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 28)
-                .stroke(isDark ? Color.white.opacity(0.12) : Color(red: 0.886, green: 0.910, blue: 0.941), lineWidth: 1)
+                .stroke(isDark ? Color(red: 0.35, green: 0.08, blue: 0.08) : Color(red: 0.886, green: 0.910, blue: 0.941), lineWidth: 1.2)
         )
-        .shadow(color: isDark ? Color.black.opacity(0.4) : Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
+        .shadow(color: isDark ? Color(red: 0.35, green: 0.08, blue: 0.08).opacity(0.4) : Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
         .padding(.horizontal, 14)
         .padding(.bottom, 8)
     }
@@ -774,8 +796,9 @@ struct ProfileDrawerContent: View {
 
                     // 7. TURNO CENTRAL DE ALARMAS
                     let isOpActive = !viewModel.centralOperatorName.isEmpty
-                    let isComandanteOp = (user?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "COMANDANTE") && ["1", "01", "2", "02", "3", "03"].contains(user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
-                    let canCloseOp = isOpActive && (viewModel.isCentralActive || (!viewModel.centralOperatorId.isEmpty && viewModel.centralOperatorId == user?.idRegistro) || isComandanteOp)
+                    let isRadial1 = (user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) == "1" || user?.idRadial.trimmingCharacters(in: .whitespacesAndNewlines) == "01")
+                    let isOperator = viewModel.isCentralActive || (!viewModel.centralOperatorId.isEmpty && viewModel.centralOperatorId == user?.idRegistro)
+                    let canCloseOp = isOpActive && (isOperator || isRadial1)
 
                     if canCloseOp {
                         VStack(alignment: .leading, spacing: 8) {
@@ -813,7 +836,7 @@ struct ProfileDrawerContent: View {
                                 .aspectRatio(contentMode: .fit)
                                 .frame(height: 32)
                         }
-                        Text("V 2.1.4")
+                        Text("V 2.1.6")
                             .font(.system(size: 11, weight: .black))
                             .foregroundColor(Color(red: 0.851, green: 0.467, blue: 0.024)) // Amber #D97706
                             .tracking(0.5)
@@ -929,7 +952,7 @@ struct ChangelogDialog: View {
                         .font(.system(size: 18, weight: .black))
                         .foregroundColor(isDark ? .white : .textDark)
                     
-                    Text("SENTINEL ONE V 2.1.4")
+                    Text("SENTINEL ONE V 2.1.6")
                         .font(.system(size: 14, weight: .bold))
                         .foregroundColor(.gray)
                 }
@@ -937,23 +960,23 @@ struct ChangelogDialog: View {
                 // Bullet points
                 VStack(alignment: .leading, spacing: 14) {
                     bulletPoint(
-                        icon: "gearshape.fill",
-                        title: "Logo e Icono Personalizado",
-                        desc: "Soporte para cambiar dinámicamente el icono de lanzamiento y almacenar en caché el logotipo oficial de su institución.",
+                        icon: "bell.badge.fill",
+                        title: "Protocolo de Alertas Grados 1, 2 y 3",
+                        desc: "Grado 1 con notificación estándar del teléfono, Grado 2 con tono de alerta y Grado 3 para alerta general con sirena (en 0-8 opera con tono alerta y vibración fuerte).",
                         isDark: isDark
                     )
                     
                     bulletPoint(
-                        icon: "cloud.fill",
-                        title: "Descarga de Actualizaciones",
-                        desc: "Corrección en la visualización del progreso de descargas OTA al evitar la compresión en tránsito.",
+                        icon: "trash.fill",
+                        title: "Gestión de Alertas y Órdenes",
+                        desc: "Comandancia ahora puede eliminar alertas oficiales y órdenes del día directamente desde su dispositivo móvil.",
                         isDark: isDark
                     )
 
                     bulletPoint(
-                        icon: "lock.fill",
-                        title: "Seguridad del Portal",
-                        desc: "Se removió la opción de cambiar organización en la pantalla de login para evitar desvinculaciones accidentales.",
+                        icon: "checkmark.circle.badge.questionmark.fill",
+                        title: "Visualización de Asistencia",
+                        desc: "Sincronización directa y corrección integral en el cálculo y visualización de asistencias en tiempo real.",
                         isDark: isDark
                     )
                 }
@@ -1014,13 +1037,17 @@ struct FullscreenEmergencyAlertView: View {
     @State private var pulseGlow: Bool = false
 
     var body: some View {
+        let claveColor = getClaveTacticalColor(clave: dispatch.clave)
+        let hasGps = (dispatch.lat != nil && dispatch.lat != 0 && dispatch.lng != nil && dispatch.lng != 0)
+
         ZStack {
-            // Intense Emergency Red Gradient Background
+            // Tactical Dark Emergency Gradient
             LinearGradient(
                 gradient: Gradient(colors: [
-                    Color(red: 0.88, green: 0.12, blue: 0.12),
-                    Color(red: 0.65, green: 0.05, blue: 0.05),
-                    Color(red: 0.40, green: 0.02, blue: 0.02)
+                    Color(red: 0.02, green: 0.03, blue: 0.07),
+                    Color(red: 0.12, green: 0.02, blue: 0.02),
+                    Color(red: 0.23, green: 0.03, blue: 0.03),
+                    Color(red: 0.05, green: 0.01, blue: 0.01)
                 ]),
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -1029,61 +1056,57 @@ struct FullscreenEmergencyAlertView: View {
 
             // Subtle pulsing background glow
             Circle()
-                .fill(Color.red.opacity(pulseGlow ? 0.35 : 0.15))
+                .fill(claveColor.opacity(pulseGlow ? 0.25 : 0.08))
                 .frame(width: 320, height: 320)
                 .blur(radius: 50)
                 .offset(y: -100)
                 .animation(Animation.easeInOut(duration: 1.2).repeatForever(autoreverses: true), value: pulseGlow)
 
+            // Animated Pulsing Emergency Screen Perimeter Border
+            PulsingPerimeterBorder(color: claveColor, strokeWidth: 3.5)
+                .ignoresSafeArea()
+
             VStack(spacing: 0) {
                 // Header: Logo and Emergency Header
-                VStack(spacing: 10) {
+                VStack(spacing: 8) {
                     ZStack {
                         Circle()
-                            .stroke(Color.white.opacity(0.3), lineWidth: 4)
-                            .frame(width: 78, height: 78)
-                            .scaleEffect(pulseGlow ? 1.12 : 1.0)
+                            .stroke(claveColor.opacity(0.4), lineWidth: 3)
+                            .frame(width: 74, height: 74)
+                            .scaleEffect(pulseGlow ? 1.1 : 1.0)
                             .opacity(pulseGlow ? 0.8 : 0.4)
                             .animation(Animation.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: pulseGlow)
 
                         Image(uiImage: viewModel.getInstitutionLogo())
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(width: 72, height: 72)
+                            .frame(width: 68, height: 68)
                             .clipShape(Circle())
-                            .overlay(Circle().stroke(Color.white, lineWidth: 2.5))
+                            .overlay(Circle().stroke(claveColor, lineWidth: 2))
                             .shadow(color: Color.black.opacity(0.4), radius: 6, x: 0, y: 3)
                     }
 
-                    Text("🚨 DESPACHO DE EMERGENCIA 🚨")
-                        .font(.system(size: 20, weight: .black))
-                        .foregroundColor(.white)
-                        .multilineTextAlignment(.center)
-                        .shadow(color: Color.black.opacity(0.5), radius: 4, x: 0, y: 2)
-
-                    Text("¡CONFIRMA TU ASISTENCIA AHORA!")
-                        .font(.system(size: 13, weight: .heavy))
-                        .foregroundColor(Color.white.opacity(0.95))
-                        .tracking(1)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 4)
-                        .background(Color.black.opacity(0.3))
-                        .cornerRadius(12)
+                    HStack(spacing: 6) {
+                        Text("🚨 DESPACHO DE EMERGENCIA 🚨")
+                            .font(.system(size: 14, weight: .black))
+                            .foregroundColor(.white)
+                            .tracking(0.5)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+                    .background(claveColor.opacity(0.2))
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(claveColor.opacity(0.5), lineWidth: 1))
                 }
-                .padding(.top, 48)
+                .padding(.top, 44)
 
-                Spacer(minLength: 12)
+                Spacer(minLength: 8)
 
-                // Center Card: Emergency Clave, Location, Details
-                VStack(spacing: 12) {
-                    Text("CLAVE DE ACTUACIÓN")
-                        .font(.system(size: 13, weight: .black))
-                        .tracking(2.5)
-                        .foregroundColor(Color.white.opacity(0.8))
-
+                // Center Card: Emergency Clave, Location, Details & Phase 1/2
+                VStack(spacing: 8) {
                     let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
                     Text(claveText)
-                        .font(.system(size: claveText.count > 6 ? 56 : 74, weight: .black))
+                        .font(.system(size: claveText.count > 6 ? 50 : 64, weight: .black))
                         .foregroundColor(.white)
                         .multilineTextAlignment(.center)
                         .minimumScaleFactor(0.5)
@@ -1094,82 +1117,83 @@ struct FullscreenEmergencyAlertView: View {
                     if !dispatch.lugar.isEmpty {
                         HStack(alignment: .center, spacing: 6) {
                             Image(systemName: "mappin.and.ellipse")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(claveColor)
                             Text(dispatch.lugar)
-                                .font(.system(size: 15, weight: .bold))
-                                .foregroundColor(.white)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(Color(red: 0.95, green: 0.96, blue: 0.98))
                                 .lineLimit(2)
                                 .multilineTextAlignment(.center)
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 8)
-                        .background(Color.black.opacity(0.35))
-                        .cornerRadius(14)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Color.black.opacity(0.5))
+                        .cornerRadius(10)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.15), lineWidth: 1))
+                        .padding(.horizontal, 16)
                     }
 
                     // Time & Date Pills
-                    HStack(spacing: 12) {
+                    HStack(spacing: 10) {
                         let hora = dispatch.horaDespacho.isEmpty ? "--:--" : dispatch.horaDespacho
                         HStack(spacing: 4) {
                             Image(systemName: "clock.fill")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                             Text(hora)
-                                .font(.system(size: 14, weight: .black))
+                                .font(.system(size: 13, weight: .black))
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.18))
-                        .cornerRadius(10)
+                        .foregroundColor(Color(red: 0.8, green: 0.84, blue: 0.88))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(8)
 
                         let fecha = dispatch.fechaDespacho.isEmpty ? DateFormatter.localizedString(from: Date(), dateStyle: .short, timeStyle: .none) : dispatch.fechaDespacho
                         HStack(spacing: 4) {
                             Image(systemName: "calendar")
-                                .font(.system(size: 12))
+                                .font(.system(size: 11))
                             Text(fecha)
-                                .font(.system(size: 14, weight: .black))
+                                .font(.system(size: 13, weight: .black))
                         }
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.18))
-                        .cornerRadius(10)
+                        .foregroundColor(Color(red: 0.8, green: 0.84, blue: 0.88))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.4))
+                        .cornerRadius(8)
                     }
 
-                    if !dispatch.preinforme.isEmpty {
-                        Text(dispatch.preinforme)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(Color.white.opacity(0.95))
-                            .multilineTextAlignment(.center)
-                            .lineLimit(3)
-                            .padding(.horizontal, 20)
-                            .padding(.vertical, 8)
-                            .background(Color.black.opacity(0.25))
-                            .cornerRadius(12)
-                            .padding(.horizontal, 20)
+                    Spacer().frame(height: 4)
+
+                    // Hero Area: Phase 2 Map or Phase 1 Radar
+                    if hasGps, let lat = dispatch.lat, let lng = dispatch.lng {
+                        IncidentMapPreview(lat: lat, lng: lng, clave: dispatch.clave, lugar: dispatch.lugar, isDark: true)
+                            .frame(height: 150)
+                            .padding(.horizontal, 16)
+                    } else {
+                        TacticalRadarScanner(clave: dispatch.clave, isDark: true, compact: true)
+                            .padding(.horizontal, 16)
                     }
 
                     if !dispatch.carros.isEmpty {
                         HStack(spacing: 6) {
                             Image(systemName: "flame.fill")
-                                .font(.system(size: 13))
+                                .font(.system(size: 12))
                             Text("UNIDADES: \(dispatch.carros)")
-                                .font(.system(size: 15, weight: .black))
+                                .font(.system(size: 13, weight: .black))
                         }
-                        .foregroundColor(Color(red: 0.99, green: 0.85, blue: 0.25)) // Amber/Yellow
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.4))
-                        .cornerRadius(12)
+                        .foregroundColor(Color(red: 0.99, green: 0.85, blue: 0.25))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color(red: 0.99, green: 0.85, blue: 0.25).opacity(0.4), lineWidth: 1))
                     }
                 }
 
-                Spacer(minLength: 16)
+                Spacer(minLength: 12)
 
                 // Action Buttons: ASISTIR & NO ASISTIR
-                VStack(spacing: 12) {
+                VStack(spacing: 10) {
                     Button(action: {
                         let impact = UIImpactFeedbackGenerator(style: .heavy)
                         impact.impactOccurred()
@@ -1180,13 +1204,13 @@ struct FullscreenEmergencyAlertView: View {
                     }) {
                         HStack(spacing: 10) {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 22, weight: .bold))
+                                .font(.system(size: 20, weight: .bold))
                             Text("ASISTIR")
-                                .font(.system(size: 19, weight: .black))
+                                .font(.system(size: 18, weight: .black))
                         }
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 58)
+                        .frame(height: 54)
                         .background(
                             LinearGradient(
                                 colors: [Color(red: 0.1, green: 0.78, blue: 0.55), Color(red: 0.05, green: 0.62, blue: 0.42)],
@@ -1194,7 +1218,7 @@ struct FullscreenEmergencyAlertView: View {
                                 endPoint: .bottom
                             )
                         )
-                        .cornerRadius(20)
+                        .cornerRadius(18)
                         .shadow(color: Color(red: 0.05, green: 0.62, blue: 0.42).opacity(0.5), radius: 8, x: 0, y: 4)
                     }
 
@@ -1208,23 +1232,23 @@ struct FullscreenEmergencyAlertView: View {
                     }) {
                         HStack(spacing: 8) {
                             Image(systemName: "xmark.circle")
-                                .font(.system(size: 18, weight: .bold))
+                                .font(.system(size: 16, weight: .bold))
                             Text("NO ASISTIR")
-                                .font(.system(size: 15, weight: .heavy))
+                                .font(.system(size: 14, weight: .heavy))
                         }
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Color.black.opacity(0.45))
+                        .frame(height: 46)
+                        .background(Color.black.opacity(0.5))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(Color.white.opacity(0.5), lineWidth: 1.5)
                         )
-                        .cornerRadius(18)
+                        .cornerRadius(16)
                     }
                 }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 48)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 36)
             }
         }
         .onAppear {

@@ -226,6 +226,8 @@ exports.enviarAlerta = onDocumentCreated(
     let typePush = (duracion === "C") ? "CHAT" : "ALERT";
 
     let senderId = "";
+    const gradoAlerta = String(data.gradoAlerta || "1").trim();
+
     if (typePush === "CHAT") {
         const partes = mensaje.split("|").filter(s => s.trim() !== "");
         if (partes.length > 0) {
@@ -234,6 +236,8 @@ exports.enviarAlerta = onDocumentCreated(
             senderId = parsed.senderId;
             mensaje = await cleanChatMessage(rawMsg);
         }
+    } else {
+        senderId = String(data.senderId || data.idRegistro || data.quienAlerta || "").trim();
     }
 
     const aQuien = String(data.aQuienAlerta || "").trim().toUpperCase();
@@ -249,6 +253,7 @@ exports.enviarAlerta = onDocumentCreated(
         type: String(typePush),
         payloadId: String(id),
         clave: "",
+        gradoAlerta: String(gradoAlerta),
         senderId: String(senderId)
       },
       android: {
@@ -918,6 +923,115 @@ exports.actualizarEstadoPersonal = onDocumentUpdated(
     }
   }
 );
+
+// 8. SOLICITUD DE APERTURA DE PUERTA / ACCESO A LA CENTRAL
+exports.solicitarAperturaPuerta = onDocumentCreated(
+  "solicitudes_puerta/{id}",
+  async (event) => {
+    const data = event.data ? event.data.data() : null;
+    if (!data) return null;
+
+    const id = event.params.id;
+    const idRadial = String(data.idRadial || "").trim();
+    const nombreBombero = String(data.nombreBombero || "Bombero").trim();
+    const idRegistro = String(data.idRegistro || "").trim();
+    const formattedName = formatFirefighterName(nombreBombero);
+
+    const titleText = "🚪 SOLICITUD DE ACCESO";
+    const bodyText = `${idRadial ? idRadial + " - " : ""}${formattedName} está en la entrada`;
+
+    const db = admin.firestore();
+
+    // 1. Obtener el operador activo en la Central desde accesos/central
+    let operatorId = null;
+    try {
+      const centralSnap = await db.collection("accesos").document("central").get();
+      if (centralSnap.exists) {
+        const centralData = centralSnap.data();
+        if (centralData.estado === "activo" && centralData.idRegistro) {
+          operatorId = String(centralData.idRegistro).trim();
+        }
+      }
+    } catch (e) {
+      console.error("Error al consultar operador activo en accesos/central:", e);
+    }
+
+    const payload = {
+      notification: {
+        title: titleText,
+        body: bodyText
+      },
+      data: {
+        title: titleText,
+        body: bodyText,
+        type: "DOOR_REQUEST",
+        requestId: String(id),
+        idRadial: String(idRadial),
+        nombreBombero: String(nombreBombero),
+        idRegistro: String(idRegistro),
+        click_action: "FLUTTER_NOTIFICATION_CLICK"
+      },
+      android: {
+        priority: "high",
+        notification: {
+          sound: "default",
+          channelId: "sisbom_alerts_channel",
+          clickAction: "OPEN_DOOR_REQUEST"
+        }
+      },
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: titleText,
+              body: bodyText
+            },
+            sound: "default",
+            category: "DOOR_REQUEST_ALERT",
+            contentAvailable: true
+          }
+        }
+      }
+    };
+
+    const promises = [];
+
+    // Enviar EXCLUSIVAMENTE al operador activo (usuario_ID) y/o topic central_operador
+    if (operatorId) {
+      const safeOpTopic = operatorId.replace(/\s+/g, "");
+      const opPayload = Object.assign({}, payload, { topic: "usuario_" + safeOpTopic });
+      promises.push(
+        admin.messaging().send(opPayload)
+          .then(() => console.log(`Push de timbre enviado EXCLUSIVAMENTE al operador: usuario_${safeOpTopic}`))
+          .catch(err => console.error("Error enviando push a operador:", err))
+      );
+    } else {
+      // Si no hay idRegistro específico pero la consola está abierta, enviar a central_operador
+      const centralPayload = Object.assign({}, payload, { topic: "central_operador" });
+      promises.push(
+        admin.messaging().send(centralPayload)
+          .then(() => console.log("Push de timbre enviado a central_operador (sin operador individual)"))
+          .catch(err => console.error("Error enviando push a central_operador:", err))
+      );
+    }
+
+    await Promise.all(promises);
+
+    try {
+      await event.data.ref.update({
+        pushSent: true,
+        pushSentAt: Date.now()
+      });
+    } catch (e) {}
+
+    return null;
+  }
+);
+
 
 
 

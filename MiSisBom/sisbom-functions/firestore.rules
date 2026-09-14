@@ -159,6 +159,12 @@ service cloud.firestore {
     }
 
     match /accesos/comandancia/{document=**} {
+      allow read, write: if isComandanteOrAdmin() || hasModulo('accesos');
+      allow read: if isAuthenticated();
+    }
+
+    // solicitudes_puerta collection (Timbre de acceso a la Central)
+    match /solicitudes_puerta/{id} {
       allow read, write: if true;
     }
 

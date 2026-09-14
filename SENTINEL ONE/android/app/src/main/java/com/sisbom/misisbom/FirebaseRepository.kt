@@ -569,6 +569,18 @@ class FirebaseRepository {
             .addOnFailureListener { onFailure(it) }
     }
 
+    fun deleteAlert(alertId: String, onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {
+        if (isReadOnly) {
+            android.util.Log.w("SisBom", "Write deleteAlert blocked: Read-Only Mode")
+            onSuccess()
+            return
+        }
+        db.collection("alertas").document(alertId)
+            .delete()
+            .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener { onFailure(it) }
+    }
+
     fun createAlert(alert: Alert, onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {
         if (isReadOnly) {
             android.util.Log.w("SisBom", "Write createAlert blocked: Read-Only Mode")
@@ -590,6 +602,39 @@ class FirebaseRepository {
         db.collection("accesos").document("central")
             .update("puerta", true)
             .addOnSuccessListener { onSuccess() }
+            .addOnFailureListener { onFailure(it) }
+    }
+
+    fun solicitarAperturaPuerta(
+        idRegistro: String,
+        idRadial: String,
+        nombreBombero: String,
+        onSuccess: () -> Unit,
+        onFailure: (Exception) -> Unit
+    ) {
+        if (isReadOnly) {
+            android.util.Log.w("SisBom", "Write solicitarAperturaPuerta blocked: Read-Only Mode")
+            onSuccess()
+            return
+        }
+        val now = java.text.SimpleDateFormat("dd-MM-yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val docData = hashMapOf(
+            "idRegistro" to idRegistro,
+            "idRadial" to idRadial,
+            "nombreBombero" to nombreBombero,
+            "fecha" to now,
+            "timestamp" to com.google.firebase.firestore.FieldValue.serverTimestamp(),
+            "estado" to "pendiente",
+            "pushSent" to false
+        )
+        db.collection("solicitudes_puerta")
+            .add(docData)
+            .addOnSuccessListener {
+                try {
+                    db.collection("accesos").document("central").update("solicitudPuerta", docData)
+                } catch (_: Exception) {}
+                onSuccess()
+            }
             .addOnFailureListener { onFailure(it) }
     }
 

@@ -67,6 +67,7 @@ struct AlertItemCard: View {
     @ObservedObject var viewModel: SisBomViewModel
     let onChatClick: () -> Void
     @State private var showDetailSheet: Bool = false
+    @State private var showDeleteConfirm: Bool = false
 
     var body: some View {
         let isDark = viewModel.isDarkMode
@@ -78,11 +79,24 @@ struct AlertItemCard: View {
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .contains(myRadial)
         let isChat = alert.duracion.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "C"
+        let isComandante = (viewModel.currentUser?.idRadial == "1" || viewModel.currentUser?.idRadial == "01" || (viewModel.currentUser?.cargo.uppercased().contains("COMANDANTE") == true))
         
         VStack(spacing: 8) {
-            // Bookmark Ribbon Row
+            // Action Buttons Row (Delete for Comandante + Pin Bookmark)
             HStack {
+                if isComandante {
+                    Button(action: {
+                        showDeleteConfirm = true
+                    }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(Color.bomberosRed.opacity(0.85))
+                            .padding(4)
+                    }
+                }
+                
                 Spacer()
+                
                 Button(action: {
                     viewModel.toggleAlertPin(alert: alert)
                 }) {
@@ -185,6 +199,16 @@ struct AlertItemCard: View {
         )
         .sheet(isPresented: $showDetailSheet) {
             AlertDetailModal(alert: alert, viewModel: viewModel, isPresented: $showDetailSheet)
+        }
+        .alert(isPresented: $showDeleteConfirm) {
+            Alert(
+                title: Text("Eliminar Alerta"),
+                message: Text("¿Está seguro de eliminar esta alerta permanentemente de la cartelera?"),
+                primaryButton: .destructive(Text("Eliminar")) {
+                    viewModel.deleteAlert(alertId: alert.idAlerta)
+                },
+                secondaryButton: .cancel(Text("Cancelar"))
+            )
         }
     }
 }

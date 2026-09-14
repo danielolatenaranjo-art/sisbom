@@ -75,7 +75,7 @@ val DarkCardSurface = Color(0xFF120A0A)       // rgba(15, 23, 42, 0.45)
 val LightCardBorder = Color(0xFFE2E8F0)       // rgba(255, 255, 255, 0.4)
 val DarkCardBorder = Color(0x1AEF4444)        // rgba(255, 255, 255, 0.05)
 
-// Compatibilidad con el código existente
+// Colores de compatibilidad
 val BgCream = Color(0xFFF8FAFC)
 val BgCreamSecondary = Color(0xFFFFF0EC)
 val TextDark = Color(0xFF1E293B)
@@ -85,6 +85,245 @@ val CardSurface = Color.White
 val CardBorder = Color(0xFFEDE8E3)
 val SlateLight = Color(0xFFF8FAFC)
 val SlateBorder = Color(0x33CCCCCC)
+
+// Tactical Emergency Clave Colors & Indicators
+fun getClaveTacticalColor(clave: String): Color {
+    val cleanKey = clave.trim().uppercase()
+    return when {
+        cleanKey == "10-0" || cleanKey.startsWith("10-0") || cleanKey.contains("10-30") || cleanKey.contains("10_30") -> Color(0xFFDC2626) // Crimson Fire
+        cleanKey == "10-1" -> Color(0xFFEA580C) // Orange Vehicle Fire
+        cleanKey == "10-2" || cleanKey.contains("FORESTAL") || cleanKey.contains("PASTIZAL") -> Color(0xFFD97706) // Amber Wildfire
+        cleanKey == "10-3" || cleanKey == "10-8" -> Color(0xFF0284C7) // Rescue Cyan/Blue
+        cleanKey == "10-4" -> Color(0xFFE11D48) // Vehicle Accident Rose/Red
+        cleanKey == "10-5" || cleanKey.contains("HAZMAT") -> Color(0xFF7C3AED) // Hazmat Purple
+        cleanKey == "10-6" || cleanKey.contains("GAS") -> Color(0xFF0D9488) // Gas Teal
+        cleanKey == "10-7" || cleanKey.contains("ELECTR") -> Color(0xFFEAB308) // Electrical Yellow
+        cleanKey == "10-9" -> Color(0xFFC2410C) // Other Service Amber
+        cleanKey == "10-10" -> Color(0xFF0369A1) // Debris / Collapse Slate-Blue
+        cleanKey == "10-11" -> Color(0xFF2563EB) // Special Service Blue
+        cleanKey == "10-12" -> Color(0xFF4F46E5) // Mutual Aid Indigo
+        cleanKey == "10-14" -> Color(0xFF059669) // Emerald
+        cleanKey.contains("9-0") || cleanKey.contains("COMANDANCIA") -> Color(0xFFDC2626)
+        else -> Color(0xFFDC2626)
+    }
+}
+
+fun getClavePinHex(clave: String): String {
+    val cleanKey = clave.trim().uppercase()
+    return when {
+        cleanKey == "10-0" || cleanKey.startsWith("10-0") || cleanKey.contains("10-30") || cleanKey.contains("10_30") -> "#DC2626"
+        cleanKey == "10-1" -> "#EA580C"
+        cleanKey == "10-2" || cleanKey.contains("FORESTAL") || cleanKey.contains("PASTIZAL") -> "#D97706"
+        cleanKey == "10-3" || cleanKey == "10-8" -> "#0284C7"
+        cleanKey == "10-4" -> "#E11D48"
+        cleanKey == "10-5" || cleanKey.contains("HAZMAT") -> "#7C3AED"
+        cleanKey == "10-6" || cleanKey.contains("GAS") -> "#0D9488"
+        cleanKey == "10-7" || cleanKey.contains("ELECTR") -> "#EAB308"
+        cleanKey == "10-9" -> "#C2410C"
+        cleanKey == "10-10" -> "#0369A1"
+        cleanKey == "10-11" -> "#2563EB"
+        cleanKey == "10-12" -> "#4F46E5"
+        cleanKey == "10-14" -> "#059669"
+        else -> "#DC2626"
+    }
+}
+
+@Composable
+fun TacticalRadarScanner(
+    clave: String,
+    modifier: Modifier = Modifier,
+    isDark: Boolean = true,
+    compact: Boolean = false
+) {
+    val claveColor = getClaveTacticalColor(clave)
+    val infiniteTransition = rememberInfiniteTransition(label = "RadarTransition")
+    
+    // Rotating radar beam angle
+    val radarAngle by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2800, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "RadarAngle"
+    )
+
+    // Pulsing core ping
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "PulseScale"
+    )
+
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "PulseAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(if (compact) 120.dp else 165.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (isDark) Color(0xFF030712) else Color(0xFF0F172A))
+            .border(1.dp, if (isDark) Color(0x33EF4444) else Color(0x33DC2626), RoundedCornerShape(16.dp))
+    ) {
+        // Radar Canvas Grid & Sweep
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val maxRadius = Math.min(size.width, size.height) * 0.45f
+
+            // Concentric range circles
+            val ringCount = 3
+            for (i in 1..ringCount) {
+                val r = maxRadius * (i.toFloat() / ringCount)
+                drawCircle(
+                    color = claveColor.copy(alpha = 0.18f),
+                    radius = r,
+                    center = center,
+                    style = Stroke(width = 1.2f)
+                )
+            }
+
+            // Crosshair lines
+            drawLine(
+                color = claveColor.copy(alpha = 0.22f),
+                start = Offset(center.x - maxRadius, center.y),
+                end = Offset(center.x + maxRadius, center.y),
+                strokeWidth = 1f
+            )
+            drawLine(
+                color = claveColor.copy(alpha = 0.22f),
+                start = Offset(center.x, center.y - maxRadius),
+                end = Offset(center.x, center.y + maxRadius),
+                strokeWidth = 1f
+            )
+
+            // Radar Sweep Sector
+            drawArc(
+                brush = Brush.sweepGradient(
+                    0f to Color.Transparent,
+                    0.85f to Color.Transparent,
+                    0.95f to claveColor.copy(alpha = 0.15f),
+                    1f to claveColor.copy(alpha = 0.55f),
+                    center = center
+                ),
+                startAngle = radarAngle - 90f,
+                sweepAngle = 90f,
+                useCenter = true,
+                topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
+                size = androidx.compose.ui.geometry.Size(maxRadius * 2, maxRadius * 2)
+            )
+
+            // Pulsing target beacon
+            drawCircle(
+                color = claveColor.copy(alpha = pulseAlpha * 0.35f),
+                radius = 16f * pulseScale,
+                center = center
+            )
+            drawCircle(
+                color = Color.White,
+                radius = 4.5f,
+                center = center
+            )
+        }
+
+        // Top Status Badge
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .background(Color(0xCC000000), RoundedCornerShape(6.dp))
+                .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                .padding(horizontal = 7.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(Color(0xFFF59E0B), RoundedCornerShape(50))
+            )
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(
+                text = "FASE 1: SIN GPS",
+                color = Color(0xFFFDE68A),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.5.sp
+            )
+        }
+
+        // Center / Bottom Tactical Description
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "🛰️ RASTREANDO GEORREFERENCIA...",
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                letterSpacing = 0.8.sp
+            )
+            Text(
+                text = "Central despachando coordenadas y pre-informe",
+                color = Color(0xFF94A3B8),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun PulsingPerimeterBorder(
+    modifier: Modifier = Modifier,
+    color: Color = Color(0xFFEF4444),
+    strokeWidth: Dp = 3.5.dp
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "PerimeterTransition")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "PerimeterAlpha"
+    )
+
+    Canvas(modifier = modifier.fillMaxSize()) {
+        val strokePx = strokeWidth.toPx()
+        // Draw pulsing outer glow
+        drawRoundRect(
+            color = color.copy(alpha = alpha * 0.4f),
+            topLeft = Offset(strokePx / 2f, strokePx / 2f),
+            size = androidx.compose.ui.geometry.Size(size.width - strokePx, size.height - strokePx),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx(), 24.dp.toPx()),
+            style = Stroke(width = strokePx * 2f)
+        )
+        // Draw solid crisp inner stroke
+        drawRoundRect(
+            color = color.copy(alpha = alpha),
+            topLeft = Offset(strokePx / 2f, strokePx / 2f),
+            size = androidx.compose.ui.geometry.Size(size.width - strokePx, size.height - strokePx),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx(), 24.dp.toPx()),
+            style = Stroke(width = strokePx)
+        )
+    }
+}
 
 @Composable
 fun SisBomBackground(

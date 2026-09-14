@@ -194,6 +194,7 @@ fun MainScreen(viewModel: SisBomViewModel) {
                         .fillMaxSize()
                         .background(Color.Transparent)
                 ) {
+                    val isDark = LocalDarkMode.current
                     val statusBarPadding = androidx.compose.foundation.layout.WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
                     val density = androidx.compose.ui.platform.LocalDensity.current
                     val screenHeightPx = with(density) { androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx() }
@@ -208,7 +209,7 @@ fun MainScreen(viewModel: SisBomViewModel) {
                     val todayDay = cal.get(java.util.Calendar.DAY_OF_MONTH)
                     val isDecember8th = (todayMonth == java.util.Calendar.DECEMBER && todayDay == 8)
 
-                    val topPaddingValue = 112.dp
+                    val topPaddingValue = 104.dp
                     val customPaddingValues = PaddingValues(
                         top = topPaddingValue + saasTopExtra,
                         bottom = navigationBarPadding + 88.dp
@@ -218,7 +219,7 @@ fun MainScreen(viewModel: SisBomViewModel) {
                         state = pagerState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(top = statusBarPadding + 58.dp)
+                            .padding(top = statusBarPadding + 76.dp)
                             .clipToBounds()
                     ) { page ->
                         when (visibleTabs[page]) {
@@ -237,6 +238,33 @@ fun MainScreen(viewModel: SisBomViewModel) {
                             .fillMaxWidth()
                             .align(Alignment.TopCenter)
                     ) {
+                        // Fondo protector superior para cubrir status bar y área del logo ampliado
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(statusBarPadding + 76.dp)
+                                .background(
+                                    if (isDark) {
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                Color(0xFF0F0101),
+                                                Color(0xFF0F0101).copy(alpha = 0.95f),
+                                                Color(0xFF0F0101).copy(alpha = 0.8f),
+                                                Color.Transparent
+                                            )
+                                        )
+                                    } else {
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                LightBg,
+                                                LightBg.copy(alpha = 0.95f),
+                                                LightBg.copy(alpha = 0.8f),
+                                                Color.Transparent
+                                            )
+                                        )
+                                    }
+                                )
+                        )
                         Column(modifier = Modifier.fillMaxWidth()) {
                             TopAppBarView(viewModel) {
                                 scope.launch { drawerState.open() }
@@ -765,14 +793,14 @@ fun BottomNavigationBarView(viewModel: SisBomViewModel) {
             modifier = Modifier
                 .fillMaxWidth()
                 .height(68.dp)
-                .shadow(elevation = 12.dp, shape = RoundedCornerShape(28.dp), spotColor = if (isDark) Color.Black else Color(0x33000000))
+                .shadow(elevation = 14.dp, shape = RoundedCornerShape(28.dp), spotColor = if (isDark) Color(0x803B0A0A) else Color(0x33000000))
                 .background(
-                    if (isDark) Color(0xFF0F172A).copy(alpha = 0.95f) else Color.White.copy(alpha = 0.95f),
+                    if (isDark) Color(0xFF000000) else Color.White.copy(alpha = 0.95f),
                     RoundedCornerShape(28.dp)
                 )
                 .border(
-                    1.dp,
-                    if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFFE2E8F0),
+                    1.2.dp,
+                    if (isDark) Color(0xFF450A0A) else Color(0xFFE2E8F0),
                     RoundedCornerShape(28.dp)
                 ),
             contentAlignment = Alignment.CenterStart
@@ -1387,8 +1415,9 @@ fun ProfileDrawerContent(viewModel: SisBomViewModel, onClose: () -> Unit) {
 
         // Sección: TURNO DE CENTRAL DE ALARMAS
         val isOpActive = viewModel.centralOperatorName.isNotEmpty()
-        val isComandanteOp = user.cargo.trim().uppercase() == "COMANDANTE" && listOf("1", "01", "2", "02", "3", "03").contains(user.idRadial.trim())
-        val canCloseOp = isOpActive && (viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro) || isComandanteOp)
+        val isRadial1 = user.idRadial.trim() == "1" || user.idRadial.trim() == "01"
+        val isOperator = viewModel.isCentralActive || (viewModel.centralOperatorId.isNotEmpty() && viewModel.centralOperatorId == user.idRegistro)
+        val canCloseOp = isOpActive && (isOperator || isRadial1)
 
         if (canCloseOp) {
             Spacer(modifier = Modifier.height(24.dp))

@@ -787,6 +787,9 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     }
             }
 
+            var isFirstDispatchesSync = true
+            var isFirstAlertsSync = true
+
             viewModelScope.launch {
                 // Sincronizar despachos
                 repository.getDispatchesFlow()
@@ -795,6 +798,15 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     val oldList = dispatchesList
                     dispatchesList = list
                     saveStringToPrefs("cache_dispatches", serializeDispatches(list))
+
+                    if (isFirstDispatchesSync) {
+                        isFirstDispatchesSync = false
+                        list.forEach { d ->
+                            knownDispatchIds.add(d.idServicio)
+                            PlayedSoundsTracker.markPlayed(d.idServicio)
+                        }
+                        return@collectLatest
+                    }
 
                     list.forEach { d ->
                         val oldDispatch = oldList.find { it.idServicio == d.idServicio }
@@ -806,7 +818,7 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                         val isEscalation = isEscalation1030 || isEscalationForestal
 
                         // 1. Escalamiento a ALARMA DECLARADA (10-0 -> 10-30 o 10-2 -> ALARMA FORESTAL)
-                        if (isEscalation && d.operadorFinal.isEmpty() && !isFirstCheck) {
+                        if (isEscalation && d.operadorFinal.isEmpty()) {
                             val trackerKey = "${d.idServicio}_${if (isEscalation1030) "10_30" else "FORESTAL"}"
                             if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
                                 PlayedSoundsTracker.markPlayed(trackerKey)
@@ -847,7 +859,7 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                             val is08 = currentUser?.estado == "0-8" || currentUser?.estado == "10-8"
                             val shouldNotify = if (is08) is1030OrEscalation else (currentUser?.estado != "0-8")
 
-                            if (!isFirstCheck && d.operadorFinal.isEmpty() && shouldNotify && !hasCDS && !isCentralActive) {
+                            if (d.operadorFinal.isEmpty() && shouldNotify && !hasCDS && !isCentralActive) {
                                 if (d.idServicio.isNotEmpty()) {
                                     if (!PlayedSoundsTracker.hasPlayed(d.idServicio)) {
                                         PlayedSoundsTracker.markPlayed(d.idServicio)
@@ -926,20 +938,51 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                         }
                     }
 
+                    if (isFirstAlertsSync) {
+                        isFirstAlertsSync = false
+                        list.forEach { a ->
+                            knownAlertIds.add(a.idAlerta)
+                        }
+                        return@collectLatest
+                    }
+
                     list.forEach { a ->
                         if (!knownAlertIds.contains(a.idAlerta)) {
                             knownAlertIds.add(a.idAlerta)
-                            if (!isFirstCheck) {
-                                val dateStr = a.fechaAlerta.ifEmpty { a.fechaOrden }
-                                val isTooOld = TimeValidation.isTooOld(dateStr, a.horaAlerta)
-                                val hasCDS = currentUser?.hasActiveCDS() == true
-                                val is08 = currentUser?.estado == "0-8" || currentUser?.estado == "10-8"
-                                if (!isTooOld && !isAirplaneMode && !is08 && !hasCDS) {
-                                    if (a.duracion == "C") {
+                            val dateStr = a.fechaAlerta.ifEmpty { a.fechaOrden }
+                            val isTooOld = TimeValidation.isTooOld(dateStr, a.horaAlerta)
+                            val hasCDS = currentUser?.hasActiveCDS() == true
+                            val is08 = currentUser?.estado == "0-8" || currentUser?.estado == "10-8"
+                            val isAbsoluteSilence = prefs.getBoolean("SILENCIO_ABSOLUTO", false) || (currentUser?.estado?.contains("ABSOLUTO") == true)
+                            val isExcluded = hasCDS || isAbsoluteSilence || currentUser?.hasActiveSuspension() == true || currentUser?.hasActiveLicense() == true || currentUser?.estado == "PERMISO"
+
+                            // Filtrar si la alerta fue emitida por mí mismo
+                            val myId = currentUser?.idRegistro?.trim()?.lowercase() ?: ""
+                            val myName = currentUser?.nombreBombero?.trim()?.lowercase() ?: ""
+                            val myRadial = currentUser?.idRadial?.trim()?.lowercase() ?: ""
+                            val alertSender = a.quienAlerta.trim().lowercase()
+                            val isSelfAlert = (myId.isNotEmpty() && alertSender.contains(myId)) ||
+                                              (myName.isNotEmpty() && alertSender.contains(myName)) ||
+                                              (myRadial.isNotEmpty() && (alertSender == myRadial || alertSender.startsWith("$myRadial ") || alertSender.startsWith("$myRadial-")))
+
+                            if (!isTooOld && !isAirplaneMode && !isExcluded && !isSelfAlert) {
+                                val grado = a.gradoAlerta.trim()
+                                if (grado == "3") {
+                                    if (is08) {
                                         SoundPlayer.playSound(context, "alerta")
+                                        SoundPlayer.triggerVibration(context, true)
                                     } else {
                                         SoundPlayer.playSound(context, "alerta")
+                                        SoundPlayer.triggerVibration(context, true)
                                     }
+                                } else if (grado == "2") {
+                                    if (!is08) {
+                                        SoundPlayer.playSound(context, "alerta")
+                                    }
+                                    SoundPlayer.triggerVibration(context, false)
+                                } else {
+                                    // Grado 1
+                                    SoundPlayer.triggerVibration(context, false)
                                 }
                             }
                         }
@@ -1489,6 +1532,22 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun solicitarAperturaPuerta(onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {
+        val user = currentUser ?: run {
+            onFailure(Exception("Usuario no autenticado"))
+            return
+        }
+        ensureFreshSession {
+            repository.solicitarAperturaPuerta(
+                idRegistro = user.idRegistro,
+                idRadial = user.idRadial,
+                nombreBombero = user.nombreBombero,
+                onSuccess = onSuccess,
+                onFailure = onFailure
+            )
+        }
+    }
+
     fun publishAlert(razon: String, mensaje: String, grado: String, duracion: String, aQuien: String, onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {
         val user = currentUser ?: return
         viewModelScope.launch(Dispatchers.IO) {
@@ -1603,6 +1662,21 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     onFailure(e)
                 }
             }
+        }
+    }
+
+    fun deleteAlert(alertId: String) {
+        if (alertId.isEmpty()) return
+        ensureFreshSession {
+            repository.deleteAlert(
+                alertId = alertId,
+                onSuccess = {
+                    showSystemToast("Alerta eliminada correctamente")
+                },
+                onFailure = { e ->
+                    showSystemToast("Error al eliminar alerta: ${e.localizedMessage}")
+                }
+            )
         }
     }
 

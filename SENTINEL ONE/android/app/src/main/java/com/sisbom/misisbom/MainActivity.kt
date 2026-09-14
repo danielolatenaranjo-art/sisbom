@@ -37,6 +37,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -197,41 +201,42 @@ object NotificationHelper {
             }
             notificationManager.createNotificationChannel(silentChannel)
 
-            // 6. Alertas Grado 1 (Notificación visual únicamente)
+            // 6. Alertas Grado 1 (Notificación estándar con sonido normal del teléfono y vibración)
             val alertsG1Channel = NotificationChannel(
                 "sisbom_alertas_g1_v1",
-                "Alertas - Grado 1 (Silencioso)",
+                "Alertas - Grado 1 (Preventivo)",
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Notificaciones de alerta visuales sin sonido ni vibración"
-                setSound(null, null)
-                enableVibration(false)
+                description = "Notificaciones de alerta preventiva con sonido estándar y vibración"
+                setSound(android.provider.Settings.System.DEFAULT_NOTIFICATION_URI, notificationAttributes)
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 300, 150, 300)
             }
             notificationManager.createNotificationChannel(alertsG1Channel)
 
-            // 7. Alertas Grado 2 (Vibración únicamente)
+            // 7. Alertas Grado 2 (Vibración y sonido alerta.mp3 a volumen normal)
             val alertsG2Channel = NotificationChannel(
                 "sisbom_alertas_g2_v1",
-                "Alertas - Grado 2 (Vibración)",
+                "Alertas - Grado 2 (Alistamiento)",
                 NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
-                description = "Notificaciones de alerta con vibración y sin sonido"
-                setSound(null, null)
+                description = "Notificaciones de alerta con tono alerta.mp3 y vibración"
+                setSound(alertSound, notificationAttributes)
                 enableVibration(true)
                 vibrationPattern = longArrayOf(0, 500, 200, 500)
             }
             notificationManager.createNotificationChannel(alertsG2Channel)
 
-            // 8. Alertas Grado 3 (Sonido Fuerte + Vibración)
+            // 8. Alertas Grado 3 (Sonido Fuerte alerta.mp3 + Vibración Fuerte)
             val alertsG3Channel = NotificationChannel(
                 "sisbom_alertas_g3_v1",
-                "Alertas - Grado 3 (Sonido Fuerte)",
+                "Alertas - Grado 3 (Alerta General)",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Notificaciones de alerta con vibración y sonido fuerte"
+                description = "Notificaciones de alerta general con sonido fuerte y vibración continua"
                 setSound(alertSound, alarmAttributes)
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 500, 200, 500)
+                vibrationPattern = longArrayOf(0, 800, 200, 800, 200, 800)
                 setBypassDnd(true)
             }
             notificationManager.createNotificationChannel(alertsG3Channel)
@@ -528,17 +533,17 @@ object NotificationHelper {
             "ALERT" -> {
                 if (isCentral) {
                     "sisbom_actions_v1"
-                } else if (is08) {
-                    "sisbom_dispatch_silent_v1"
                 } else {
                     val isOrden = title.contains("ORDEN", ignoreCase = true)
                     if (isOrden) {
-                        "sisbom_alertas_critical_v10"
+                        if (is08) "sisbom_dispatch_silent_v1" else "sisbom_alertas_critical_v10"
                     } else {
                         when (gradoAlerta) {
                             "1" -> "sisbom_alertas_g1_v1"
                             "2" -> "sisbom_alertas_g2_v1"
-                            "3" -> "sisbom_alertas_g3_v1"
+                            "3" -> {
+                                if (is08) "sisbom_alertas_g2_v1" else "sisbom_alertas_g3_v1"
+                            }
                             else -> "sisbom_alertas_g1_v1"
                         }
                     }
@@ -562,6 +567,8 @@ object NotificationHelper {
         val is66 = title.contains("6-6") || message.contains("6-6")
         val isOrden = type == "ORDEN" || title.contains("ORDEN", ignoreCase = true)
         val isGrade3 = type == "ALERT" && gradoAlerta == "3"
+        val isGrade2 = type == "ALERT" && gradoAlerta == "2"
+        val isGrade1 = type == "ALERT" && (gradoAlerta == "1" || gradoAlerta.isEmpty())
 
         val isConductor = if (cachedUser != null) {
             try {
@@ -617,15 +624,42 @@ object NotificationHelper {
             } else {
                 playLoud = !isCentral
             }
-        } else {
-            // Para despachos generales: suena fuerte si no es central ni 0-8.
-            // Para DISPATCH_UPDATE: SOLO suena si es escalamiento (isEscalationAlarm). Si es un cambio de clave ordinario (ej: 10-4 a 10-7), NO SUENA!
-            playLoud = (type == "DISPATCH" || isOrden || isGrade3) && !isCentral
-            if ((is08 || isCDS)) {
+        } else if (isGrade3) {
+            // Grado 3:
+            // Para 0-9: Suena alerta.mp3 FUERTE a volumen máximo (playLoud = true) + Vibración Fuerte.
+            // Para 0-8: Funciona como Grado 2: SIN sonido fuerte/alarma, pero SÍ Vibración Fuerte + tono alerta.mp3 a volumen normal.
+            val isAbsoluteSilence = prefs.getBoolean("SILENCIO_ABSOLUTO", false) || userStatus.contains("ABSOLUTO")
+            if (isCDS || isExcluded || isAbsoluteSilence) {
                 playLoud = false
+            } else if (is08) {
+                playLoud = false
+                forceVibrateOnly = true
+                if (!isCentral && !forceSilent) {
+                    SoundPlayer.playSound(context, "alerta")
+                }
+            } else {
+                playLoud = !isCentral && !forceSilent
             }
-            if (forceSilent) {
-                playLoud = false
+        } else if (isGrade2) {
+            // Grado 2: Tono alerta.mp3 a volumen normal de notificación + vibración
+            val isAbsoluteSilence = prefs.getBoolean("SILENCIO_ABSOLUTO", false) || userStatus.contains("ABSOLUTO")
+            playLoud = false
+            if (!isCDS && !isExcluded && !isAbsoluteSilence && !isCentral && !forceSilent) {
+                SoundPlayer.playSound(context, "alerta")
+                SoundPlayer.triggerVibration(context, false)
+            }
+        } else if (isGrade1) {
+            // Grado 1: Sonido normal del teléfono / notificación estándar + vibración
+            playLoud = false
+            if (!isCDS && !isExcluded && !isCentral && !forceSilent) {
+                SoundPlayer.triggerVibration(context, false)
+            }
+        } else {
+            // Para despachos generales: suena fuerte si es 0-9 y no central.
+            // Para 0-8: NO suena sirena, pero SÍ tiene vibración fuerte.
+            playLoud = (type == "DISPATCH" || isOrden) && !isCentral && !is08 && !isCDS && !forceSilent
+            if (type == "DISPATCH" && is08 && !isCDS && !isExcluded && !forceSilent) {
+                forceVibrateOnly = true
             }
         }
 
@@ -875,6 +909,17 @@ object NotificationHelper {
                     PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
                 )
                 builder.addAction(android.R.drawable.ic_menu_save, "Anclar", pinPending)
+            } else if (type == "DOOR_REQUEST") {
+                val openIntent = Intent(baseIntent).apply {
+                    putExtra("ACTION_TYPE", "OPEN_DOOR")
+                }
+                val openPending = PendingIntent.getBroadcast(
+                    context,
+                    payloadId.hashCode() + 4,
+                    openIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                )
+                builder.addAction(android.R.drawable.ic_lock_idle_lock, "ABRIR PUERTA", openPending)
             }
         }
 
@@ -1712,156 +1757,232 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                 }
             }
 
+            val claveTacticalColor = getClaveTacticalColor(dispatch.clave)
+            val hasGps = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFFB91C1C)) // Red background
-                    .systemBarsPadding()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF030712), // Deep tactical black
+                                Color(0xFF1E0505), // Dark blood tint
+                                Color(0xFF3B0707), // Emergency dark crimson
+                                Color(0xFF0F0202)  // Bottom stealth black
+                            )
+                        )
+                    )
             ) {
+                // Animated Pulsing Emergency Screen Perimeter Border
+                PulsingPerimeterBorder(
+                    modifier = Modifier.fillMaxSize(),
+                    color = claveTacticalColor,
+                    strokeWidth = 3.5.dp
+                )
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                        .systemBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
-                    // Header / Pulsing icon / Logo
+                    // Header: Institution Logo, Pulsing Icon & Alarm Banner
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(top = 16.dp)
+                        modifier = Modifier.padding(top = 8.dp)
                     ) {
-                        coil.compose.AsyncImage(
-                            model = viewModel.getClientLogoModel(),
-                            contentDescription = "Logo",
-                            placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
-                            error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
-                            modifier = Modifier
-                                .size(72.dp)
-                                .clip(CircleShape)
-                                .border(2.dp, Color.White, CircleShape),
-                            contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = "🚨 DESPACHO DE EMERGENCIA 🚨",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "¡CONFIRMA TU ASISTENCIA AHORA!",
-                            color = Color.White.copy(alpha = 0.9f),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-
-                    // Clave, Hora y Fecha (Directo sobre el rojo, sin tarjeta)
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = "CLAVE",
-                            color = Color.White.copy(alpha = 0.75f),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = 2.sp
-                        )
-                        val claveText = dispatch.clave.ifEmpty { "10-0" }
-                        Text(
-                            text = claveText,
-                            color = Color.White,
-                            fontSize = if (claveText.length > 5) 68.sp else 84.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            lineHeight = if (claveText.length > 5) 72.sp else 88.sp
-                        )
-                        Spacer(modifier = Modifier.height(14.dp))
+                        Box(contentAlignment = Alignment.Center) {
+                            coil.compose.AsyncImage(
+                                model = viewModel.getClientLogoModel(),
+                                contentDescription = "Logo",
+                                placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                                error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                                modifier = Modifier
+                                    .size(68.dp)
+                                    .clip(CircleShape)
+                                    .border(2.dp, claveTacticalColor, CircleShape),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
                         Row(
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier
+                                .background(claveTacticalColor.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                .border(1.dp, claveTacticalColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = "HORA: ${dispatch.horaDespacho.ifEmpty { "--:--" }}",
+                                text = "🚨 DESPACHO DE EMERGENCIA 🚨",
                                 color = Color.White,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Text(
-                                text = "•",
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            val fechaDespacho = dispatch.fechaDespacho.ifEmpty {
-                                java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date())
-                            }
-                            Text(
-                                text = "FECHA: $fechaDespacho",
-                                color = Color.White,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Black
-                            )
-                        }
-
-                        if (dispatch.preinforme.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-                            Text(
-                                text = dispatch.preinforme,
-                                color = Color.White.copy(alpha = 0.9f),
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                maxLines = 2,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-
-                        if (dispatch.carros.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Text(
-                                text = "UNIDADES: ${dispatch.carros}",
-                                color = Color(0xFFFBBF24),
-                                fontSize = 15.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Black,
+                                letterSpacing = 0.5.sp,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
                             )
                         }
                     }
 
-                    // Action buttons (Elevados más arriba)
+                    // Tactical Clave, Location & Phase 1/2 Visualization
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .padding(vertical = 6.dp)
+                    ) {
+                        val claveText = dispatch.clave.ifEmpty { "10-0" }
+                        Text(
+                            text = claveText,
+                            color = Color.White,
+                            fontSize = if (claveText.length > 5) 54.sp else 68.sp,
+                            fontWeight = FontWeight.Black,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = if (claveText.length > 5) 58.sp else 72.sp
+                        )
+
+                        if (dispatch.lugar.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.LocationOn,
+                                    contentDescription = null,
+                                    tint = claveTacticalColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = dispatch.lugar,
+                                    color = Color(0xFFF1F5F9),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 2,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Time & Date Monospace Pills
+                        Row(
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "HORA: ${cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" }}",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "•",
+                                color = Color.White.copy(alpha = 0.4f),
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            val fechaDespacho = dispatch.fechaDespacho.ifEmpty {
+                                java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date())
+                            }
+                            Text(
+                                text = "FECHA: $fechaDespacho",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Phase 1 (Radar) or Phase 2 (Tactical Map)
+                        if (hasGps) {
+                            IncidentMapPreview(
+                                lat = dispatch.lat!!,
+                                lng = dispatch.lng!!,
+                                isPending = false,
+                                clave = dispatch.clave,
+                                lugar = dispatch.lugar,
+                                isDark = true,
+                                modifier = Modifier.height(150.dp)
+                            )
+                        } else {
+                            TacticalRadarScanner(
+                                clave = dispatch.clave,
+                                isDark = true,
+                                compact = true
+                            )
+                        }
+
+                        if (dispatch.carros.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+                                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text(
+                                    text = "🚒 UNIDADES: ${dispatch.carros}",
+                                    color = Color(0xFFFBBF24),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
+                        }
+                    }
+
+                    // Tactical Action buttons: ASISTIR & NO ASISTIR
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(bottom = 44.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                            .padding(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         Button(
                             onClick = { 
                                 viewModel.attendService(dispatch.idServicio, true)
                                 viewModel.fullscreenDispatchId = null
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10B981)), // Green
-                            shape = RoundedCornerShape(18.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = GoGreen),
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(56.dp)
+                                .height(54.dp)
                         ) {
-                            Text(
-                                text = "ASISTIR",
-                                color = Color.White,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Black
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "ASISTIR",
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Black
+                                )
+                            }
                         }
 
                         Button(
@@ -1869,19 +1990,31 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                                 viewModel.declineService(dispatch.idServicio)
                                 viewModel.fullscreenDispatchId = null
                             },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.45f)),
-                            shape = RoundedCornerShape(18.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.5f)),
+                            shape = RoundedCornerShape(16.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White.copy(alpha = 0.5f)),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(48.dp)
+                                .height(46.dp)
                         ) {
-                            Text(
-                                text = "NO ASISTIR",
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = null,
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "NO ASISTIR",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
                         }
                     }
                 }
@@ -1911,8 +2044,22 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val userId = prefs.getString("USER_ID", "") ?: ""
 
         val senderId = message.data["senderId"] ?: ""
-        if (senderId.isNotEmpty() && userId.isNotEmpty() && senderId.trim().lowercase() == userId.trim().lowercase()) {
-            return
+        if (senderId.isNotEmpty()) {
+            val cleanSender = senderId.trim().lowercase()
+            val cleanUser = userId.trim().lowercase()
+            val cachedUser = prefs.getString("fire_user", null)
+            val userRadial = if (cachedUser != null) {
+                try { org.json.JSONObject(cachedUser).optString("idRadial", "").trim().lowercase() } catch (_: Exception) { "" }
+            } else ""
+            val userName = if (cachedUser != null) {
+                try { org.json.JSONObject(cachedUser).optString("nombreBombero", "").trim().lowercase() } catch (_: Exception) { "" }
+            } else ""
+
+            if (cleanSender == cleanUser ||
+                (userRadial.isNotEmpty() && (cleanSender == userRadial || cleanSender.startsWith(userRadial))) ||
+                (userName.isNotEmpty() && cleanSender.contains(userName))) {
+                return
+            }
         }
 
         if (type == "STATUS_CHANGE") {
@@ -2010,6 +2157,10 @@ class NotificationActionReceiver : BroadcastReceiver() {
             "ALERT_PIN" -> builder
                 .setContentTitle("Alerta Anclada 📌")
                 .setContentText("Se ha fijado en tu muro.")
+
+            "OPEN_DOOR" -> builder
+                .setContentTitle("Puerta Abierta ✅")
+                .setContentText("Acceso concedido a la Central")
         }
 
         with(NotificationManagerCompat.from(context)) {
@@ -2050,7 +2201,14 @@ class NotificationActionReceiver : BroadcastReceiver() {
 
     private fun executeFirebaseAction(actionType: String, payloadId: String, userId: String, intent: Intent, context: Context) {
         val db = FirebaseFirestore.getInstance()
-        if (actionType == "DISPATCH") {
+        if (actionType == "OPEN_DOOR") {
+            db.collection("accesos").document("central").update("puerta", true)
+            if (payloadId.isNotEmpty()) {
+                try {
+                    db.collection("solicitudes_puerta").document(payloadId).update("estado", "atendida")
+                } catch (_: Exception) {}
+            }
+        } else if (actionType == "DISPATCH") {
             try {
                 SoundPlayer.release()
             } catch (e: Exception) {

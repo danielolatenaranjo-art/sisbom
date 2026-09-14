@@ -123,23 +123,54 @@ class FirebaseRepository {
             }
             
             var attendanceList = documents.compactMap { doc -> AttendanceSheet? in
-                var data = doc.data()
-                if data["idLista"] == nil {
-                    data["idLista"] = doc.documentID
-                }
-                guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
-                return try? JSONDecoder().decode(AttendanceSheet.self, from: jsonData)
+                let data = doc.data()
+                let idLista = (data["idLista"] as? String) ?? doc.documentID
+                let clave = (data["clave"] as? String) ?? ""
+                let tipo = (data["tipo"] as? String) ?? ""
+                let fecha = (data["fecha"] as? String) ?? ""
+                let hora = (data["hora"] as? String) ?? ""
+                let lugar = (data["lugar"] as? String) ?? ""
+                let aprobadoPor = (data["aprobadoPor"] as? String) ?? ""
+                
+                let anuladaRaw = data["anulada"]
+                let isAnulada: Bool = {
+                    if let b = anuladaRaw as? Bool { return b }
+                    if let n = anuladaRaw as? NSNumber { return n.intValue == 1 }
+                    if let s = anuladaRaw as? String {
+                        let upper = s.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        return upper == "1" || upper == "SI" || upper == "SÍ"
+                    }
+                    return false
+                }()
+                
+                return AttendanceSheet(
+                    idLista: idLista,
+                    clave: clave,
+                    tipo: tipo,
+                    fecha: fecha,
+                    hora: hora,
+                    lugar: lugar,
+                    aprobadoPor: aprobadoPor,
+                    anulada: isAnulada,
+                    userEstado: "",
+                    userAbono: 0.0
+                )
             }
             
-            // For each attendance sheet, fetch the personal subcollection entry for this user to get userEstado/userAbono
+            if userId.isEmpty || attendanceList.isEmpty {
+                onChange(attendanceList)
+                return
+            }
+            
+            // For each attendance sheet, fetch the "bomberos" subcollection entry for this user to get userEstado/userAbono
             let group = DispatchGroup()
             for i in 0..<attendanceList.count {
                 let sheetId = attendanceList[i].idLista
                 group.enter()
-                self.db.collection("asistencia").document(sheetId).collection("personal").document(userId).getDocument { subDoc, subErr in
+                self.db.collection("asistencia").document(sheetId).collection("bomberos").document(userId).getDocument { subDoc, subErr in
                     defer { group.leave() }
                     if let subDoc = subDoc, subDoc.exists, let subData = subDoc.data() {
-                        attendanceList[i].userEstado = subData["estado"] as? String ?? ""
+                        attendanceList[i].userEstado = (subData["estado"] as? String) ?? "FALTA"
                         if let abono = subData["abono"] {
                             if let doubleAbono = abono as? Double {
                                 attendanceList[i].userAbono = doubleAbono
@@ -149,6 +180,8 @@ class FirebaseRepository {
                                 attendanceList[i].userAbono = Double(strAbono) ?? 0.0
                             }
                         }
+                    } else {
+                        attendanceList[i].userEstado = "FALTA"
                     }
                 }
             }
@@ -223,6 +256,43 @@ class FirebaseRepository {
     
     func sendChatMessage(alertId: String, finalChatString: String, completion: @escaping (Result<Void, Error>) -> Void) {
         db.collection("alertas").document(alertId).updateData(["mensajeAlerta": finalChatString]) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func solicitarAperturaPuerta(user: SisBomUser, completion: @escaping (Result<Void, Error>) -> Void) {
+        let requestData: [String: Any] = [
+            "idBombero": user.id,
+            "idRadial": user.idRadial,
+            "nombreBombero": user.nombreBombero,
+            "timestamp": FieldValue.serverTimestamp(),
+            "estado": "PENDIENTE"
+        ]
+        
+        db.collection("solicitudes_puerta").addDocument(data: requestData) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                let centralUpdate: [String: Any] = [
+                    "solicitudPuerta": [
+                        "idRadial": user.idRadial,
+                        "nombreBombero": user.nombreBombero,
+                        "timestamp": Date().timeIntervalSince1970 * 1000
+                    ]
+                ]
+                self.db.collection("accesos").document("central").setData(centralUpdate, merge: true) { _ in
+                    completion(.success(()))
+                }
+            }
+        }
+    }
+    
+    func deleteAlert(alertId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        db.collection("alertas").document(alertId).delete { error in
             if let error = error {
                 completion(.failure(error))
             } else {

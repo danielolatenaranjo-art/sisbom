@@ -41,6 +41,7 @@ struct OrdenItemCard: View {
     let orden: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
     @State private var showDetailSheet: Bool = false
+    @State private var showDeleteConfirm: Bool = false
 
     var body: some View {
         let isDark = viewModel.isDarkMode
@@ -48,68 +49,93 @@ struct OrdenItemCard: View {
         let isConforme = orden.conforme.split(separator: ",")
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
             .contains(myRadial)
+        let isComandante = (viewModel.currentUser?.idRadial == "1" || viewModel.currentUser?.idRadial == "01" || (viewModel.currentUser?.cargo.uppercased().contains("COMANDANTE") == true))
         
-        Button(action: {
-            showDetailSheet = true
-        }) {
-            VStack(spacing: 10) {
-                // Circle with Clipboard Icon
-                ZStack {
-                    Circle()
-                        .fill(isDark ? Color.white.opacity(0.1) : Color(red: 0.88, green: 0.91, blue: 0.95))
-                        .frame(width: 48, height: 48)
+        ZStack(alignment: .topTrailing) {
+            Button(action: {
+                showDetailSheet = true
+            }) {
+                VStack(spacing: 10) {
+                    // Circle with Clipboard Icon
+                    ZStack {
+                        Circle()
+                            .fill(isDark ? Color.white.opacity(0.1) : Color(red: 0.88, green: 0.91, blue: 0.95))
+                            .frame(width: 48, height: 48)
+                        
+                        Image(systemName: "list.clipboard.fill")
+                            .font(.system(size: 20))
+                            .foregroundColor(isDark ? .white : Color(red: 0.32, green: 0.38, blue: 0.48))
+                    }
+                    .padding(.top, 14)
                     
-                    Image(systemName: "list.clipboard.fill")
-                        .font(.system(size: 20))
-                        .foregroundColor(isDark ? .white : Color(red: 0.32, green: 0.38, blue: 0.48))
+                    // N° Number
+                    HStack(spacing: 8) {
+                        Text("N°")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(isDark ? .white : .textDark)
+                        Text(orden.numeroOrden.isEmpty ? orden.idAlerta : orden.numeroOrden)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(isDark ? .white : .textDark)
+                    }
+                    
+                    // Date
+                    Text(orden.fechaOrden.isEmpty ? orden.fechaAlerta : orden.fechaOrden)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                    
+                    // Divider
+                    Divider()
+                        .background(isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08))
+                        .padding(.horizontal, 12)
+                    
+                    // Status VISTO / PENDIENTE
+                    if isConforme {
+                        Text("✓ VISTO")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(Color(red: 0.02, green: 0.59, blue: 0.41))
+                            .padding(.bottom, 8)
+                    } else {
+                        Text("PENDIENTE")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(.bomberosRed)
+                            .padding(.bottom, 8)
+                    }
                 }
-                .padding(.top, 10)
-                
-                // N° Number
-                HStack(spacing: 8) {
-                    Text("N°")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(isDark ? .white : .textDark)
-                    Text(orden.numeroOrden.isEmpty ? orden.idAlerta : orden.numeroOrden)
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(isDark ? .white : .textDark)
-                }
-                
-                // Date
-                Text(orden.fechaOrden.isEmpty ? orden.fechaAlerta : orden.fechaOrden)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
-                
-                // Divider
-                Divider()
-                    .background(isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.08))
-                    .padding(.horizontal, 12)
-                
-                // Status VISTO / PENDIENTE
-                if isConforme {
-                    Text("✓ VISTO")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(Color(red: 0.02, green: 0.59, blue: 0.41))
-                        .padding(.bottom, 8)
-                } else {
-                    Text("PENDIENTE")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.bomberosRed)
-                        .padding(.bottom, 8)
+                .frame(maxWidth: .infinity)
+                .background(isDark ? Color.navyDark : Color.white)
+                .cornerRadius(20)
+                .shadow(color: isDark ? Color.clear : Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 20)
+                        .stroke(isConforme ? Color.goGreen.opacity(0.35) : (isDark ? Color.white.opacity(0.1) : Color(red: 0.85, green: 0.94, blue: 0.90)), lineWidth: 1.5)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            
+            // Delete trash button for Comandante in top trailing corner
+            if isComandante {
+                Button(action: {
+                    showDeleteConfirm = true
+                }) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(Color.bomberosRed.opacity(0.85))
+                        .padding(8)
                 }
             }
-            .frame(maxWidth: .infinity)
-            .background(isDark ? Color.navyDark : Color.white)
-            .cornerRadius(20)
-            .shadow(color: isDark ? Color.clear : Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
-            .overlay(
-                RoundedRectangle(cornerRadius: 20)
-                    .stroke(isConforme ? Color.goGreen.opacity(0.35) : (isDark ? Color.white.opacity(0.1) : Color(red: 0.85, green: 0.94, blue: 0.90)), lineWidth: 1.5)
-            )
         }
-        .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showDetailSheet) {
             OrdenDetailView(orden: orden, viewModel: viewModel, isPresented: $showDetailSheet)
+        }
+        .alert(isPresented: $showDeleteConfirm) {
+            Alert(
+                title: Text("Eliminar Orden del Día"),
+                message: Text("¿Está seguro de eliminar permanentemente la Orden N° \(orden.numeroOrden)?"),
+                primaryButton: .destructive(Text("Eliminar")) {
+                    viewModel.deleteAlert(alertId: orden.idAlerta)
+                },
+                secondaryButton: .cancel(Text("Cancelar"))
+            )
         }
     }
 }
