@@ -325,10 +325,12 @@ func getVehicleEmoji(carro: String) -> String {
         return "🚚"
     } else if upper.hasPrefix("K") || upper.hasPrefix("J") || upper.hasPrefix("UT") {
         return "🚙"
-    } else if upper.hasPrefix("H") || upper.hasPrefix("HZ") {
-        return "☣️"
     } else {
-        func formatOperatorCadName(_ fullName: String) -> String {
+        return "🚒"
+    }
+}
+
+func formatOperatorCadName(_ fullName: String) -> String {
     let words = fullName.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
     switch words.count {
     case 0: return ""

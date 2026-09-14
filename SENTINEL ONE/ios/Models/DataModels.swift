@@ -233,6 +233,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
     var id: String { idServicio }
     let idServicio: String
     let clave: String
+    let claveApoyo: String
     let lugar: String
     let preinforme: String
     let carros: String // Can be parsed flexibly inside Repository
@@ -254,13 +255,14 @@ struct Dispatch: Identifiable, Codable, Equatable {
     var unidades: [String: UnitInfo] = [:]
 
     enum CodingKeys: String, CodingKey {
-        case idServicio, clave, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal
+        case idServicio, clave, claveApoyo, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal
         case carrosTexto, source, obacServicio, informeObac, fechaTermino, operadorInicial, lat, lng, unidades
     }
 
     init(
         idServicio: String = "",
         clave: String = "",
+        claveApoyo: String = "",
         lugar: String = "",
         preinforme: String = "",
         carros: String = "",
@@ -281,6 +283,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
     ) {
         self.idServicio = idServicio
         self.clave = clave
+        self.claveApoyo = claveApoyo
         self.lugar = lugar
         self.preinforme = preinforme
         self.carros = carros
@@ -304,6 +307,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         idServicio = try container.decodeIfPresent(String.self, forKey: .idServicio) ?? ""
         clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
+        claveApoyo = try container.decodeIfPresent(String.self, forKey: .claveApoyo) ?? ""
         lugar = try container.decodeIfPresent(String.self, forKey: .lugar) ?? ""
         preinforme = try container.decodeIfPresent(String.self, forKey: .preinforme) ?? ""
         horaDespacho = try container.decodeIfPresent(String.self, forKey: .horaDespacho) ?? ""
