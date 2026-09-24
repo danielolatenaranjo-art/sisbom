@@ -17,27 +17,65 @@ import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.Granularity
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class GpsTrackingService : Service(), LocationListener {
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.view.Surface
+import android.view.WindowManager
 
+class GpsTrackingService : Service(), LocationListener, SensorEventListener {
+
+    private var fusedLocationClient: FusedLocationProviderClient? = null
+    private var locationCallback: LocationCallback? = null
     private var locationManager: LocationManager? = null
+    private var sensorManager: SensorManager? = null
+    private var rotationVectorSensor: Sensor? = null
+    private var accelSensor: Sensor? = null
+    private var magSensor: Sensor? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+
     private val repository = FirebaseRepository()
     private var lastSentLat = 0.0
     private var lastSentLng = 0.0
     private var lastSentTime = 0L
     private var lastSentDispatchId = ""
 
+    // Variables de fusión de sensores (Giroscopio / Magnetómetro / Acelerómetro)
+    private val rotationMatrix = FloatArray(9)
+    private val remappedMatrix = FloatArray(9)
+    private val orientationValues = FloatArray(3)
+    private val lastAccel = FloatArray(3)
+    private val lastMag = FloatArray(3)
+    private var hasAccel = false
+    private var hasMag = false
+    private var smoothedSensorHeading = 0f
+    private var lastSensorEmitTimestamp = 0L
+    private var lastValidMovementHeading = 0f
+
     companion object {
         private const val NOTIFICATION_ID = 8844
         private const val CHANNEL_ID = "sisbom_car_gps"
-        private const val UPDATE_INTERVAL_MS = 1000L // 1 segundo para visualización fluida en tiempo real
+        private const val UPDATE_INTERVAL_MS = 250L // 4 Hz (250ms) para movimiento local milimétrico en tiempo real
         private const val MIN_DISTANCE_M = 0f
+
+        @Volatile
+        var currentDisplayRotation: Int = Surface.ROTATION_90
 
         var isServiceRunning = false
         var currentLat = 0.0
@@ -89,6 +127,14 @@ class GpsTrackingService : Service(), LocationListener {
         isServiceRunning = true
 
         try {
+            val pm = getSystemService(Context.POWER_SERVICE) as? PowerManager
+            wakeLock = pm?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SisBomCar:GpsTrackingWakeLock")?.apply {
+                setReferenceCounted(false)
+                acquire(24 * 60 * 60 * 1000L) // 24 horas seguro
+            }
+        } catch (_: Exception) {}
+
+        try {
             createNotificationChannel()
             val notification = buildForegroundNotification("SisBom Car Activo", "Monitoreo GPS continuo de Carro Bomba")
 
@@ -105,6 +151,7 @@ class GpsTrackingService : Service(), LocationListener {
         } catch (_: Exception) {}
 
         startLocationUpdates()
+        startSensorUpdates()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -117,6 +164,13 @@ class GpsTrackingService : Service(), LocationListener {
     @SuppressLint("MissingPermission")
     private fun sendForceUpdate() {
         try {
+            fusedLocationClient?.lastLocation?.addOnSuccessListener { loc ->
+                if (loc != null) {
+                    onLocationChanged(loc)
+                    sendLocationToFirebase(loc, isForced = true)
+                }
+            }
+
             val lm = locationManager ?: (getSystemService(Context.LOCATION_SERVICE) as? LocationManager) ?: return
             val lastGps = try { lm.getLastKnownLocation(LocationManager.GPS_PROVIDER) } catch(_: SecurityException) { null }
             val lastNet = try { lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) } catch(_: SecurityException) { null }
@@ -135,6 +189,7 @@ class GpsTrackingService : Service(), LocationListener {
     private var lastGpsFixTimestamp = 0L
     private var stationaryAnchorLat = 0.0
     private var stationaryAnchorLng = 0.0
+    private var prevLocationForBearing: Location? = null
 
     private val gpsListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -162,6 +217,37 @@ class GpsTrackingService : Service(), LocationListener {
 
     @SuppressLint("MissingPermission")
     private fun startLocationUpdates() {
+        // 1. Google Play Services Fused Location Provider (GNSS multi-constelación L1/L5 + RTT + Fusión IMU)
+        try {
+            fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+            val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, UPDATE_INTERVAL_MS).apply {
+                setMinUpdateIntervalMillis(100L)
+                setMinUpdateDistanceMeters(MIN_DISTANCE_M)
+                setGranularity(Granularity.GRANULARITY_FINE)
+                setWaitForAccurateLocation(false)
+            }.build()
+
+            locationCallback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    val loc = result.lastLocation ?: return
+                    handleLocationFix(loc, isFromGps = true)
+                }
+            }
+
+            fusedLocationClient?.requestLocationUpdates(
+                locationRequest,
+                locationCallback!!,
+                Looper.getMainLooper()
+            )
+
+            fusedLocationClient?.lastLocation?.addOnSuccessListener { loc ->
+                if (loc != null) {
+                    handleLocationFix(loc, isFromGps = true)
+                }
+            }
+        } catch (_: Exception) {}
+
+        // 2. Android LocationManager Nativo (Motor de Respaldo Redundante con GPS_PROVIDER)
         try {
             locationManager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             val lm = locationManager ?: return
@@ -200,80 +286,111 @@ class GpsTrackingService : Service(), LocationListener {
         val now = System.currentTimeMillis()
 
         // Si es GPS y tiene precisión razonable, actualizar marca de tiempo GPS
-        if (isFromGps && location.accuracy > 0 && location.accuracy <= 50f) {
+        if (isFromGps && location.accuracy > 0 && location.accuracy <= 45f) {
             hasRecentGpsFix = true
             lastGpsFixTimestamp = now
         }
 
-        // Descartar lecturas con pésima precisión (> 40 metros)
-        if (location.accuracy > 40f) {
+        // Descartar únicamente lecturas con error grosero (> 45 metros) si la precisión es válida
+        if (location.accuracy > 45f && location.accuracy > 0f) {
             return
         }
 
         // Si tenemos señal GPS reciente, ignorar completamente cualquier punto proveniente de red
-        if (!isFromGps && hasRecentGpsFix && (now - lastGpsFixTimestamp < 15000L)) {
+        if (!isFromGps && hasRecentGpsFix && (now - lastGpsFixTimestamp < 10000L)) {
             return
         }
 
         val rawSpeedKmH = if (location.hasSpeed()) location.speed * 3.6f else 0f
 
-        // Inicializar ancla si es la primera coordenada válida
-        if (stationaryAnchorLat == 0.0 && stationaryAnchorLng == 0.0) {
-            stationaryAnchorLat = location.latitude
-            stationaryAnchorLng = location.longitude
-            currentLat = location.latitude
-            currentLng = location.longitude
-        }
+        currentLat = location.latitude
+        currentLng = location.longitude
 
         val distFromAnchor = FloatArray(1)
         Location.distanceBetween(stationaryAnchorLat, stationaryAnchorLng, location.latitude, location.longitude, distFromAnchor)
+        val distanceFromAnchorM = distFromAnchor[0]
 
-        // Filtro estricto contra ruido de oficina / interiores:
-        // Si no ha salido de un radio de 15 metros del ancla, o la precisión es > 20m con velocidad baja,
-        // la velocidad real es estrictamente 0 km/h (elimina saltos de 11 a 14 km/h en reposo).
-        val filteredSpeedKmH = when {
-            distFromAnchor[0] < 15.0f -> 0f
-            location.accuracy > 25f -> 0f
-            location.accuracy > 15f && rawSpeedKmH < 18.0f -> 0f
-            rawSpeedKmH < 5.0f -> 0f
-            else -> rawSpeedKmH
-        }
+        // Detección fluida de movimiento vs reposo:
+        val isVehicleStationary = distanceFromAnchorM < 1.8f && rawSpeedKmH < 1.2f
 
-        // Si el vehículo está detenido o dentro del radio de reposo:
-        if (filteredSpeedKmH == 0f) {
+        if (isVehicleStationary && stationaryAnchorLat != 0.0) {
+            // El vehículo está detenido (semáforos, cuartel, intersecciones o escena)
             currentSpeedKmH = 0f
+            // En reposo, preservar rigurosamente el último rumbo cinemático de movimiento (no rota hacia el Norte ni gira)
+            val bestHeading = when {
+                smoothedSensorHeading > 0f -> smoothedSensorHeading
+                lastValidMovementHeading > 0f -> lastValidMovementHeading
+                currentHeading > 0f -> currentHeading
+                else -> 0f
+            }
+            currentHeading = bestHeading
             _localLocationFlow.value = GpsLocationData(
-                lat = stationaryAnchorLat,
-                lng = stationaryAnchorLng,
+                lat = currentLat,
+                lng = currentLng,
                 speedKmH = 0f,
-                heading = currentHeading,
+                heading = bestHeading,
                 accuracy = location.accuracy,
                 timestamp = location.time
             )
+            sendLocationToFirebase(location, isForced = false)
             return
         }
 
-        // Si el vehículo realmente salió del reposo (movimiento genuino):
-        // Actualizar ancla a la posición en movimiento
+        // El vehículo está en movimiento: actualizar ancla y posición actual
         stationaryAnchorLat = location.latitude
         stationaryAnchorLng = location.longitude
+        currentSpeedKmH = if (rawSpeedKmH >= 1.5f) rawSpeedKmH else 3.5f
 
-        val filteredHeading = if (location.hasBearing() && filteredSpeedKmH >= 5f) {
-            location.bearing
-        } else {
-            currentHeading
+        var resolvedMovementHeading: Float? = null
+
+        // 1. Rumbo nativo de hardware GNSS/GPS en movimiento (Doppler / Carrier phase)
+        if (location.hasBearing() && location.bearing != 0f) {
+            resolvedMovementHeading = (location.bearing + 360f) % 360f
         }
 
-        currentLat = location.latitude
-        currentLng = location.longitude
-        currentSpeedKmH = filteredSpeedKmH
+        // 2. Rumbo cinemático matemático calculado entre puntos sucesivos (Trayectoria real GPS)
+        val prevLoc = prevLocationForBearing
+        if (prevLoc != null) {
+            val distMoved = prevLoc.distanceTo(location)
+            if (distMoved >= 1.5f) {
+                val calcB = (prevLoc.bearingTo(location) + 360f) % 360f
+                if (resolvedMovementHeading == null) {
+                    resolvedMovementHeading = calcB
+                } else {
+                    // Fusión suave entre rumbo GNSS y vector de desplazamiento cinemático
+                    val diff = ((calcB - resolvedMovementHeading + 540f) % 360f) - 180f
+                    resolvedMovementHeading = (resolvedMovementHeading + diff * 0.35f + 360f) % 360f
+                }
+                prevLocationForBearing = Location(location)
+            }
+        } else {
+            prevLocationForBearing = Location(location)
+        }
+
+        if (resolvedMovementHeading != null && resolvedMovementHeading > 0f) {
+            // Suavizado exponencial del rumbo de movimiento para eliminar jitter y mantener dirección perfecta
+            if (lastValidMovementHeading == 0f) {
+                lastValidMovementHeading = resolvedMovementHeading
+            } else {
+                val diff = ((resolvedMovementHeading - lastValidMovementHeading + 540f) % 360f) - 180f
+                lastValidMovementHeading = (lastValidMovementHeading + diff * 0.4f + 360f) % 360f
+            }
+        }
+
+        val filteredHeading = when {
+            rawSpeedKmH >= 3.5f && resolvedMovementHeading != null -> resolvedMovementHeading
+            rawSpeedKmH >= 3.5f && lastValidMovementHeading > 0f -> lastValidMovementHeading
+            smoothedSensorHeading > 0f -> smoothedSensorHeading
+            lastValidMovementHeading > 0f -> lastValidMovementHeading
+            else -> currentHeading
+        }
         currentHeading = filteredHeading
 
-        // Emisión inmediata en tiempo real local para la interfaz y mapa
+        // Emisión inmediata en tiempo real local para la interfaz y mapa (fluidez 60 FPS)
         _localLocationFlow.value = GpsLocationData(
             lat = location.latitude,
             lng = location.longitude,
-            speedKmH = filteredSpeedKmH,
+            speedKmH = currentSpeedKmH,
             heading = filteredHeading,
             accuracy = location.accuracy,
             timestamp = location.time
@@ -282,11 +399,111 @@ class GpsTrackingService : Service(), LocationListener {
         sendLocationToFirebase(location, isForced = false)
     }
 
+    private fun startSensorUpdates() {
+        try {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            val sm = sensorManager ?: return
+
+            rotationVectorSensor = sm.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
+            if (rotationVectorSensor != null) {
+                sm.registerListener(this, rotationVectorSensor, SensorManager.SENSOR_DELAY_UI)
+            } else {
+                // Fallback: Acelerómetro + Brújula Magnética
+                accelSensor = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+                magSensor = sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD)
+                accelSensor?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+                magSensor?.let { sm.registerListener(this, it, SensorManager.SENSOR_DELAY_UI) }
+            }
+        } catch (_: Exception) {}
+    }
+
+    override fun onSensorChanged(event: SensorEvent?) {
+        if (event == null) return
+        try {
+            var rawAzimuth: Float? = null
+            val rotation = currentDisplayRotation
+
+            if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                SensorManager.getRotationMatrixFromVector(rotationMatrix, event.values)
+
+                when (rotation) {
+                    Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix)
+                    Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedMatrix)
+                    Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedMatrix)
+                    else -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Y, remappedMatrix)
+                }
+
+                SensorManager.getOrientation(remappedMatrix, orientationValues)
+                var az = Math.toDegrees(orientationValues[0].toDouble()).toFloat()
+                if (az < 0) az += 360f
+                rawAzimuth = az
+            } else if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                System.arraycopy(event.values, 0, lastAccel, 0, event.values.size)
+                hasAccel = true
+            } else if (event.sensor.type == Sensor.TYPE_MAGNETIC_FIELD) {
+                System.arraycopy(event.values, 0, lastMag, 0, event.values.size)
+                hasMag = true
+            }
+
+            if (rawAzimuth == null && hasAccel && hasMag) {
+                if (SensorManager.getRotationMatrix(rotationMatrix, null, lastAccel, lastMag)) {
+                    when (rotation) {
+                        Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_Y, SensorManager.AXIS_MINUS_X, remappedMatrix)
+                        Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_X, SensorManager.AXIS_MINUS_Y, remappedMatrix)
+                        Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_MINUS_Y, SensorManager.AXIS_X, remappedMatrix)
+                        else -> SensorManager.remapCoordinateSystem(rotationMatrix, SensorManager.AXIS_X, SensorManager.AXIS_Y, remappedMatrix)
+                    }
+                    SensorManager.getOrientation(remappedMatrix, orientationValues)
+                    var az = Math.toDegrees(orientationValues[0].toDouble()).toFloat()
+                    if (az < 0) az += 360f
+                    rawAzimuth = az
+                }
+            }
+
+            if (rawAzimuth != null) {
+                updateSmoothedSensorHeading(rawAzimuth)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun updateSmoothedSensorHeading(rawAzimuth: Float) {
+        if (smoothedSensorHeading == 0f) {
+            smoothedSensorHeading = rawAzimuth
+        } else {
+            val diff = ((rawAzimuth - smoothedSensorHeading + 540f) % 360f) - 180f
+            // Filtro de banda muerta: ignorar temblores menores a 3.5° para evitar giros involuntarios de cámara por ruido magnético
+            if (Math.abs(diff) > 3.5f) {
+                smoothedSensorHeading = (smoothedSensorHeading + diff * 0.20f + 360f) % 360f
+            }
+        }
+
+        // Si el vehículo está detenido o a baja velocidad (< 4 km/h), el giroscopio orienta el vehículo con estabilidad
+        if (currentSpeedKmH < 4f && smoothedSensorHeading > 0f) {
+            currentHeading = smoothedSensorHeading
+            val now = System.currentTimeMillis()
+            if (now - lastSensorEmitTimestamp >= 120L && currentLat != 0.0 && currentLng != 0.0) {
+                lastSensorEmitTimestamp = now
+                _localLocationFlow.value = GpsLocationData(
+                    lat = currentLat,
+                    lng = currentLng,
+                    speedKmH = currentSpeedKmH,
+                    heading = smoothedSensorHeading,
+                    accuracy = 10f,
+                    timestamp = now
+                )
+            }
+        }
+    }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+
     private fun sendLocationToFirebase(location: Location, isForced: Boolean) {
         val now = System.currentTimeMillis()
         val prefs = getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
         val unitId = prefs.getString("selected_unit_id", "") ?: ""
         val activeDispatchId = prefs.getString("active_dispatch_id", "") ?: ""
+        val unitEnServicio = prefs.getString("unit_en_servicio", "0") ?: "0"
+        val isEnCuartelPref = prefs.getBoolean("is_en_cuartel", true)
 
         if (unitId.isEmpty()) return
 
@@ -303,18 +520,25 @@ class GpsTrackingService : Service(), LocationListener {
         val isDispatched = activeDispatchId.isNotEmpty()
         val dispatchStateChanged = isDispatched && (lastSentDispatchId != activeDispatchId)
 
-        // Criterios de envío a Firestore:
-        // - Forzado (ej. botón o inicio)
-        // - Cambio / activación de despacho
-        // - Movimiento real >= 35 metros
-        // - Cada 30 segundos si hay movimiento
-        val isMoving = currentSpeedKmH >= 4f
+        // 3. Evaluar si la unidad está en servicio activo de emergencia
+        val isInEmergencyService = isDispatched || (unitEnServicio.isNotEmpty() && unitEnServicio != "0" && unitEnServicio != "0-8" && unitEnServicio != "0-9")
+        val isAtCuartel = !isInEmergencyService || isEnCuartelPref
+
         val timeSinceLast = now - lastSentTime
-        val shouldSend = isForced ||
-                dispatchStateChanged ||
-                (distanceMoved >= 35f) ||
-                (isMoving && timeSinceLast >= 30000L) ||
-                lastSentTime == 0L
+
+        // Criterios de transmisión a Firestore (Optimizado estrictamente contra cuotas excesivas):
+        // REGLA: Cada 1 minuto (60.000 ms) o cada 100 metros, lo que ocurra primero.
+        // EN CUARTEL: Si el vehículo está en cuartel, se transmite UNA sola vez al iniciar o llegar,
+        // y NO se repite periódicamente en reposo a menos que se mueva >= 100 metros o cambie a despacho/forzado.
+        val shouldSend = if (isForced || dispatchStateChanged || lastSentTime == 0L) {
+            true
+        } else if (distanceMoved >= 100f) {
+            true
+        } else if (isInEmergencyService && !isAtCuartel && timeSinceLast >= 60000L) {
+            true
+        } else {
+            false
+        }
 
         if (shouldSend) {
             lastSentTime = now
@@ -322,12 +546,14 @@ class GpsTrackingService : Service(), LocationListener {
             lastSentLng = location.longitude
             lastSentDispatchId = activeDispatchId
 
-            repository.updateVehicleLocation(
-                vehicleId = unitId,
-                lat = location.latitude,
-                lng = location.longitude,
-                heading = currentHeading
-            )
+            try {
+                repository.updateVehicleLocation(
+                    vehicleId = unitId,
+                    lat = location.latitude,
+                    lng = location.longitude,
+                    heading = currentHeading
+                )
+            } catch (_: Exception) {}
         }
     }
 
@@ -371,7 +597,21 @@ class GpsTrackingService : Service(), LocationListener {
 
     override fun onDestroy() {
         isServiceRunning = false
-        locationManager?.removeUpdates(this)
+        try {
+            locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
+        } catch (_: Exception) {}
+        try {
+            locationManager?.removeUpdates(this)
+        } catch (_: Exception) {}
+        try {
+            sensorManager?.unregisterListener(this)
+        } catch (_: Exception) {}
+        try {
+            wakeLock?.let {
+                if (it.isHeld) it.release()
+            }
+            wakeLock = null
+        } catch (_: Exception) {}
         super.onDestroy()
     }
 

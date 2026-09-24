@@ -28,7 +28,7 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
 
     private val context = application.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
-    private val repository = FirebaseRepository()
+    val repository = FirebaseRepository()
 
     // Estado SaaS
     var saasLicenseKey by mutableStateOf(prefs.getString("saas_license_key", "") ?: "")
@@ -50,6 +50,11 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
     var authorizedComandanteName by mutableStateOf(prefs.getString("auth_comandante_name", "") ?: "")
     var isVerifyingComandante by mutableStateOf(false)
     var comandanteAuthError by mutableStateOf("")
+
+    // Destino Asistencial 6-15 (CESFAM / HOSPITAL)
+    var active615DestinoNombre by mutableStateOf(prefs.getString("active_615_destino_nombre", "") ?: "")
+    var active615DestinoLat by mutableStateOf(prefs.getFloat("active_615_destino_lat", 0f).toDouble())
+    var active615DestinoLng by mutableStateOf(prefs.getFloat("active_615_destino_lng", 0f).toDouble())
 
     // Listas en tiempo real
     var availableVehicles = mutableStateListOf<Vehicle>()
@@ -87,6 +92,13 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
         val fbConfig = prefs.getString("saas_firebase_config", null)
         if (fbConfig != null) {
             initializeDynamicFirebase(context, fbConfig)
+        }
+
+        // Precarga inmediata de personal desde almacenamiento local offline
+        val offlinePersonal = repository.loadCachedPersonal(context)
+        if (offlinePersonal.isNotEmpty()) {
+            personalList.clear()
+            personalList.addAll(offlinePersonal)
         }
 
         if (isLicenseValid) {
@@ -157,6 +169,15 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun fetchDispatchById(id: String) {
+        if (id.isBlank() || id == "0" || id == "0-8" || id == "0-9") return
+        repository.getDispatchById(id) { d ->
+            if (d != null) {
+                activeDispatch = d
+            }
+        }
+    }
+
     private fun filterDispatchForUnit(list: List<Dispatch>, unitId: String, unitLabel: String): Dispatch? {
         if (unitId.isEmpty() && unitLabel.isEmpty()) return null
 
@@ -165,13 +186,45 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
         val labelClean = unitLabel.replace("-", "").replace(" ", "").trim().uppercase()
         val enServ = v?.enServicio?.trim() ?: "0"
 
-        // 1. Buscar en despachos activos donde la unidad esté en `unidades` o `carros`
+        // 1. Si el vehículo tiene asignado un ID de servicio en su campo enServicio (ej: "1", "12", "96")
+        if (enServ.isNotEmpty() && enServ != "0" && enServ != "0-8" && enServ != "0-9" && enServ != "6-13" && enServ != "6-14") {
+            val directMatch = list.find { d ->
+                val sId = d.idServicio.trim()
+                val eClean = enServ.trim()
+                val isSameId = sId.equals(eClean, ignoreCase = true) ||
+                    (sId.isNotEmpty() && eClean.isNotEmpty() && (sId.contains(eClean, ignoreCase = true) || eClean.contains(sId, ignoreCase = true)))
+                if (isSameId) {
+                    val st = d.estado.trim().lowercase()
+                    val isFinalized = (st == "finalizada" || st == "finalizado" || st == "cancelada" || st == "cancelado")
+                    val matchUnit = d.unidades.entries.find { (uKey, _) ->
+                        val cleanKey = uKey.replace("-", "").replace(" ", "").trim().uppercase()
+                        (idClean.isNotEmpty() && cleanKey == idClean) ||
+                        (labelClean.isNotEmpty() && cleanKey == labelClean)
+                    }
+                    if (matchUnit != null) {
+                        val uData = matchUnit.value
+                        val uStatus = ((uData["status"] ?: "") as? String ?: "").lowercase()
+                        val uEstado = ((uData["estado"] ?: "") as? String ?: "").lowercase()
+                        val hora68 = ((uData["hora68"] ?: uData["disponible68At"] ?: uData["regreso68At"]) as? String ?: "").trim()
+                        val isInactive = uStatus in listOf("6-8", "finalizado", "cancelado") ||
+                            uEstado in listOf("6-8", "finalizado", "cancelado") ||
+                            hora68.isNotEmpty()
+                        !isInactive && !isFinalized
+                    } else {
+                        !isFinalized
+                    }
+                } else false
+            }
+            if (directMatch != null) {
+                return directMatch
+            }
+        }
+
+        // 2. Buscar en despachos activos donde la unidad esté en `unidades` o `carros`
         val matchInDispatches = list.find { d ->
-            val isClosed = d.operadorFinal.isNotEmpty() ||
-                    d.estado.trim().lowercase() == "finalizada" ||
-                    d.estado.trim().lowercase() == "cancelada" ||
-                    d.estado.trim().lowercase() == "cerrada"
-            if (isClosed) return@find false
+            val st = d.estado.trim().lowercase()
+            val isFinalized = (st == "finalizada" || st == "finalizado" || st == "cancelada" || st == "cancelado")
+            if (isFinalized) return@find false
 
             // Comparación en mapa de unidades
             val matchUnit = d.unidades.entries.find { (uKey, _) ->
@@ -181,46 +234,74 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (matchUnit != null) {
                 val uData = matchUnit.value
-                val estado = ((uData["estado"] ?: uData["status"]) as? String ?: "").lowercase()
-                val hora68 = (uData["hora68"] ?: uData["regreso68At"]) as? String ?: ""
-                val isInactive = estado == "cancelado" || estado == "6-8" || hora68.isNotEmpty()
+                val uStatus = ((uData["status"] ?: "") as? String ?: "").lowercase()
+                val uEstado = ((uData["estado"] ?: "") as? String ?: "").lowercase()
+                val hora68 = ((uData["hora68"] ?: uData["disponible68At"] ?: uData["regreso68At"]) as? String ?: "").trim()
+                val isInactive = uStatus in listOf("6-8", "finalizado", "cancelado") ||
+                    uEstado in listOf("6-8", "finalizado", "cancelado") ||
+                    hora68.isNotEmpty()
                 !isInactive
             } else {
-                // Comparación en lista de carros en texto (separado por comas, barras o espacios, sin romper guiones)
-                val carrosList = d.carros.split(",", ";", "/", "|", "\n").map {
+                // Comparación en lista de carros en texto (array o texto separado por comas / barras)
+                val carrosList = d.carros.split(",", ";", "/", "|", "\n", " ").map {
                     it.replace("-", "").replace(" ", "").trim().uppercase()
                 }.filter { it.isNotEmpty() }
-                (idClean.isNotEmpty() && carrosList.contains(idClean)) || (labelClean.isNotEmpty() && carrosList.contains(labelClean))
+                val isInCarros = (idClean.isNotEmpty() && carrosList.contains(idClean)) || 
+                                 (labelClean.isNotEmpty() && carrosList.contains(labelClean))
+                isInCarros
             }
         }
         if (matchInDispatches != null) {
             return matchInDispatches
         }
 
-        // 2. Si el vehículo tiene asignado un ID de servicio en su campo enServicio
-        if (enServ.isNotEmpty() && enServ != "0" && enServ != "0-8" && enServ != "0-9" && enServ != "6-13" && enServ != "6-14") {
-            val directMatch = list.find { d ->
-                (d.idServicio.equals(enServ, ignoreCase = true) || d.idServicio.contains(enServ, ignoreCase = true) || enServ.contains(d.idServicio, ignoreCase = true)) &&
-                d.operadorFinal.isEmpty() &&
-                d.estado.trim().lowercase() != "finalizada" &&
-                d.estado.trim().lowercase() != "cancelada"
+        // 3. Fallback de retención activa: Si ya hay un despacho activo asignado, mantenerlo mientras siga activo en Firestore y no esté finalizado / 6-8
+        val currentActiveId = activeDispatch?.idServicio?.trim() ?: ""
+        if (currentActiveId.isNotEmpty()) {
+            val stillActive = list.find { d ->
+                val isSame = d.idServicio.trim().equals(currentActiveId, ignoreCase = true)
+                if (isSame) {
+                    val st = d.estado.trim().lowercase()
+                    val isFinalized = (st == "finalizada" || st == "finalizado" || st == "cancelada" || st == "cancelado")
+                    val matchUnit = d.unidades.entries.find { (uKey, _) ->
+                        val cleanKey = uKey.replace("-", "").replace(" ", "").trim().uppercase()
+                        (idClean.isNotEmpty() && cleanKey == idClean) || (labelClean.isNotEmpty() && cleanKey == labelClean)
+                    }
+                    if (matchUnit != null) {
+                        val uData = matchUnit.value
+                        val uStatus = ((uData["status"] ?: "") as? String ?: "").lowercase()
+                        val uEstado = ((uData["estado"] ?: "") as? String ?: "").lowercase()
+                        val hora68 = ((uData["hora68"] ?: uData["disponible68At"] ?: uData["regreso68At"]) as? String ?: "").trim()
+                        val isInactive = uStatus in listOf("6-8", "finalizado", "cancelado") || uEstado in listOf("6-8", "finalizado", "cancelado") || hora68.isNotEmpty()
+                        !isInactive && !isFinalized
+                    } else {
+                        !isFinalized
+                    }
+                } else false
             }
-            if (directMatch != null) {
-                return directMatch
-            }
-
-            // Si hay un solo despacho activo no finalizado y el carro está en servicio activo
-            val activeDispatches = list.filter {
-                it.operadorFinal.isEmpty() &&
-                it.estado.trim().lowercase() != "finalizada" &&
-                it.estado.trim().lowercase() != "cancelada"
-            }
-            if (activeDispatches.size == 1) {
-                return activeDispatches.first()
+            if (stillActive != null) {
+                return stillActive
             }
         }
 
         return null
+    }
+
+    fun updateServiceStateInPrefs() {
+        val dispatchId = activeDispatch?.idServicio?.trim() ?: ""
+        val enServ = currentUnitVehicle?.enServicio?.trim() ?: "0"
+        val estado = currentUnitVehicle?.estado?.trim() ?: ""
+        val activeTrip = activeBitacoraTrip
+        val hasActiveSalida = activeTrip != null && activeTrip.hora68.isEmpty() && activeTrip.estadoMovil != "en cuartel" && activeTrip.estadoMovil != "6-8"
+        val isEnCuartel = (dispatchId.isEmpty() && !hasActiveSalida && (enServ == "0" || enServ == "0-8" || enServ == "0-9" || enServ.isEmpty())) ||
+                estado == "6-10" || estado == "6-8" || estado.contains("cuartel")
+
+        prefs.edit().apply {
+            putString("active_dispatch_id", dispatchId)
+            putString("unit_en_servicio", enServ)
+            putString("unit_estado", estado)
+            putBoolean("is_en_cuartel", isEnCuartel)
+        }.apply()
     }
 
     private fun subscribeToData() {
@@ -251,6 +332,30 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
                                 MainActivity.wakeUpScreenAndStayAwake(context)
                             }
                         }
+                        val enServ = match.enServicio.trim()
+                        if (fresh == null && enServ.isNotEmpty() && enServ != "0" && enServ != "0-8" && enServ != "0-9") {
+                            repository.getDispatchById(enServ) { directD ->
+                                if (directD != null) {
+                                    val uUnit = directD.unidades.entries.find { (k, _) ->
+                                        val ck = k.replace("-", "").trim().uppercase()
+                                        ck == selectedUnitId.replace("-", "").trim().uppercase()
+                                    }
+                                    val uStatus = (uUnit?.value?.get("status") as? String ?: "").lowercase()
+                                    val uEstado = (uUnit?.value?.get("estado") as? String ?: "").lowercase()
+                                    val hora68 = ((uUnit?.value?.get("hora68") ?: uUnit?.value?.get("disponible68At")) as? String ?: "").trim()
+                                    if (uStatus !in listOf("6-8", "finalizado", "cancelado") && uEstado !in listOf("6-8", "finalizado", "cancelado") && hora68.isBlank()) {
+                                        activeDispatch = directD
+                                        updateServiceStateInPrefs()
+                                    }
+                                }
+                            }
+                        }
+                        updateServiceStateInPrefs()
+
+                        if (match.solicitudGps) {
+                            GpsTrackingService.triggerImmediateLocationUpdate(context)
+                            repository.clearGpsRequest(match.idCarro)
+                        }
                     }
                 }
         }
@@ -260,6 +365,7 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
                 .catch { e -> e.printStackTrace() }
                 .collectLatest { trip ->
                     activeBitacoraTrip = trip
+                    updateServiceStateInPrefs()
                 }
         }
 
@@ -280,11 +386,30 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
                             MainActivity.wakeUpScreenAndStayAwake(context)
                         }
                     }
+                    val enServ = currentUnitVehicle?.enServicio?.trim() ?: ""
+                    if (fresh == null && enServ.isNotEmpty() && enServ != "0" && enServ != "0-8" && enServ != "0-9") {
+                        repository.getDispatchById(enServ) { directD ->
+                            if (directD != null) {
+                                val uUnit = directD.unidades.entries.find { (k, _) ->
+                                    val ck = k.replace("-", "").trim().uppercase()
+                                    ck == selectedUnitId.replace("-", "").trim().uppercase()
+                                }
+                                val uStatus = (uUnit?.value?.get("status") as? String ?: "").lowercase()
+                                val uEstado = (uUnit?.value?.get("estado") as? String ?: "").lowercase()
+                                val hora68 = ((uUnit?.value?.get("hora68") ?: uUnit?.value?.get("disponible68At")) as? String ?: "").trim()
+                                if (uStatus !in listOf("6-8", "finalizado", "cancelado") && uEstado !in listOf("6-8", "finalizado", "cancelado") && hora68.isBlank()) {
+                                    activeDispatch = directD
+                                    updateServiceStateInPrefs()
+                                }
+                            }
+                        }
+                    }
+                    updateServiceStateInPrefs()
                 }
         }
 
         personalJob = viewModelScope.launch {
-            repository.getPersonalFlow()
+            repository.getPersonalFlow(context)
                 .catch { e -> e.printStackTrace() }
                 .collectLatest { list ->
                     personalList.clear()
@@ -296,18 +421,33 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
     // Acciones Tácticas del Carro Bomba (6-0, 6-3, 6-15, 6-13, 6-9, 6-10, 6-8, 6-7)
     fun markSalida60() {
         if (selectedUnitId.isEmpty()) return
-        val dispatchId = activeDispatch?.idServicio ?: ""
+        val dispatch = activeDispatch
+        val dispatchId = dispatch?.idServicio ?: ""
         val bitacoraId = activeBitacoraTrip?.idSalida ?: ""
-        val actualUnitKey = activeDispatch?.unidades?.keys?.find {
+        val actualUnitKey = dispatch?.unidades?.keys?.find {
             it.replace("-", "").equals(selectedUnitId.replace("-", ""), ignoreCase = true) ||
             it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
         } ?: selectedUnitId
+
+        val activeTrip = activeBitacoraTrip
+        val uUnit = dispatch?.unidades?.get(actualUnitKey)
+        val currentDriver = activeTrip?.conductor?.ifEmpty { null }
+            ?: (uUnit?.get("conductor") as? String ?: "")
+        val currentObac = activeTrip?.obac?.ifEmpty { null }
+            ?: (uUnit?.get("obac") as? String ?: "")
+
+        prefs.edit().putBoolean("is_en_cuartel", false).putString("unit_estado", "6-0").apply()
 
         repository.recordDispatchMilestone(
             dispatchId = dispatchId,
             vehicleId = actualUnitKey,
             milestoneKey = "salida60At",
-            bitacoraId = bitacoraId
+            bitacoraId = bitacoraId,
+            clave = dispatch?.clave ?: "",
+            lugar = dispatch?.lugar ?: "",
+            preinforme = dispatch?.preinforme ?: "",
+            conductor = currentDriver,
+            obac = currentObac
         )
     }
 
@@ -320,6 +460,8 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
         } ?: selectedUnitId
 
+        prefs.edit().putBoolean("is_en_cuartel", false).putString("unit_estado", "6-3").apply()
+
         repository.recordDispatchMilestone(
             dispatchId = dispatchId,
             vehicleId = actualUnitKey,
@@ -328,8 +470,23 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    fun markTraslado615() {
+    fun markTraslado615(
+        destinationName: String = "CESFAM PLACILLA",
+        lat: Double = -34.6393245,
+        lng: Double = -71.1172894
+    ) {
         if (selectedUnitId.isEmpty()) return
+        active615DestinoNombre = destinationName
+        active615DestinoLat = lat
+        active615DestinoLng = lng
+        prefs.edit().apply {
+            putString("active_615_destino_nombre", destinationName)
+            putFloat("active_615_destino_lat", lat.toFloat())
+            putFloat("active_615_destino_lng", lng.toFloat())
+            putBoolean("is_en_cuartel", false)
+            putString("unit_estado", "6-15")
+        }.apply()
+
         val dispatchId = activeDispatch?.idServicio ?: ""
         val bitacoraId = activeBitacoraTrip?.idSalida ?: ""
         val actualUnitKey = activeDispatch?.unidades?.keys?.find {
@@ -341,7 +498,10 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             dispatchId = dispatchId,
             vehicleId = actualUnitKey,
             milestoneKey = "traslado615At",
-            bitacoraId = bitacoraId
+            bitacoraId = bitacoraId,
+            destinoSalud = destinationName,
+            destinoSaludLat = lat,
+            destinoSaludLng = lng
         )
     }
 
@@ -353,6 +513,8 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             it.replace("-", "").equals(selectedUnitId.replace("-", ""), ignoreCase = true) ||
             it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
         } ?: selectedUnitId
+
+        prefs.edit().putBoolean("is_en_cuartel", false).putString("unit_estado", "6-3_salud").apply()
 
         repository.recordDispatchMilestone(
             dispatchId = dispatchId,
@@ -371,6 +533,8 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
         } ?: selectedUnitId
 
+        prefs.edit().putBoolean("is_en_cuartel", false).putString("unit_estado", "6-13").apply()
+
         repository.recordDispatchMilestone(
             dispatchId = dispatchId,
             vehicleId = actualUnitKey,
@@ -381,6 +545,17 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
 
     fun markRetorno69() {
         if (selectedUnitId.isEmpty()) return
+        active615DestinoNombre = ""
+        active615DestinoLat = 0.0
+        active615DestinoLng = 0.0
+        prefs.edit().apply {
+            remove("active_615_destino_nombre")
+            remove("active_615_destino_lat")
+            remove("active_615_destino_lng")
+            putBoolean("is_en_cuartel", false)
+            putString("unit_estado", "6-9")
+        }.apply()
+
         val dispatchId = activeDispatch?.idServicio ?: ""
         val bitacoraId = activeBitacoraTrip?.idSalida ?: ""
         val actualUnitKey = activeDispatch?.unidades?.keys?.find {
@@ -405,11 +580,19 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
         } ?: selectedUnitId
 
+        prefs.edit().apply {
+            putBoolean("is_en_cuartel", true)
+            putString("unit_estado", "6-10")
+        }.apply()
+
         repository.recordDispatchMilestone(
             dispatchId = dispatchId,
             vehicleId = actualUnitKey,
             milestoneKey = "llegada610At",
-            bitacoraId = bitacoraId
+            bitacoraId = bitacoraId,
+            onSuccess = {
+                GpsTrackingService.triggerImmediateLocationUpdate(context)
+            }
         )
     }
 
@@ -422,6 +605,22 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
         } ?: selectedUnitId
 
+        // Limpiar inmediatamente el estado local activo
+        activeDispatch = null
+        activeBitacoraTrip = null
+        active615DestinoNombre = ""
+        active615DestinoLat = 0.0
+        active615DestinoLng = 0.0
+        prefs.edit().apply {
+            remove("active_dispatch_id")
+            remove("active_615_destino_nombre")
+            remove("active_615_destino_lat")
+            remove("active_615_destino_lng")
+            putBoolean("is_en_cuartel", true)
+            putString("unit_estado", "6-8")
+            putString("unit_en_servicio", "0")
+        }.apply()
+
         repository.recordDispatchMilestone(
             dispatchId = dispatchId,
             vehicleId = actualUnitKey,
@@ -431,7 +630,12 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
             onSuccess = {
                 activeDispatch = null
                 activeBitacoraTrip = null
-                prefs.edit().remove("active_dispatch_id").apply()
+                prefs.edit().apply {
+                    remove("active_dispatch_id")
+                    putBoolean("is_en_cuartel", true)
+                    putString("unit_estado", "6-8")
+                    putString("unit_en_servicio", "0")
+                }.apply()
                 GpsTrackingService.triggerImmediateLocationUpdate(context)
             }
         )
@@ -491,6 +695,40 @@ class CarViewModel(application: Application) : AndroidViewModel(application) {
     fun solicitarGpsBombero(userId: String) {
         val serviceId = activeDispatch?.idServicio ?: activeBitacoraTrip?.idSalida ?: "1"
         repository.solicitarUbicacionBombero(userId, serviceId)
+    }
+
+    fun request1210Conductor() {
+        if (selectedUnitId.isEmpty()) return
+        val dispatchId = activeDispatch?.idServicio ?: ""
+        val actualUnitKey = activeDispatch?.unidades?.keys?.find {
+            it.replace("-", "").equals(selectedUnitId.replace("-", ""), ignoreCase = true) ||
+            it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
+        } ?: selectedUnitId
+
+        repository.solicitarConductor1210(
+            dispatchId = dispatchId,
+            vehicleId = actualUnitKey,
+            onSuccess = {
+                Toast.makeText(context, "🚨 SOLICITUD 12-10 (CONDUCTOR) ENVIADA", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    fun request66Personal() {
+        if (selectedUnitId.isEmpty()) return
+        val dispatchId = activeDispatch?.idServicio ?: ""
+        val actualUnitKey = activeDispatch?.unidades?.keys?.find {
+            it.replace("-", "").equals(selectedUnitId.replace("-", ""), ignoreCase = true) ||
+            it.replace("-", "").equals(selectedUnitLabel.replace("-", ""), ignoreCase = true)
+        } ?: selectedUnitId
+
+        repository.solicitarPersonal66(
+            dispatchId = dispatchId,
+            vehicleId = actualUnitKey,
+            onSuccess = {
+                Toast.makeText(context, "👥 SOLICITUD 6-6 (PERSONAL) ENVIADA", Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 
     fun setVehicleFueraServicio08(motivo: String = "Fuera de servicio") {

@@ -75,7 +75,7 @@ data class Vehicle(
     val patente: String = "",
     val tipo: String = "",
     val compania: String = "",
-    val estado: String = "0-8",
+    val estado: String = "1",
     val enServicio: String = "0",
     val conductor: String = "",
     val obac: String = "",
@@ -86,7 +86,15 @@ data class Vehicle(
     val lng: Double? = null,
     val speed: Float = 0f,
     val heading: Float = 0f,
-    val lastUpdate: String = ""
+    val lastUpdate: String = "",
+    val km: String = "",
+    val odometro: String = "",
+    val kmActual: String = "",
+    val solicitudConductorAt: String = "",
+    val solicitudConductorTimestamp: Long = 0L,
+    val solicitudPersonalAt: String = "",
+    val solicitudPersonalTimestamp: Long = 0L,
+    val solicitudGps: Boolean = false
 )
 
 data class ComandanteAuth(

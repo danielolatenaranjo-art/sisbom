@@ -1,5 +1,6 @@
 package com.sisbom.sisbomcar
 
+import android.content.Context
 import com.google.android.gms.tasks.Tasks
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FirebaseFirestore
@@ -9,6 +10,9 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
+import org.osmdroid.util.GeoPoint
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -96,16 +100,87 @@ class FirebaseRepository {
                     }
                     val list = snapshot?.documents?.mapNotNull { doc ->
                         mapToDispatch(doc)
-                    }?.filter {
-                        it.operadorFinal.trim().isEmpty() &&
-                        it.estado.trim().lowercase() != "finalizada" &&
-                        it.estado.trim().lowercase() != "cancelada"
+                    }?.filter { d ->
+                        val st = d.estado.trim().lowercase()
+                        val isFinalized = (st == "finalizada" || st == "finalizado" || st == "cancelada" || st == "cancelado") && d.operadorFinal.isNotEmpty()
+                        !isFinalized
                     } ?: emptyList()
                     trySend(list)
                 }
             awaitClose { listener.remove() }
         } catch (e: Exception) {
             trySend(emptyList())
+            awaitClose {}
+        }
+    }
+
+    // 3.1 Obtener despacho específico por ID
+    fun getDispatchById(dispatchId: String, onResult: (Dispatch?) -> Unit) {
+        val firestore = db ?: run { onResult(null); return }
+        if (dispatchId.isBlank()) { onResult(null); return }
+        val cleanId = dispatchId.trim()
+        firestore.collection("despachos").document(cleanId)
+            .get()
+            .addOnSuccessListener { doc ->
+                if (doc != null && doc.exists()) {
+                    onResult(mapToDispatch(doc))
+                } else {
+                    firestore.collection("despachos").whereEqualTo("id", cleanId).limit(1).get()
+                        .addOnSuccessListener { querySnap ->
+                            val match = querySnap.documents.firstOrNull()?.let { mapToDispatch(it) }
+                            onResult(match)
+                        }
+                        .addOnFailureListener { onResult(null) }
+                }
+            }
+            .addOnFailureListener { onResult(null) }
+    }
+
+    // 3.2 Escuchar geolocalización en vivo del alertante
+    fun getAlertanteLocationFlow(dispatchId: String): Flow<Pair<Double, Double>?> = callbackFlow {
+        if (dispatchId.isBlank()) {
+            trySend(null)
+            awaitClose {}
+            return@callbackFlow
+        }
+        val firestore = db
+        if (firestore == null) {
+            trySend(null)
+            awaitClose {}
+            return@callbackFlow
+        }
+        try {
+            val cleanId = dispatchId.trim()
+            val listener = firestore.collection("geolocalizaciones_alertantes").document(cleanId)
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null || snapshot == null || !snapshot.exists()) {
+                        trySend(null)
+                        return@addSnapshotListener
+                    }
+                    val lat = (snapshot.get("lat") ?: snapshot.get("latitude"))?.let {
+                        when (it) {
+                            is Number -> it.toDouble()
+                            is String -> it.toDoubleOrNull()
+                            else -> null
+                        }
+                    }
+                    val lng = (snapshot.get("lng") ?: snapshot.get("longitude"))?.let {
+                        when (it) {
+                            is Number -> it.toDouble()
+                            is String -> it.toDoubleOrNull()
+                            else -> null
+                        }
+                    }
+                    val isDisconnected = (snapshot.get("desconectado") as? Boolean) == true
+                    if (lat != null && lng != null && lat != 0.0 && lng != 0.0 && !isDisconnected) {
+                        trySend(Pair(lat, lng))
+                    } else {
+                        trySend(null)
+                    }
+                }
+            awaitClose { listener.remove() }
+        } catch (e: Exception) {
+            trySend(null)
             awaitClose {}
         }
     }
@@ -159,17 +234,21 @@ class FirebaseRepository {
         if (vehicleId.isEmpty()) return
         val timeNow = SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.getDefault()).format(Date())
 
+        val cleanStatus = if (newStatus == "0" || newStatus == "0-8" || newStatus == "08" || newStatus.equals("false", ignoreCase = true)) "0" else "1"
         val updates = hashMapOf<String, Any>(
-            "estado" to newStatus,
+            "estado" to cleanStatus,
             "lastUpdate" to timeNow
         )
         if (enServicio.isNotEmpty()) {
             updates["enServicio"] = enServicio
         }
         if (notas.isNotEmpty()) {
-            updates["notas"] = notas
-        } else if (newStatus == "0-9" || newStatus == "1") {
+            val upperNotas = notas.trim().uppercase(Locale.getDefault())
+            updates["notas"] = upperNotas
+            updates["Observacion"] = upperNotas
+        } else if (cleanStatus == "1") {
             updates["notas"] = ""
+            updates["Observacion"] = ""
         }
 
         firestore.collection("vehiculos").document(vehicleId)
@@ -281,13 +360,10 @@ class FirebaseRepository {
                         }
                     }
 
-                    // Actualizar vehiculos
+                    // Actualizar vehiculos (solo estado operativo y servicio)
                     val vehUpdates = hashMapOf<String, Any>(
-                        "estado" to type,
+                        "estado" to "1",
                         "enServicio" to type,
-                        "conductor" to conductor,
-                        "obac" to obac,
-                        "aCargo" to obac,
                         "notas" to motivo,
                         "lugar" to lugar,
                         "lastUpdate" to "$dateNow $timeNow"
@@ -392,6 +468,15 @@ class FirebaseRepository {
         milestoneKey: String,
         kmValue: String = "",
         bitacoraId: String = "",
+        clave: String = "",
+        lugar: String = "",
+        preinforme: String = "",
+        conductor: String = "",
+        obac: String = "",
+        tripulantesList: List<PersonItem> = emptyList(),
+        destinoSalud: String = "",
+        destinoSaludLat: Double = 0.0,
+        destinoSaludLng: Double = 0.0,
         onSuccess: () -> Unit = {},
         onFailure: (Exception) -> Unit = {}
     ) {
@@ -400,10 +485,96 @@ class FirebaseRepository {
         val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
         val dateNow = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date())
         val timestampField = "${milestoneKey}Timestamp"
-
         val cleanVeh = vehicleId.replace("-", "").trim().uppercase()
 
-        // Función auxiliar para actualizar Bitácora
+        // 1. Preparar campos para actualizar/crear en mapa anidado de unidades en despacho
+        val unitData = hashMapOf<String, Any>(
+            milestoneKey to timeNow,
+            timestampField to System.currentTimeMillis()
+        )
+        if (kmValue.isNotBlank()) {
+            unitData["km"] = kmValue
+        }
+        when (milestoneKey) {
+            "salida60At" -> {
+                unitData["status"] = "6-0"
+                unitData["estado"] = "en_trayecto"
+                unitData["hora60"] = timeNow
+                unitData["salida60At"] = timeNow
+                unitData["horaSalida"] = timeNow
+            }
+            "llegada63At" -> {
+                unitData["status"] = "6-3"
+                unitData["estado"] = "en_lugar"
+                unitData["hora63"] = timeNow
+                unitData["llegada63At"] = timeNow
+                unitData["horaLlegada"] = timeNow
+            }
+            "traslado615At" -> {
+                unitData["status"] = "6-15"
+                unitData["estado"] = "6-15"
+                unitData["is615"] = true
+                unitData["hora615"] = timeNow
+                unitData["traslado615At"] = timeNow
+                if (destinoSalud.isNotEmpty()) {
+                    unitData["destinoSalud"] = destinoSalud
+                    unitData["lugarSalud"] = destinoSalud
+                    unitData["destinoSaludLat"] = destinoSaludLat
+                    unitData["destinoSaludLng"] = destinoSaludLng
+                }
+            }
+            "llegada63SaludAt" -> {
+                unitData["status"] = "6-3"
+                unitData["estado"] = "en_lugar"
+                unitData["is615"] = true
+                unitData["hora63Salud"] = timeNow
+                unitData["llegada63SaludAt"] = timeNow
+            }
+            "retorno69At" -> {
+                unitData["status"] = "6-9"
+                unitData["estado"] = "retorno"
+                unitData["is615"] = false
+                unitData["hora69"] = timeNow
+                unitData["retorno69At"] = timeNow
+            }
+            "llegadaCuartel610At", "llegada610At" -> {
+                unitData["status"] = "6-10"
+                unitData["estado"] = "en_cuartel"
+                unitData["is615"] = false
+                unitData["hora610"] = timeNow
+                unitData["llegada610At"] = timeNow
+            }
+            "disponible68At" -> {
+                unitData["status"] = "6-8"
+                unitData["estado"] = "finalizado"
+                unitData["is615"] = false
+                unitData["hora68"] = timeNow
+                unitData["disponible68At"] = timeNow
+            }
+        }
+
+        // 2. Función para escribir despacho con mapa anidado canonical (nunca dot keys en SetOptions.merge)
+        fun executeDispatchUpdate(bId: String) {
+            if (bId.isNotEmpty()) {
+                unitData["bitacoraId"] = bId
+                unitData["idSalida"] = bId
+            }
+            if (dispatchId.isNotEmpty()) {
+                val nestedDispatch = hashMapOf<String, Any>(
+                    "unidades" to hashMapOf<String, Any>(
+                        vehicleId to unitData
+                    )
+                )
+                firestore.collection("despachos").document(dispatchId)
+                    .set(nestedDispatch, SetOptions.merge())
+                    .addOnSuccessListener { onSuccess() }
+                    .addOnFailureListener { err -> onFailure(err) }
+            } else {
+                onSuccess()
+            }
+        }
+
+        // 3. Helper para actualizar documento de Bitácora existente
         fun updateBitacoraDoc(bDocId: String, extraUpdates: Map<String, Any>) {
             if (bDocId.isNotEmpty()) {
                 firestore.collection("bitacora").document(bDocId).set(extraUpdates, SetOptions.merge())
@@ -426,12 +597,103 @@ class FirebaseRepository {
 
         when (milestoneKey) {
             "salida60At" -> {
+                fun createNewBitacoraEntry() {
+                    getNextBitacoraId { nextId ->
+                        val tripNombres = tripulantesList.joinToString(", ") { "${it.idRadial} ${it.nombreBombero}".trim() }
+                        val tripMaps = tripulantesList.map { p ->
+                            mapOf(
+                                "idRegistro" to p.idRegistro,
+                                "idRadial" to p.idRadial,
+                                "nombre" to p.nombreBombero,
+                                "compania" to p.compania,
+                                "cargo" to p.cargo
+                            )
+                        }
+                        val logData = hashMapOf<String, Any>(
+                            "idSalida" to nextId,
+                            "id" to nextId,
+                            "ID" to nextId,
+                            "idRegistro" to nextId,
+                            "idServicio" to dispatchId,
+                            "carro" to vehicleId,
+                            "clave" to clave,
+                            "lugar" to lugar,
+                            "preInforme" to preinforme,
+                            "informe63" to "",
+                            "observacion" to "",
+                            "conductor" to conductor,
+                            "obac" to obac,
+                            "cuantosBomberos" to if (tripulantesList.isNotEmpty()) tripulantesList.size.toString() else "0",
+                            "tripulantes" to if (tripulantesList.isNotEmpty()) tripulantesList.size.toString() else "0",
+                            "tripulantesNombres" to tripNombres,
+                            "tripulantesDetalle" to tripMaps,
+                            "fecha60" to dateNow,
+                            "hora60" to timeNow,
+                            "fecha63" to "", "hora63" to "",
+                            "fecha69" to "", "hora69" to "",
+                            "fecha610" to "", "hora610" to "",
+                            "fecha68" to "", "hora68" to "",
+                            "estadoMovil" to "en trayecto",
+                            "km" to "",
+                            "timestamp" to System.currentTimeMillis()
+                        )
+                        firestore.collection("bitacora").document(nextId).set(logData)
+                            .addOnSuccessListener {
+                                tripulantesList.forEach { p ->
+                                    if (p.idRegistro.isNotEmpty()) {
+                                        val subMap = mapOf(
+                                            "idRegistro" to p.idRegistro,
+                                            "idRadial" to p.idRadial,
+                                            "nombre" to p.nombreBombero,
+                                            "compania" to p.compania,
+                                            "cargo" to p.cargo,
+                                            "timestamp" to System.currentTimeMillis()
+                                        )
+                                        firestore.collection("bitacora").document(nextId)
+                                            .collection("tripulantes").document(p.idRegistro)
+                                            .set(subMap)
+                                    }
+                                }
+                                executeDispatchUpdate(nextId)
+                            }
+                            .addOnFailureListener {
+                                executeDispatchUpdate("")
+                            }
+                    }
+                }
+
                 val bitUpdates = hashMapOf<String, Any>(
                     "hora60" to timeNow,
                     "fecha60" to dateNow,
                     "estadoMovil" to "en trayecto"
                 )
-                updateBitacoraDoc(bitacoraId, bitUpdates)
+                if (conductor.isNotEmpty()) bitUpdates["conductor"] = conductor
+                if (obac.isNotEmpty()) bitUpdates["obac"] = obac
+
+                if (bitacoraId.isNotEmpty()) {
+                    firestore.collection("bitacora").document(bitacoraId).set(bitUpdates, SetOptions.merge())
+                    executeDispatchUpdate(bitacoraId)
+                } else {
+                    firestore.collection("bitacora").get().addOnSuccessListener { bSnap ->
+                        val matches = bSnap.documents.filter { bDoc ->
+                            val bCarro = (bDoc.getString("carro") ?: bDoc.getString("idCarro") ?: "").replace("-", "").trim().uppercase()
+                            val h68 = bDoc.getString("hora68") ?: ""
+                            val f68 = bDoc.getString("fecha68") ?: ""
+                            val sameServicio = dispatchId.isNotEmpty() && bDoc.getString("idServicio") == dispatchId
+                            val isVehMatch = bCarro.isNotEmpty() && (bCarro == cleanVeh || cleanVeh.contains(bCarro) || bCarro.contains(cleanVeh))
+                            (sameServicio || isVehMatch) && (h68.isEmpty() && f68.isEmpty())
+                        }
+                        if (matches.isNotEmpty()) {
+                            val activeDoc = matches.first()
+                            activeDoc.reference.set(bitUpdates, SetOptions.merge())
+                            executeDispatchUpdate(activeDoc.id)
+                        } else {
+                            createNewBitacoraEntry()
+                        }
+                    }.addOnFailureListener {
+                        createNewBitacoraEntry()
+                    }
+                }
                 updateVehicleStatus(vehicleId, "6-0", dispatchId)
             }
             "llegada63At" -> {
@@ -442,20 +704,34 @@ class FirebaseRepository {
                 )
                 updateBitacoraDoc(bitacoraId, bitUpdates)
                 updateVehicleStatus(vehicleId, "6-3", dispatchId)
+                executeDispatchUpdate(bitacoraId)
             }
             "traslado615At" -> {
+                val obsText = if (destinoSalud.isNotEmpty()) "TRASLADO A $destinoSalud (6-15)" else "TRASLADO CENTRO ASISTENCIAL (6-15)"
                 val bitUpdates = hashMapOf<String, Any>(
-                    "observacion" to "TRASLADO CENTRO ASISTENCIAL (6-15)"
+                    "observacion" to obsText,
+                    "estadoMovil" to "traslado salud"
                 )
+                if (destinoSalud.isNotEmpty()) {
+                    bitUpdates["destinoSalud"] = destinoSalud
+                }
                 updateBitacoraDoc(bitacoraId, bitUpdates)
-                updateVehicleStatus(vehicleId, "6-15", dispatchId)
+                updateVehicleStatus(
+                    vehicleId = vehicleId,
+                    newStatus = "6-15",
+                    enServicio = dispatchId,
+                    notas = if (destinoSalud.isNotEmpty()) "6-15 $destinoSalud" else "6-15"
+                )
+                executeDispatchUpdate(bitacoraId)
             }
             "llegada63SaludAt" -> {
                 val bitUpdates = hashMapOf<String, Any>(
-                    "observacion" to "LLEGADA CENTRO ASISTENCIAL (6-3 SALUD)"
+                    "observacion" to "LLEGADA CENTRO ASISTENCIAL (6-3 SALUD)",
+                    "estadoMovil" to "en centro asistencial"
                 )
                 updateBitacoraDoc(bitacoraId, bitUpdates)
                 updateVehicleStatus(vehicleId, "6-3", dispatchId)
+                executeDispatchUpdate(bitacoraId)
             }
             "retornoEmergencia613At" -> {
                 val bitUpdates = hashMapOf<String, Any>(
@@ -463,6 +739,7 @@ class FirebaseRepository {
                 )
                 updateBitacoraDoc(bitacoraId, bitUpdates)
                 updateVehicleStatus(vehicleId, "6-13", dispatchId)
+                executeDispatchUpdate(bitacoraId)
             }
             "retorno69At" -> {
                 val bitUpdates = hashMapOf<String, Any>(
@@ -472,6 +749,7 @@ class FirebaseRepository {
                 )
                 updateBitacoraDoc(bitacoraId, bitUpdates)
                 updateVehicleStatus(vehicleId, "6-9", dispatchId)
+                executeDispatchUpdate(bitacoraId)
             }
             "llegadaCuartel610At", "llegada610At" -> {
                 val bitUpdates = hashMapOf<String, Any>(
@@ -481,6 +759,7 @@ class FirebaseRepository {
                 )
                 updateBitacoraDoc(bitacoraId, bitUpdates)
                 updateVehicleStatus(vehicleId, "6-10", dispatchId)
+                executeDispatchUpdate(bitacoraId)
             }
             "disponible68At" -> {
                 val bitUpdates = hashMapOf<String, Any>(
@@ -491,80 +770,45 @@ class FirebaseRepository {
                 if (kmValue.isNotBlank()) bitUpdates["km"] = kmValue
                 updateBitacoraDoc(bitacoraId, bitUpdates)
 
-                // Actualizar vehículo a Disponible (0-9), enServicio a 0 y limpiar dotación
+                // Actualizar vehículo a Disponible (estado = "1", enServicio = "0")
                 val vehUpdates = hashMapOf<String, Any>(
                     "enServicio" to "0",
-                    "estado" to "0-9",
-                    "conductor" to "",
-                    "obac" to "",
-                    "aCargo" to "",
+                    "estado" to "1",
                     "notas" to "",
                     "lugar" to "Cuartel",
                     "lastUpdate" to "$dateNow $timeNow"
                 )
-                if (kmValue.isNotBlank()) vehUpdates["kmActual"] = kmValue
+                if (kmValue.isNotBlank()) {
+                    vehUpdates["kmActual"] = kmValue
+                    vehUpdates["km"] = kmValue
+                    vehUpdates["odometro"] = kmValue
+                }
                 firestore.collection("vehiculos").document(vehicleId).set(vehUpdates, SetOptions.merge())
-            }
-        }
 
-        // Si hay un despacho de central activo, actualizar también el documento de despacho
-        if (dispatchId.isNotEmpty()) {
-            val unitNestedPath = "unidades.$vehicleId"
-            val updates = hashMapOf<String, Any>(
-                "$unitNestedPath.$milestoneKey" to timeNow,
-                "$unitNestedPath.$timestampField" to System.currentTimeMillis()
-            )
-            if (kmValue.isNotBlank()) {
-                updates["$unitNestedPath.km"] = kmValue
-            }
-            when (milestoneKey) {
-                "salida60At" -> {
-                    updates["$unitNestedPath.status"] = "6-0"
-                    updates["$unitNestedPath.estado"] = "en_trayecto"
-                    updates["$unitNestedPath.hora60"] = timeNow
-                    updates["$unitNestedPath.horaSalida"] = timeNow
+                firestore.collection("vehiculos").get().addOnSuccessListener { vSnap ->
+                    vSnap.documents.forEach { vDoc ->
+                        val vId = vDoc.id.replace("-", "").trim().uppercase()
+                        val cId = (vDoc.getString("idCarro") ?: vDoc.getString("carro") ?: "").replace("-", "").trim().uppercase()
+                        if (vId == cleanVeh || cId == cleanVeh) {
+                            vDoc.reference.set(vehUpdates, SetOptions.merge())
+                        }
+                    }
                 }
-                "llegada63At" -> {
-                    updates["$unitNestedPath.status"] = "6-3"
-                    updates["$unitNestedPath.estado"] = "en_lugar"
-                    updates["$unitNestedPath.hora63"] = timeNow
-                    updates["$unitNestedPath.horaLlegada"] = timeNow
-                }
-                "retorno69At" -> {
-                    updates["$unitNestedPath.status"] = "6-9"
-                    updates["$unitNestedPath.estado"] = "retorno"
-                    updates["$unitNestedPath.hora69"] = timeNow
-                }
-                "llegadaCuartel610At", "llegada610At" -> {
-                    updates["$unitNestedPath.status"] = "6-10"
-                    updates["$unitNestedPath.estado"] = "en_cuartel"
-                    updates["$unitNestedPath.hora610"] = timeNow
-                }
-                "disponible68At" -> {
-                    updates["$unitNestedPath.status"] = "6-8"
-                    updates["$unitNestedPath.estado"] = "finalizado"
-                    updates["$unitNestedPath.hora68"] = timeNow
-                }
-            }
 
-            firestore.collection("despachos").document(dispatchId)
-                .update(updates)
-                .addOnSuccessListener { onSuccess() }
-                .addOnFailureListener { _ ->
-                    val fallbackMap = hashMapOf(
-                        "unidades" to hashMapOf(
-                            vehicleId to hashMapOf(
-                                milestoneKey to timeNow,
-                                timestampField to System.currentTimeMillis()
-                            )
-                        )
-                    )
-                    firestore.collection("despachos").document(dispatchId).set(fallbackMap, SetOptions.merge())
-                        .addOnSuccessListener { onSuccess() }
-                        .addOnFailureListener { err -> onFailure(err) }
+                // Liberar personal vinculado a este despacho
+                if (dispatchId.isNotEmpty()) {
+                    firestore.collection("personal").whereEqualTo("enServicio", dispatchId).get()
+                        .addOnSuccessListener { pSnap ->
+                            pSnap.documents.forEach { pDoc ->
+                                pDoc.reference.set(mapOf("enServicio" to "0"), SetOptions.merge())
+                            }
+                        }
                 }
-        } else {
-            onSuccess()
+                executeDispatchUpdate(bitacoraId)
+            }
+            else -> {
+                executeDispatchUpdate(bitacoraId)
+            }
         }
     }
 
@@ -585,11 +829,19 @@ class FirebaseRepository {
             "lng" to lng,
             "heading" to heading,
             "lastUpdate" to timeNow,
-            "posicionGps" to geoPoint
+            "posicionGps" to geoPoint,
+            "solicitudGps" to false
         )
 
         firestore.collection("vehiculos").document(vehicleId)
             .set(data, SetOptions.merge())
+    }
+
+    fun clearGpsRequest(vehicleId: String) {
+        val firestore = db ?: return
+        if (vehicleId.isEmpty()) return
+        firestore.collection("vehiculos").document(vehicleId)
+            .set(mapOf("solicitudGps" to false), SetOptions.merge())
     }
 
     // 8. Verificar credenciales y cargo de Comandante (idRadial 1) para autorizar la tablet
@@ -777,13 +1029,22 @@ class FirebaseRepository {
                 ?: (doc.get("rumbo") as? Number)?.toFloat()
                 ?: 0f
 
-            val geoPoint = doc.getGeoPoint("posicionGps")
-            val latVal = geoPoint?.latitude
-                ?: (doc.get("lat") as? Number)?.toDouble()
-                ?: (doc.get("lat") as? String)?.toDoubleOrNull()
-            val lngVal = geoPoint?.longitude
-                ?: (doc.get("lng") as? Number)?.toDouble()
-                ?: (doc.get("lng") as? String)?.toDoubleOrNull()
+            val (latVal, lngVal) = extractCoordinates(doc, "posicionGps", "geo", "ubicacionGps")
+
+            val rawEstado = doc.get("estado")
+            val cleanEstado = when (rawEstado) {
+                is Boolean -> if (rawEstado) "1" else "0"
+                is Number -> if (rawEstado.toLong() == 0L) "0" else "1"
+                is String -> {
+                    val s = rawEstado.trim().lowercase()
+                    if (s == "0" || s == "0-8" || s == "08" || s == "false" || s == "fuera de servicio") "0" else "1"
+                }
+                else -> "1"
+            }
+
+            val condTs = (doc.get("solicitudConductorTimestamp") as? Number)?.toLong() ?: 0L
+            val persTs = (doc.get("solicitudPersonalTimestamp") as? Number)?.toLong() ?: 0L
+            val solGpsVal = doc.getBoolean("solicitudGps") ?: doc.getBoolean("solicitud_gps") ?: false
 
             Vehicle(
                 idCarro = doc.id,
@@ -791,32 +1052,114 @@ class FirebaseRepository {
                 patente = patenteVal,
                 tipo = tipoVal,
                 compania = doc.getString("compania") ?: doc.getString("cia") ?: "",
-                estado = doc.getString("estado") ?: "0-8",
+                estado = cleanEstado,
                 enServicio = enServicioVal,
                 conductor = doc.getString("conductor") ?: doc.getString("maquinista") ?: "",
                 obac = doc.getString("obac") ?: doc.getString("aCargo") ?: "",
                 tripulacion = tripulacionList,
                 numTripulantes = (doc.get("numTripulantes") as? Number)?.toInt() ?: tripulacionList.size,
-                notas = doc.getString("notas") ?: doc.getString("observacion") ?: "",
+                notas = doc.getString("notas") ?: doc.getString("observacion") ?: doc.getString("Observacion") ?: "",
                 lat = latVal,
                 lng = lngVal,
                 speed = speedVal,
                 heading = headingVal,
-                lastUpdate = doc.getString("lastUpdate") ?: ""
+                lastUpdate = doc.getString("lastUpdate") ?: "",
+                solicitudConductorAt = doc.getString("solicitudConductorAt") ?: "",
+                solicitudConductorTimestamp = condTs,
+                solicitudPersonalAt = doc.getString("solicitudPersonalAt") ?: "",
+                solicitudPersonalTimestamp = persTs,
+                solicitudGps = solGpsVal
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("SisBomCar", "Error en mapToVehicle doc ${doc.id}: ${e.message}", e)
             null
+        }
+    }
+
+    private fun extractCoordinates(doc: DocumentSnapshot, vararg fieldNames: String): Pair<Double?, Double?> {
+        return extractCoordinates(doc, true, *fieldNames)
+    }
+
+    private fun extractCoordinates(doc: DocumentSnapshot, fallbackToTopLevel: Boolean = true, vararg fieldNames: String): Pair<Double?, Double?> {
+        for (field in fieldNames) {
+            val raw = doc.get(field) ?: continue
+            when (raw) {
+                is com.google.firebase.firestore.GeoPoint -> {
+                    if (raw.latitude != 0.0 && raw.longitude != 0.0) {
+                        return Pair(raw.latitude, raw.longitude)
+                    }
+                }
+                is Map<*, *> -> {
+                    val lat = (raw["lat"] ?: raw["latitude"] ?: raw["latitud"])?.let {
+                        when (it) {
+                            is Number -> it.toDouble()
+                            is String -> it.toDoubleOrNull()
+                            else -> null
+                        }
+                    }
+                    val lng = (raw["lng"] ?: raw["longitude"] ?: raw["longitud"] ?: raw["lon"])?.let {
+                        when (it) {
+                            is Number -> it.toDouble()
+                            is String -> it.toDoubleOrNull()
+                            else -> null
+                        }
+                    }
+                    if (lat != null && lng != null && lat != 0.0 && lng != 0.0) {
+                        return Pair(lat, lng)
+                    }
+                }
+                else -> {}
+            }
+        }
+
+        if (!fallbackToTopLevel) {
+            return Pair(null, null)
+        }
+
+        val topLat = (doc.get("lat") ?: doc.get("latitude") ?: doc.get("latitud"))?.let {
+            when (it) {
+                is Number -> it.toDouble()
+                is String -> it.toDoubleOrNull()
+                else -> null
+            }
+        }
+        val topLng = (doc.get("lng") ?: doc.get("longitude") ?: doc.get("longitud") ?: doc.get("lon"))?.let {
+            when (it) {
+                is Number -> it.toDouble()
+                is String -> it.toDoubleOrNull()
+                else -> null
+            }
+        }
+        return Pair(topLat, topLng)
+    }
+
+    private fun safeBoolean(doc: DocumentSnapshot, key: String): Boolean {
+        val raw = doc.get(key) ?: return false
+        return when (raw) {
+            is Boolean -> raw
+            is Number -> raw.toInt() == 1
+            is String -> raw.equals("true", ignoreCase = true) || raw.equals("si", ignoreCase = true) || raw == "1"
+            else -> false
+        }
+    }
+
+    private fun safeString(doc: DocumentSnapshot, key: String): String {
+        val obj = doc.get(key) ?: return ""
+        return when (obj) {
+            is String -> obj.trim()
+            is Map<*, *> -> {
+                val calle = (obj["calle"] ?: obj["street"] ?: "")?.toString()?.trim() ?: ""
+                val num = (obj["numero"] ?: obj["number"] ?: "")?.toString()?.trim() ?: ""
+                val com = (obj["comuna"] ?: obj["city"] ?: "")?.toString()?.trim() ?: ""
+                listOf(calle, num, com).filter { it.isNotEmpty() }.joinToString(" ")
+            }
+            else -> obj.toString().trim()
         }
     }
 
     private fun mapToDispatch(doc: DocumentSnapshot): Dispatch? {
         return try {
-            val carrosRaw = doc.get("carros") ?: doc.get("unidadesDespachadas")
-            val carrosStr = when (carrosRaw) {
-                is List<*> -> carrosRaw.joinToString(", ") { it.toString() }
-                is String -> carrosRaw
-                else -> ""
-            }
+            val carrosRaw = doc.get("carros") ?: doc.get("unidadesDespachadas") ?: doc.get("unidadesAsignadas")
 
             val unidadesRaw = doc.get("unidades") as? Map<String, Any> ?: emptyMap()
             val unidadesMap = mutableMapOf<String, MutableMap<String, Any>>()
@@ -841,6 +1184,13 @@ class FirebaseRepository {
                 }
             }
 
+            val carrosStr = when {
+                carrosRaw is List<*> && carrosRaw.isNotEmpty() -> carrosRaw.joinToString(", ") { it.toString() }
+                carrosRaw is String && carrosRaw.isNotBlank() -> carrosRaw
+                unidadesMap.isNotEmpty() -> unidadesMap.keys.joinToString(", ")
+                else -> safeString(doc, "carrosTexto")
+            }
+
             val bitacoraRaw = doc.get("bitacora") as? List<*> ?: emptyList<Any>()
             val bitacoraList = bitacoraRaw.mapNotNull {
                 if (it is Map<*, *>) {
@@ -855,78 +1205,89 @@ class FirebaseRepository {
             }
 
             // Coordenadas del Incidente (Marcadas por Central CAD / Mapa Táctico)
-            val geoMap = (doc.get("geo") as? Map<*, *>)
-                ?: (doc.get("geolocalizacion") as? Map<*, *>)
-                ?: (doc.get("ubicacionGps") as? Map<*, *>)
-                ?: (doc.get("coordenadas") as? Map<*, *>)
-                ?: (doc.get("posicionGps") as? Map<*, *>)
-
-            val geoPoint = doc.getGeoPoint("posicionGps") ?: doc.getGeoPoint("geo") ?: doc.getGeoPoint("ubicacionGps")
-            val latVal = geoPoint?.latitude
-                ?: (geoMap?.get("lat") as? Number)?.toDouble()
-                ?: (geoMap?.get("lat") as? String)?.toDoubleOrNull()
-                ?: (doc.get("lat") as? Number)?.toDouble()
-                ?: (doc.get("lat") as? String)?.toDoubleOrNull()
-
-            val lngVal = geoPoint?.longitude
-                ?: (geoMap?.get("lng") as? Number)?.toDouble()
-                ?: (geoMap?.get("lng") as? String)?.toDoubleOrNull()
-                ?: (doc.get("lng") as? Number)?.toDouble()
-                ?: (doc.get("lng") as? String)?.toDoubleOrNull()
+            val (latVal, lngVal) = extractCoordinates(doc, true, "geo", "geolocalizacion", "ubicacionGps", "posicionGps", "coordenadas")
 
             // Coordenadas separadas del Alertante (si reportó ubicación por link SMS/WhatsApp)
+            val (alertanteLatVal, alertanteLngVal) = extractCoordinates(doc, false, "geolocalizacionAlertante", "alertanteGeo")
             val alertanteMap = (doc.get("geolocalizacionAlertante") as? Map<*, *>)
                 ?: (doc.get("alertanteGeo") as? Map<*, *>)
                 ?: ((doc.get("geo") as? Map<*, *>)?.get("alertanteGeo") as? Map<*, *>)
-            val alertanteLatVal = (alertanteMap?.get("lat") as? Number)?.toDouble()
-                ?: (alertanteMap?.get("lat") as? String)?.toDoubleOrNull()
-            val alertanteLngVal = (alertanteMap?.get("lng") as? Number)?.toDouble()
-                ?: (alertanteMap?.get("lng") as? String)?.toDoubleOrNull()
             val alertanteAccVal = (alertanteMap?.get("accuracy") as? Number)?.toFloat()
                 ?: (alertanteMap?.get("accuracy") as? String)?.toFloatOrNull()
 
-            val phoneVal = doc.getString("telefono")
-                ?: (doc.get("smsSolicitudGeo") as? Map<*, *>)?.get("telefono")?.toString()
-                ?: (doc.get("geolocalizacionAlertante") as? Map<*, *>)?.get("telefono")?.toString()
-                ?: (doc.get("alertanteGeo") as? Map<*, *>)?.get("telefono")?.toString()
-                ?: ""
+            val phoneVal = safeString(doc, "telefono").ifEmpty {
+                (doc.get("smsSolicitudGeo") as? Map<*, *>)?.get("telefono")?.toString()
+                    ?: (doc.get("geolocalizacionAlertante") as? Map<*, *>)?.get("telefono")?.toString()
+                    ?: (doc.get("alertanteGeo") as? Map<*, *>)?.get("telefono")?.toString()
+                    ?: ""
+            }
 
-            val solicitanteVal = doc.getString("solicitante")
-                ?: doc.getString("alertante")
-                ?: doc.getString("nombreAlertante")
-                ?: ""
+            val solicitanteVal = safeString(doc, "solicitante").ifEmpty {
+                safeString(doc, "alertante").ifEmpty {
+                    safeString(doc, "nombreAlertante")
+                }
+            }
 
-            val claveVal = doc.getString("clave")
-                ?: doc.getString("key")
-                ?: doc.getString("claveEmergencia")
-                ?: doc.getString("tipoEmergencia")
-                ?: ""
+            val idVal = doc.get("id")?.toString()
+                ?: doc.get("idDespacho")?.toString()
+                ?: doc.get("idServicio")?.toString()
+                ?: doc.get("numero")?.toString()
+                ?: doc.id
 
-            val lugarVal = doc.getString("lugar")
-                ?: doc.getString("direccion")
-                ?: doc.getString("ubicacion")
-                ?: (doc.get("geo") as? Map<*, *>)?.get("direccion")?.toString()
-                ?: (doc.get("geo") as? Map<*, *>)?.get("address")?.toString()
-                ?: (doc.get("ubicacionGps") as? Map<*, *>)?.get("direccion")?.toString()
-                ?: ""
+            val claveVal = safeString(doc, "clave").ifEmpty {
+                safeString(doc, "key").ifEmpty {
+                    safeString(doc, "claveEmergencia").ifEmpty {
+                        safeString(doc, "tipoEmergencia")
+                    }
+                }
+            }
+
+            val dirVal = safeString(doc, "lugar").ifEmpty {
+                safeString(doc, "direccion").ifEmpty {
+                    safeString(doc, "ubicacion").ifEmpty {
+                        (doc.get("geo") as? Map<*, *>)?.get("direccion")?.toString()
+                            ?: (doc.get("geo") as? Map<*, *>)?.get("address")?.toString()
+                            ?: (doc.get("ubicacionGps") as? Map<*, *>)?.get("direccion")?.toString()
+                            ?: ""
+                    }
+                }
+            }
+
+            val esquinaVal = safeString(doc, "esquina").ifEmpty {
+                safeString(doc, "interseccion").ifEmpty {
+                    safeString(doc, "referencia")
+                }
+            }
+
+            val comunaVal = safeString(doc, "comuna").ifEmpty {
+                safeString(doc, "ciudad")
+            }
+
+            var lugarVal = dirVal
+            if (esquinaVal.isNotBlank() && !lugarVal.contains(esquinaVal, ignoreCase = true)) {
+                lugarVal = if (lugarVal.isNotBlank()) "$lugarVal (Esq. $esquinaVal)" else "Esq. $esquinaVal"
+            }
+            if (comunaVal.isNotBlank() && !lugarVal.contains(comunaVal, ignoreCase = true)) {
+                lugarVal = if (lugarVal.isNotBlank()) "$lugarVal, $comunaVal" else comunaVal
+            }
 
             Dispatch(
-                idServicio = doc.id,
+                idServicio = idVal,
                 clave = claveVal,
-                claveApoyo = doc.getString("claveApoyo") ?: "",
+                claveApoyo = safeString(doc, "claveApoyo"),
                 lugar = lugarVal,
-                preinforme = doc.getString("preinforme") ?: "",
+                preinforme = safeString(doc, "preinforme").ifEmpty { safeString(doc, "preInforme").ifEmpty { safeString(doc, "informe").ifEmpty { safeString(doc, "detalles") } } },
                 carros = carrosStr,
-                horaDespacho = doc.getString("horaDespacho") ?: "",
-                fechaDespacho = doc.getString("fechaDespacho") ?: "",
-                hora67 = doc.getString("hora67") ?: "",
-                quienDespacha = doc.getString("quienDespacha") ?: "",
-                operadorFinal = doc.getString("operadorFinal") ?: "",
-                obacGeneral = doc.getString("obacGeneral") ?: "",
+                horaDespacho = safeString(doc, "horaDespacho"),
+                fechaDespacho = safeString(doc, "fechaDespacho"),
+                hora67 = safeString(doc, "hora67"),
+                quienDespacha = safeString(doc, "quienDespacha"),
+                operadorFinal = safeString(doc, "operadorFinal"),
+                obacGeneral = safeString(doc, "obacGeneral"),
                 unidades = unidadesMap,
                 bitacora = bitacoraList,
-                solicitarConfirmacion = doc.getBoolean("solicitarConfirmacion") ?: false,
-                estado = doc.getString("estado") ?: "",
+                solicitarConfirmacion = safeBoolean(doc, "solicitarConfirmacion"),
+                estado = safeString(doc, "estado"),
                 solicitante = solicitanteVal,
                 telefono = phoneVal,
                 lat = latVal,
@@ -935,16 +1296,25 @@ class FirebaseRepository {
                 alertanteLng = alertanteLngVal,
                 alertanteAccuracy = alertanteAccVal
             )
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("SisBomCar", "Error en mapToDispatch doc ${doc.id}: ${e.message}", e)
             null
         }
     }
 
-    // 9. Escuchar lista de personal en tiempo real
-    fun getPersonalFlow(): Flow<List<PersonItem>> = callbackFlow {
+    // 9. Escuchar lista de personal en tiempo real con soporte 100% offline
+    fun getPersonalFlow(context: Context? = null): Flow<List<PersonItem>> = callbackFlow {
+        // Emitir caché local offline inmediatamente
+        if (context != null) {
+            val cached = loadCachedPersonal(context)
+            if (cached.isNotEmpty()) {
+                trySend(cached)
+            }
+        }
+
         val firestore = db
         if (firestore == null) {
-            trySend(emptyList())
+            if (context == null) trySend(emptyList())
             awaitClose {}
             return@callbackFlow
         }
@@ -952,7 +1322,6 @@ class FirebaseRepository {
             val listener = firestore.collection("personal")
                 .addSnapshotListener { snapshot, error ->
                     if (error != null) {
-                        trySend(emptyList())
                         return@addSnapshotListener
                     }
                     val list = snapshot?.documents?.mapNotNull { doc ->
@@ -977,11 +1346,16 @@ class FirebaseRepository {
                             gpsTimestamp = ts
                         )
                     } ?: emptyList()
-                    trySend(list)
+
+                    if (list.isNotEmpty()) {
+                        trySend(list)
+                        if (context != null) {
+                            saveCachedPersonal(context, list)
+                        }
+                    }
                 }
             awaitClose { listener.remove() }
         } catch (e: Exception) {
-            trySend(emptyList())
             awaitClose {}
         }
     }
@@ -1041,18 +1415,7 @@ class FirebaseRepository {
             else -> ""
         }
 
-        // 1. Actualizar vehiculos
-        val vUpdates = mutableMapOf<String, Any>()
-        if (finalDriverName.isNotEmpty()) vUpdates["conductor"] = finalDriverName
-        if (finalObacName.isNotEmpty()) {
-            vUpdates["obac"] = finalObacName
-            vUpdates["aCargo"] = finalObacName
-        }
-        if (vUpdates.isNotEmpty()) {
-            firestore.collection("vehiculos").document(vehicleId).set(vUpdates, SetOptions.merge())
-        }
-
-        // 2. Actualizar bitácora (Documento bitacora/{bitacoraId} o búsqueda activa)
+        // 1. Actualizar bitácora (Documento bitacora/{bitacoraId} o búsqueda activa)
         val bUpdates = hashMapOf<String, Any>(
             "tripulantes" to namesStr,
             "tripulantesNombres" to namesStr,
@@ -1098,25 +1461,30 @@ class FirebaseRepository {
             }
         }
 
-        // 3. Actualizar documento de despacho si existe
+        // 3. Actualizar documento de despacho si existe (con mapa anidado canonical)
         if (dispatchId.isNotEmpty()) {
-            val dUpdates = hashMapOf<String, Any>(
-                "unidades.$vehicleId.tripulantesDetalle" to listMap,
-                "unidades.$vehicleId.tripulantesNombres" to namesStr,
-                "unidades.$vehicleId.tripulacion" to tripulantes.map { it.nombreBombero },
-                "unidades.$vehicleId.count" to finalCountStr,
-                "unidades.$vehicleId.cuantosBomberos" to finalCountStr
+            val unitData = hashMapOf<String, Any>(
+                "tripulantesDetalle" to listMap,
+                "tripulantesNombres" to namesStr,
+                "tripulacion" to tripulantes.map { it.nombreBombero },
+                "count" to finalCountStr,
+                "cuantosBomberos" to finalCountStr
             )
             if (finalDriverRad.isNotEmpty()) {
-                dUpdates["unidades.$vehicleId.driverRad"] = finalDriverRad
-                dUpdates["unidades.$vehicleId.conductor"] = finalDriverName
+                unitData["driverRad"] = finalDriverRad
+                unitData["conductor"] = finalDriverName
             }
             if (finalObacRad.isNotEmpty()) {
-                dUpdates["unidades.$vehicleId.obacRad"] = finalObacRad
-                dUpdates["unidades.$vehicleId.obac"] = finalObacName
-                dUpdates["unidades.$vehicleId.aCargo"] = finalObacName
+                unitData["obacRad"] = finalObacRad
+                unitData["obac"] = finalObacName
+                unitData["aCargo"] = finalObacName
             }
-            firestore.collection("despachos").document(dispatchId).set(dUpdates, SetOptions.merge())
+            val dNestedMap = hashMapOf<String, Any>(
+                "unidades" to hashMapOf<String, Any>(
+                    vehicleId to unitData
+                )
+            )
+            firestore.collection("despachos").document(dispatchId).set(dNestedMap, SetOptions.merge())
         }
 
         // 4. Marcar a cada bombero como en servicio
@@ -1156,7 +1524,222 @@ class FirebaseRepository {
                 SetOptions.merge()
             )
     }
+
+    // 12. Solicitar 12-10 (Conductor para la unidad)
+    fun solicitarConductor1210(
+        dispatchId: String,
+        vehicleId: String,
+        onSuccess: () -> Unit = {},
+        onFailure: (Exception) -> Unit = {}
+    ) {
+        val firestore = db ?: return
+        if (vehicleId.isEmpty()) return
+        val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        val ts = System.currentTimeMillis()
+
+        val vUpdates = hashMapOf<String, Any>(
+            "solicitudConductorAt" to timeNow,
+            "solicitudConductorTimestamp" to ts
+        )
+        firestore.collection("vehiculos").document(vehicleId).set(vUpdates, SetOptions.merge())
+
+        if (dispatchId.isNotEmpty()) {
+            val dNestedMap = hashMapOf<String, Any>(
+                "unidades" to hashMapOf<String, Any>(
+                    vehicleId to hashMapOf<String, Any>(
+                        "solicitudConductorAt" to timeNow,
+                        "solicitudConductorTimestamp" to ts
+                    )
+                )
+            )
+            firestore.collection("despachos").document(dispatchId).set(dNestedMap, SetOptions.merge())
+                .addOnSuccessListener { onSuccess() }
+                .addOnFailureListener { err -> onFailure(err) }
+        } else {
+            onSuccess()
+        }
+    }
+
+    // 13. Solicitar 6-6 (Personal / Dotación para la unidad)
+    fun solicitarPersonal66(
+        dispatchId: String,
+        vehicleId: String,
+        onSuccess: () -> Unit = {},
+        onFailure: (Exception) -> Unit = {}
+    ) {
+        val firestore = db ?: return
+        if (vehicleId.isEmpty()) return
+        val timeNow = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+        val ts = System.currentTimeMillis()
+
+        val vUpdates = hashMapOf<String, Any>(
+            "solicitudPersonalAt" to timeNow,
+            "solicitudPersonalTimestamp" to ts
+        )
+        firestore.collection("vehiculos").document(vehicleId).set(vUpdates, SetOptions.merge())
+
+        if (dispatchId.isNotEmpty()) {
+            val dNestedMap = hashMapOf<String, Any>(
+                "unidades" to hashMapOf<String, Any>(
+                    vehicleId to hashMapOf<String, Any>(
+                        "solicitudPersonalAt" to timeNow,
+                        "solicitudPersonalTimestamp" to ts
+                    )
+                )
+            )
+            firestore.collection("despachos").document(dispatchId).set(dNestedMap, SetOptions.merge())
+                .addOnSuccessListener { onSuccess() }
+                .addOnFailureListener { err -> onFailure(err) }
+        } else {
+            onSuccess()
+        }
+    }
+
+    // =========================================================================
+    // PERSISTENCIA LOCAL 100% OFFLINE (Personal y Rutas OSRM)
+    // =========================================================================
+
+    fun saveCachedPersonal(context: Context, list: List<PersonItem>) {
+        try {
+            val prefs = context.getSharedPreferences("SisBomOfflineCache", Context.MODE_PRIVATE)
+            val jsonArray = JSONArray()
+            list.forEach { p ->
+                val obj = JSONObject().apply {
+                    put("idRegistro", p.idRegistro)
+                    put("nombreBombero", p.nombreBombero)
+                    put("idRadial", p.idRadial)
+                    put("compania", p.compania)
+                    put("cargo", p.cargo)
+                    put("enServicio", p.enServicio)
+                    put("lat", p.lat)
+                    put("lng", p.lng)
+                    put("gpsTimestamp", p.gpsTimestamp)
+                }
+                jsonArray.put(obj)
+            }
+            prefs.edit().putString("cached_personal_list", jsonArray.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun loadCachedPersonal(context: Context): List<PersonItem> {
+        return try {
+            val prefs = context.getSharedPreferences("SisBomOfflineCache", Context.MODE_PRIVATE)
+            val raw = prefs.getString("cached_personal_list", null) ?: return emptyList()
+            val array = JSONArray(raw)
+            val result = mutableListOf<PersonItem>()
+            for (i in 0 until array.length()) {
+                val obj = array.getJSONObject(i)
+                result.add(
+                    PersonItem(
+                        idRegistro = obj.optString("idRegistro", ""),
+                        nombreBombero = obj.optString("nombreBombero", ""),
+                        idRadial = obj.optString("idRadial", ""),
+                        compania = obj.optString("compania", ""),
+                        cargo = obj.optString("cargo", ""),
+                        enServicio = obj.optString("enServicio", "0"),
+                        lat = obj.optDouble("lat", 0.0),
+                        lng = obj.optDouble("lng", 0.0),
+                        gpsTimestamp = obj.optLong("gpsTimestamp", 0L)
+                    )
+                )
+            }
+            result
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    fun saveCachedRoute(
+        context: Context,
+        routeKey: String,
+        points: List<GeoPoint>,
+        maneuvers: List<TacticalManeuverStep>,
+        duration: Double,
+        distance: Double
+    ) {
+        try {
+            if (routeKey.isBlank() || points.isEmpty()) return
+            val prefs = context.getSharedPreferences("SisBomRouteCache", Context.MODE_PRIVATE)
+
+            val root = JSONObject()
+            root.put("duration", duration)
+            root.put("distance", distance)
+
+            val ptsArray = JSONArray()
+            points.forEach { pt ->
+                val pObj = JSONObject()
+                pObj.put("lat", pt.latitude)
+                pObj.put("lng", pt.longitude)
+                ptsArray.put(pObj)
+            }
+            root.put("points", ptsArray)
+
+            val manArray = JSONArray()
+            maneuvers.forEach { m ->
+                val mObj = JSONObject()
+                mObj.put("instruction", m.instruction)
+                mObj.put("streetName", m.streetName)
+                mObj.put("distanceMeters", m.distanceMeters)
+                mObj.put("modifier", m.modifier)
+                mObj.put("maneuverType", m.maneuverType)
+                mObj.put("lat", m.location.latitude)
+                mObj.put("lng", m.location.longitude)
+                manArray.put(mObj)
+            }
+            root.put("maneuvers", manArray)
+
+            prefs.edit().putString("route_$routeKey", root.toString()).apply()
+        } catch (_: Exception) {}
+    }
+
+    fun loadCachedRoute(context: Context, routeKey: String): CachedRouteData? {
+        return try {
+            if (routeKey.isBlank()) return null
+            val prefs = context.getSharedPreferences("SisBomRouteCache", Context.MODE_PRIVATE)
+            val raw = prefs.getString("route_$routeKey", null) ?: return null
+            val root = JSONObject(raw)
+
+            val duration = root.optDouble("duration", 0.0)
+            val distance = root.optDouble("distance", 0.0)
+
+            val ptsArray = root.optJSONArray("points") ?: JSONArray()
+            val points = mutableListOf<GeoPoint>()
+            for (i in 0 until ptsArray.length()) {
+                val pObj = ptsArray.getJSONObject(i)
+                points.add(GeoPoint(pObj.getDouble("lat"), pObj.getDouble("lng")))
+            }
+
+            val manArray = root.optJSONArray("maneuvers") ?: JSONArray()
+            val maneuvers = mutableListOf<TacticalManeuverStep>()
+            for (i in 0 until manArray.length()) {
+                val mObj = manArray.getJSONObject(i)
+                maneuvers.add(
+                    TacticalManeuverStep(
+                        instruction = mObj.optString("instruction", ""),
+                        streetName = mObj.optString("streetName", ""),
+                        distanceMeters = mObj.optDouble("distanceMeters", 0.0),
+                        modifier = mObj.optString("modifier", ""),
+                        maneuverType = mObj.optString("maneuverType", ""),
+                        location = GeoPoint(mObj.optDouble("lat", 0.0), mObj.optDouble("lng", 0.0))
+                    )
+                )
+            }
+
+            if (points.isNotEmpty()) {
+                CachedRouteData(points, maneuvers, duration, distance)
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
+
+data class CachedRouteData(
+    val points: List<GeoPoint>,
+    val maneuvers: List<TacticalManeuverStep>,
+    val duration: Double,
+    val distance: Double
+)
 
 data class PersonItem(
     val idRegistro: String = "",

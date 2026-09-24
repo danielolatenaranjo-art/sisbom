@@ -466,17 +466,24 @@
 
             const cleanIdUpper = candidateId.toUpperCase();
             
-            const person = window.App && window.App.personalData ? window.App.personalData.find(p => 
-                (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
-                (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
-                (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
-                (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
-                (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
-                (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+            let person = window.App && window.App.personalData ? window.App.personalData.find(p => 
+                p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper
             ) : null;
 
+            if (!person && candidateName && window.App && window.App.personalData) {
+                person = window.App.personalData.find(p => 
+                    p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())
+                );
+            }
+
+            if (!person && !/^\d+$/.test(candidateId) && cleanIdUpper.length >= 3 && window.App && window.App.personalData) {
+                person = window.App.personalData.find(p => 
+                    p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper)
+                );
+            }
+
             if (person) {
-                const rad = person.idRadial || person.radio || candidateId;
+                const rad = person.idRadial || candidateId;
                 return `${rad} - ${person.nombreBombero}`;
             }
             
@@ -940,10 +947,13 @@
                     this.allDespachosData = new Array();
                     this.despachosData = new Array();
                     snap.forEach(d => {
-                        const row = d.data();
+                        const row = d.data() || {};
                         const item = Object.assign(new Object({ id: d.id, key: row.clave }), row);
                         this.allDespachosData.push(item);
-                        if (String(row.estado).toLowerCase() === 'activa') {
+                        const est = String(row.estado || '').toLowerCase().trim();
+                        const opFin = String(row.operadorFinal || '').trim();
+                        const isFin = opFin !== '' || est === 'finalizada' || est === 'cerrada' || est === 'cancelada' || est === 'terminada';
+                        if (!isFin && (est === 'activa' || est === 'pre-despacho')) {
                             this.despachosData.push(item);
                         }
                     });
@@ -958,7 +968,7 @@
                 this.unsubBitacora = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'bitacora'), (snap) => {
                     this.bitacoraData = new Array();
                     snap.forEach(d => {
-                        let row = d.data();
+                        let row = d.data() || {};
                         row.idSalida = d.id;
                         this.bitacoraData.push(row);
                     });
@@ -972,7 +982,7 @@
                 this.unsubVehiculos = window.fbOnSnapshot(window.fbCollection(window.fbDb, 'vehiculos'), (snap) => {
                     this.fleetData = new Array();
                     snap.forEach(d => {
-                        let row = d.data();
+                        let row = d.data() || {};
                         row.idCarro = d.id;
                         this.fleetData.push(row);
                     });
@@ -986,25 +996,116 @@
             updateFleetData() {
                 if (this.fleetData.length === 0) return;
                 
+                // Servicios activos vigentes
+                const activeServicesList = (this.despachosData && this.despachosData.length > 0) 
+                    ? this.despachosData 
+                    : (this.allDespachosData || []).filter(d => {
+                        const est = String(d.estado || '').toLowerCase().trim();
+                        const opFin = String(d.operadorFinal || '').trim();
+                        return opFin === '' && (est === 'activa' || est === 'pre-despacho');
+                    });
+
                 this.fleetData.forEach(u => {
                     let activeTrip = null;
-                    const enServicioRaw = String(u.enServicio || '0').trim();
-                    const hasServicio = enServicioRaw !== '0' && enServicioRaw !== '';
-                    
-                    if (hasServicio) {
-                        // 1. Intentar buscar un viaje activo en bitacora que coincida con el idServicio y carro
-                        let matchedTrips = this.bitacoraData.filter(b => 
-                            String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase() &&
-                            String(b.idServicio || '').trim().toLowerCase() === enServicioRaw.toLowerCase()
-                        );
+                    const cleanCarId = String(u.idCarro || u.ID || '').replace(/-/g, '').trim().toUpperCase();
+                    const rawEnServ = String(u.enServicio || '0').trim();
+
+                    // 1. Buscar si este carro está asignado en algún despacho activo
+                    let matchedActiveSvc = null;
+                    let matchedSvcUnit = null;
+
+                    for (const svc of activeServicesList) {
+                        const svcIdStr = String(svc.id || svc.idServicio || '').trim();
+                        const unidadesMap = (svc.unidades && typeof svc.unidades === 'object') ? { ...svc.unidades } : {};
                         
-                        if (matchedTrips.length > 0) {
-                            matchedTrips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
-                            activeTrip = matchedTrips.at(0);
-                        } else {
-                            // 2. Intentar buscar cualquier viaje activo para este carro (sin hora68 ni fecha68)
-                            matchedTrips = this.bitacoraData.filter(b => 
-                                String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase() &&
+                        // Combinar cualquier clave aplanada tipo "unidades.RS1" o "unidades.RS1.count"
+                        Object.keys(svc).forEach(k => {
+                            if (k.startsWith('unidades.')) {
+                                const parts = k.split('.');
+                                if (parts.length === 2) {
+                                    if (typeof svc[k] === 'object' && svc[k] !== null) {
+                                        unidadesMap[parts[1]] = Object.assign(unidadesMap[parts[1]] || {}, svc[k]);
+                                    }
+                                } else if (parts.length >= 3) {
+                                    const carKey = parts[1];
+                                    const propKey = parts.slice(2).join('.');
+                                    if (!unidadesMap[carKey]) unidadesMap[carKey] = {};
+                                    unidadesMap[carKey][propKey] = svc[k];
+                                }
+                            }
+                        });
+
+                        // Soportar array de unidades usado en Central index.html
+                        if (Array.isArray(svc.units)) {
+                            svc.units.forEach(un => {
+                                const unKey = String(un.name || un.idCarro || '').trim();
+                                if (unKey) {
+                                    unidadesMap[unKey] = Object.assign({}, un, unidadesMap[unKey] || {});
+                                }
+                            });
+                        }
+
+                        let matchKey = Object.keys(unidadesMap).find(k => k.replace(/-/g, '').trim().toUpperCase() === cleanCarId);
+                        let uInfo = matchKey ? unidadesMap[matchKey] : null;
+                        const inCarros = Array.isArray(svc.carros) && svc.carros.some(c => String(c).replace(/-/g, '').trim().toUpperCase() === cleanCarId);
+                        const matchesEnServicio = rawEnServ !== '0' && rawEnServ !== '' && svcIdStr === rawEnServ;
+
+                        if (uInfo || inCarros || matchesEnServicio) {
+                            const is68 = uInfo && (
+                                uInfo.status === '6-8' || 
+                                uInfo.estado === '6-8' || 
+                                uInfo.estado === 'cancelado' ||
+                                (uInfo.hora68 && String(uInfo.hora68).trim() !== '') || 
+                                (uInfo.disponible68At && String(uInfo.disponible68At).trim() !== '') ||
+                                uInfo.estadoMovil === 'en cuartel'
+                            );
+
+                            if (!is68) {
+                                // Verificar si en bitácora para este servicio ya tiene 6-8
+                                const bitacoraEnd = this.bitacoraData.find(b => 
+                                    String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === cleanCarId &&
+                                    String(b.idServicio || '').trim() === svcIdStr &&
+                                    ((b.hora68 && String(b.hora68).trim() !== '') || b.estadoMovil === 'en cuartel')
+                                );
+                                if (!bitacoraEnd) {
+                                    matchedActiveSvc = svc;
+                                    matchedSvcUnit = uInfo;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Determinar el id de servicio efectivo
+                    let effectiveEnServicio = '0';
+                    if (matchedActiveSvc) {
+                        effectiveEnServicio = String(matchedActiveSvc.id || matchedActiveSvc.idServicio || '0');
+                    } else {
+                        // Si no está en despacho activo, chequear si hay un viaje abierto en bitácora
+                        const openTrip = this.bitacoraData.find(b => 
+                            String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === cleanCarId &&
+                            (!b.hora68 && !b.fecha68 && b.estadoMovil !== 'en cuartel')
+                        );
+                        if (openTrip) {
+                            effectiveEnServicio = String(openTrip.idServicio || '1');
+                            activeTrip = openTrip;
+                        } else if (rawEnServ !== '0' && rawEnServ !== '') {
+                            // Si la unidad tiene enServicio en base de datos, respetarlo siempre
+                            effectiveEnServicio = rawEnServ;
+                            const foundSvc = (this.allDespachosData || activeServicesList || []).find(s => String(s.id || s.idServicio) === rawEnServ);
+                            if (foundSvc) matchedActiveSvc = foundSvc;
+                        }
+                    }
+
+                    u.enServicio = effectiveEnServicio;
+                    const hasServicio = effectiveEnServicio !== '0' && effectiveEnServicio !== '';
+
+                    if (hasServicio) {
+                        if (!activeTrip) {
+                            // 1. Buscar viaje en bitácora
+                            let matchedTrips = this.bitacoraData.filter(b => 
+                                String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === cleanCarId &&
+                                String(b.idServicio || '').trim().toLowerCase() === effectiveEnServicio.toLowerCase() &&
                                 (!b.hora68 && !b.fecha68 && b.estadoMovil !== 'en cuartel')
                             );
                             if (matchedTrips.length > 0) {
@@ -1012,48 +1113,37 @@
                                 activeTrip = matchedTrips.at(0);
                             }
                         }
-                        
-                        // 3. Fallback al último viaje en general
+
+                        // 2. Si no hay trip en bitácora, sintetizarlo con los datos del despacho activo
                         if (!activeTrip) {
-                            const trips = this.bitacoraData.filter(b => String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === String(u.idCarro || '').replace(/-/g, '').trim().toUpperCase());
-                            if (trips.length > 0) {
-                                trips.sort((a, b) => (parseInt(b.idSalida) || 0) - (parseInt(a.idSalida) || 0));
-                                activeTrip = trips.at(0);
-                            }
-                        }
-                        
-                        // 4. Sintetizar un viaje temporal si activeTrip sigue siendo nulo o es un viaje ya terminado (para no perder información)
-                        const isCompleted = activeTrip && (activeTrip.hora68 || activeTrip.fecha68 || activeTrip.estadoMovil === 'en cuartel');
-                        if (!activeTrip || isCompleted) {
-                            const activeSvc = (this.allDespachosData || this.despachosData).find(d => String(d.idServicio || d.id || d._id).trim().toLowerCase() === enServicioRaw.toLowerCase());
+                            const activeSvc = matchedActiveSvc;
+                            const svcUnit = matchedSvcUnit;
+                            let serviceLabel = effectiveEnServicio;
                             if (activeSvc) {
-                                let svcUnit = null;
-                                if (activeSvc.unidades) {
-                                    const carKey = Object.keys(activeSvc.unidades).find(k => 
-                                        k.replace(/-/g, '').toUpperCase() === String(u.idCarro).replace(/-/g, '').toUpperCase()
-                                    );
-                                    if (carKey) {
-                                        svcUnit = activeSvc.unidades[carKey];
-                                    }
-                                }
-                                activeTrip = {
-                                    idSalida: svcUnit ? (svcUnit.bitacoraId || svcUnit.idSalida || "") : "",
-                                    idServicio: enServicioRaw,
-                                    clave: activeSvc.key || activeSvc.clave,
-                                    lugar: activeSvc.location || activeSvc.lugar || "",
-                                    carro: u.idCarro,
-                                    conductor: svcUnit ? (svcUnit.driverRad || svcUnit.conductor || "") : (u.conductor || ""),
-                                    obac: svcUnit ? (svcUnit.obacRad || svcUnit.obac || "") : (u.obac || u.aCargo || ""),
-                                    cuantosBomberos: svcUnit ? (svcUnit.count || svcUnit.cuantosBomberos || "0") : (u.numTripulantes || "0"),
-                                    hora60: svcUnit ? (svcUnit.departureTime || svcUnit.hora60 || svcUnit.salida60At || "") : "",
-                                    fecha60: "",
-                                    hora63: svcUnit ? (svcUnit.arrivalTime || svcUnit.hora63 || svcUnit.llegada63At || "") : "",
-                                    hora69: svcUnit ? (svcUnit.time69 || svcUnit.hora69 || svcUnit.retorno69At || "") : "",
-                                    hora610: svcUnit ? (svcUnit.time610 || svcUnit.hora610 || svcUnit.llegada610At || "") : ""
-                                };
+                                serviceLabel = activeSvc.key || activeSvc.clave || `EMERGENCIA #${effectiveEnServicio}`;
+                            } else if (!serviceLabel.startsWith('6-') && !serviceLabel.toUpperCase().includes('EMERGENCIA')) {
+                                serviceLabel = `EMERGENCIA #${serviceLabel}`;
                             }
+                            activeTrip = {
+                                idSalida: svcUnit ? (svcUnit.bitacoraId || svcUnit.idSalida || "") : "",
+                                idServicio: effectiveEnServicio,
+                                clave: (activeSvc && (activeSvc.key || activeSvc.clave)) || serviceLabel,
+                                lugar: (activeSvc && (activeSvc.location || activeSvc.lugar)) || "",
+                                carro: u.idCarro,
+                                conductor: svcUnit ? (svcUnit.driverRad || svcUnit.conductor || "") : (u.conductor || ""),
+                                obac: svcUnit ? (svcUnit.obacRad || svcUnit.obac || "") : (u.obac || u.aCargo || ""),
+                                cuantosBomberos: svcUnit ? (svcUnit.count || svcUnit.cuantosBomberos || "0") : (u.numTripulantes || "0"),
+                                hora60: svcUnit ? (svcUnit.departureTime || svcUnit.hora60 || svcUnit.salida60At || "") : "",
+                                fecha60: "",
+                                hora63: svcUnit ? (svcUnit.arrivalTime || svcUnit.hora63 || svcUnit.llegada63At || "") : "",
+                                hora69: svcUnit ? (svcUnit.time69 || svcUnit.hora69 || svcUnit.retorno69At || "") : "",
+                                hora610: svcUnit ? (svcUnit.time610 || svcUnit.hora610 || svcUnit.llegada610At || "") : ""
+                            };
                         }
+                    } else {
+                        activeTrip = null;
                     }
+
                     u.currentTrip = activeTrip;
                 });
                 
@@ -1080,10 +1170,12 @@
                 this.fleetData.sort((a, b) => String(a?.idCarro || a?.id || a?.ID || '').localeCompare(String(b?.idCarro || b?.id || b?.ID || ''), undefined, new Object({numeric: true, sensitivity: 'base'})));
 
                 grid.innerHTML = this.fleetData.map(unit => {
-                    const statusRaw = String(unit.estado || '1').trim();
+                    const statusRaw = String(unit.estado !== undefined && unit.estado !== null ? unit.estado : '1').trim().toLowerCase();
+                    const is08 = statusRaw === '0' || statusRaw === '0-8' || statusRaw === '08' || statusRaw === 'false';
                     const enServicio = String(unit.enServicio || '0').trim();
                     const kmActual = unit.kmActual || '0';
                     const trip = unit.currentTrip;
+                    const motivo08 = unit.Observacion || unit.notas || unit.observacion || 'Sin motivo';
 
                     let borderColorHex = '#16a34a'; // green-600
                     let statusText = 'Disponible';
@@ -1094,7 +1186,7 @@
                     const btnBase = "w-full py-2 rounded font-bold shadow-sm transition-colors border cursor-pointer disabled:cursor-not-allowed disabled:opacity-50";
                     const authDisabled = !localStorage.getItem('authUserId') ? 'disabled' : '';
 
-                    if (statusRaw === '0-8') {
+                    if (is08) {
                         // 0-8 Fuera de servicio
                         borderColorHex = '#dc2626'; // red-600
                         statusText = '0-8';
@@ -1102,10 +1194,10 @@
                         detailsHtml = `
                             <div class="bg-red-50 rounded border border-red-100 p-2 mt-2">
                                 <span class="font-bold text-red-500 block mb-0.5" style="font-size: 9px;">MOTIVO 0-8:</span>
-                                <p class="text-xs text-red-700 font-medium truncate" title="${unit.Observacion || 'Sin motivo'}">${unit.Observacion || 'Sin motivo'}</p>
+                                <p class="text-xs text-red-700 font-medium truncate" title="${motivo08}">${motivo08}</p>
                             </div>
                         `;
-                        actionsHtml = `<button ${authDisabled} onclick="App.habilitarCarro('${unit.idCarro}', this)" class="${btnBase} bg-slate-900 text-white hover:bg-slate-800 border-slate-800" style="font-size: 11px;"><i class="fas fa-check"></i> HABILITAR</button>`;
+                        actionsHtml = `<button ${authDisabled} onclick="window.App ? window.App.habilitarCarro('${unit.idCarro}', this) : window.habilitarCarro('${unit.idCarro}', this)" class="${btnBase} bg-slate-900 text-white hover:bg-slate-800 border-slate-800" style="font-size: 11px;"><i class="fas fa-check"></i> HABILITAR</button>`;
                     } else if (enServicio !== '0') {
                         // En Servicio
                         borderColorHex = '#f97316'; // orange-500
@@ -1176,6 +1268,7 @@
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-1.5 shrink-0">
+                                    <button type="button" onclick="App.solicitarGps('${unit.idCarro}', this)" class="text-slate-400 hover:text-emerald-400 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer" title="Solicitar GPS a SENTINEL NAV"><i class="fas fa-satellite-dish text-sm"></i></button>
                                     <button type="button" onclick="App.openFleetMapModal('${unit.idCarro}')" class="text-slate-400 hover:text-blue-400 p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer" title="Ver en mapa"><i class="fas fa-location-dot text-sm"></i></button>
                                     <span class="px-2 py-1 rounded font-black tracking-widest border shrink-0 shadow-sm ${badgeClass}" style="font-size: 9px;">${statusText}</span>
                                 </div>
@@ -1610,12 +1703,22 @@
                 btn.disabled = true;
 
                 try {
-                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ estado: '0', notas: motivo.toUpperCase() }));
+                    const motivoUpper = motivo.toUpperCase();
+                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ 
+                        estado: '0', 
+                        notas: motivoUpper, 
+                        Observacion: motivoUpper 
+                    }));
                     const vUnit = this.fleetData.find(v => v.idCarro === id);
-                    if(vUnit) { vUnit.estado = '0'; vUnit.notas = motivo.toUpperCase(); localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); }
+                    if(vUnit) { 
+                        vUnit.estado = '0'; 
+                        vUnit.notas = motivoUpper; 
+                        vUnit.Observacion = motivoUpper; 
+                        localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); 
+                    }
                     
                     window.notifyLocalIframes();
-                    this.showToast("UNIDAD FUERA DE SERVICIO.", "success");
+                    this.showToast("UNIDAD FUERA DE SERVICIO (0-8).", "success");
                     this.closeModals();
                     this.updateFleetData();
                 } catch(e) {
@@ -1626,16 +1729,35 @@
                 }
             },
 
+            async habilitarCarro(id, btn) {
+                const appObj = (this && typeof this.updateStatus === 'function') ? this : window.App;
+                if (appObj && typeof appObj.updateStatus === 'function') {
+                    return appObj.updateStatus(id, '1', btn);
+                }
+            },
+
             async updateStatus(id, status, btn) {
                 if (!localStorage.getItem('authUserId')) return;
-                const origHtml = btn.innerHTML;
-                btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
-                btn.disabled = true;
+                const origHtml = btn ? btn.innerHTML : '';
+                if (btn) {
+                    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>';
+                    btn.disabled = true;
+                }
                 
                 try {
-                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ estado: status, notas: '' }));
+                    const cleanStatus = (status === '0-9' || status === '1' || status === 1 || status === true) ? '1' : '0';
+                    window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ 
+                        estado: cleanStatus, 
+                        notas: '', 
+                        Observacion: '' 
+                    }));
                     const vUnit = this.fleetData.find(v => v.idCarro === id);
-                    if(vUnit) { vUnit.estado = status; vUnit.notas = ''; localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); }
+                    if(vUnit) { 
+                        vUnit.estado = cleanStatus; 
+                        vUnit.notas = ''; 
+                        vUnit.Observacion = ''; 
+                        localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData)); 
+                    }
                     
                     window.notifyLocalIframes();
                     this.showToast("UNIDAD DISPONIBLE (0-9).", "success");
@@ -1643,8 +1765,37 @@
                 } catch(e) {
                     this.showToast("ERROR AL ACTUALIZAR.", "error");
                 } finally { 
-                    btn.innerHTML = origHtml;
-                    btn.disabled = false;
+                    if (btn) {
+                        btn.innerHTML = origHtml;
+                        btn.disabled = false;
+                    }
+                }
+            },
+
+            async solicitarGps(idCarro, btn) {
+                if (!localStorage.getItem('authUserId')) return;
+                const origHtml = btn ? btn.innerHTML : '';
+                if (btn) {
+                    btn.innerHTML = '<i class="fas fa-circle-notch fa-spin text-sm text-emerald-400"></i>';
+                    btn.disabled = true;
+                }
+                
+                try {
+                    window.queueFirebaseWrite('update', 'vehiculos', idCarro, {
+                        solicitudGps: true,
+                        solicitudGpsAt: new Date().toLocaleTimeString('es-CL'),
+                        solicitudGpsTimestamp: Date.now()
+                    });
+                    this.showToast(`SOLICITUD GPS ENVIADA A ${idCarro}.`, "success");
+                } catch(e) {
+                    this.showToast("ERROR AL SOLICITAR GPS.", "error");
+                } finally {
+                    setTimeout(() => {
+                        if (btn) {
+                            btn.innerHTML = origHtml;
+                            btn.disabled = false;
+                        }
+                    }, 2000);
                 }
             },
 
@@ -1712,6 +1863,7 @@
                     });
                     const localMax = parseInt(localStorage.getItem('sisbom_max_bitacora_id')) || 0;
                     if (localMax > maxId) maxId = localMax;
+                    if (maxId < 288) maxId = 288;
                     
                     const nextId = String(maxId + 1);
                     localStorage.setItem('sisbom_max_bitacora_id', nextId);
@@ -1848,6 +2000,46 @@
                     unit.Observacion = obs || unit.Observacion;
                     localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData));
 
+                    // Sincronizar despachos activos si correspondía
+                    const cleanId = String(id || '').trim();
+                    const cleanIdNorm = cleanId.replace(/-/g, '').toUpperCase();
+                    const targetSvcs = (this.allDespachosData || this.despachosData || []).filter(s => {
+                        const est = String(s.estado || '').toLowerCase().trim();
+                        const opFin = String(s.operadorFinal || '').trim();
+                        return opFin === '' && (est === 'activa' || est === 'pre-despacho');
+                    });
+                    targetSvcs.forEach(s => {
+                        let inThisSvc = false;
+                        if (Array.isArray(s.carros) && s.carros.some(c => String(c).replace(/-/g, '').toUpperCase() === cleanIdNorm)) inThisSvc = true;
+                        if (s.unidades && Object.keys(s.unidades).some(k => k.replace(/-/g, '').toUpperCase() === cleanIdNorm)) inThisSvc = true;
+                        if (s.units && Array.isArray(s.units) && s.units.some(u => String(u.name || u.idCarro || '').replace(/-/g, '').toUpperCase() === cleanIdNorm)) inThisSvc = true;
+                        if (inThisSvc) {
+                            const remainingCarros = (s.carros || []).filter(c => String(c).replace(/-/g, '').toUpperCase() !== cleanIdNorm);
+                            const carsStr = remainingCarros.join(' / ');
+                            const updatedUnidades = Object.assign({}, s.unidades || {});
+                            if (updatedUnidades[cleanId]) {
+                                updatedUnidades[cleanId] = Object.assign({}, updatedUnidades[cleanId], {
+                                    status: '6-8',
+                                    estado: '6-8',
+                                    hora68: tStr,
+                                    disponible68At: tStr,
+                                    estadoMovil: 'en cuartel'
+                                });
+                            }
+                            const payload = new Object({
+                                carros: remainingCarros,
+                                carrosTexto: carsStr,
+                                unidades: updatedUnidades
+                            });
+                            window.queueFirebaseWrite('update', 'despachos', String(s.id || s.idServicio), payload);
+                            if (parent && typeof parent.removeUnitFromServiceInFirebase === 'function') {
+                                parent.removeUnitFromServiceInFirebase(s, cleanId);
+                            } else if (window.removeUnitFromServiceInFirebase) {
+                                window.removeUnitFromServiceInFirebase(s, cleanId);
+                            }
+                        }
+                    });
+
                     window.notifyLocalIframes();
                     this.showToast("UNIDAD DISPONIBLE.", "success");
                     this.closeModals();
@@ -1905,31 +2097,104 @@
 
             urgentRelease(id) {
                 if (!localStorage.getItem('authUserId')) return;
-                this.openConfirmModal("LIBERACIÓN URGENTE", `¿LIBERAR URGENTEMENTE LA UNIDAD <b>${id}</b>?<br><br>CERRARÁ LA SALIDA ACTUAL SIN PEDIR KM.`, async () => {
-                    const unit = this.fleetData.find(u => u.idCarro === id);
+                this.openConfirmModal("LIBERACIÓN URGENTE", `¿LIBERAR URGENTEMENTE LA UNIDAD <b>${id}</b>?<br><br>CERRARÁ LA SALIDA ACTUAL Y DEJARÁ LA UNIDAD 100% DISPONIBLE (0-8).`, async () => {
+                    const cleanId = String(id || '').trim();
+                    const cleanIdNorm = cleanId.replace(/-/g, '').toUpperCase();
+                    const unit = this.fleetData.find(u => String(u.idCarro || u.ID || '').replace(/-/g, '').trim().toUpperCase() === cleanIdNorm) || this.fleetData.find(u => u.idCarro === id);
+                    const targetDocId = (unit && (unit.ID || unit.idCarro)) || cleanId;
                     try {
                         const now = new Date();
                         const dStr = `${String(now.getDate()).padStart(2, '0')}-${String(now.getMonth()+1).padStart(2, '0')}-${now.getFullYear()}`;
                         const tStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
-                        if (unit.currentTrip) {
-                            window.queueFirebaseWrite('update', 'bitacora', String(unit.currentTrip.idSalida), new Object({ km: unit.kmActual || '0', observacion: 'LIBERACIÓN URGENTE', fecha68: dStr, hora68: tStr }));
-                            unit.currentTrip.km = unit.kmActual || '0';
-                            unit.currentTrip.observacion = 'LIBERACIÓN URGENTE';
-                            unit.currentTrip.fecha68 = dStr;
-                            unit.currentTrip.hora68 = tStr;
-                            localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
-                        }
+                        // 1. Cerrar todos los viajes abiertos en bitácora para este móvil
+                        const openTrips = this.bitacoraData.filter(b => 
+                            String(b.carro || '').replace(/-/g, '').trim().toUpperCase() === cleanIdNorm &&
+                            (!b.hora68 || !b.fecha68 || b.estadoMovil !== 'en cuartel')
+                        );
+                        openTrips.forEach(trip => {
+                            window.queueFirebaseWrite('update', 'bitacora', String(trip.idSalida), new Object({ km: (unit && unit.kmActual) || '0', observacion: 'LIBERACIÓN URGENTE', fecha68: dStr, hora68: tStr, estadoMovil: 'en cuartel' }));
+                            trip.km = (unit && unit.kmActual) || '0';
+                            trip.observacion = 'LIBERACIÓN URGENTE';
+                            trip.fecha68 = dStr;
+                            trip.hora68 = tStr;
+                            trip.estadoMovil = 'en cuartel';
+                        });
+                        localStorage.setItem('db_bitacora', JSON.stringify(this.bitacoraData));
 
-                        window.queueFirebaseWrite('update', 'vehiculos', id, new Object({ enServicio: '0' }));
-                        unit.enServicio = '0';
+                        // 2. Dejar enServicio: '0' en la colección VEHICULOS de Firestore
+                        window.queueFirebaseWrite('update', 'vehiculos', String(targetDocId), new Object({ enServicio: '0', solicitudConductorAt: '', solicitudPersonalAt: '' }));
+                        if (unit) {
+                            unit.enServicio = '0';
+                            unit.solicitudConductorAt = '';
+                            unit.solicitudPersonalAt = '';
+                            unit.currentTrip = null;
+                        }
                         localStorage.setItem('db_vehiculos', JSON.stringify(this.fleetData));
 
+                        // 3. Actualizar despachos activos directamente en Firebase y localmente
+                        const targetSvcs = (this.allDespachosData || this.despachosData || []).filter(s => {
+                            const est = String(s.estado || '').toLowerCase().trim();
+                            const opFin = String(s.operadorFinal || '').trim();
+                            return opFin === '' && (est === 'activa' || est === 'pre-despacho');
+                        });
+
+                        targetSvcs.forEach(s => {
+                            let inThisSvc = false;
+                            if (Array.isArray(s.carros) && s.carros.some(c => String(c).replace(/-/g, '').toUpperCase() === cleanIdNorm)) inThisSvc = true;
+                            if (s.unidades && Object.keys(s.unidades).some(k => k.replace(/-/g, '').toUpperCase() === cleanIdNorm)) inThisSvc = true;
+                            if (s.units && Array.isArray(s.units) && s.units.some(u => String(u.name || u.idCarro || '').replace(/-/g, '').toUpperCase() === cleanIdNorm)) inThisSvc = true;
+
+                            if (inThisSvc) {
+                                const remainingCarros = (s.carros || []).filter(c => String(c).replace(/-/g, '').toUpperCase() !== cleanIdNorm);
+                                const carsStr = remainingCarros.join(' / ');
+                                const updatedUnidades = Object.assign({}, s.unidades || {});
+                                if (updatedUnidades[cleanId]) {
+                                    updatedUnidades[cleanId] = Object.assign({}, updatedUnidades[cleanId], {
+                                        status: '6-8',
+                                        estado: '6-8',
+                                        hora68: tStr,
+                                        disponible68At: tStr,
+                                        estadoMovil: 'en cuartel'
+                                    });
+                                }
+                                const payload = new Object({
+                                    carros: remainingCarros,
+                                    carrosTexto: carsStr,
+                                    unidades: updatedUnidades
+                                });
+                                window.queueFirebaseWrite('update', 'despachos', String(s.id || s.idServicio), payload);
+
+                                if (s.units && Array.isArray(s.units)) {
+                                    s.units = s.units.filter(u => String(u.name || u.idCarro || '').replace(/-/g, '').toUpperCase() !== cleanIdNorm);
+                                }
+                                s.carros = remainingCarros;
+                                s.carrosTexto = carsStr;
+                                if (s.unidades && s.unidades[cleanId]) {
+                                    s.unidades[cleanId].status = '6-8';
+                                    s.unidades[cleanId].estado = '6-8';
+                                    s.unidades[cleanId].hora68 = tStr;
+                                    s.unidades[cleanId].disponible68At = tStr;
+                                    s.unidades[cleanId].estadoMovil = 'en cuartel';
+                                }
+
+                                if (parent && typeof parent.removeUnitFromServiceInFirebase === 'function') {
+                                    parent.removeUnitFromServiceInFirebase(s, cleanId);
+                                } else if (window.removeUnitFromServiceInFirebase) {
+                                    window.removeUnitFromServiceInFirebase(s, cleanId);
+                                }
+                            }
+                        });
+
+                        localStorage.setItem('activeServices', JSON.stringify(this.despachosData));
+                        localStorage.setItem('db_despachos', JSON.stringify(this.allDespachosData));
+
                         window.notifyLocalIframes();
-                        this.showToast("UNIDAD LIBERADA.", "success");
+                        this.showToast("UNIDAD LIBERADA (100% DISPONIBLE).", "success");
                         this.updateFleetData();
 
                     } catch(e) {
+                        console.error("Error en urgentRelease:", e);
                         this.showToast("ERROR AL LIBERAR.", "error");
                     }
                 });
@@ -1977,17 +2242,24 @@
                 const cleanIdUpper = candidateId.toUpperCase();
                 
                 let found = (this.personalData || []).find(p => 
-                    (p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper) ||
-                    (p.idRegistro && String(p.idRegistro).trim().toUpperCase() === cleanIdUpper) ||
-                    (p.ID && String(p.ID).trim().toUpperCase() === cleanIdUpper) ||
-                    (p.id && String(p.id).trim().toUpperCase() === cleanIdUpper) ||
-                    (candidateName && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())) ||
-                    (!/^\d+$/.test(candidateId) && p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper))
+                    p.idRadial && String(p.idRadial).trim().toUpperCase() === cleanIdUpper
                 );
+
+                if (!found && candidateName) {
+                    found = (this.personalData || []).find(p => 
+                        p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(candidateName.toUpperCase())
+                    );
+                }
+
+                if (!found && !/^\d+$/.test(candidateId) && cleanIdUpper.length >= 3) {
+                    found = (this.personalData || []).find(p => 
+                        p.nombreBombero && String(p.nombreBombero).trim().toUpperCase().includes(cleanIdUpper)
+                    );
+                }
                 
                 if (found) {
                     const shortName = this.formatShortName(found.nombreBombero);
-                    const rad = found.idRadial || found.radio || candidateId;
+                    const rad = found.idRadial || candidateId;
                     return `${rad} • ${shortName}`;
                 }
                 return this.formatShortName(candidateId);
@@ -2179,10 +2451,12 @@
                 }
 
                 this.fleetData.forEach(unit => {
-                    const statusRaw = String(unit.estado || '1').trim();
+                    const statusRaw = String(unit.estado !== undefined && unit.estado !== null ? unit.estado : '1').trim().toLowerCase();
+                    const is08 = statusRaw === '0' || statusRaw === '0-8' || statusRaw === '08' || statusRaw === 'false';
                     const enServicio = String(unit.enServicio || '0').trim();
                     const trip = unit.currentTrip;
                     const coords = this.getUnitCoordinates(unit);
+                    const motivo08 = unit.Observacion || unit.notas || unit.observacion || 'Sin motivo';
 
                     let statusClass = 'status-09';
                     let statusText = 'DISPONIBLE (0-9)';
@@ -2190,7 +2464,7 @@
                     let dotColor = '#10b981';
                     let badgeClassSidebar = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
 
-                    if (statusRaw === '0-8') {
+                    if (is08) {
                         statusClass = 'status-08';
                         statusText = '0-8 FUERA SERVICIO';
                         statusShortText = '0-8';
@@ -2245,9 +2519,9 @@
                                     <div><span style="color: #64748b; font-weight: 700;">TRIPULACIÓN:</span> <span style="color: #0f172a; font-weight: 800;">${countVol} VOL.</span></div>
                                 </div>
                             ` : ''}
-                            ${statusRaw === '0-8' && unit.Observacion ? `
+                            ${is08 ? `
                                 <div style="background-color: #fef2f2; border: 1px solid #fee2e2; border-radius: 6px; padding: 5px; font-size: 10px; margin-top: 5px; color: #991b1b;">
-                                    <span style="font-weight: 700;">MOTIVO:</span> ${unit.Observacion}
+                                    <span style="font-weight: 700;">MOTIVO:</span> ${motivo08}
                                 </div>
                             ` : ''}
                         </div>
@@ -2324,6 +2598,13 @@
                 }, 3500);
             }
         });
+
+        // Global fallback bindings
+        window.habilitarCarro = function(id, btn) {
+            if (window.App && typeof window.App.habilitarCarro === 'function') {
+                return window.App.habilitarCarro(id, btn);
+            }
+        };
 
         window.onFirebaseParentLogout = function() {
             console.log("Firebase Parent Logout event received in Material Mayor.");

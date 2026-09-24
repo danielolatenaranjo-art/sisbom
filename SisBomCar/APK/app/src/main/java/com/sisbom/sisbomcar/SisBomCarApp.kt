@@ -31,6 +31,17 @@ class SisBomCarApp : Application() {
             defaultHandler?.uncaughtException(thread, throwable)
         }
 
+        // Inicializar Google Maps de forma segura antes de crear vistas nativas o BitmapDescriptors
+        try {
+            com.google.android.gms.maps.MapsInitializer.initialize(this, com.google.android.gms.maps.MapsInitializer.Renderer.LATEST) { renderer ->
+                Log.d("SisBomCarApp", "Google Maps Renderer: $renderer")
+            }
+        } catch (e: Exception) {
+            try {
+                com.google.android.gms.maps.MapsInitializer.initialize(this)
+            } catch (_: Exception) {}
+        }
+
         // Inicializar Osmdroid de forma segura antes de crear vistas nativas
         try {
             android.preference.PreferenceManager.getDefaultSharedPreferences(this).let { sp ->

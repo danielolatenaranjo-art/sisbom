@@ -111,6 +111,12 @@ class MainActivity : ComponentActivity() {
             )
         } catch (_: Exception) {}
 
+        try {
+            com.google.android.gms.maps.MapsInitializer.initialize(applicationContext, com.google.android.gms.maps.MapsInitializer.Renderer.LATEST) {}
+        } catch (_: Exception) {
+            try { com.google.android.gms.maps.MapsInitializer.initialize(applicationContext) } catch (_: Exception) {}
+        }
+
         setContent {
             CarPlayTheme {
                 val hasActiveDispatch = viewModel.activeDispatch != null && viewModel.activeDispatch?.operadorFinal.isNullOrEmpty()
@@ -134,7 +140,7 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var showSettings by remember { mutableStateOf(false) }
                     val crashPrefs = remember { getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE) }
-                    val hasCrashTrace = remember { !crashPrefs.getString("last_crash_trace", "").isNullOrEmpty() }
+                    var hasCrashTrace by remember { mutableStateOf(!crashPrefs.getString("last_crash_trace", "").isNullOrEmpty()) }
 
                     if (!viewModel.isLicenseValid || viewModel.selectedUnitId.isEmpty() || showSettings || hasCrashTrace) {
                         CarPlaySetupWizard(
@@ -142,6 +148,7 @@ class MainActivity : ComponentActivity() {
                             onSetupCompleted = {
                                 // Al completar la configuración, limpiamos el crash trace previo para permitir entrar al dashboard
                                 crashPrefs.edit().remove("last_crash_trace").commit()
+                                hasCrashTrace = false
                                 showSettings = false
                             }
                         )
@@ -229,8 +236,34 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        try {
+            updateDisplayRotation()
+        } catch (_: Exception) {}
+
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionsLauncher.launch(permissionsToRequest.toTypedArray())
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateDisplayRotation()
+    }
+
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        updateDisplayRotation()
+    }
+
+    private fun updateDisplayRotation() {
+        try {
+            val rot = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display?.rotation ?: android.view.Surface.ROTATION_90
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay.rotation
+            }
+            GpsTrackingService.currentDisplayRotation = rot
+        } catch (_: Exception) {}
     }
 }
