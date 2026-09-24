@@ -5,6 +5,8 @@ import FirebaseAuth
 
 // Since we'll import Firebase via Swift Package Manager (SPM) in Xcode, we can use the Firestore APIs directly.
 class FirebaseRepository {
+    static let shared = FirebaseRepository()
+    
     private var db: Firestore {
         return Firestore.firestore()
     }

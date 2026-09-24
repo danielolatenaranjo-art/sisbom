@@ -1037,6 +1037,7 @@ struct ChangelogDialog: View {
 }
 
 // MARK: - Fullscreen Emergency Alert View
+// MARK: - Fullscreen Emergency Alert View
 struct FullscreenEmergencyAlertView: View {
     let dispatch: Dispatch
     @ObservedObject var viewModel: SisBomViewModel
@@ -1050,268 +1051,274 @@ struct FullscreenEmergencyAlertView: View {
         let claveColor = getClaveTacticalColor(clave: dispatch.clave)
 
         ZStack {
-            // LAYER 0: Solid Emergency Background Base (Never blank or gray)
-            (isDark ? Color(red: 0.06, green: 0.01, blue: 0.01) : Color(red: 0.96, green: 0.97, blue: 0.99))
-                .ignoresSafeArea()
+            backgroundLayers(isDark: isDark, coords: coords, hasGps: hasGps)
 
-            // LAYER 1: Fullscreen Map or Tactical Radar (Edge-to-Edge)
-            IncidentMapPreview(
-                lat: dispatch.lat ?? 0.0,
-                lng: dispatch.lng ?? 0.0,
-                cuartelLat: coords.lat,
-                cuartelLng: coords.lng,
-                isPending: !hasGps,
-                clave: dispatch.clave,
-                lugar: dispatch.lugar,
-                isDark: isDark
-            )
-            .ignoresSafeArea()
-
-            // LAYER 2: Translucent Vignette Gradient (Ensures HUD readability)
-            LinearGradient(
-                gradient: Gradient(colors: isDark ? [
-                    Color.black.opacity(0.70),
-                    Color.black.opacity(0.35),
-                    Color.black.opacity(0.20),
-                    Color.black.opacity(0.40),
-                    Color.black.opacity(0.85)
-                ] : [
-                    Color.white.opacity(0.75),
-                    Color.white.opacity(0.35),
-                    Color.white.opacity(0.20),
-                    Color.white.opacity(0.40),
-                    Color.white.opacity(0.90)
-                ]),
-                startPoint: .top,
-                endPoint: .bottom
-            )
-            .ignoresSafeArea()
-
-            // LAYER 3: Interactive HUD & Emergency Dispatch Controls
             VStack(spacing: 0) {
-                // Top Navigation Bar (Logo, Header Title & Dismiss button)
-                HStack(alignment: .center, spacing: 12) {
-                    Image(uiImage: viewModel.getInstitutionLogo())
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 44, height: 44)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
-                        .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.bomberosRed)
-                                .frame(width: 8, height: 8)
-                                .scaleEffect(pulseGlow ? 1.3 : 0.8)
-                                .animation(Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseGlow)
-                            Text("¡DESPACHO DE EMERGENCIA!")
-                                .font(.system(size: 11, weight: .black))
-                                .foregroundColor(isDark ? Color.bomberosRedLight : Color.bomberosRed)
-                                .tracking(0.5)
-                        }
-
-                        Text(viewModel.saasClientName.isEmpty ? "CUERPO DE BOMBEROS" : viewModel.saasClientName.uppercased())
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(isDark ? Color.white.opacity(0.7) : Color.textSecondary)
-                    }
-
-                    Spacer()
-
-                    // Close / Dismiss button
-                    Button(action: {
-                        onDismiss?()
-                        viewModel.fullscreenDispatchId = nil
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(isDark ? .white : Color(hex: "334155"))
-                            .frame(width: 34, height: 34)
-                            .background(isDark ? Color.black.opacity(0.5) : Color.white.opacity(0.8))
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(isDark ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1))
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 52)
-                .padding(.bottom, 8)
+                headerBar(isDark: isDark)
 
                 Spacer(minLength: 6)
 
-                // Central Card: Clave, Hora, Dirección, Carros, Preinforme
-                VStack(spacing: 10) {
-                    // Clave Badge
-                    let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
-                    Text(claveText)
-                        .font(.system(size: claveText.count > 6 ? 42 : 54, weight: .black))
-                        .foregroundColor(isDark ? .white : Color(hex: "0F172A"))
-                        .multilineTextAlignment(.center)
-                        .minimumScaleFactor(0.6)
-                        .lineLimit(1)
-                        .shadow(color: isDark ? Color.black.opacity(0.9) : Color.clear, radius: 10, x: 0, y: 4)
-
-                    // Hora de Despacho
-                    let cleanHora = dispatch.horaDespacho.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleanHora.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "clock.fill")
-                                .font(.system(size: 12))
-                            Text(cleanHora)
-                                .font(.system(size: 14, weight: .bold))
-                        }
-                        .foregroundColor(isDark ? Color(hex: "E2E8F0") : Color(hex: "334155"))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(isDark ? Color.black.opacity(0.4) : Color.white.opacity(0.7))
-                        .cornerRadius(12)
-                    }
-
-                    // Dirección
-                    let cleanLugar = cleanLugarDisplay(dispatch.lugar)
-                    if !cleanLugar.isEmpty {
-                        HStack(spacing: 6) {
-                            Image(systemName: "mappin.circle.fill")
-                                .font(.system(size: 14))
-                                .foregroundColor(Color.bomberosRed)
-                            Text(cleanLugar.uppercased())
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(isDark ? Color(hex: "F1F5F9") : Color(hex: "1E293B"))
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .background(isDark ? Color.black.opacity(0.45) : Color.white.opacity(0.85))
-                        .cornerRadius(14)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 14)
-                                .stroke(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.08), lineWidth: 1)
-                        )
-                        .padding(.horizontal, 16)
-                    }
-
-                    // Carros / Unidades
-                    let carrosList = dispatch.carros.components(separatedBy: CharacterSet(charactersIn: ",/ ")).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                    if !carrosList.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(carrosList, id: \.self) { carro in
-                                    HStack(spacing: 5) {
-                                        Text(getVehicleEmoji(carro: carro))
-                                            .font(.system(size: 14))
-                                        Text(carro)
-                                            .font(.system(size: 13, weight: .black))
-                                            .foregroundColor(isDark ? .white : Color(hex: "0F172A"))
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(isDark ? Color.black.opacity(0.6) : Color.white.opacity(0.9))
-                                    .cornerRadius(10)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 10)
-                                            .stroke(Color(hex: "FBBF24").opacity(0.6), lineWidth: 1)
-                                    )
-                                }
-                            }
-                            .padding(.horizontal, 20)
-                        }
-                    }
-
-                    // Preinforme (si existe)
-                    let cleanPre = dispatch.preinforme.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "---", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !cleanPre.isEmpty && !cleanPre.localizedCaseInsensitiveContains("A la espera") {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("📋 PRE-INFORME:")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(isDark ? Color(hex: "94A3B8") : Color(hex: "64748B"))
-                            Text(cleanPre)
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(isDark ? .white : Color(hex: "0F172A"))
-                                .lineLimit(2)
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(isDark ? Color.black.opacity(0.5) : Color.white.opacity(0.85))
-                        .cornerRadius(12)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
-                        )
-                        .padding(.horizontal, 20)
-                    }
-                }
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(isDark ? Color(red: 0.12, green: 0.02, blue: 0.02).opacity(0.65) : Color.white.opacity(0.7))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 24)
-                                .stroke(claveColor.opacity(0.4), lineWidth: 1.5)
-                        )
-                )
-                .padding(.horizontal, 16)
+                detailsCard(isDark: isDark, claveColor: claveColor)
 
                 Spacer(minLength: 8)
 
-                // Action Buttons: ASISTIR & NO ASISTIR
-                HStack(spacing: 14) {
-                    // ASISTIR (Green)
-                    Button(action: {
-                        let impact = UIImpactFeedbackGenerator(style: .heavy)
-                        impact.impactOccurred()
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
-                            viewModel.fullscreenDispatchId = nil
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 20, weight: .bold))
-                            Text("ASISTIR")
-                                .font(.system(size: 18, weight: .black))
-                        }
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(Color.goGreen)
-                        .cornerRadius(18)
-                        .shadow(color: Color.goGreen.opacity(0.45), radius: 8, x: 0, y: 4)
-                    }
-
-                    // NO ASISTIR (Red)
-                    Button(action: {
-                        let impact = UIImpactFeedbackGenerator(style: .medium)
-                        impact.impactOccurred()
-                        withAnimation(.easeOut(duration: 0.25)) {
-                            viewModel.declineService(dispatchId: dispatch.idServicio)
-                            viewModel.fullscreenDispatchId = nil
-                        }
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18, weight: .bold))
-                            Text("NO ASISTIR")
-                                .font(.system(size: 16, weight: .black))
-                        }
-                        .foregroundColor(isDark ? .white : Color(hex: "DC2626"))
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 56)
-                        .background(isDark ? Color(hex: "1F0404").opacity(0.9) : Color(hex: "FEF2F2"))
-                        .cornerRadius(18)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 18)
-                                .stroke(Color(hex: "EF4444").opacity(0.8), lineWidth: 1.5)
-                        )
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 48)
+                actionButtons(isDark: isDark)
             }
         }
         .onAppear {
             pulseGlow = true
         }
+    }
+
+    @ViewBuilder
+    private func backgroundLayers(isDark: Bool, coords: (lat: Double, lng: Double), hasGps: Bool) -> some View {
+        (isDark ? Color(red: 0.06, green: 0.01, blue: 0.01) : Color(red: 0.96, green: 0.97, blue: 0.99))
+            .ignoresSafeArea()
+
+        IncidentMapPreview(
+            lat: dispatch.lat ?? 0.0,
+            lng: dispatch.lng ?? 0.0,
+            cuartelLat: coords.lat,
+            cuartelLng: coords.lng,
+            isPending: !hasGps,
+            clave: dispatch.clave,
+            lugar: dispatch.lugar,
+            isDark: isDark
+        )
+        .ignoresSafeArea()
+
+        LinearGradient(
+            gradient: Gradient(colors: isDark ? [
+                Color.black.opacity(0.70),
+                Color.black.opacity(0.35),
+                Color.black.opacity(0.20),
+                Color.black.opacity(0.40),
+                Color.black.opacity(0.85)
+            ] : [
+                Color.white.opacity(0.75),
+                Color.white.opacity(0.35),
+                Color.white.opacity(0.20),
+                Color.white.opacity(0.40),
+                Color.white.opacity(0.90)
+            ]),
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+    }
+
+    @ViewBuilder
+    private func headerBar(isDark: Bool) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(uiImage: viewModel.getInstitutionLogo())
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 44, height: 44)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.white.opacity(0.3), lineWidth: 1))
+                .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(Color.bomberosRed)
+                        .frame(width: 8, height: 8)
+                        .scaleEffect(pulseGlow ? 1.3 : 0.8)
+                        .animation(Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseGlow)
+                    Text("¡DESPACHO DE EMERGENCIA!")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundColor(isDark ? Color.bomberosRedLight : Color.bomberosRed)
+                        .tracking(0.5)
+                }
+
+                Text(viewModel.saasClientName.isEmpty ? "CUERPO DE BOMBEROS" : viewModel.saasClientName.uppercased())
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(isDark ? Color.white.opacity(0.7) : Color.textSecondary)
+            }
+
+            Spacer()
+
+            Button(action: {
+                onDismiss?()
+                viewModel.fullscreenDispatchId = nil
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(isDark ? .white : Color(hex: "334155"))
+                    .frame(width: 34, height: 34)
+                    .background(isDark ? Color.black.opacity(0.5) : Color.white.opacity(0.8))
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(isDark ? Color.white.opacity(0.2) : Color.black.opacity(0.1), lineWidth: 1))
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 52)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder
+    private func detailsCard(isDark: Bool, claveColor: Color) -> some View {
+        let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
+        let cleanHora = dispatch.horaDespacho.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanLugar = cleanLugarDisplay(dispatch.lugar)
+        let carrosList = dispatch.carros.components(separatedBy: CharacterSet(charactersIn: ",/ ")).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        let cleanPre = dispatch.preinforme.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "---", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        VStack(spacing: 10) {
+            Text(claveText)
+                .font(.system(size: claveText.count > 6 ? 42 : 54, weight: .black))
+                .foregroundColor(isDark ? .white : Color(hex: "0F172A"))
+                .multilineTextAlignment(.center)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+                .shadow(color: isDark ? Color.black.opacity(0.9) : Color.clear, radius: 10, x: 0, y: 4)
+
+            if !cleanHora.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.fill")
+                        .font(.system(size: 12))
+                    Text(cleanHora)
+                        .font(.system(size: 14, weight: .bold))
+                }
+                .foregroundColor(isDark ? Color(hex: "E2E8F0") : Color(hex: "334155"))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(isDark ? Color.black.opacity(0.4) : Color.white.opacity(0.7))
+                .cornerRadius(12)
+            }
+
+            if !cleanLugar.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.system(size: 14))
+                        .foregroundColor(Color.bomberosRed)
+                    Text(cleanLugar.uppercased())
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(isDark ? Color(hex: "F1F5F9") : Color(hex: "1E293B"))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(isDark ? Color.black.opacity(0.45) : Color.white.opacity(0.85))
+                .cornerRadius(14)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.08), lineWidth: 1)
+                )
+                .padding(.horizontal, 16)
+            }
+
+            if !carrosList.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(carrosList, id: \.self) { carro in
+                            HStack(spacing: 5) {
+                                Text(getVehicleEmoji(carro: carro))
+                                    .font(.system(size: 14))
+                                Text(carro)
+                                    .font(.system(size: 13, weight: .black))
+                                    .foregroundColor(isDark ? .white : Color(hex: "0F172A"))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(isDark ? Color.black.opacity(0.6) : Color.white.opacity(0.9))
+                            .cornerRadius(10)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Color(hex: "FBBF24").opacity(0.6), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.horizontal, 20)
+                }
+            }
+
+            if !cleanPre.isEmpty && !cleanPre.localizedCaseInsensitiveContains("A la espera") {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("📋 PRE-INFORME:")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(isDark ? Color(hex: "94A3B8") : Color(hex: "64748B"))
+                    Text(cleanPre)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(isDark ? .white : Color(hex: "0F172A"))
+                        .lineLimit(2)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(isDark ? Color.black.opacity(0.5) : Color.white.opacity(0.85))
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(isDark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
+                )
+                .padding(.horizontal, 20)
+            }
+        }
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 24)
+                .fill(isDark ? Color(red: 0.12, green: 0.02, blue: 0.02).opacity(0.65) : Color.white.opacity(0.7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 24)
+                        .stroke(claveColor.opacity(0.4), lineWidth: 1.5)
+                )
+        )
+        .padding(.horizontal, 16)
+    }
+
+    @ViewBuilder
+    private func actionButtons(isDark: Bool) -> some View {
+        HStack(spacing: 14) {
+            Button(action: {
+                let impact = UIImpactFeedbackGenerator(style: .heavy)
+                impact.impactOccurred()
+                withAnimation(.easeOut(duration: 0.25)) {
+                    viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
+                    viewModel.fullscreenDispatchId = nil
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20, weight: .bold))
+                    Text("ASISTIR")
+                        .font(.system(size: 18, weight: .black))
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(Color.goGreen)
+                .cornerRadius(18)
+                .shadow(color: Color.goGreen.opacity(0.45), radius: 8, x: 0, y: 4)
+            }
+
+            Button(action: {
+                let impact = UIImpactFeedbackGenerator(style: .medium)
+                impact.impactOccurred()
+                withAnimation(.easeOut(duration: 0.25)) {
+                    viewModel.declineService(dispatchId: dispatch.idServicio)
+                    viewModel.fullscreenDispatchId = nil
+                }
+            }) {
+                HStack(spacing: 8) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18, weight: .bold))
+                    Text("NO ASISTIR")
+                        .font(.system(size: 16, weight: .black))
+                }
+                .foregroundColor(isDark ? .white : Color(hex: "DC2626"))
+                .frame(maxWidth: .infinity)
+                .frame(height: 56)
+                .background(isDark ? Color(hex: "1F0404").opacity(0.9) : Color(hex: "FEF2F2"))
+                .cornerRadius(18)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18)
+                        .stroke(Color(hex: "EF4444").opacity(0.8), lineWidth: 1.5)
+                )
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 48)
     }
 }
