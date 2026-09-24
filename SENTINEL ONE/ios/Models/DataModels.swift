@@ -518,7 +518,7 @@ struct Vehicle: Identifiable, Codable, Equatable {
         case idCarro, clave, estado, enServicio
     }
 
-    init(idCarro: String = "", clave: String = "", estado: String = "0-8", enServicio: String = "0") {
+    init(idCarro: String = "", clave: String = "", estado: String = "1", enServicio: String = "0") {
         self.idCarro = idCarro
         self.clave = clave
         self.estado = estado
@@ -529,8 +529,29 @@ struct Vehicle: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         idCarro = try container.decodeIfPresent(String.self, forKey: .idCarro) ?? ""
         clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
-        estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? "0-8"
-        enServicio = try container.decodeIfPresent(String.self, forKey: .enServicio) ?? "0"
+        
+        if let rawBool = try? container.decodeIfPresent(Bool.self, forKey: .estado) {
+            estado = rawBool ? "1" : "0"
+        } else if let rawInt = try? container.decodeIfPresent(Int.self, forKey: .estado) {
+            estado = rawInt == 0 ? "0" : "1"
+        } else if let rawStr = try? container.decodeIfPresent(String.self, forKey: .estado) {
+            let s = rawStr.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if s == "0" || s == "0-8" || s == "08" || s == "false" || s == "fuera de servicio" {
+                estado = "0"
+            } else {
+                estado = "1"
+            }
+        } else {
+            estado = "1"
+        }
+        
+        if let rawEnServicio = try? container.decodeIfPresent(String.self, forKey: .enServicio) {
+            enServicio = rawEnServicio
+        } else if let rawInt = try? container.decodeIfPresent(Int.self, forKey: .enServicio) {
+            enServicio = String(rawInt)
+        } else {
+            enServicio = "0"
+        }
     }
 }
 

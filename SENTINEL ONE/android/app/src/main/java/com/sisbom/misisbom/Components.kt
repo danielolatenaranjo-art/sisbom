@@ -633,76 +633,112 @@ object SoundPlayer {
     private var toneGenerator: ToneGenerator? = null
 
     fun playSound(context: Context, soundName: String) {
-        try {
-            mediaPlayer?.release()
-            mediaPlayer = null
-
-            // Forzar volumen al 100% en todos los canales de audio (Alarma, Notificación y Multimedia)
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-            if (audioManager != null) {
+        val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+        mainHandler.post {
+            try {
                 try {
-                    audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                } catch (_: Exception) {}
-                try {
-                    val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                    audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
-                } catch (_: Exception) {}
-                try {
-                    val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
-                } catch (_: Exception) {}
-                try {
-                    val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
-                    audioManager.setStreamVolume(AudioManager.STREAM_RING, maxRing, 0)
-                } catch (_: Exception) {}
-                try {
-                    val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
-                    audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
-                } catch (_: Exception) {}
-            }
-
-            val cleanName = soundName.substringBefore(".").trim().lowercase()
-            val resId = context.resources.getIdentifier(cleanName, "raw", context.packageName)
-
-            if (resId != 0) {
-                mediaPlayer = MediaPlayer().apply {
-                    val attributes = AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .setLegacyStreamType(AudioManager.STREAM_ALARM)
-                        .build()
-                    setAudioAttributes(attributes)
-                    @Suppress("DEPRECATION")
-                    setAudioStreamType(AudioManager.STREAM_ALARM)
-                    val afd = context.resources.openRawResourceFd(resId)
-                    setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
-                    afd.close()
-                    setVolume(1.0f, 1.0f)
-                    prepare()
-                    setOnCompletionListener {
-                        it.release()
-                        if (mediaPlayer == it) {
-                            mediaPlayer = null
-                        }
+                    if (mediaPlayer?.isPlaying == true) {
+                        mediaPlayer?.stop()
                     }
-                    start()
+                    mediaPlayer?.reset()
+                    mediaPlayer?.release()
+                } catch (_: Exception) {}
+                mediaPlayer = null
+
+                // Forzar volumen al 100% en todos los canales de audio (Alarma, Notificación y Multimedia)
+                val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                if (audioManager != null) {
+                    try {
+                        audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                    } catch (_: Exception) {}
+                    try {
+                        val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+                        audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
+                    } catch (_: Exception) {}
+                    try {
+                        val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
+                    } catch (_: Exception) {}
+                    try {
+                        val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
+                        audioManager.setStreamVolume(AudioManager.STREAM_RING, maxRing, 0)
+                    } catch (_: Exception) {}
+                    try {
+                        val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
+                        audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
+                    } catch (_: Exception) {}
                 }
-            } else {
-                if (toneGenerator == null) {
-                    toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+
+                val cleanName = soundName.substringBefore(".").trim().lowercase()
+                val resId = context.resources.getIdentifier(cleanName, "raw", context.packageName)
+
+                if (resId != 0) {
+                    val afd = try {
+                        context.resources.openRawResourceFd(resId)
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                    if (afd != null) {
+                        try {
+                            val mp = MediaPlayer()
+                            val attributes = AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_ALARM)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .build()
+                            mp.setAudioAttributes(attributes)
+                            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+                            mp.setVolume(1.0f, 1.0f)
+                            mp.prepare()
+                            mp.setOnCompletionListener {
+                                try {
+                                    it.release()
+                                } catch (_: Exception) {}
+                                if (mediaPlayer == it) {
+                                    mediaPlayer = null
+                                }
+                            }
+                            mediaPlayer = mp
+                            mp.start()
+                        } finally {
+                            try {
+                                afd.close()
+                            } catch (_: Exception) {}
+                        }
+                    } else {
+                        val mp = MediaPlayer.create(context, resId)
+                        mediaPlayer = mp
+                        mp?.setVolume(1.0f, 1.0f)
+                        mp?.setOnCompletionListener {
+                            try { it.release() } catch (_: Exception) {}
+                            if (mediaPlayer == it) mediaPlayer = null
+                        }
+                        mp?.start()
+                    }
+                } else {
+                    if (toneGenerator == null) {
+                        toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+                    }
+                    val toneType = when {
+                        cleanName.startsWith("c10") -> ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK
+                        cleanName.contains("alerta") -> ToneGenerator.TONE_PROP_BEEP2
+                        else -> ToneGenerator.TONE_PROP_BEEP
+                    }
+                    toneGenerator?.startTone(toneType, 400)
                 }
-                val toneType = when {
-                    cleanName.startsWith("c10") -> ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK
-                    cleanName.contains("alerta") -> ToneGenerator.TONE_PROP_BEEP2
-                    else -> ToneGenerator.TONE_PROP_BEEP
-                }
-                toneGenerator?.startTone(toneType, 400)
+
+                triggerVibration(context, cleanName)
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                try {
+                    if (toneGenerator == null) {
+                        toneGenerator = ToneGenerator(AudioManager.STREAM_ALARM, 100)
+                    }
+                    toneGenerator?.startTone(ToneGenerator.TONE_CDMA_EMERGENCY_RINGBACK, 1200)
+                } catch (_: Exception) {}
+                triggerVibration(context, true)
             }
-
-            triggerVibration(context, cleanName)
-
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
     }
 

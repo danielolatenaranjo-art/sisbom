@@ -7,7 +7,10 @@
   "targets": {
     "sisbom-de5f8": {
       "hosting": {
-        "main": [
+        "sentinellink": [
+          "sentinellink-app"
+        ],
+        "sisbom": [
           "sisbom"
         ]
       }

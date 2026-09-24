@@ -29,8 +29,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
-        CFBundleShortVersionString: "2.2.0"
-        CFBundleVersion: "220"
+        CFBundleShortVersionString: "2.2.3"
+        CFBundleVersion: "223"
         UILaunchScreen: {}
         UIBackgroundModes:
           - fetch

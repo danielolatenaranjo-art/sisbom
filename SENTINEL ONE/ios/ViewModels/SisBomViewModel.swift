@@ -281,6 +281,13 @@ class SisBomViewModel: ObservableObject {
         Messaging.messaging().subscribe(toTopic: "despachos")
         Messaging.messaging().subscribe(toTopic: "alertas")
         Messaging.messaging().subscribe(toTopic: "alertas_generales")
+        
+        if isCentralActive {
+            Messaging.messaging().subscribe(toTopic: "central_operador")
+        } else {
+            Messaging.messaging().unsubscribe(fromTopic: "central_operador")
+        }
+
         if !userId.isEmpty {
             Messaging.messaging().subscribe(toTopic: "usuario_\(userId)")
             Messaging.messaging().subscribe(toTopic: "personal_\(userId)")
@@ -313,6 +320,12 @@ class SisBomViewModel: ObservableObject {
             self.isCentralActive = isMeActive
             self.centralOperatorName = isActive ? opName : ""
             self.centralOperatorId = isActive ? idReg : ""
+            
+            if isMeActive {
+                Messaging.messaging().subscribe(toTopic: "central_operador")
+            } else {
+                Messaging.messaging().unsubscribe(fromTopic: "central_operador")
+            }
             
             if isMeActive {
                 if self.currentUser?.estado != "0-9" {
@@ -394,6 +407,21 @@ class SisBomViewModel: ObservableObject {
                             DispatchQueue.main.async {
                                 self.fullscreenDispatchId = d.idServicio
                             }
+
+                            // Re-trigger reminder tone after 60 seconds if still unassigned / not responded
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+                                guard let self = self else { return }
+                                if let currentDisp = self.dispatchesList.first(where: { $0.idServicio == d.idServicio }),
+                                   currentDisp.operadorFinal.isEmpty {
+                                    let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
+                                    let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                    let hasResponded = userEnServicio == d.idServicio || userEnServicio == "-\(d.idServicio)" || userEnServicio.hasPrefix("-") || (!userEnServicio.isEmpty && userEnServicio != "0")
+                                    if isStill09 && !hasResponded && !self.isCentralActive && !self.isAirplaneMode {
+                                        self.playSound(soundName: "c10_30")
+                                        self.triggerVibration()
+                                    }
+                                }
+                            }
                         }
                     }
                 } else if is1030 && !self.knownDispatchIds.contains(trackerKey1030) {
@@ -409,6 +437,21 @@ class SisBomViewModel: ObservableObject {
                                 self.fullscreenDispatchId = d.idServicio
                             }
                         }
+
+                        // Re-trigger reminder tone after 60 seconds if still unassigned / not responded
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+                            guard let self = self else { return }
+                            if let currentDisp = self.dispatchesList.first(where: { $0.idServicio == d.idServicio }),
+                               currentDisp.operadorFinal.isEmpty {
+                                let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
+                                let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                let hasResponded = userEnServicio == d.idServicio || userEnServicio == "-\(d.idServicio)" || userEnServicio.hasPrefix("-") || (!userEnServicio.isEmpty && userEnServicio != "0")
+                                if isStill09 && !hasResponded && !self.isCentralActive && !self.isAirplaneMode {
+                                    self.playSound(soundName: "c10_30")
+                                    self.triggerVibration()
+                                }
+                            }
+                        }
                     } else if d.operadorFinal.isEmpty && !self.isCentralActive && !isSpecial && !isAttending && !userEnServicio.hasPrefix("-") && (is09 || is08) {
                         DispatchQueue.main.async {
                             self.fullscreenDispatchId = d.idServicio
@@ -421,6 +464,21 @@ class SisBomViewModel: ObservableObject {
                     if !is08 && !isSpecial && !isAbsoluteSilence && !self.isAirplaneMode {
                         self.playSound(soundName: soundName)
                         self.triggerVibration()
+
+                        // Re-trigger reminder tone after 60 seconds if still unassigned / not responded
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in
+                            guard let self = self else { return }
+                            if let currentDisp = self.dispatchesList.first(where: { $0.idServicio == d.idServicio }),
+                               currentDisp.operadorFinal.isEmpty {
+                                let isStill09 = (self.currentUser?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "") == "0-9"
+                                let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                let hasResponded = userEnServicio == d.idServicio || userEnServicio == "-\(d.idServicio)" || userEnServicio.hasPrefix("-") || (!userEnServicio.isEmpty && userEnServicio != "0")
+                                if isStill09 && !hasResponded && !self.isCentralActive && !self.isAirplaneMode {
+                                    self.playSound(soundName: soundName)
+                                    self.triggerVibration()
+                                }
+                            }
+                        }
                     }
 
                     if d.operadorFinal.isEmpty && !self.isCentralActive && is09 && !isAttending && !userEnServicio.hasPrefix("-") {
@@ -1162,6 +1220,12 @@ class SisBomViewModel: ObservableObject {
     
     // MARK: - Dynamic Firebase & SaaS License Methods
     
+    func getCuartelCoordinates() -> (lat: Double, lng: Double) {
+        let lat = UserDefaults.standard.object(forKey: "cuartel_lat") as? Double ?? -34.637373
+        let lng = UserDefaults.standard.object(forKey: "cuartel_lng") as? Double ?? -71.125741
+        return (lat, lng)
+    }
+
     func initializeDynamicFirebase(configStr: String) {
         AppDelegate.configureDynamicFirebase(configStr: configStr)
     }
@@ -1214,12 +1278,20 @@ class SisBomViewModel: ObservableObject {
                     
                     let clientName = json["clientName"] as? String ?? json["nombreMostrar"] as? String ?? "SisBom"
                     let logoUrl = json["logoUrl"] as? String ?? ""
+                    let cuartelLat = json["cuartelLat"] as? Double ?? json["latCuartel"] as? Double
+                    let cuartelLng = json["cuartelLng"] as? Double ?? json["lngCuartel"] as? Double
                     
                     // Save to UserDefaults
                     UserDefaults.standard.set(trimmedKey, forKey: "saas_license_key")
                     UserDefaults.standard.set(configStr, forKey: "saas_firebase_config")
                     UserDefaults.standard.set(clientName, forKey: "saas_client_name")
                     UserDefaults.standard.set(logoUrl, forKey: "saas_logo_url")
+                    if let cuartelLat = cuartelLat {
+                        UserDefaults.standard.set(cuartelLat, forKey: "cuartel_lat")
+                    }
+                    if let cuartelLng = cuartelLng {
+                        UserDefaults.standard.set(cuartelLng, forKey: "cuartel_lng")
+                    }
                     
                     self.saasLicenseKey = trimmedKey
                     self.saasClientName = clientName
@@ -1305,7 +1377,14 @@ class SisBomViewModel: ObservableObject {
                 if let data = data,
                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     let authorized = json["authorized"] as? Bool ?? false
-                    if !authorized {
+                    if authorized {
+                        if let cuartelLat = json["cuartelLat"] as? Double ?? json["latCuartel"] as? Double {
+                            UserDefaults.standard.set(cuartelLat, forKey: "cuartel_lat")
+                        }
+                        if let cuartelLng = json["cuartelLng"] as? Double ?? json["lngCuartel"] as? Double {
+                            UserDefaults.standard.set(cuartelLng, forKey: "cuartel_lng")
+                        }
+                    } else {
                         self.clearLicense()
                     }
                 }
@@ -1324,6 +1403,8 @@ class SisBomViewModel: ObservableObject {
         UserDefaults.standard.removeObject(forKey: "saas_firebase_config")
         UserDefaults.standard.removeObject(forKey: "saas_client_name")
         UserDefaults.standard.removeObject(forKey: "saas_logo_url")
+        UserDefaults.standard.removeObject(forKey: "cuartel_lat")
+        UserDefaults.standard.removeObject(forKey: "cuartel_lng")
         UserDefaults.standard.removeObject(forKey: "fire_user")
         
         self.currentUser = nil
@@ -1360,31 +1441,19 @@ class SisBomViewModel: ObservableObject {
     }
 
     func closeCentralOperatorSession() {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "dd-MM-yyyy HH:mm:ss"
-        let nowStr = formatter.string(from: Date())
-        
-        repository.updateCentralSession(
-            updates: [
-                "estado": "inactivo",
-                "fechaSalida": nowStr,
-                "operadorActivo": "",
-                "idRegistro": ""
-            ],
-            completion: { [weak self] result in
-                guard let self = self else { return }
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success:
-                        self.centralOperatorName = ""
-                        self.centralOperatorId = ""
-                        self.isCentralActive = false
-                    case .failure(let error):
-                        print("Error closing central session: \(error.localizedDescription)")
-                    }
+        repository.closeCentralSession { [weak self] result in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                switch result {
+                case .success:
+                    self.centralOperatorName = ""
+                    self.centralOperatorId = ""
+                    self.isCentralActive = false
+                case .failure(let error):
+                    print("Error closing central session: \(error.localizedDescription)")
                 }
             }
-        )
+        }
     }
 
     func openDoor(onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {

@@ -19,27 +19,48 @@
   "storage": {
     "rules": "storage.rules"
   },
-  "hosting": {
-    "target": "main",
-    "public": "public",
-    "ignore": [
-      "firebase.json",
-      "**/.*",
-      "**/node_modules/**"
-    ],
-    "headers": [
-      {
-        "source": "/firebase-messaging-sw.js",
-        "headers": [
-          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-        ]
-      },
-      {
-        "source": "/index.html",
-        "headers": [
-          { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
-        ]
-      }
-    ]
-  }
+  "hosting": [
+    {
+      "target": "sentinellink",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        { "source": "/g", "destination": "/geo.html" },
+        { "source": "/geo", "destination": "/geo.html" }
+      ],
+      "headers": [
+        {
+          "source": "/**",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "sisbom",
+      "public": "public",
+      "ignore": [
+        "firebase.json",
+        "**/.*",
+        "**/node_modules/**"
+      ],
+      "rewrites": [
+        { "source": "/g", "destination": "/geo.html" },
+        { "source": "/geo", "destination": "/geo.html" }
+      ],
+      "headers": [
+        {
+          "source": "/**",
+          "headers": [
+            { "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }
+          ]
+        }
+      ]
+    }
+  ]
 }

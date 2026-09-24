@@ -33,18 +33,22 @@ func getCycleYear(date: Date) -> Int {
     return month == 12 ? year + 1 : year
 }
 
-func isAbonoValue(value: Any?, clave: String) -> Bool {
+func isAbonoValue(value: Any?, clave: String = "", tipo: String = "") -> Bool {
     if let b = value as? Bool { return b }
-    if let n = value as? NSNumber { return n.intValue == 1 }
+    if let n = value as? NSNumber { return n.intValue == 1 || n.doubleValue == 1.0 }
     if let d = value as? Double { return d == 1.0 }
     let str = String(describing: value ?? "").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-    return str == "SÍ" || str == "SI" || str == "S" || str == "TRUE" || str == "1" || clave.uppercased().contains("ABONO")
+    if str == "SÍ" || str == "SI" || str == "S" || str == "TRUE" || str == "1" || str == "1.0" || str.contains("ABONO") || str.contains("EXTRA") { return true }
+    if clave.uppercased().contains("ABONO") || clave.uppercased().contains("EXTRA") { return true }
+    if tipo.uppercased().contains("ABONO") || tipo.uppercased().contains("EXTRA") { return true }
+    return false
 }
 
 func calculateCycleStats(history: [AttendanceSheet]) -> CycleStats {
     let filtered = history.filter { h in
-        let st = h.userEstado.isEmpty ? "FALTA" : h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave)
+        let st = h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        if st.isEmpty || st == "NO_REGISTRA" || st == "NO REGISTRA" { return false }
+        let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave, tipo: h.tipo)
         let isPresent = st == "A" || st == "ASISTE" || st == "CDS"
         return !(isAbono && !isPresent)
     }
@@ -54,8 +58,8 @@ func calculateCycleStats(history: [AttendanceSheet]) -> CycleStats {
     var totalAbonosAsiste = 0
 
     for h in filtered {
-        let st = h.userEstado.isEmpty ? "FALTA" : h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave)
+        let st = h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave, tipo: h.tipo)
         let isPresent = st == "A" || st == "ASISTE" || st == "CDS"
         if !isAbono {
             totalObligatorias += 1
@@ -127,8 +131,9 @@ struct AsistenciaTab: View {
         let currentCycleStats = calculateCycleStats(history: currentCycleHistory)
 
         let displayedHistory = currentCycleHistory.filter { h in
-            let st = h.userEstado.isEmpty ? "FALTA" : h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-            let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave)
+            let st = h.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            if st.isEmpty || st == "NO_REGISTRA" || st == "NO REGISTRA" { return false }
+            let isAbono = isAbonoValue(value: h.userAbono, clave: h.clave, tipo: h.tipo)
             let isPresent = st == "A" || st == "ASISTE" || st == "CDS"
             return !(isAbono && !isPresent)
         }

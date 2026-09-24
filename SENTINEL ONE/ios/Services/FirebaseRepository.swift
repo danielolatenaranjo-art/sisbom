@@ -98,7 +98,7 @@ class FirebaseRepository {
     }
     
     func getVehicles(onChange: @escaping ([Vehicle]) -> Void) -> ListenerRegistration {
-        return db.collection("moviles").addSnapshotListener { snapshot, error in
+        return db.collection("vehiculos").addSnapshotListener { snapshot, error in
             guard let documents = snapshot?.documents else {
                 print("Error fetching vehicles: \(error?.localizedDescription ?? "Unknown error")")
                 return
@@ -143,6 +143,17 @@ class FirebaseRepository {
                     return false
                 }()
                 
+                let rawAbono = data["esAbono"] ?? data["abono"] ?? data["tipo"]
+                let defaultAbono: Double = {
+                    if let b = rawAbono as? Bool { return b ? 1.0 : 0.0 }
+                    if let n = rawAbono as? NSNumber { return n.doubleValue }
+                    if let s = rawAbono as? String {
+                        let upper = s.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        return (upper == "1" || upper == "SI" || upper == "SÍ" || upper.contains("ABONO") || upper.contains("EXTRA")) ? 1.0 : 0.0
+                    }
+                    return 0.0
+                }()
+                
                 return AttendanceSheet(
                     idLista: idLista,
                     clave: clave,
@@ -153,7 +164,7 @@ class FirebaseRepository {
                     aprobadoPor: aprobadoPor,
                     anulada: isAnulada,
                     userEstado: "",
-                    userAbono: 0.0
+                    userAbono: defaultAbono
                 )
             }
             
@@ -171,23 +182,25 @@ class FirebaseRepository {
                     defer { group.leave() }
                     if let subDoc = subDoc, subDoc.exists, let subData = subDoc.data() {
                         attendanceList[i].userEstado = (subData["estado"] as? String) ?? "FALTA"
-                        if let abono = subData["abono"] {
-                            if let doubleAbono = abono as? Double {
+                        if let subAbono = subData["esAbono"] ?? subData["abono"] {
+                            if let doubleAbono = subAbono as? Double {
                                 attendanceList[i].userAbono = doubleAbono
-                            } else if let intAbono = abono as? Int {
+                            } else if let intAbono = subAbono as? Int {
                                 attendanceList[i].userAbono = Double(intAbono)
-                            } else if let strAbono = abono as? String {
-                                attendanceList[i].userAbono = Double(strAbono) ?? 0.0
+                            } else if let strAbono = subAbono as? String {
+                                let upper = strAbono.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                                attendanceList[i].userAbono = Double(strAbono) ?? ((upper == "SI" || upper == "SÍ" || upper == "1" || upper.contains("ABONO") || upper.contains("EXTRA")) ? 1.0 : 0.0)
                             }
                         }
                     } else {
-                        attendanceList[i].userEstado = "FALTA"
+                        attendanceList[i].userEstado = "NO_REGISTRA"
                     }
                 }
             }
             
             group.notify(queue: .main) {
-                onChange(attendanceList)
+                let validList = attendanceList.filter { $0.userEstado != "NO_REGISTRA" && !$0.userEstado.isEmpty }
+                onChange(validList)
             }
         }
     }
@@ -265,10 +278,11 @@ class FirebaseRepository {
     }
     
     func solicitarAperturaPuerta(user: UserPersonal, completion: @escaping (Result<Void, Error>) -> Void) {
+        let formattedName = formatFirefighterName(user.nombreBombero)
         let requestData: [String: Any] = [
             "idBombero": user.id,
             "idRadial": user.idRadial,
-            "nombreBombero": user.nombreBombero,
+            "nombreBombero": formattedName,
             "timestamp": FieldValue.serverTimestamp(),
             "estado": "PENDIENTE"
         ]
@@ -280,7 +294,7 @@ class FirebaseRepository {
                 let centralUpdate: [String: Any] = [
                     "solicitudPuerta": [
                         "idRadial": user.idRadial,
-                        "nombreBombero": user.nombreBombero,
+                        "nombreBombero": formattedName,
                         "timestamp": Date().timeIntervalSince1970 * 1000
                     ]
                 ]
@@ -302,11 +316,61 @@ class FirebaseRepository {
     }
     
     func updateVehicleService(vehicleId: String, enServicio: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        db.collection("moviles").document(vehicleId).updateData(["enServicio": enServicio]) { error in
+        db.collection("vehiculos").document(vehicleId).updateData(["enServicio": enServicio]) { error in
             if let error = error {
                 completion(.failure(error))
             } else {
                 completion(.success(()))
+            }
+        }
+    }
+    
+    func closeCentralSession(completion: @escaping (Result<Void, Error>) -> Void) {
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "dd-MM-yyyy"
+        let dateNow = dateFmt.string(from: Date())
+        
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm:ss"
+        let timeNow = timeFmt.string(from: Date())
+        
+        db.collection("accesos").document("central").getDocument { [weak self] snapshot, error in
+            guard let self = self else { return }
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            
+            let sessionId = snapshot?.data()?["idInicio"] as? String ?? ""
+            if !sessionId.isEmpty {
+                let regClose: [String: Any] = [
+                    "estado": "cerrado",
+                    "fechaCierre": dateNow,
+                    "horaCierre": timeNow
+                ]
+                self.db.collection("accesos").document("central")
+                    .collection("registros").document(sessionId)
+                    .setData(regClose, merge: true)
+            }
+            
+            let closePayload: [String: Any] = [
+                "estado": "cerrado",
+                "idInicio": "",
+                "idRegistro": "",
+                "cargo": "",
+                "nombreBombero": "",
+                "operador": "",
+                "fechaIngreso": "",
+                "horaIngreso": "",
+                "fechaCierre": dateNow,
+                "horaCierre": timeNow
+            ]
+            self.db.collection("accesos").document("central").setData(closePayload, merge: true) { err in
+                if let err = err {
+                    completion(.failure(err))
+                } else {
+                    completion(.success(()))
+                }
             }
         }
     }

@@ -113,7 +113,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             options: []
         )
         
-        UNUserNotificationCenter.current().setNotificationCategories([dispatchCategory, generalAlertCategory, chatCategory])
+        let openDoorAction = UNNotificationAction(
+            identifier: "OPEN_DOOR_ACTION",
+            title: "ABRIR PUERTA",
+            options: [.foreground]
+        )
+        let doorRequestCategory = UNNotificationCategory(
+            identifier: "DOOR_REQUEST_ALERT",
+            actions: [openDoorAction],
+            intentIdentifiers: [],
+            options: []
+        )
+        
+        UNUserNotificationCenter.current().setNotificationCategories([dispatchCategory, generalAlertCategory, chatCategory, doorRequestCategory])
         
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
             if granted {
@@ -178,7 +190,15 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let actionIdentifier = response.actionIdentifier
         
         if let type = userInfo["type"] as? String {
-            if type == "CHAT", let payloadId = userInfo["payloadId"] as? String {
+            if type == "DOOR_REQUEST" {
+                if actionIdentifier == "OPEN_DOOR_ACTION" {
+                    FirebaseRepository.shared.setDoorOpen {
+                        print("Puerta abierta exitosamente desde notificación iOS")
+                    } onFailure: { err in
+                        print("Error abriendo puerta desde notificación iOS: \(err)")
+                    }
+                }
+            } else if type == "CHAT", let payloadId = userInfo["payloadId"] as? String {
                 AppDelegate.launchChatId = payloadId
                 
                 NotificationCenter.default.post(

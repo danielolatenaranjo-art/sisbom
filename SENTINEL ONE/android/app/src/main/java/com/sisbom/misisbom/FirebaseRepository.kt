@@ -104,6 +104,7 @@ data class Dispatch(
     val unidades: Map<String, Map<String, Any>> = emptyMap(),
     val solicitarConfirmacion: Boolean = false,
     val estado: String = "",
+    val visibleMovil: Boolean = true,
     val lat: Double? = null,
     val lng: Double? = null
 )
@@ -203,7 +204,11 @@ class FirebaseRepository {
                 }
                 val list = snapshot?.documents?.mapNotNull { doc ->
                     mapToDispatch(doc)
-                }?.filter { it.estado.trim().lowercase() != "cancelada" } ?: emptyList()
+                }?.filter { 
+                    val estado = it.estado.trim().lowercase()
+                    val isVisible = it.visibleMovil
+                    it.operadorFinal.isEmpty() && isVisible && (estado == "activa" || estado == "pre-despacho" || estado == "en curso" || estado.isEmpty()) && estado != "cancelada" && estado != "finalizada" && estado != "cerrada" && estado != "terminada"
+                } ?: emptyList()
                 trySend(list)
             }
         awaitClose { listener.remove() }
@@ -290,11 +295,13 @@ class FirebaseRepository {
                                     fullCache.add(recent)
                                 }
                             }
-                            fullCache.sortByDescending { it.idLista.toIntOrNull() ?: 0 }
-                            saveCachedAttendance(context, userId, fullCache)
-                            onComplete(fullCache)
+                            val validSheets = fullCache.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                                .sortedByDescending { it.idLista.toIntOrNull() ?: 0 }
+                            saveCachedAttendance(context, userId, validSheets)
+                            onComplete(validSheets)
                         } else {
-                            onComplete(recentSheets)
+                            val validSheets = recentSheets.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                            onComplete(validSheets)
                         }
                     } else {
                         var completedCount = 0
@@ -310,11 +317,15 @@ class FirebaseRepository {
                                         val subSnap = subTask.result
                                         if (subSnap != null && subSnap.exists()) {
                                             sheet.userEstado = subSnap.getString("estado") ?: "FALTA"
+                                            val subAbono = subSnap.get("esAbono") ?: subSnap.get("abono")
+                                            if (subAbono != null) {
+                                                sheet.userAbono = subAbono
+                                            }
                                         } else {
-                                            sheet.userEstado = "FALTA"
+                                            sheet.userEstado = "NO_REGISTRA"
                                         }
                                     } else {
-                                        sheet.userEstado = "FALTA"
+                                        sheet.userEstado = "NO_REGISTRA"
                                     }
                                     completedCount++
                                     if (completedCount == totalCount) {
@@ -328,18 +339,21 @@ class FirebaseRepository {
                                                     fullCache.add(recent)
                                                 }
                                             }
-                                            fullCache.sortByDescending { it.idLista.toIntOrNull() ?: 0 }
-                                            saveCachedAttendance(context, userId, fullCache)
-                                            onComplete(fullCache)
+                                            val validSheets = fullCache.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                                                .sortedByDescending { it.idLista.toIntOrNull() ?: 0 }
+                                            saveCachedAttendance(context, userId, validSheets)
+                                            onComplete(validSheets)
                                         } else {
-                                            onComplete(recentSheets)
+                                            val validSheets = recentSheets.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                                            onComplete(validSheets)
                                         }
                                     }
                                 }
                         }
                     }
                 } else {
-                    onComplete(cached.ifEmpty { recentSheets })
+                    val validList = (cached.ifEmpty { recentSheets }).filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                    onComplete(validList)
                 }
             }
     }
@@ -401,11 +415,13 @@ class FirebaseRepository {
                                     fullCache.add(recent)
                                 }
                             }
-                            fullCache.sortByDescending { it.idLista.toIntOrNull() ?: 0 }
-                            saveCachedAttendance(context, userId, fullCache)
-                            trySend(fullCache)
+                            val validSheets = fullCache.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                                .sortedByDescending { it.idLista.toIntOrNull() ?: 0 }
+                            saveCachedAttendance(context, userId, validSheets)
+                            trySend(validSheets)
                         } else {
-                            trySend(recentSheets)
+                            val validSheets = recentSheets.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                            trySend(validSheets)
                         }
                     } else {
                         var completedCount = 0
@@ -422,11 +438,15 @@ class FirebaseRepository {
                                         val subSnap = task.result
                                         if (subSnap != null && subSnap.exists()) {
                                             sheet.userEstado = subSnap.getString("estado") ?: "FALTA"
+                                            val subAbono = subSnap.get("esAbono") ?: subSnap.get("abono")
+                                            if (subAbono != null) {
+                                                sheet.userAbono = subAbono
+                                            }
                                         } else {
-                                            sheet.userEstado = "FALTA"
+                                            sheet.userEstado = "NO_REGISTRA"
                                         }
                                     } else {
-                                        sheet.userEstado = "FALTA"
+                                        sheet.userEstado = "NO_REGISTRA"
                                     }
                                     completedCount++
                                     if (completedCount == totalCount) {
@@ -440,22 +460,21 @@ class FirebaseRepository {
                                                     fullCache.add(recent)
                                                 }
                                             }
-                                            fullCache.sortByDescending { it.idLista.toIntOrNull() ?: 0 }
-                                            saveCachedAttendance(context, userId, fullCache)
-                                            trySend(fullCache)
+                                            val validSheets = fullCache.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                                                .sortedByDescending { it.idLista.toIntOrNull() ?: 0 }
+                                            saveCachedAttendance(context, userId, validSheets)
+                                            trySend(validSheets)
                                         } else {
-                                            trySend(recentSheets)
+                                            val validSheets = recentSheets.filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                                            trySend(validSheets)
                                         }
                                     }
                                 }
                         }
                     }
                 } else {
-                    if (context != null) {
-                        trySend(cached)
-                    } else {
-                        trySend(recentSheets)
-                    }
+                    val validList = (if (context != null) cached else recentSheets).filter { it.userEstado != "NO_REGISTRA" && it.userEstado.isNotEmpty() }
+                    trySend(validList)
                 }
             }
         awaitClose { listener.remove() }
@@ -631,7 +650,10 @@ class FirebaseRepository {
             .add(docData)
             .addOnSuccessListener {
                 try {
-                    db.collection("accesos").document("central").update("solicitudPuerta", docData)
+                    db.collection("accesos").document("central").set(
+                        mapOf("solicitudPuerta" to docData),
+                        com.google.firebase.firestore.SetOptions.merge()
+                    )
                 } catch (_: Exception) {}
                 onSuccess()
             }
@@ -644,15 +666,42 @@ class FirebaseRepository {
             onSuccess()
             return
         }
-        val now = java.text.SimpleDateFormat("dd-MM-yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-        db.collection("accesos").document("central")
-            .update(mapOf(
-                "estado" to "inactivo",
-                "fechaSalida" to now,
-                "operadorActivo" to "",
-                "idRegistro" to ""
-            ))
-            .addOnSuccessListener { onSuccess() }
+        val dateNow = java.text.SimpleDateFormat("dd-MM-yyyy", java.util.Locale.getDefault()).format(java.util.Date())
+        val timeNow = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+
+        db.collection("accesos").document("central").get()
+            .addOnSuccessListener { snap ->
+                val sessionId = snap.getString("idInicio") ?: ""
+                if (sessionId.isNotEmpty()) {
+                    db.collection("accesos").document("central")
+                        .collection("registros").document(sessionId)
+                        .set(
+                            mapOf(
+                                "estado" to "cerrado",
+                                "fechaCierre" to dateNow,
+                                "horaCierre" to timeNow
+                            ),
+                            com.google.firebase.firestore.SetOptions.merge()
+                        )
+                }
+
+                val closePayload = mapOf(
+                    "estado" to "cerrado",
+                    "idInicio" to "",
+                    "idRegistro" to "",
+                    "cargo" to "",
+                    "nombreBombero" to "",
+                    "operador" to "",
+                    "fechaIngreso" to "",
+                    "horaIngreso" to "",
+                    "fechaCierre" to dateNow,
+                    "horaCierre" to timeNow
+                )
+                db.collection("accesos").document("central")
+                    .set(closePayload, com.google.firebase.firestore.SetOptions.merge())
+                    .addOnSuccessListener { onSuccess() }
+                    .addOnFailureListener { onFailure(it) }
+            }
             .addOnFailureListener { onFailure(it) }
     }
 
@@ -964,7 +1013,7 @@ fun formatProfilePhotoUrl(foto: String): String {
                 clave = doc.getString("clave") ?: "",
                 claveApoyo = doc.getString("claveApoyo") ?: "",
                 lugar = doc.getString("lugar") ?: "",
-                preinforme = doc.getString("preinforme") ?: "",
+                preinforme = doc.getString("preinforme") ?: doc.getString("preInforme") ?: doc.getString("pre_informe") ?: "",
                 carros = carrosStr,
                 horaDespacho = doc.getString("horaDespacho") ?: "",
                 fechaDespacho = doc.getString("fechaDespacho") ?: "",
@@ -974,6 +1023,7 @@ fun formatProfilePhotoUrl(foto: String): String {
                 unidades = unidadesMap,
                 solicitarConfirmacion = doc.getBoolean("solicitarConfirmacion") ?: false,
                 estado = doc.getString("estado") ?: "",
+                visibleMovil = doc.getBoolean("visibleMovil") ?: true,
                 lat = latVal,
                 lng = lngVal
             )
@@ -1009,11 +1059,21 @@ fun formatProfilePhotoUrl(foto: String): String {
 
     private fun mapToVehicle(doc: DocumentSnapshot): Vehicle? {
         return try {
+            val rawEstado = doc.get("estado")
+            val cleanEstado = when (rawEstado) {
+                is Boolean -> if (rawEstado) "1" else "0"
+                is Number -> if (rawEstado.toLong() == 0L) "0" else "1"
+                is String -> {
+                    val s = rawEstado.trim().lowercase()
+                    if (s == "0" || s == "0-8" || s == "08" || s == "false" || s == "fuera de servicio") "0" else "1"
+                }
+                else -> "1"
+            }
             Vehicle(
                 idCarro = doc.id,
-                clave = doc.getString("clave") ?: "",
-                estado = doc.getString("estado") ?: "0-8",
-                enServicio = doc.getString("enServicio") ?: "0"
+                clave = doc.get("clave")?.toString()?.takeIf { it.isNotEmpty() } ?: doc.id,
+                estado = cleanEstado,
+                enServicio = doc.get("enServicio")?.toString() ?: "0"
             )
         } catch (e: Exception) {
             null
@@ -1022,6 +1082,7 @@ fun formatProfilePhotoUrl(foto: String): String {
 
     private fun mapToAttendanceSheet(doc: DocumentSnapshot): AttendanceSheet? {
         return try {
+            val rawAbono = doc.get("esAbono") ?: doc.get("abono") ?: doc.get("tipo") ?: "NO"
             AttendanceSheet(
                 idLista = doc.id,
                 clave = doc.getString("clave") ?: "",
@@ -1031,7 +1092,7 @@ fun formatProfilePhotoUrl(foto: String): String {
                 lugar = doc.getString("lugar") ?: "",
                 aprobadoPor = doc.getString("aprobadoPor") ?: "",
                 anulada = doc.get("anulada") ?: 0,
-                userAbono = doc.get("abono") ?: "NO",
+                userAbono = rawAbono,
                 obac = doc.getString("obac") ?: doc.getString("obacServicio") ?: "",
                 detalle = doc.getString("detalle") ?: doc.getString("detalles") ?: doc.getString("observacion") ?: ""
             )
@@ -1048,22 +1109,25 @@ fun formatProfilePhotoUrl(foto: String): String {
             val list = mutableListOf<AttendanceSheet>()
             for (i in 0 until arr.length()) {
                 val obj = arr.getJSONObject(i)
-                list.add(
-                    AttendanceSheet(
-                        idLista = obj.optString("idLista"),
-                        clave = obj.optString("clave"),
-                        tipo = obj.optString("tipo"),
-                        fecha = obj.optString("fecha"),
-                        hora = obj.optString("hora"),
-                        lugar = obj.optString("lugar"),
-                        aprobadoPor = obj.optString("aprobadoPor"),
-                        anulada = obj.opt("anulada") ?: 0,
-                        userEstado = obj.optString("userEstado"),
-                        userAbono = obj.opt("userAbono") ?: 0,
-                        obac = obj.optString("obac"),
-                        detalle = obj.optString("detalle")
+                val estado = obj.optString("userEstado")
+                if (estado != "NO_REGISTRA" && estado.isNotEmpty()) {
+                    list.add(
+                        AttendanceSheet(
+                            idLista = obj.optString("idLista"),
+                            clave = obj.optString("clave"),
+                            tipo = obj.optString("tipo"),
+                            fecha = obj.optString("fecha"),
+                            hora = obj.optString("hora"),
+                            lugar = obj.optString("lugar"),
+                            aprobadoPor = obj.optString("aprobadoPor"),
+                            anulada = obj.opt("anulada") ?: 0,
+                            userEstado = estado,
+                            userAbono = obj.opt("userAbono") ?: 0,
+                            obac = obj.optString("obac"),
+                            detalle = obj.optString("detalle")
+                        )
                     )
-                )
+                }
             }
             list
         } catch (_: Exception) {

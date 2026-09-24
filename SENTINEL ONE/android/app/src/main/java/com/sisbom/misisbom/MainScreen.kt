@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import coil.compose.AsyncImage
@@ -200,18 +201,13 @@ fun MainScreen(viewModel: SisBomViewModel) {
                     val screenHeightPx = with(density) { androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp.dp.toPx() }
                     val navigationBarPadding = androidx.compose.foundation.layout.WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
-                    // TopAppBarView height ~140.dp (or ~230.dp / ~320.dp for Asistencia totals), BottomNavigationBarView height ~88.dp
-                    val saasTopExtra = if (viewModel.isReadOnly) 32.dp else 0.dp
-                    val today = java.util.Date()
-                    val cal = java.util.Calendar.getInstance()
-                    cal.time = today
-                    val todayMonth = cal.get(java.util.Calendar.MONTH)
-                    val todayDay = cal.get(java.util.Calendar.DAY_OF_MONTH)
-                    val isDecember8th = (todayMonth == java.util.Calendar.DECEMBER && todayDay == 8)
+                    var topHeaderHeightPx by remember { mutableStateOf(0) }
+                    val topHeaderHeightDp = with(density) { topHeaderHeightPx.toDp() }
+                    // Dynamic fallback before first measure pass finishes (~1 frame)
+                    val effectiveTopHeaderDp = if (topHeaderHeightPx > 0) topHeaderHeightDp else (statusBarPadding + 220.dp)
 
-                    val topPaddingValue = 104.dp
                     val customPaddingValues = PaddingValues(
-                        top = topPaddingValue + saasTopExtra,
+                        top = effectiveTopHeaderDp,
                         bottom = navigationBarPadding + 88.dp
                     )
 
@@ -219,7 +215,6 @@ fun MainScreen(viewModel: SisBomViewModel) {
                         state = pagerState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(top = statusBarPadding + 76.dp)
                             .clipToBounds()
                     ) { page ->
                         when (visibleTabs[page]) {
@@ -238,18 +233,19 @@ fun MainScreen(viewModel: SisBomViewModel) {
                             .fillMaxWidth()
                             .align(Alignment.TopCenter)
                     ) {
-                        // Fondo protector superior para cubrir status bar y área del logo ampliado
+                        // Fondo protector superior para cubrir status bar y área del header
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(statusBarPadding + 76.dp)
+                                .height(effectiveTopHeaderDp + 8.dp)
                                 .background(
                                     if (isDark) {
                                         Brush.verticalGradient(
                                             colors = listOf(
                                                 Color(0xFF0F0101),
-                                                Color(0xFF0F0101).copy(alpha = 0.95f),
-                                                Color(0xFF0F0101).copy(alpha = 0.8f),
+                                                Color(0xFF0F0101).copy(alpha = 0.96f),
+                                                Color(0xFF0F0101).copy(alpha = 0.85f),
+                                                Color(0xFF0F0101).copy(alpha = 0.35f),
                                                 Color.Transparent
                                             )
                                         )
@@ -257,15 +253,22 @@ fun MainScreen(viewModel: SisBomViewModel) {
                                         Brush.verticalGradient(
                                             colors = listOf(
                                                 LightBg,
-                                                LightBg.copy(alpha = 0.95f),
-                                                LightBg.copy(alpha = 0.8f),
+                                                LightBg.copy(alpha = 0.96f),
+                                                LightBg.copy(alpha = 0.85f),
+                                                LightBg.copy(alpha = 0.35f),
                                                 Color.Transparent
                                             )
                                         )
                                     }
                                 )
                         )
-                        Column(modifier = Modifier.fillMaxWidth()) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onGloballyPositioned { coordinates ->
+                                    topHeaderHeightPx = coordinates.size.height
+                                }
+                        ) {
                             TopAppBarView(viewModel) {
                                 scope.launch { drawerState.open() }
                             }

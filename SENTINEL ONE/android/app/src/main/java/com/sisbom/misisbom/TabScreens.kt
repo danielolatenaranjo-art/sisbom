@@ -2,8 +2,11 @@ package com.sisbom.misisbom
 
 import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import coil.compose.AsyncImage
@@ -59,6 +62,8 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.layout.onGloballyPositioned
 import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -269,7 +274,10 @@ fun ActividadTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
             }
         }
 
-        items(activeDispatches) { dispatch ->
+        items(
+            items = activeDispatches,
+            key = { it.idServicio }
+        ) { dispatch ->
             DispatchItemCard(dispatch, viewModel)
         }
     }
@@ -309,19 +317,24 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
     val inService = user.enServicio.trim() != "0" && user.enServicio.trim().isNotEmpty() && !user.enServicio.trim().startsWith("-")
     val isSpecial = baseState.contains("SUSPENDIDO") || baseState == "CDS" || baseState.contains("LICENCIA") || baseState == "PERMISO"
     
+    val (cuartelLat, cuartelLng) = viewModel.getCuartelCoordinates()
     val claveColor = getClaveTacticalColor(dispatch.clave)
-    val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
+    val hasValidLocation = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0 && (dispatch.lat != cuartelLat || dispatch.lng != cuartelLng)
     
     val cardBorderColor = if (isAttending) {
         GoGreen
     } else {
-        if (isDark) Color(0xFF7F1D1D) else Color(0xFFEF4444).copy(alpha = 0.6f)
+        if (isDark) Color(0xFF7F1D1D) else Color(0xFFEF4444).copy(alpha = 0.5f)
     }
     
     val titleText = if (isAttending) "SALIENDO A SERVICIO" else "¡DESPACHO ACTIVO!"
-    val titleColor = if (isAttending) GoGreen else Color(0xFFEF4444)
+    val titleColor = if (isAttending) GoGreen else if (isDark) Color(0xFFEF4444) else Color(0xFFDC2626)
     val operadorName = dispatch.quienDespacha.ifEmpty { dispatch.operadorFinal }
     
+    var headerHeightPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val targetYPx = if (headerHeightPx > 0) headerHeightPx + (180f * density / 2f) else 210f * density
+
     val openNavigation: () -> Unit = {
         if (hasValidLocation) {
             try {
@@ -344,7 +357,9 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp)),
         shape = RoundedCornerShape(24.dp),
-        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color(0xFF140303)),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = if (isDark) Color(0xFF140303) else Color(0xFFFFFFFF)
+        ),
         border = androidx.compose.foundation.BorderStroke(1.2.dp, cardBorderColor)
     ) {
         Box(
@@ -353,36 +368,54 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                 .clip(RoundedCornerShape(24.dp))
         ) {
             // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (fills exact card height)
-            val finalLat = if (hasValidLocation) dispatch.lat!! else -34.637373
-            val finalLng = if (hasValidLocation) dispatch.lng!! else -71.125741
+            val finalLat = if (hasValidLocation) dispatch.lat!! else cuartelLat
+            val finalLng = if (hasValidLocation) dispatch.lng!! else cuartelLng
             IncidentMapPreview(
                 lat = finalLat,
                 lng = finalLng,
+                cuartelLat = cuartelLat,
+                cuartelLng = cuartelLng,
                 isPending = !hasValidLocation,
                 clave = dispatch.clave,
                 lugar = dispatch.lugar,
                 isDark = isDark,
+                targetYPx = targetYPx,
                 modifier = Modifier.matchParentSize()
             )
 
-            // LAYER 1: CONTENT WITH TOP & BOTTOM DARK RED GRADIENT OVERLAYS
+            // LAYER 1: CONTENT WITH TOP & BOTTOM GRADIENT OVERLAYS
             Column(
                 modifier = Modifier.fillMaxWidth()
             ) {
-                // TOP HEADER: Dark Red Gradient fading downwards into transparency over the map
+                // TOP HEADER: Gradient fading downwards into transparency over the map
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onGloballyPositioned { coordinates ->
+                            headerHeightPx = coordinates.size.height
+                        }
                         .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color(0xFA2D0606),
-                                    Color(0xF0250505),
-                                    Color(0xD91E0404),
-                                    Color(0x80160303),
-                                    Color.Transparent
+                            if (isDark) {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFA2D0606),
+                                        Color(0xF0250505),
+                                        Color(0xD91E0404),
+                                        Color(0x80160303),
+                                        Color.Transparent
+                                    )
                                 )
-                            )
+                            } else {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFFFFFFFF),
+                                        Color(0xF5FFFFFF),
+                                        Color(0xDCFFFFFF),
+                                        Color(0x80FFFFFF),
+                                        Color.Transparent
+                                    )
+                                )
+                            }
                         )
                         .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
                 ) {
@@ -402,7 +435,7 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
 
                         Text(
                             text = cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" },
-                            color = Color(0xFFCBD5E1),
+                            color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF64748B),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -419,78 +452,64 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
 
                     Text(
                         text = claveText,
-                        color = Color.White,
+                        color = if (isDark) Color.White else Color(0xFF0F172A),
                         fontSize = 34.sp,
                         fontWeight = FontWeight.Black,
                         lineHeight = 38.sp
                     )
 
-                    // Location / Address (Primary address below Clave)
-                    Text(
-                        text = if (dispatch.lugar.isNotBlank()) dispatch.lugar.uppercase() else "UBICACIÓN EN PROCESO DE GEORREFERENCIACIÓN",
-                        color = Color(0xFFE2E8F0),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        lineHeight = 17.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    // Location / Address (Primary address below Clave, displayed ONLY if valid)
+                    val cleanLugar = cleanLugarDisplay(dispatch.lugar)
+                    if (cleanLugar.isNotEmpty()) {
+                        Text(
+                            text = cleanLugar.uppercase(),
+                            color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            lineHeight = 17.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
 
-                // CENTER VIEWPORT: Compact transparent clickable area to view and tap the map
+                // CENTER VIEWPORT: Expanded transparent clickable area to view and tap the map
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(75.dp)
+                        .height(180.dp)
                         .clickable { openNavigation() }
                 )
 
-                // BOTTOM CONTROLS: Dark Red Gradient fading upwards into transparency over the map
+                // BOTTOM CONTROLS: Gradient fading upwards into transparency over the map
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    Color(0x80160303),
-                                    Color(0xD91A0404),
-                                    Color(0xF0150303),
-                                    Color(0xFA100202)
+                            if (isDark) {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color(0x80160303),
+                                        Color(0xD91A0404),
+                                        Color(0xF0150303),
+                                        Color(0xFA100202)
+                                    )
                                 )
-                            )
+                            } else {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        Color(0x80FFFFFF),
+                                        Color(0xDCFFFFFF),
+                                        Color(0xF5FFFFFF),
+                                        Color(0xFFFFFFFF)
+                                    )
+                                )
+                            }
                         )
                         .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 14.dp)
                 ) {
-                    // Pre-informe (if available)
-                    val cleanPreinforme = dispatch.preinforme.trim().replace("---", "").trim()
-                    if (cleanPreinforme.isNotEmpty() && !cleanPreinforme.contains("A la espera", ignoreCase = true)) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0x4D000000), RoundedCornerShape(14.dp))
-                                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(14.dp))
-                                .padding(10.dp)
-                        ) {
-                            Column {
-                                Text(
-                                    text = "📋 PRE-INFORME:",
-                                    color = Color(0xFF94A3B8),
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = cleanPreinforme,
-                                    color = Color.White,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(top = 2.dp)
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                    }
-
                     // UNIDADES DESPACHADAS (Direct mini-cards without outer card wrapper)
                     val carrosList = dispatch.carros.split(Regex("[,/ ]+"))
                         .map { it.trim() }
@@ -499,14 +518,14 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                     if (carrosList.isEmpty()) {
                         Text(
                             text = "---",
-                            color = Color(0xFFF87171),
+                            color = if (isDark) Color(0xFFF87171) else Color(0xFFDC2626),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Black
                         )
                     } else if (carrosList.size == 1 && carrosList[0].equals("PERSONAL", ignoreCase = true)) {
                         Text(
                             text = "🧑‍🚒 PERSONAL",
-                            color = Color(0xFFF87171),
+                            color = if (isDark) Color(0xFFF87171) else Color(0xFFDC2626),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Black
                         )
@@ -526,12 +545,12 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                 Box(
                                     modifier = Modifier
                                         .background(
-                                            Color(0x66000000),
+                                            if (isDark) Color(0x66000000) else Color(0xFFF8FAFC),
                                             RoundedCornerShape(10.dp)
                                         )
                                         .border(
                                             1.dp,
-                                            Color(0x33FFFFFF),
+                                            if (isDark) Color(0x33FFFFFF) else Color(0xFFCBD5E1),
                                             RoundedCornerShape(10.dp)
                                         )
                                         .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -543,7 +562,7 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                         Text(text = emoji, fontSize = 15.sp)
                                         Text(
                                             text = carroName,
-                                            color = Color.White,
+                                            color = if (isDark) Color.White else Color(0xFF0F172A),
                                             fontWeight = FontWeight.Black,
                                             fontSize = 13.sp
                                         )
@@ -551,13 +570,13 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                         if (solConductor.isNotEmpty()) {
                                             Box(
                                                 modifier = Modifier
-                                                    .background(Color(0xFFF59E0B).copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                                                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFFF59E0B).copy(alpha = if (isDark) 0.25f else 0.15f), RoundedCornerShape(6.dp))
+                                                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = if (isDark) 0.7f else 0.8f), RoundedCornerShape(6.dp))
                                                     .padding(horizontal = 5.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
                                                     text = "12-10",
-                                                    color = Color(0xFFFBBF24),
+                                                    color = if (isDark) Color(0xFFFBBF24) else Color(0xFFD97706),
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Black
                                                 )
@@ -567,13 +586,13 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                         if (solPersonal.isNotEmpty()) {
                                             Box(
                                                 modifier = Modifier
-                                                    .background(Color(0xFF3B82F6).copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                                                    .border(1.dp, Color(0xFF3B82F6).copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                                                    .background(Color(0xFF3B82F6).copy(alpha = if (isDark) 0.25f else 0.15f), RoundedCornerShape(6.dp))
+                                                    .border(1.dp, Color(0xFF3B82F6).copy(alpha = if (isDark) 0.7f else 0.8f), RoundedCornerShape(6.dp))
                                                     .padding(horizontal = 5.dp, vertical = 2.dp)
                                             ) {
                                                 Text(
                                                     text = "6-6",
-                                                    color = Color(0xFF60A5FA),
+                                                    color = if (isDark) Color(0xFF60A5FA) else Color(0xFF2563EB),
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Black
                                                 )
@@ -585,20 +604,56 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                         }
                     }
 
+                    // Pre-informe (if available) - positioned below dispatched units and above action buttons
+                    val cleanPreinforme = dispatch.preinforme.trim().replace("---", "").trim()
+                    if (cleanPreinforme.isNotEmpty() && !cleanPreinforme.contains("A la espera", ignoreCase = true)) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isDark) Color(0x4D000000) else Color(0xFFF8FAFC),
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isDark) Color(0x26FFFFFF) else Color(0xFFE2E8F0),
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .padding(10.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    text = "📋 PRE-INFORME:",
+                                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = cleanPreinforme,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            }
+                        }
+                    }
+
                     val clean67 = cleanSheetPrefix(dispatch.hora67)
                     if (clean67.isNotEmpty()) {
                         Spacer(modifier = Modifier.height(10.dp))
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(if (isDark) Color(0x1A10B981) else Color(0x1A34D399), RoundedCornerShape(8.dp))
-                                .border(1.dp, Color(0xFF10B981).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                .background(if (isDark) Color(0x1A10B981) else Color(0x1510B981), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFF10B981).copy(alpha = if (isDark) 0.3f else 0.4f), RoundedCornerShape(8.dp))
                                 .padding(8.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "✓ CONTROL DE EMERGENCIA (6-7): $clean67",
-                                color = if (isDark) Color(0xFF34D399) else Color(0xFF059669),
+                                color = if (isDark) Color(0xFF34D399) else Color(0xFF047857),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Black
                             )
@@ -618,7 +673,7 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                androidx.compose.animation.slideOutVertically(
                                    targetOffsetY = { it / 2 },
                                    animationSpec = androidx.compose.animation.core.tween(200)
-                               ) +
+                                ) +
                                androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(200))
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
@@ -653,9 +708,16 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                                 ) {
                                     // ASISTIR (Crimson / Ruby Red Filled Pill Button)
                                     Button(
-                                        onClick = { viewModel.attendService(dispatch.idServicio, true) },
+                                        onClick = { 
+                                            try {
+                                                SoundPlayer.stop(context)
+                                                NotificationHelper.cancelRepeatAlert(dispatch.idServicio)
+                                                NotificationHelper.ignorePayload(context, dispatch.idServicio)
+                                            } catch (_: Exception) {}
+                                            viewModel.attendService(dispatch.idServicio, true) 
+                                        },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (canAttend) Color(0xFF881A1A) else if (isDark) Color(0x1AFFFFFF) else Color(0x1A000000),
+                                            containerColor = if (canAttend) Color(0xFF881A1A) else if (isDark) Color(0x1AFFFFFF) else Color(0x0D000000),
                                             contentColor = if (canAttend) Color.White else if (isDark) Color(0xFF475569) else Color(0xFF94A3B8)
                                         ),
                                         enabled = canAttend,
@@ -684,10 +746,17 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
 
                                     // NO ASISTIR (Outlined Pill Button)
                                     Button(
-                                        onClick = { viewModel.declineService(dispatch.idServicio) },
+                                        onClick = { 
+                                            try {
+                                                SoundPlayer.stop(context)
+                                                NotificationHelper.cancelRepeatAlert(dispatch.idServicio)
+                                                NotificationHelper.ignorePayload(context, dispatch.idServicio)
+                                            } catch (_: Exception) {}
+                                            viewModel.declineService(dispatch.idServicio) 
+                                        },
                                         colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isDeclined) Color(0xFFEF4444) else Color(0x1A000000),
-                                            contentColor = if (isDeclined) Color.White else Color(0xFFEF4444)
+                                            containerColor = if (isDeclined) Color(0xFFEF4444) else if (isDark) Color(0x1A000000) else Color(0x08EF4444),
+                                            contentColor = if (isDeclined) Color.White else Color(0xFFDC2626)
                                         ),
                                         enabled = !isDeclined && !inService && baseState == "0-9",
                                         shape = RoundedCornerShape(20.dp),
@@ -724,14 +793,21 @@ fun DispatchItemCard(dispatch: Dispatch, viewModel: SisBomViewModel) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0x4D000000), RoundedCornerShape(14.dp))
-                                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(14.dp))
+                                .background(
+                                    if (isDark) Color(0x4D000000) else Color(0xFFF8FAFC),
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isDark) Color(0x26FFFFFF) else Color(0xFFE2E8F0),
+                                    RoundedCornerShape(14.dp)
+                                )
                                 .padding(horizontal = 12.dp, vertical = 9.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "EN CONSOLA: ${formatOperatorCadName(operadorName).uppercase()}",
-                                color = Color(0xFFCBD5E1),
+                                color = if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 0.5.sp
@@ -800,15 +876,27 @@ private fun createIncidentMarkerDrawable(
 fun IncidentMapPreview(
     lat: Double,
     lng: Double,
+    cuartelLat: Double = -34.637373,
+    cuartelLng: Double = -71.125741,
     isPending: Boolean = false,
     clave: String,
     lugar: String = "",
     isDark: Boolean = true,
+    isFullScreen: Boolean = false,
+    targetYPx: Float = 0f,
     modifier: Modifier = Modifier
 ) {
-    val finalLat = if (lat == 0.0) -34.637373 else lat
-    val finalLng = if (lng == 0.0) -71.125741 else lng
-    val zoomLevel = 16.2
+    val finalLat = if (lat == 0.0 || isPending) cuartelLat else lat
+    val finalLng = if (lng == 0.0 || isPending) cuartelLng else lng
+    val zoomLevel = 15.0
+
+    // Keep updated state references so all closures and callbacks have fresh real-time data
+    val currentLat by rememberUpdatedState(finalLat)
+    val currentLng by rememberUpdatedState(finalLng)
+    val currentPending by rememberUpdatedState(isPending)
+    val currentClave by rememberUpdatedState(clave)
+    val currentDark by rememberUpdatedState(isDark)
+    val currentTargetYPx by rememberUpdatedState(targetYPx)
 
     val pinColorHex = getClavePinHex(clave)
     val pinColorInt = android.graphics.Color.parseColor(pinColorHex)
@@ -820,19 +908,35 @@ fun IncidentMapPreview(
     val mapViewRef = remember { mutableStateOf<org.osmdroid.views.MapView?>(null) }
     val markerRef = remember { mutableStateOf<org.osmdroid.views.overlay.Marker?>(null) }
 
-    fun updateMapCenter(mapView: org.osmdroid.views.MapView) {
+    var lastCenteredLat by remember { mutableStateOf<Double?>(null) }
+    var lastCenteredLng by remember { mutableStateOf<Double?>(null) }
+
+    fun calculateCenterGeoPoint(hPx: Int, cLat: Double, cLng: Double, cZoom: Double, tYPx: Float): org.osmdroid.util.GeoPoint {
+        if (isFullScreen) {
+            return org.osmdroid.util.GeoPoint(cLat, cLng)
+        }
+        val actualTargetYPx = if (tYPx > 0f) tYPx else (210f * density)
+        val dyPx = (hPx / 2f) - actualTargetYPx
+        // Exact Web Mercator degrees per screen pixel when tiles are scaled to DPI:
+        val degPerPx = (360.0 * Math.cos(Math.toRadians(cLat))) / (256.0 * Math.pow(2.0, cZoom) * density)
+        val centerLat = cLat - (dyPx * degPerPx)
+        return org.osmdroid.util.GeoPoint(centerLat, cLng)
+    }
+
+    fun updateMapCenter(mapView: org.osmdroid.views.MapView, animate: Boolean = false) {
         mapView.post {
             val h = mapView.height
             val w = mapView.width
             if (h > 0 && w > 0) {
-                val hDp = h / density
-                val targetYDp = 135f
-                val dyDp = (hDp / 2f) - targetYDp
-                val dLatPerDp = 0.0000154
-                val centerLat = finalLat - (dyDp * dLatPerDp)
-                val centerPoint = org.osmdroid.util.GeoPoint(centerLat, finalLng)
-                mapView.controller.setCenter(centerPoint)
-                mapView.controller.setZoom(zoomLevel)
+                val centerPoint = calculateCenterGeoPoint(h, currentLat, currentLng, zoomLevel, currentTargetYPx)
+                if (animate) {
+                    mapView.controller.animateTo(centerPoint, zoomLevel, 900L)
+                } else {
+                    mapView.controller.setCenter(centerPoint)
+                    mapView.controller.setZoom(zoomLevel)
+                }
+                lastCenteredLat = currentLat
+                lastCenteredLng = currentLng
             }
         }
     }
@@ -844,9 +948,75 @@ fun IncidentMapPreview(
         }
     }
 
+    // Live GPS & State Tracker: Animates camera only when coordinates change while viewing
+    LaunchedEffect(finalLat, finalLng, isPending, isDark, targetYPx, mapViewRef.value) {
+        val mv = mapViewRef.value ?: return@LaunchedEffect
+
+        // 1. Adaptive Tactical Map Styling
+        if (isDark) {
+            val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
+                -0.75f, 0f, 0f, 0f, 210f,
+                0f, -0.75f, 0f, 0f, 210f,
+                0f, 0f, -0.75f, 0f, 215f,
+                0f, 0f, 0f, 1f, 0f
+            ))
+            val darkTactical = android.graphics.ColorMatrix()
+            darkTactical.setSaturation(0.2f)
+            inverseMatrix.preConcat(darkTactical)
+            mv.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
+        } else {
+            mv.overlayManager.tilesOverlay.setColorFilter(null)
+        }
+
+        // 2. Incident Marker Placement
+        if (!isPending) {
+            val markerPoint = org.osmdroid.util.GeoPoint(finalLat, finalLng)
+            val currentMarker = markerRef.value
+            if (currentMarker == null) {
+                val newMarker = org.osmdroid.views.overlay.Marker(mv).apply {
+                    position = markerPoint
+                    setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
+                    icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
+                    setInfoWindow(null)
+                }
+                markerRef.value = newMarker
+                mv.overlays.add(newMarker)
+            } else {
+                currentMarker.position = markerPoint
+                currentMarker.icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
+            }
+        } else {
+            markerRef.value?.let {
+                mv.overlays.remove(it)
+                markerRef.value = null
+            }
+        }
+
+        // 3. Camera Position: Only animate if coordinates actively changed in real-time.
+        // For initial mount / tab switch, set center immediately without traveling from (0,0).
+        val h = mv.height
+        val w = mv.width
+        if (h > 0 && w > 0) {
+            val centerPoint = calculateCenterGeoPoint(h, finalLat, finalLng, zoomLevel, targetYPx)
+            val isLiveCoordChange = lastCenteredLat != null && (lastCenteredLat != finalLat || lastCenteredLng != finalLng)
+            if (isLiveCoordChange) {
+                mv.controller.animateTo(centerPoint, zoomLevel, 900L)
+            } else {
+                mv.controller.setCenter(centerPoint)
+                mv.controller.setZoom(zoomLevel)
+            }
+            lastCenteredLat = finalLat
+            lastCenteredLng = finalLng
+        } else {
+            updateMapCenter(mv, animate = false)
+        }
+
+        mv.invalidate()
+    }
+
     Box(
         modifier = modifier
-            .background(Color(0xFF140303))
+            .background(if (isDark) Color(0xFF140303) else Color(0xFFF1F5F9))
     ) {
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->
@@ -858,28 +1028,31 @@ fun IncidentMapPreview(
                     setMultiTouchControls(false)
                     zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
                     isTilesScaledToDpi = true
-                    
-                    updateMapCenter(this)
+
+                    // Initialize immediately on target coordinates to prevent any default (0,0) offset
+                    controller.setCenter(org.osmdroid.util.GeoPoint(currentLat, currentLng))
+                    controller.setZoom(zoomLevel)
+
+                    updateMapCenter(this, animate = false)
 
                     addOnLayoutChangeListener { _, _, top, _, bottom, _, _, oldTop, oldBottom ->
-                        if (bottom - top != oldBottom - oldTop) {
-                            updateMapCenter(this)
+                        if (bottom - top != oldBottom - oldTop && (bottom - top) > 0) {
+                            updateMapCenter(this, animate = false)
                         }
                     }
 
-                    if (!isPending) {
+                    if (!currentPending) {
                         val marker = org.osmdroid.views.overlay.Marker(this).apply {
-                            position = org.osmdroid.util.GeoPoint(finalLat, finalLng)
+                            position = org.osmdroid.util.GeoPoint(currentLat, currentLng)
                             setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
-                            icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
+                            icon = createIncidentMarkerDrawable(context, pinColorInt, currentClave)
                             setInfoWindow(null)
                         }
                         markerRef.value = marker
                         overlays.add(marker)
                     }
 
-                    // Adaptive Tactical Map Styling (Dark tactical in dark mode, crisp natural light map in light mode)
-                    if (isDark) {
+                    if (currentDark) {
                         val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
                             -0.75f, 0f, 0f, 0f, 210f,
                             0f, -0.75f, 0f, 0f, 210f,
@@ -898,51 +1071,65 @@ fun IncidentMapPreview(
                 }
             },
             update = { mapView ->
-                updateMapCenter(mapView)
-
-                // Update theme color filter dynamically on recomposition / mode switch
-                if (isDark) {
-                    val inverseMatrix = android.graphics.ColorMatrix(floatArrayOf(
-                        -0.75f, 0f, 0f, 0f, 210f,
-                        0f, -0.75f, 0f, 0f, 210f,
-                        0f, 0f, -0.75f, 0f, 215f,
-                        0f, 0f, 0f, 1f, 0f
-                    ))
-                    val darkTactical = android.graphics.ColorMatrix()
-                    darkTactical.setSaturation(0.2f)
-                    inverseMatrix.preConcat(darkTactical)
-                    mapView.overlayManager.tilesOverlay.setColorFilter(android.graphics.ColorMatrixColorFilter(inverseMatrix))
-                } else {
-                    mapView.overlayManager.tilesOverlay.setColorFilter(null)
+                if (mapViewRef.value != mapView) {
+                    mapViewRef.value = mapView
                 }
-
-                if (!isPending) {
-                    val markerPoint = org.osmdroid.util.GeoPoint(finalLat, finalLng)
-                    if (markerRef.value == null) {
-                        val marker = org.osmdroid.views.overlay.Marker(mapView).apply {
-                            position = markerPoint
-                            setAnchor(org.osmdroid.views.overlay.Marker.ANCHOR_CENTER, org.osmdroid.views.overlay.Marker.ANCHOR_CENTER)
-                            icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
-                            setInfoWindow(null)
-                        }
-                        markerRef.value = marker
-                        mapView.overlays.add(marker)
-                    } else {
-                        markerRef.value?.position = markerPoint
-                        markerRef.value?.icon = createIncidentMarkerDrawable(context, pinColorInt, clave)
-                    }
-                } else {
-                    markerRef.value?.let {
-                        mapView.overlays.remove(it)
-                        markerRef.value = null
-                    }
-                }
-
                 mapView.invalidate()
             },
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (isPending) Modifier.blur(4.dp) else Modifier)
         )
+
+        // Glassmorphism Frosted Overlay: active while isPending is true, fades out when GPS arrives
+        AnimatedVisibility(
+            visible = isPending,
+            enter = fadeIn(animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(600)),
+            modifier = Modifier.matchParentSize()
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (isDark) {
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x40140303),
+                                    Color(0x261E0404),
+                                    Color(0x1A140303),
+                                    Color(0x40140303)
+                                )
+                            )
+                        } else {
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color(0x40F8FAFC),
+                                    Color(0x26F1F5F9),
+                                    Color(0x1AF8FAFC),
+                                    Color(0x40F8FAFC)
+                                )
+                            )
+                        }
+                    )
+            )
+        }
     }
+}
+
+fun cleanLugarDisplay(lugar: String): String {
+    val t = lugar.trim()
+    if (t.isEmpty() ||
+        t.contains("OBTENIENDO", ignoreCase = true) ||
+        t.contains("UBICACI", ignoreCase = true) ||
+        t.contains("PROCESO", ignoreCase = true) ||
+        t.contains("GEORREFERENC", ignoreCase = true) ||
+        t == "---" ||
+        t == "-"
+    ) {
+        return ""
+    }
+    return t
 }
 
 // Helper functions for cleaning dates/hours
@@ -3089,18 +3276,22 @@ data class CycleStats(
     val abonos: Int
 )
 
-fun isAbonoValue(value: Any?, clave: String): Boolean {
-    if (value == null) return false
+fun isAbonoValue(value: Any?, clave: String = "", tipo: String = ""): Boolean {
+    if (value == null && clave.isEmpty() && tipo.isEmpty()) return false
     if (value is Boolean) return value
-    if (value is Number) return value.toInt() == 1
-    val str = value.toString().uppercase().trim()
-    return str == "SÍ" || str == "SI" || str == "S" || str == "TRUE" || str == "1" || clave.uppercase().contains("ABONO")
+    if (value is Number) return value.toDouble() == 1.0 || value.toInt() == 1
+    val str = (value?.toString() ?: "").uppercase().trim()
+    if (str == "SÍ" || str == "SI" || str == "S" || str == "TRUE" || str == "1" || str == "1.0" || str.contains("ABONO") || str.contains("EXTRA")) return true
+    if (clave.uppercase().contains("ABONO") || clave.uppercase().contains("EXTRA")) return true
+    if (tipo.uppercase().contains("ABONO") || tipo.uppercase().contains("EXTRA")) return true
+    return false
 }
 
 fun calculateCycleStats(history: List<AttendanceSheet>): CycleStats {
     val filtered = history.filter { h ->
-        val st = if (h.userEstado.isEmpty()) "FALTA" else h.userEstado.uppercase().trim()
-        val isAbono = isAbonoValue(h.userAbono, h.clave)
+        val st = h.userEstado.uppercase().trim()
+        if (st.isEmpty() || st == "NO_REGISTRA" || st == "NO REGISTRA") return@filter false
+        val isAbono = isAbonoValue(h.userAbono, h.clave, h.tipo)
         val isPresent = st == "A" || st == "ASISTE" || st == "CDS"
         !(isAbono && !isPresent)
     }
@@ -3110,8 +3301,8 @@ fun calculateCycleStats(history: List<AttendanceSheet>): CycleStats {
     var totalAbonosAsiste = 0
 
     filtered.forEach { h ->
-        val st = if (h.userEstado.isEmpty()) "FALTA" else h.userEstado.uppercase().trim()
-        val isAbono = isAbonoValue(h.userAbono, h.clave)
+        val st = h.userEstado.uppercase().trim()
+        val isAbono = isAbonoValue(h.userAbono, h.clave, h.tipo)
         val isPresent = st == "A" || st == "ASISTE" || st == "CDS"
         if (!isAbono) {
             totalObligatorias++
@@ -3363,8 +3554,9 @@ fun AsistenciaTab(viewModel: SisBomViewModel, paddingValues: PaddingValues) {
 
     // Only display lists of current cycle
     val displayedHistory = currentCycleHistory.filter { h ->
-        val st = if (h.userEstado.isEmpty()) "FALTA" else h.userEstado.uppercase().trim()
-        val isAbono = isAbonoValue(h.userAbono, h.clave)
+        val st = h.userEstado.uppercase().trim()
+        if (st.isEmpty() || st == "NO_REGISTRA" || st == "NO REGISTRA") return@filter false
+        val isAbono = isAbonoValue(h.userAbono, h.clave, h.tipo)
         val isPresent = st == "A" || st == "ASISTE" || st == "CDS"
         !(isAbono && !isPresent)
     }
@@ -3714,7 +3906,7 @@ fun AttendanceItemCard(item: AttendanceSheet, viewModel: SisBomViewModel) {
         "#" + rawId
     }
 
-    val isAbono = isAbonoValue(item.userAbono, item.clave)
+    val isAbono = isAbonoValue(item.userAbono, item.clave, item.tipo)
 
     val cardBgColor = if (isDark) Color(0xFF1E293B) else Color.White
     val tintAlpha = if (isDark) 0.22f else 0.15f

@@ -22,6 +22,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -32,9 +33,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.CheckCircle
@@ -243,123 +246,150 @@ object NotificationHelper {
         }
     }
 
+    val pendingRepeatJobs = java.util.concurrent.ConcurrentHashMap<String, kotlinx.coroutines.Job>()
+
+    fun cancelRepeatAlert(idServicio: String) {
+        if (idServicio.isEmpty()) return
+        pendingRepeatJobs.remove(idServicio)?.cancel()
+    }
+
+    fun ignorePayload(context: Context, payloadId: String) {
+        if (payloadId.isEmpty()) return
+        try {
+            val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+            val current = prefs.getStringSet("IGNORED_PAYLOADS", emptySet())?.toMutableSet() ?: mutableSetOf()
+            current.add(payloadId)
+            prefs.edit().putStringSet("IGNORED_PAYLOADS", current).apply()
+        } catch (_: Exception) {}
+    }
+
     fun scheduleRepeatAlert(context: Context, idServicio: String, clave: String, is09: Boolean) {
-        if (!is09) return
+        if (!is09 || idServicio.isEmpty()) return
+        cancelRepeatAlert(idServicio)
         val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
-        serviceScope.launch {
+        val job = serviceScope.launch {
             kotlinx.coroutines.delay(60000) // 1 minute
             
-            // Check if user is still 0-9 and has not assisted
             val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+            val ignoredPayloads = prefs.getStringSet("IGNORED_PAYLOADS", emptySet()) ?: emptySet()
+            if (ignoredPayloads.contains(idServicio)) return@launch
+
             val isAirplaneMode = prefs.getBoolean("MODO_AVION", false)
             if (isAirplaneMode) return@launch
+            val isCentral = prefs.getBoolean("IS_CENTRAL_MODE", false)
+            if (isCentral) return@launch
+            val isUnavailable = prefs.getString("IS_UNAVAILABLE", "false") == "true"
+            if (isUnavailable) return@launch
+
             val cachedUser = prefs.getString("fire_user", null)
             var enServicio = "0"
-            val userStatus = if (cachedUser != null) {
+            var userStatus = ""
+            if (cachedUser != null) {
                 try {
                     val userObj = org.json.JSONObject(cachedUser)
                     enServicio = userObj.optString("enServicio", "0").trim()
-                    userObj.optString("estado", "").trim().uppercase()
-                } catch (_: Exception) { "" }
-            } else { "" }
+                    userStatus = userObj.optString("estado", "").trim().uppercase()
+                } catch (_: Exception) {}
+            }
             
-            if (userStatus != "0-9") return@launch
-            if (enServicio != "0" && enServicio.isNotEmpty() && !enServicio.startsWith("-")) return@launch
-            
-            val isCentral = prefs.getBoolean("IS_CENTRAL_MODE", false)
-            if (isCentral) return@launch
+            if (userStatus == "0-8" || userStatus.contains("0-8") || userStatus == "NO ASISTIR" ||
+                userStatus.contains("SUSPEND") || userStatus.contains("LICENCIA") || userStatus.contains("CDS") || userStatus == "PERMISO") {
+                return@launch
+            }
+            if (enServicio == idServicio || enServicio == "-$idServicio" || enServicio.startsWith("-") || (enServicio.isNotEmpty() && enServicio != "0")) {
+                return@launch
+            }
 
-            // Also check Firestore to be absolutely certain they have not assisted or changed status in the last 60 seconds
+            // Also check Firestore if available to confirm they have not assisted or declined
             val userId = prefs.getString("USER_ID", "") ?: ""
             if (userId.isNotEmpty()) {
                 try {
                     val db = FirebaseFirestore.getInstance()
                     val userTask = db.collection("personal").document(userId).get()
-                    val userDoc = Tasks.await(userTask, 3, TimeUnit.SECONDS)
+                    val userDoc = Tasks.await(userTask, 2, TimeUnit.SECONDS)
                     if (userDoc.exists()) {
                         val freshEstado = userDoc.getString("estado")?.trim()?.uppercase() ?: ""
                         val freshEnServicio = userDoc.getString("enServicio")?.trim() ?: "0"
-                        if (freshEstado != "0-9" || (freshEnServicio != "0" && freshEnServicio.isNotEmpty() && !freshEnServicio.startsWith("-"))) {
+                        if (freshEstado == "0-8" || freshEstado.contains("0-8") || freshEstado == "NO ASISTIR" ||
+                            freshEstado.contains("SUSPEND") || freshEstado.contains("LICENCIA") || freshEstado.contains("CDS") || freshEstado == "PERMISO" ||
+                            freshEnServicio == idServicio || freshEnServicio == "-$idServicio" || freshEnServicio.startsWith("-") || (freshEnServicio.isNotEmpty() && freshEnServicio != "0")) {
                             return@launch
                         }
                     }
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
+                } catch (_: Exception) {}
             }
             
-            // Check if the dispatch is still active in Firestore
+            // Check if the dispatch is still active in Firestore (or fallback to cache)
+            var isDispatchStillActive = true
+            var docClave = clave
             try {
                 val db = FirebaseFirestore.getInstance()
                 val task = db.collection("despachos").document(idServicio).get()
-                val doc = Tasks.await(task, 5, TimeUnit.SECONDS)
+                val doc = Tasks.await(task, 3, TimeUnit.SECONDS)
                 if (doc.exists()) {
                     val operadorFinal = doc.getString("operadorFinal") ?: ""
-                    val fechaDespacho = doc.getString("fechaDespacho") ?: ""
-                    val horaDespacho = doc.getString("horaDespacho") ?: ""
-                    if (operadorFinal.isEmpty()) {
-                        if (TimeValidation.isTooOld(fechaDespacho, horaDespacho)) {
-                            return@launch
-                        }
-                        // Still active! Sound the alarm again!
-                        val claveUpper = clave.trim().uppercase()
-                        val docClaveUpper = (doc.getString("clave") ?: "").trim().uppercase()
-                        val is1030 = claveUpper.contains("10-30") || claveUpper.contains("10_30") || docClaveUpper.contains("10-30") || docClaveUpper.contains("10_30") || claveUpper.contains("ALARMA GENERAL") || docClaveUpper.contains("ALARMA GENERAL")
-                        val isForestal = claveUpper.contains("FORESTAL") || docClaveUpper.contains("FORESTAL") || claveUpper.contains("INCENDIO FORESTAL") || docClaveUpper.contains("INCENDIO FORESTAL")
-                        val is90 = claveUpper == "9-0" || claveUpper == "9.0" || claveUpper == "9_0" || docClaveUpper == "9-0" || docClaveUpper == "9.0" || docClaveUpper == "9_0" || claveUpper.contains("COMANDANCIA") || docClaveUpper.contains("COMANDANCIA") || claveUpper.contains("LLAMADO") || docClaveUpper.contains("LLAMADO")
-
-                        val soundToPlay = if (is1030 || isForestal || is90) {
-                            "c10_30"
-                        } else {
-                            var cleanClave = clave.trim().replace("-", "_").replace(" ", "_").lowercase()
-                            if (cleanClave.isEmpty()) {
-                                val fullText = (doc.getString("clave") ?: "").lowercase()
-                                val keys = listOf("10_0", "10_1", "10_2", "10_3", "10_4", "10_5", "10_6", "10_7", "10_8", "10_9", "10_10", "10_12", "10_15", "10_30")
-                                for (k in keys) {
-                                    if (fullText.contains(k.replace("_", "-")) || fullText.contains(k)) {
-                                        cleanClave = k
-                                        break
-                                    }
-                                }
-                            }
-                            val possibleSound = if (cleanClave.startsWith("c10") || cleanClave.startsWith("c9")) cleanClave else "c$cleanClave"
-                            val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
-                            if (resId != 0) possibleSound else "despacho"
-                        }
-                        
-                        // Set volumes loud
-                        val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                        val originalRingerMode = audioManager.ringerMode
-                        val originalNotifVol = audioManager.getStreamVolume(AudioManager.STREAM_NOTIFICATION)
-                        val originalAlarmVol = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-                        val originalMusicVol = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                        
-                        try {
-                            audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                            val maxNotif = audioManager.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION)
-                            val maxAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
-                            val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                            audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
-                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
-                        } catch (_: Exception) {}
-                        
-                        SoundPlayer.playSound(context, soundToPlay)
-                        
-                        // Restore volume after 10s
-                        kotlinx.coroutines.delay(10000)
-                        try {
-                            audioManager.setStreamVolume(AudioManager.STREAM_NOTIFICATION, originalNotifVol, 0)
-                            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, originalAlarmVol, 0)
-                            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, originalMusicVol, 0)
-                            audioManager.ringerMode = originalRingerMode
-                        } catch (_: Exception) {}
+                    val est = (doc.getString("estado") ?: "").lowercase().trim()
+                    if (operadorFinal.isNotEmpty() || est == "finalizada" || est == "cancelada" || est == "cerrada") {
+                        isDispatchStillActive = false
                     }
+                    val cl = (doc.getString("clave") ?: "").trim()
+                    if (cl.isNotEmpty()) docClave = cl
                 }
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
+                // If network timeout, assume still active unless ignored
             }
+
+            if (!isDispatchStillActive) return@launch
+
+            val claveUpper = clave.trim().uppercase()
+            val docClaveUpper = docClave.trim().uppercase()
+            val is1030 = claveUpper.contains("10-30") || claveUpper.contains("10_30") || docClaveUpper.contains("10-30") || docClaveUpper.contains("10_30") || claveUpper.contains("ALARMA GENERAL") || docClaveUpper.contains("ALARMA GENERAL")
+            val isForestal = claveUpper.contains("FORESTAL") || docClaveUpper.contains("FORESTAL") || claveUpper.contains("INCENDIO FORESTAL") || docClaveUpper.contains("INCENDIO FORESTAL")
+            val is90 = claveUpper == "9-0" || claveUpper == "9.0" || claveUpper == "9_0" || docClaveUpper == "9-0" || docClaveUpper == "9.0" || docClaveUpper == "9_0" || claveUpper.contains("COMANDANCIA") || docClaveUpper.contains("COMANDANCIA") || claveUpper.contains("LLAMADO") || docClaveUpper.contains("LLAMADO")
+
+            val soundToPlay = if (is1030 || isForestal || is90) {
+                "c10_30"
+            } else {
+                val baseClave = if (clave.isNotEmpty()) clave else docClave
+                var cleanClave = baseClave.trim().replace("-", "_").replace(" ", "_").lowercase()
+                val possibleSound = if (cleanClave.startsWith("c10") || cleanClave.startsWith("c9")) cleanClave else "c$cleanClave"
+                val resId = context.resources.getIdentifier(possibleSound, "raw", context.packageName)
+                if (resId != 0) possibleSound else "despacho"
+            }
+            
+            // Set volumes loud
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+            val originalRingerMode = audioManager?.ringerMode ?: AudioManager.RINGER_MODE_NORMAL
+            val originalNotifVol = audioManager?.getStreamVolume(AudioManager.STREAM_NOTIFICATION) ?: 0
+            val originalAlarmVol = audioManager?.getStreamVolume(AudioManager.STREAM_ALARM) ?: 0
+            val originalMusicVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 0
+            
+            try {
+                audioManager?.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                val maxNotif = audioManager?.getStreamMaxVolume(AudioManager.STREAM_NOTIFICATION) ?: 100
+                val maxAlarm = audioManager?.getStreamMaxVolume(AudioManager.STREAM_ALARM) ?: 100
+                val maxMusic = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 100
+                audioManager?.setStreamVolume(AudioManager.STREAM_NOTIFICATION, maxNotif, 0)
+                audioManager?.setStreamVolume(AudioManager.STREAM_ALARM, maxAlarm, 0)
+                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, maxMusic, 0)
+            } catch (_: Exception) {}
+            
+            SoundPlayer.playSound(context, soundToPlay)
+            SoundPlayer.triggerVibration(context, true)
+            
+            // Restore volume after 10s
+            kotlinx.coroutines.delay(10000)
+            try {
+                audioManager?.setStreamVolume(AudioManager.STREAM_NOTIFICATION, originalNotifVol, 0)
+                audioManager?.setStreamVolume(AudioManager.STREAM_ALARM, originalAlarmVol, 0)
+                audioManager?.setStreamVolume(AudioManager.STREAM_MUSIC, originalMusicVol, 0)
+                if (audioManager != null) {
+                    audioManager.ringerMode = originalRingerMode
+                }
+            } catch (_: Exception) {}
         }
+        pendingRepeatJobs[idServicio] = job
+        job.invokeOnCompletion { pendingRepeatJobs.remove(idServicio) }
     }
 
     fun scheduleRepeat1210or66(
@@ -500,13 +530,13 @@ object NotificationHelper {
             return
         }
 
-        if (type != "STATUS_CHANGE" && isFromFCM && MainActivity.isAppInForeground) return
+        if (type != "STATUS_CHANGE" && type != "DOOR_REQUEST" && isFromFCM && MainActivity.isAppInForeground) return
         // Do NOT block dispatches when user is 0-8 (isUnavailable)
         // AND do NOT block escalation alarms (10-30 or Alarma Forestal) even if in ignoredPayloads (e.g. user previously pressed "No Asistir")
         if (type == "DISPATCH" && is08) {
             // Let it proceed
-        } else if (isEscalationAlarm) {
-            // Let escalation alarms proceed even if in ignoredPayloads!
+        } else if (isEscalationAlarm || type == "DOOR_REQUEST") {
+            // Let escalation alarms and door requests proceed even if in ignoredPayloads!
         } else if (payloadId.isNotEmpty() && ignoredPayloads.contains(payloadId)) {
             return
         }
@@ -514,7 +544,21 @@ object NotificationHelper {
         // Active central operator DND mode
         val isCentral = prefs.getBoolean("IS_CENTRAL_MODE", false)
 
+        // DOOR_REQUEST (Timbre): ONLY rings on the active operator on duty (isCentral == true) and never on the requester's app
+        if (type == "DOOR_REQUEST") {
+            if (!isCentral) return
+            val myId = try {
+                val cachedUser = prefs.getString("CACHED_USER_OBJECT", null)
+                if (cachedUser != null) org.json.JSONObject(cachedUser).optString("idRegistro", "").trim() else ""
+            } catch (_: Exception) { "" }
+            val reqId = payloadId.replace("door_", "").trim()
+            if (myId.isNotEmpty() && reqId.isNotEmpty() && (reqId.equals(myId, ignoreCase = true) || reqId.startsWith("${myId}_"))) {
+                return
+            }
+        }
+
         val channelId = when (type) {
+            "DOOR_REQUEST" -> "sisbom_alertas_critical_v10"
             "STATUS_CHANGE" -> "sisbom_alertas_normal_v10"
             "DISPATCH" -> {
                 if (isCentral) "sisbom_actions_v1"
@@ -654,11 +698,13 @@ object NotificationHelper {
             if (!isCDS && !isExcluded && !isCentral && !forceSilent) {
                 SoundPlayer.triggerVibration(context, false)
             }
+        } else if (type == "DOOR_REQUEST") {
+            playLoud = !forceSilent
         } else {
             // Para despachos generales: suena fuerte si es 0-9 y no central.
             // Para 0-8: NO suena sirena, pero SÍ tiene vibración fuerte.
-            playLoud = (type == "DISPATCH" || isOrden) && !isCentral && !is08 && !isCDS && !forceSilent
-            if (type == "DISPATCH" && is08 && !isCDS && !isExcluded && !forceSilent) {
+            playLoud = (type == "DISPATCH" || isOrden) && !isCentral && !is08 && !isCDS && !forceSilent && !hasDeclined
+            if (type == "DISPATCH" && is08 && !isCDS && !isExcluded && !forceSilent && !hasDeclined) {
                 forceVibrateOnly = true
             }
         }
@@ -715,7 +761,7 @@ object NotificationHelper {
                 } else {
                     "despacho"
                 }
-            } else if (isOrden || isGrade3) {
+            } else if (isOrden || isGrade3 || type == "DOOR_REQUEST") {
                 "alerta"
             } else {
                 "alerta"
@@ -733,6 +779,14 @@ object NotificationHelper {
                         SoundPlayer.playSound(context, soundToPlay)
                         // Schedule repeat after 1 minute
                         scheduleRepeatAlert(context, payloadId, claveOpt.ifEmpty { soundToPlay }, true)
+                    }
+                }
+            } else if (type == "DOOR_REQUEST") {
+                val trackerKey = if (payloadId.isNotEmpty()) (if (payloadId.startsWith("door_")) payloadId else "door_$payloadId") else "door_${System.currentTimeMillis() / 15000}"
+                if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
+                    PlayedSoundsTracker.markPlayed(trackerKey)
+                    if (playLoud) {
+                        SoundPlayer.playSound(context, soundToPlay)
                     }
                 }
             } else if (playLoud && (type != "DISPATCH_UPDATE" || is1210 || is66)) {
@@ -816,9 +870,10 @@ object NotificationHelper {
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
             .apply {
-                if (type == "DISPATCH" && !is08 && !isCentral) {
+                val shouldFullScreen = (type == "DISPATCH" || isEscalationAlarm) && (!is08 || isEscalationAlarm) && !isCentral
+                if (shouldFullScreen) {
                     setFullScreenIntent(pendingIntent, true)
-                    setCategory(NotificationCompat.CATEGORY_CALL)
+                    setCategory(NotificationCompat.CATEGORY_ALARM)
                 }
             }
 
@@ -1058,9 +1113,12 @@ class DispatchForegroundService : Service() {
                                     val clave = doc.getString("clave") ?: ""
                                     val claveApoyo = doc.getString("claveApoyo") ?: ""
                                     val lugar = doc.getString("lugar") ?: ""
-                                    val preinforme = doc.getString("preinforme") ?: ""
+                                    val preinforme = doc.getString("preinforme") ?: doc.getString("preInforme") ?: doc.getString("pre_informe") ?: ""
                                     val fechaDespacho = doc.getString("fechaDespacho") ?: ""
                                     val horaDespacho = doc.getString("horaDespacho") ?: ""
+                                    val visibleMovil = doc.getBoolean("visibleMovil") ?: true
+                                    val estado = doc.getString("estado")?.trim()?.lowercase() ?: ""
+                                    val isCancelled = estado == "cancelada" || estado == "finalizada" || estado == "cerrada" || estado == "terminada"
                                     val is1030 = clave.contains("10-30") || preinforme.contains("10-30")
                                     val trackerKey = if (is1030) idServicio + "_10_30" else idServicio
                                     val isTooOld = TimeValidation.isTooOld(fechaDespacho, horaDespacho)
@@ -1073,30 +1131,42 @@ class DispatchForegroundService : Service() {
                                     val inService = enServicio.isNotEmpty() && enServicio != "0" && !enServicio.startsWith("-")
                                     val shouldBeSilent = isTooOld || inService
                                     
-                                    if (is1030) {
-                                        if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
+                                    val isReadyToAlert = visibleMovil && !isCancelled && (estado == "activa" || estado == "pre-despacho")
+
+                                    if (isReadyToAlert) {
+                                        if (is1030) {
+                                            if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
+                                                PlayedSoundsTracker.markPlayed(trackerKey)
+                                                PlayedSoundsTracker.markPlayed(idServicio)
+                                                val title = "ALARMA 10-30 DECLARADA"
+                                                val body = "$clave • $lugar"
+                                                val isAttendingThisDispatch = enServicio.isNotEmpty() && enServicio == idServicio
+                                                NotificationHelper.sendNotification(
+                                                    context = this@DispatchForegroundService,
+                                                    title = title,
+                                                    message = body,
+                                                    payloadId = idServicio,
+                                                    userId = userId,
+                                                    type = "DISPATCH_UPDATE",
+                                                    isFromFCM = false,
+                                                    claveOpt = "10-30",
+                                                    gradoAlerta = "3",
+                                                    forceSilent = isTooOld || isAttendingThisDispatch
+                                                )
+                                                if (!isTooOld && !isAttendingThisDispatch && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this@DispatchForegroundService)) {
+                                                    try {
+                                                        val overlayIntent = Intent(this@DispatchForegroundService, MainActivity::class.java).apply {
+                                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                                            putExtra("DISPATCH_ID", idServicio)
+                                                            putExtra("SHOW_FULLSCREEN_ALERT", true)
+                                                        }
+                                                        startActivity(overlayIntent)
+                                                    } catch (_: Exception) {}
+                                                }
+                                            }
+                                        } else if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
                                             PlayedSoundsTracker.markPlayed(trackerKey)
-                                            PlayedSoundsTracker.markPlayed(idServicio)
-                                            val title = "ALARMA 10-30 DECLARADA"
-                                            val body = "$clave • $lugar"
-                                            val isAttendingThisDispatch = enServicio.isNotEmpty() && enServicio == idServicio
-                                            NotificationHelper.sendNotification(
-                                                context = this@DispatchForegroundService,
-                                                title = title,
-                                                message = body,
-                                                payloadId = idServicio,
-                                                userId = userId,
-                                                type = "DISPATCH_UPDATE",
-                                                isFromFCM = false,
-                                                claveOpt = "10-30",
-                                                gradoAlerta = "3",
-                                                forceSilent = isTooOld || isAttendingThisDispatch
-                                            )
-                                        }
-                                    } else if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
-                                        val isModified = change.type == com.google.firebase.firestore.DocumentChange.Type.MODIFIED
-                                        if (!isModified) {
-                                            val title = "NUEVO DESPACHO"
+                                            val title = if (estado == "pre-despacho") "PRE-DESPACHO DE EMERGENCIA" else "NUEVO DESPACHO"
                                             val body = if (clave == "10-12" && claveApoyo.isNotEmpty()) {
                                                  "$clave ($claveApoyo) • $lugar"
                                             } else {
@@ -1110,11 +1180,21 @@ class DispatchForegroundService : Service() {
                                                 payloadId = idServicio,
                                                 userId = userId,
                                                 type = "DISPATCH",
-                                                isFromFCM = true,
+                                                isFromFCM = false,
                                                 claveOpt = clave,
                                                 gradoAlerta = "3",
                                                 forceSilent = shouldBeSilent
                                             )
+                                            if (!shouldBeSilent && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this@DispatchForegroundService)) {
+                                                try {
+                                                    val overlayIntent = Intent(this@DispatchForegroundService, MainActivity::class.java).apply {
+                                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                                        putExtra("DISPATCH_ID", idServicio)
+                                                        putExtra("SHOW_FULLSCREEN_ALERT", true)
+                                                    }
+                                                    startActivity(overlayIntent)
+                                                } catch (_: Exception) {}
+                                            }
                                         }
                                     }
 
@@ -1491,8 +1571,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         val prefsTemp = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         
-        // Invalidate attendance cache once to fix abono calculations
-        val cacheVersion = prefsTemp.getInt("cache_version_abonos_v2", 0)
+        // Invalidate attendance cache once to fix entry date & abono calculations
+        val cacheVersion = prefsTemp.getInt("cache_version_abonos_fix_v4", 0)
         if (cacheVersion < 1) {
             val editor = prefsTemp.edit()
             editor.remove("cache_attendance")
@@ -1501,7 +1581,7 @@ class MainActivity : ComponentActivity() {
                     editor.remove(key)
                 }
             }
-            editor.putInt("cache_version_abonos_v2", 1)
+            editor.putInt("cache_version_abonos_fix_v4", 1)
             editor.apply()
         }
 
@@ -1510,6 +1590,7 @@ class MainActivity : ComponentActivity() {
             initializeDynamicFirebase(this, fbConfigStr)
         }
 
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -1529,6 +1610,12 @@ class MainActivity : ComponentActivity() {
         window.navigationBarColor = android.graphics.Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
+            window.attributes.layoutInDisplayCutoutMode =
+                android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
         }
 
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
@@ -1558,6 +1645,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        }
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            val wakeLock = powerManager?.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or android.os.PowerManager.ON_AFTER_RELEASE,
+                "sisbom:dispatch_wake_new_intent"
+            )
+            wakeLock?.acquire(10000L)
+        } catch (_: Exception) {}
         handleIntent(intent)
     }
 
@@ -1620,75 +1719,6 @@ fun SisBomApp(viewModel: SisBomViewModel) {
     val isDark = LocalDarkMode.current
     val activeChatAlert = viewModel.activeChatAlert
     val currentScreen = viewModel.currentScreen
-    if (!view.isInEditMode) {
-        androidx.compose.runtime.SideEffect {
-            val window = (view.context as? android.app.Activity)?.window
-            if (window != null) {
-                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
-                val isChatOpen = activeChatAlert != null || currentScreen == AppScreen.Chat
-                insetsController.isAppearanceLightStatusBars = !isDark
-                insetsController.isAppearanceLightNavigationBars = !isDark
-                
-                // Explicitly force transparency
-                window.statusBarColor = android.graphics.Color.TRANSPARENT
-                window.navigationBarColor = android.graphics.Color.TRANSPARENT
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
-                }
-            }
-        }
-    }
-    when (viewModel.currentScreen) {
-        AppScreen.Setup -> SetupScreen(viewModel)
-        AppScreen.Login -> LoginScreen(viewModel)
-        AppScreen.Main, AppScreen.Chat -> MainScreen(viewModel)
-    }
-
-    var showOverlayPermissionDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-
-    androidx.compose.runtime.LaunchedEffect(viewModel.currentUser) {
-        if (viewModel.currentUser != null) {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                if (!android.provider.Settings.canDrawOverlays(view.context)) {
-                    showOverlayPermissionDialog = true
-                }
-            }
-        }
-    }
-
-    if (showOverlayPermissionDialog) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showOverlayPermissionDialog = false },
-            title = { Text("Permiso de Superposición Requerido", fontWeight = FontWeight.Bold) },
-            text = { Text("Para recibir alertas de despacho a pantalla completa de forma inmediata cuando el teléfono está bloqueado o usando otra aplicación, debes activar el permiso 'Mostrar sobre otras aplicaciones'.") },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showOverlayPermissionDialog = false
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                            try {
-                                val intent = Intent(
-                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${view.context.packageName}")
-                                )
-                                view.context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C))
-                ) {
-                    Text("Configurar", color = Color.White)
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showOverlayPermissionDialog = false }) {
-                    Text("Ahora No")
-                }
-            }
-        )
-    }
-
-
 
     val user = viewModel.currentUser
     val dispatches = viewModel.dispatchesList
@@ -1696,328 +1726,385 @@ fun SisBomApp(viewModel: SisBomViewModel) {
 
     val showFullscreenAlert = androidx.compose.runtime.remember(user, dispatches, isCentral, viewModel.fullscreenDispatchId) {
         if (user != null && !isCentral) {
-            val is09 = user.estado.trim().uppercase() == "0-9"
             val is08 = user.estado.trim().uppercase() == "0-8" || user.estado.trim().uppercase() == "10-8"
             val fId = viewModel.fullscreenDispatchId
-            if (fId != null && (is09 || is08)) {
+            if (fId != null) {
                 val d = dispatches.firstOrNull { it.idServicio == fId && it.operadorFinal.isEmpty() }
-                val claveUp = d?.clave?.trim()?.uppercase() ?: ""
-                val isEscalationAlarm = claveUp.contains("10-30") || claveUp.contains("10_30") ||
-                        claveUp.contains("FORESTAL") ||
-                        claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" ||
-                        claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
-                val isAttending = user.enServicio.trim() == fId
-                if (!isAttending && (isEscalationAlarm || (is09 && user.estado.trim().uppercase() != "NO ASISTIR"))) {
-                    d
+                if (d != null) {
+                    val claveUp = d.clave.trim().uppercase()
+                    val isEscalationAlarm = claveUp.contains("10-30") || claveUp.contains("10_30") ||
+                            claveUp.contains("FORESTAL") ||
+                            claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" ||
+                            claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
+                    val isAttending = user.enServicio.trim() == fId
+                    val isDeclined = user.estado.trim().uppercase() == "NO ASISTIR"
+                    val isSuspended = user.hasActiveSuspension() || user.hasActiveCDS() || user.hasActiveLicense()
+                    if (!isAttending && !isDeclined && !isSuspended && (!is08 || isEscalationAlarm)) {
+                        d
+                    } else null
                 } else null
             } else null
         } else null
     }
 
-    if (showFullscreenAlert != null) {
-        val dispatch = showFullscreenAlert
-        val context = androidx.compose.ui.platform.LocalContext.current
-
-        val claveUp = dispatch.clave.trim().uppercase()
-        val is1030 = claveUp.contains("10-30") || claveUp.contains("10_30")
-        val isForestal = claveUp.contains("FORESTAL")
-        val is90 = claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" || claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
-        val escalationKey = if (is1030) "10-30" else if (isForestal) "FORESTAL" else if (is90) "9-0" else ""
-
-        androidx.compose.runtime.LaunchedEffect(dispatch.idServicio, escalationKey) {
-            val soundToPlay = if (is1030 || isForestal || is90) {
-                "c10_30"
-            } else {
-                var c = dispatch.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
-                if (c.startsWith("c10") || c.startsWith("c9")) c else "c$c"
+    if (!view.isInEditMode) {
+        androidx.compose.runtime.SideEffect {
+            val window = (view.context as? android.app.Activity)?.window
+            if (window != null) {
+                val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, view)
+                if (showFullscreenAlert != null) {
+                    insetsController.isAppearanceLightStatusBars = false
+                    insetsController.isAppearanceLightNavigationBars = false
+                } else {
+                    insetsController.isAppearanceLightStatusBars = !isDark
+                    insetsController.isAppearanceLightNavigationBars = !isDark
+                }
+                
+                // Explicitly force transparency and remove contrast bars
+                window.statusBarColor = android.graphics.Color.TRANSPARENT
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    window.navigationBarDividerColor = android.graphics.Color.TRANSPARENT
+                    window.attributes.layoutInDisplayCutoutMode =
+                        android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    window.isStatusBarContrastEnforced = false
+                    window.isNavigationBarContrastEnforced = false
+                }
             }
-            SoundPlayer.playSound(context, soundToPlay)
-            SoundPlayer.triggerVibration(context, true)
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        when (viewModel.currentScreen) {
+            AppScreen.Setup -> SetupScreen(viewModel)
+            AppScreen.Login -> LoginScreen(viewModel)
+            AppScreen.Main, AppScreen.Chat -> MainScreen(viewModel)
         }
 
-        androidx.compose.ui.window.Dialog(
-            onDismissRequest = { /* Bloqueante */ },
-            properties = androidx.compose.ui.window.DialogProperties(
-                usePlatformDefaultWidth = false,
-                dismissOnBackPress = false,
-                dismissOnClickOutside = false
-            )
-        ) {
-            val view = androidx.compose.ui.platform.LocalView.current
-            androidx.compose.runtime.SideEffect {
-                val window = (view.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
-                window?.let { w ->
-                    w.setLayout(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT
-                    )
-                    w.setStatusBarColor(android.graphics.Color.TRANSPARENT)
-                    w.setNavigationBarColor(android.graphics.Color.TRANSPARENT)
-                    androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
+        var showOverlayPermissionDialog by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+
+        androidx.compose.runtime.LaunchedEffect(viewModel.currentUser) {
+            if (viewModel.currentUser != null) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    if (!android.provider.Settings.canDrawOverlays(view.context)) {
+                        showOverlayPermissionDialog = true
+                    }
                 }
             }
+        }
 
-            val claveTacticalColor = getClaveTacticalColor(dispatch.clave)
-            val hasGps = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color(0xFF030712), // Deep tactical black
-                                Color(0xFF1E0505), // Dark blood tint
-                                Color(0xFF3B0707), // Emergency dark crimson
-                                Color(0xFF0F0202)  // Bottom stealth black
-                            )
-                        )
-                    )
-            ) {
-                // Animated Pulsing Emergency Screen Perimeter Border
-                PulsingPerimeterBorder(
-                    modifier = Modifier.fillMaxSize(),
-                    color = claveTacticalColor,
-                    strokeWidth = 3.5.dp
-                )
-
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .systemBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.SpaceBetween
-                ) {
-                    // Header: Institution Logo, Pulsing Icon & Alarm Banner
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(top = 8.dp)
+        if (showOverlayPermissionDialog) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { showOverlayPermissionDialog = false },
+                title = { Text("Permiso de Superposición Requerido", fontWeight = FontWeight.Bold) },
+                text = { Text("Para recibir alertas de despacho a pantalla completa de forma inmediata cuando el teléfono está bloqueado o usando otra aplicación, debes activar el permiso 'Mostrar sobre otras aplicaciones'.") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showOverlayPermissionDialog = false
+                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                                try {
+                                    val intent = Intent(
+                                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        Uri.parse("package:${view.context.packageName}")
+                                    )
+                                    view.context.startActivity(intent)
+                                } catch (_: Exception) {}
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFB91C1C))
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            coil.compose.AsyncImage(
-                                model = viewModel.getClientLogoModel(),
-                                contentDescription = "Logo",
-                                placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
-                                error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
-                                modifier = Modifier
-                                    .size(68.dp)
-                                    .clip(CircleShape)
-                                    .border(2.dp, claveTacticalColor, CircleShape),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Fit
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier
-                                .background(claveTacticalColor.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                                .border(1.dp, claveTacticalColor.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 10.dp, vertical = 4.dp)
-                        ) {
-                            Text(
-                                text = "🚨 DESPACHO DE EMERGENCIA 🚨",
-                                color = Color.White,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Black,
-                                letterSpacing = 0.5.sp,
-                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                            )
-                        }
+                        Text("Configurar", color = Color.White)
                     }
-
-                    // Tactical Clave, Location & Phase 1/2 Visualization
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .padding(vertical = 6.dp)
-                    ) {
-                        val claveText = dispatch.clave.ifEmpty { "10-0" }
-                        Text(
-                            text = claveText,
-                            color = Color.White,
-                            fontSize = if (claveText.length > 5) 54.sp else 68.sp,
-                            fontWeight = FontWeight.Black,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            lineHeight = if (claveText.length > 5) 58.sp else 72.sp
-                        )
-
-                        if (dispatch.lugar.isNotEmpty()) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                                    .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-                                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.LocationOn,
-                                    contentDescription = null,
-                                    tint = claveTacticalColor,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = dispatch.lugar,
-                                    color = Color(0xFFF1F5F9),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 2,
-                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                                )
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Time & Date Monospace Pills
-                        Row(
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "HORA: ${cleanSheetPrefix(dispatch.horaDespacho).ifEmpty { "--:--" }}",
-                                color = Color(0xFFCBD5E1),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = "•",
-                                color = Color.White.copy(alpha = 0.4f),
-                                fontSize = 14.sp
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            val fechaDespacho = dispatch.fechaDespacho.ifEmpty {
-                                java.text.SimpleDateFormat("dd/MM/yyyy", java.util.Locale.getDefault()).format(java.util.Date())
-                            }
-                            Text(
-                                text = "FECHA: $fechaDespacho",
-                                color = Color(0xFFCBD5E1),
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Phase 1 (Radar) or Phase 2 (Tactical Map)
-                        if (hasGps) {
-                            IncidentMapPreview(
-                                lat = dispatch.lat!!,
-                                lng = dispatch.lng!!,
-                                isPending = false,
-                                clave = dispatch.clave,
-                                lugar = dispatch.lugar,
-                                isDark = true,
-                                modifier = Modifier.height(150.dp)
-                            )
-                        } else {
-                            TacticalRadarScanner(
-                                clave = dispatch.clave,
-                                isDark = true,
-                                compact = true
-                            )
-                        }
-
-                        if (dispatch.carros.isNotEmpty()) {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier
-                                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                                    .border(1.dp, Color(0xFFF59E0B).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
-                            ) {
-                                Text(
-                                    text = "🚒 UNIDADES: ${dispatch.carros}",
-                                    color = Color(0xFFFBBF24),
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
-                        }
-                    }
-
-                    // Tactical Action buttons: ASISTIR & NO ASISTIR
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Button(
-                            onClick = { 
-                                viewModel.attendService(dispatch.idServicio, true)
-                                viewModel.fullscreenDispatchId = null
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = GoGreen),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(54.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.CheckCircle,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "ASISTIR",
-                                    color = Color.White,
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Black
-                                )
-                            }
-                        }
-
-                        Button(
-                            onClick = { 
-                                viewModel.declineService(dispatch.idServicio)
-                                viewModel.fullscreenDispatchId = null
-                            },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.5f)),
-                            shape = RoundedCornerShape(16.dp),
-                            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color.White.copy(alpha = 0.5f)),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(46.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Close,
-                                    contentDescription = null,
-                                    tint = Color(0xFFEF4444),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = "NO ASISTIR",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                        }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { showOverlayPermissionDialog = false }) {
+                        Text("Ahora No")
                     }
                 }
+            )
+        }
+
+        if (showFullscreenAlert != null) {
+            EmergencyFullscreenOverlay(
+                dispatch = showFullscreenAlert,
+                viewModel = viewModel
+            )
+        }
+    }
+}
+
+@Composable
+fun EmergencyFullscreenOverlay(
+    dispatch: Dispatch,
+    viewModel: SisBomViewModel
+) {
+    val isDark = LocalDarkMode.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    androidx.activity.compose.BackHandler(enabled = true) {
+        // Bloqueante: El bombero debe responder ASISTIR o NO ASISTIR
+    }
+
+    val claveUp = dispatch.clave.trim().uppercase()
+    val is1030 = claveUp.contains("10-30") || claveUp.contains("10_30")
+    val isForestal = claveUp.contains("FORESTAL")
+    val is90 = claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" || claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
+    val escalationKey = if (is1030) "10-30" else if (isForestal) "FORESTAL" else if (is90) "9-0" else ""
+
+    androidx.compose.runtime.LaunchedEffect(dispatch.idServicio, escalationKey) {
+        val soundToPlay = if (is1030 || isForestal || is90) {
+            "c10_30"
+        } else {
+            var c = dispatch.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
+            if (c.startsWith("c10") || c.startsWith("c9")) c else "c$c"
+        }
+        SoundPlayer.playSound(context, soundToPlay)
+        SoundPlayer.triggerVibration(context, true)
+    }
+
+    val (cuartelLat, cuartelLng) = viewModel.getCuartelCoordinates()
+    val hasGps = dispatch.lat != null && dispatch.lat != 0.0 && dispatch.lng != null && dispatch.lng != 0.0 && (dispatch.lat != cuartelLat || dispatch.lng != cuartelLng)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(if (isDark) Color(0xFF140202) else Color(0xFFF8FAFC))
+    ) {
+        // LAYER 0: IMMERSIVE FULL-SCREEN MAP CANVAS (100% Edge-to-Edge including status bar, notch & navigation)
+        IncidentMapPreview(
+            lat = dispatch.lat ?: 0.0,
+            lng = dispatch.lng ?: 0.0,
+            cuartelLat = cuartelLat,
+            cuartelLng = cuartelLng,
+            isPending = !hasGps,
+            clave = dispatch.clave,
+            lugar = dispatch.lugar,
+            isDark = isDark,
+            isFullScreen = true,
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // LAYER 1: FULLSCREEN TRANSLUCENT OVERLAY (Subtle vignette for readability, keeping map clearly visible)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    if (isDark) {
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color(0x66000000),
+                                0.25f to Color(0x2B000000),
+                                0.50f to Color(0x14000000),
+                                0.75f to Color(0x2B000000),
+                                1.0f to Color(0x73000000)
+                            )
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.0f to Color(0x66FFFFFF),
+                                0.25f to Color(0x2BFFFFFF),
+                                0.50f to Color(0x14FFFFFF),
+                                0.75f to Color(0x2BFFFFFF),
+                                1.0f to Color(0x73FFFFFF)
+                            )
+                        )
+                    }
+                )
+        )
+
+        // LAYER 2: FLOATING TOP HUD (Clean & Minimalist: Logo, Clave, Hora, Dirección si existe - Sin Íconos)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(horizontal = 24.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Shield Logo
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(80.dp)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                if (isDark) Color(0xB3000000) else Color(0x26000000),
+                                Color.Transparent
+                            )
+                        ),
+                        CircleShape
+                    )
+            ) {
+                coil.compose.AsyncImage(
+                    model = viewModel.getClientLogoModel(),
+                    contentDescription = "Logo",
+                    placeholder = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                    error = androidx.compose.ui.res.painterResource(id = R.drawable.logo),
+                    modifier = Modifier.size(72.dp),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Fit
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Hero Clave Typography (Clean and prominent)
+            val claveText = if (dispatch.clave == "10-12" && dispatch.claveApoyo.isNotEmpty()) {
+                "${dispatch.clave} (${dispatch.claveApoyo})"
+            } else {
+                dispatch.clave.ifEmpty { "10-0" }
+            }
+
+            Text(
+                text = claveText,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
+                fontSize = if (claveText.length > 5) 46.sp else 60.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                letterSpacing = 1.sp,
+                style = androidx.compose.ui.text.TextStyle(
+                    shadow = androidx.compose.ui.graphics.Shadow(
+                        color = if (isDark) Color.Black else Color.Transparent,
+                        offset = androidx.compose.ui.geometry.Offset(0f, 4f),
+                        blurRadius = 14f
+                    )
+                )
+            )
+
+            // Clean Dispatch Time (Clean text without icons)
+            val horaLimpia = cleanSheetPrefix(dispatch.horaDespacho).trim()
+            if (horaLimpia.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = horaLimpia,
+                    color = if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = androidx.compose.ui.text.TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = if (isDark) Color.Black else Color.Transparent,
+                            offset = androidx.compose.ui.geometry.Offset(0f, 2f),
+                            blurRadius = 6f
+                        )
+                    )
+                )
+            }
+
+            // Clean Location / Address (Displayed ONLY if present, no placeholder if empty, no icons)
+            val lugarLimpio = cleanLugarDisplay(dispatch.lugar)
+            if (lugarLimpio.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = lugarLimpio.uppercase(),
+                    color = if (isDark) Color(0xFFF1F5F9) else Color(0xFF1E293B),
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = androidx.compose.ui.text.TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = if (isDark) Color.Black else Color.Transparent,
+                            offset = androidx.compose.ui.geometry.Offset(0f, 2f),
+                            blurRadius = 8f
+                        )
+                    )
+                )
+            }
+
+            // Clean Units (Displayed ONLY if present, clean text without icons)
+            val carrosLimpios = dispatch.carros.trim()
+            if (carrosLimpios.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = carrosLimpios,
+                    color = Color(0xFFFBBF24),
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Black,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    style = androidx.compose.ui.text.TextStyle(
+                        shadow = androidx.compose.ui.graphics.Shadow(
+                            color = if (isDark) Color.Black else Color.Transparent,
+                            offset = androidx.compose.ui.geometry.Offset(0f, 2f),
+                            blurRadius = 6f
+                        )
+                    )
+                )
+            }
+        }
+
+        // LAYER 3: FLOATING BOTTOM ACTION BUTTONS (Clean, accessible, raised above navigation bar)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, bottom = 72.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // ASISTIR BUTTON
+            Button(
+                onClick = { 
+                    try {
+                        SoundPlayer.stop(context)
+                        NotificationHelper.cancelRepeatAlert(dispatch.idServicio)
+                        NotificationHelper.ignorePayload(context, dispatch.idServicio)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    viewModel.attendService(dispatch.idServicio, true)
+                    viewModel.fullscreenDispatchId = null
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = GoGreen),
+                shape = RoundedCornerShape(16.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = "ASISTIR",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            // NO ASISTIR BUTTON
+            Button(
+                onClick = { 
+                    try {
+                        SoundPlayer.stop(context)
+                        NotificationHelper.cancelRepeatAlert(dispatch.idServicio)
+                        NotificationHelper.ignorePayload(context, dispatch.idServicio)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                    viewModel.declineService(dispatch.idServicio)
+                    viewModel.fullscreenDispatchId = null
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = if (isDark) Color(0xD9180404) else Color(0xFFFEF2F2)),
+                border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFFEF4444).copy(alpha = 0.9f)),
+                shape = RoundedCornerShape(16.dp),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .height(56.dp)
+            ) {
+                Text(
+                    text = "NO ASISTIR",
+                    color = if (isDark) Color.White else Color(0xFFB91C1C),
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.5.sp
+                )
             }
         }
     }
@@ -2032,7 +2119,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         val title = message.data["title"] ?: message.notification?.title ?: "SisBom"
         val body = message.data["body"] ?: message.notification?.body ?: "Nueva información disponible"
         val type = message.data["type"] ?: "ALERT"
-        val payloadId = message.data["payloadId"] ?: ""
+        val payloadId = message.data["doorKey"] ?: message.data["payloadId"] ?: message.data["requestId"] ?: ""
         val clave = message.data["clave"] ?: ""
         val gradoAlerta = message.data["gradoAlerta"] ?: "1"
 
@@ -2113,14 +2200,44 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
                 if (!isCentral) {
                     NotificationHelper.sendNotification(this, title, body, payloadId, userId, type, true, clave, gradoAlerta, forceSilent)
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+                        try {
+                            val overlayIntent = Intent(this, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                putExtra("DISPATCH_ID", payloadId)
+                                putExtra("SHOW_FULLSCREEN_ALERT", true)
+                            }
+                            startActivity(overlayIntent)
+                        } catch (_: Exception) {}
+                    }
                 } else {
                     prefs.edit().putBoolean("IS_CENTRAL_MODE", true).apply()
                 }
             } catch (e: Exception) {
                 NotificationHelper.sendNotification(this, title, body, payloadId, userId, type, true, clave, gradoAlerta, forceSilent)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+                    try {
+                        val overlayIntent = Intent(this, MainActivity::class.java).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                            putExtra("DISPATCH_ID", payloadId)
+                            putExtra("SHOW_FULLSCREEN_ALERT", true)
+                        }
+                        startActivity(overlayIntent)
+                    } catch (_: Exception) {}
+                }
             }
         } else {
             NotificationHelper.sendNotification(this, title, body, payloadId, userId, type, true, clave, gradoAlerta, forceSilent)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M && android.provider.Settings.canDrawOverlays(this)) {
+                try {
+                    val overlayIntent = Intent(this, MainActivity::class.java).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                        putExtra("DISPATCH_ID", payloadId)
+                        putExtra("SHOW_FULLSCREEN_ALERT", true)
+                    }
+                    startActivity(overlayIntent)
+                } catch (_: Exception) {}
+            }
         }
     }
 }
@@ -2368,15 +2485,6 @@ class DailyReminderReceiver : BroadcastReceiver() {
             intent.action == "android.intent.action.QUICKBOOT_POWERON" || 
             intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
             scheduleDailyReminders(context)
-            try {
-                val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-                val userId = prefs.getString("USER_ID", "") ?: ""
-                if (userId.isNotEmpty()) {
-                    DispatchForegroundService.startService(context)
-                }
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
             return
         }
         

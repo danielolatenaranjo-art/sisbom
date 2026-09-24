@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tutorial Interactivo - SENTINEL ONE</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+    }
+    body {
+      background: radial-gradient(circle at 50% 20%, #1e1b4b 0%, #090d16 60%, #030712 100%);
+      color: #ffffff;
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .header-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: 1px;
+      color: #f8fafc;
+      margin-bottom: 4px;
+      text-align: center;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header-subtitle {
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 18px;
+      text-align: center;
+    }
+
+    /* Phone Mockup Frame */
+    .phone-container {
+      width: 375px;
+      height: 770px;
+      background: #030712;
+      border-radius: 48px;
+      box-shadow: 0 25px 65px rgba(0, 0, 0, 0.85), 0 0 45px rgba(220, 38, 38, 0.28);
+      border: 10px solid #1e293b;
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Dynamic Island */
+    .phone-notch {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 110px;
+      height: 24px;
+      background: #000000;
+      border-radius: 20px;
+      z-index: 50;
+    }
+
+    /* Modal Overlay Tutorial */
+    .tutorial-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(3, 7, 18, 0.94);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 34px 20px 22px 20px;
+      z-index: 40;
+    }
+
+    /* Top Bar with Omitir Button */
+    .tut-top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      width: 100%;
+      margin-top: 4px;
+      height: 28px;
+    }
+    .skip-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      color: #94a3b8;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 14px;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .skip-btn:hover {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    /* Big Centered SENTINEL ONE Logo */
+    .tut-logo-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 2px 0 10px 0;
+    }
+    .tut-logo-container img {
+      height: 38px;
+      max-width: 82%;
+      object-fit: contain;
+      filter: drop-shadow(0 0 12px rgba(239, 68, 68, 0.4));
+    }
+
+    /* Slide Card */
+    .slide-wrapper {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      position: relative;
+    }
+
+    .slide {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+      width: 100%;
+    }
+    .slide.active {
+      display: flex;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(12px) scale(0.96); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Razor Sharp Native Resolution Image Container */
+    .image-card {
+      width: 300px;
+      height: 280px;
+      border-radius: 20px;
+      background: #080d17;
+      border: 1.5px solid rgba(255, 255, 255, 0.18);
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.8), 0 0 24px rgba(220, 38, 38, 0.2);
+      overflow: hidden;
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+    }
+    .image-card img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 14px;
+      image-rendering: auto;
+      filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.6));
+    }
+
+    .slide-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 21px;
+      font-weight: 800;
+      color: #ffffff;
+      margin-bottom: 6px;
+      line-height: 1.25;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .slide-desc {
+      font-size: 13.5px;
+      color: #cbd5e1;
+      line-height: 1.48;
+      padding: 0 6px;
+    }
+
+    /* Bottom Navigation & Dots */
+    .tut-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      margin-top: 6px;
+    }
+    .dots-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.22);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .dot.active {
+      width: 30px;
+      background: linear-gradient(90deg, #ef4444, #f97316);
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.75);
+    }
+
+    /* Action Buttons */
+    .nav-btn {
+      width: 100%;
+      height: 50px;
+      border-radius: 16px;
+      border: none;
+      background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+      color: #ffffff;
+      font-family: 'Outfit', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 8px 24px rgba(220, 38, 38, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: transform 0.15s, box-shadow 0.2s;
+    }
+    .nav-btn:active {
+      transform: scale(0.97);
+    }
+
+    .controls-hint {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #64748b;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header-title">
+    <span>🚒</span> TUTORIAL DE BIENVENIDA • SENTINEL ONE
+  </div>
+  <div class="header-subtitle">
+    Proporciones nativas 100% nítidas y sin distorsión
+  </div>
+
+  <div class="phone-container">
+    <div class="phone-notch"></div>
+
+    <div class="tutorial-overlay">
+      <!-- Top Bar: Omitir -->
+      <div class="tut-top-bar">
+        <button class="skip-btn" onclick="finishTutorial()">Omitir</button>
+      </div>
+
+      <!-- Centered Official SENTINEL ONE Logo -->
+      <div class="tut-logo-container">
+        <img src="android/app/src/main/res/drawable/sentinel_one_logo.png" alt="SENTINEL ONE">
+      </div>
+
+      <!-- Slides Container -->
+      <div class="slide-wrapper">
+        
+        <!-- Slide 1: Despacho Activo Nítido -->
+        <div class="slide active" id="slide-0">
+          <div class="image-card">
+            <img src="assets/tut_sharp_1_despacho.png" alt="Despacho de Emergencia">
+          </div>
+          <div class="slide-title">Despachos en Tiempo Real 🚨</div>
+          <div class="slide-desc">
+            Recibe alarmas 10-X a pantalla completa con tonos tácticos por clave, dirección exacta, carros asignados y pre-informe.
+          </div>
+        </div>
+
+        <!-- Slide 2: Confirmacion en 1 Toque Nítido -->
+        <div class="slide" id="slide-1">
+          <div class="image-card">
+            <img src="assets/tut_sharp_2_asistencia.png" alt="Confirmación de Asistencia">
+          </div>
+          <div class="slide-title">Confirmación en 1 Toque ⏱️</div>
+          <div class="slide-desc">
+            Presiona <strong>"ASISTIR"</strong> o <strong>"NO ASISTIR"</strong> para que la Central y los Maquinistas conozcan la dotación real en camino al instante.
+          </div>
+        </div>
+
+        <!-- Slide 3: Radar GPS Táctico Nítido -->
+        <div class="slide" id="slide-2">
+          <div class="image-card">
+            <img src="assets/tut_sharp_3_radar.png" alt="Radar GPS Táctico">
+          </div>
+          <div class="slide-title">Radar GPS Táctico 🛰️</div>
+          <div class="slide-desc">
+            Visualiza en vivo la ubicación del incidente, calles, rutas de acceso y los carros bomba en servicio.
+          </div>
+        </div>
+
+        <!-- Slide 4: Control de Asistencia y Rendimiento Nítido -->
+        <div class="slide" id="slide-3">
+          <div class="image-card">
+            <img src="assets/tut_sharp_4_historial.png" alt="Historial de Asistencias">
+          </div>
+          <div class="slide-title">Control de Asistencias 📋</div>
+          <div class="slide-desc">
+            Monitorea tu porcentaje anual de asistencia, historial de llamados 10-X y cumplimiento para votaciones y cargos.
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footer & Controls -->
+      <div class="tut-footer">
+        <div class="dots-container">
+          <div class="dot active" id="dot-0"></div>
+          <div class="dot" id="dot-1"></div>
+          <div class="dot" id="dot-2"></div>
+          <div class="dot" id="dot-3"></div>
+        </div>
+
+        <button class="nav-btn" id="next-btn" onclick="nextSlide()">
+          <span>Siguiente</span> ➔
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="controls-hint">
+    <span>💡 Haz clic en <strong>Siguiente</strong> para recorrer el tutorial</span>
+  </div>
+
+  <script>
+    let currentSlide = 0;
+    const totalSlides = 4;
+
+    function showSlide(index) {
+      for (let i = 0; i < totalSlides; i++) {
+        document.getElementById(`slide-${i}`).classList.remove('active');
+        document.getElementById(`dot-${i}`).classList.remove('active');
+      }
+      document.getElementById(`slide-${index}`).classList.add('active');
+      document.getElementById(`dot-${index}`).classList.add('active');
+
+      const nextBtn = document.getElementById('next-btn');
+      if (index === totalSlides - 1) {
+        nextBtn.innerHTML = '<span>¡Comenzar a Usar! 🚀</span>';
+        nextBtn.style.background = 'linear-gradient(135deg, #16a34a 0%, #15803d 100%)';
+        nextBtn.style.boxShadow = '0 8px 24px rgba(22, 163, 74, 0.5)';
+      } else {
+        nextBtn.innerHTML = '<span>Siguiente</span> ➔';
+        nextBtn.style.background = 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)';
+        nextBtn.style.boxShadow = '0 8px 24px rgba(220, 38, 38, 0.5)';
+      }
+    }
+
+    function nextSlide() {
+      if (currentSlide < totalSlides - 1) {
+        currentSlide++;
+        showSlide(currentSlide);
+      } else {
+        finishTutorial();
+      }
+    }
+
+    function finishTutorial() {
+      alert('¡Listo! El usuario ingresa a la aplicación principal.');
+      currentSlide = 0;
+      showSlide(0);
+    }
+  </script>
+
+</body>
+</html>

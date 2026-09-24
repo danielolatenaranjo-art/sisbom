@@ -84,6 +84,15 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         return R.drawable.logo
     }
 
+    fun getCuartelCoordinates(): Pair<Double, Double> {
+        val customLat = prefs.getString("cuartel_lat", null)?.toDoubleOrNull()
+        val customLng = prefs.getString("cuartel_lng", null)?.toDoubleOrNull()
+        if (customLat != null && customLng != null) {
+            return Pair(customLat, customLng)
+        }
+        return Pair(-34.637373, -71.125741)
+    }
+
     fun downloadClientLogo(urlStr: String) {
         if (urlStr.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -445,6 +454,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                             val clientName = resJson.getString("clientName")
                             val firebaseConfig = resJson.getJSONObject("firebaseConfig")
                             val logoUrl = resJson.optString("logoUrl", "")
+                            val cuartelLat = if (resJson.has("cuartelLat")) resJson.optDouble("cuartelLat") else if (resJson.has("latCuartel")) resJson.optDouble("latCuartel") else null
+                            val cuartelLng = if (resJson.has("cuartelLng")) resJson.optDouble("cuartelLng") else if (resJson.has("lngCuartel")) resJson.optDouble("lngCuartel") else null
 
                             // Save to SharedPreferences
                             prefs.edit().apply {
@@ -453,6 +464,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                                 putString("saas_read_only", if (status == "read_only") "1" else "0")
                                 putString("saas_client_name", clientName)
                                 putString("saas_logo_url", logoUrl)
+                                if (cuartelLat != null && !cuartelLat.isNaN()) putString("cuartel_lat", cuartelLat.toString())
+                                if (cuartelLng != null && !cuartelLng.isNaN()) putString("cuartel_lng", cuartelLng.toString())
                             }.commit()
 
                             saasClientName = clientName
@@ -505,6 +518,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             remove("saas_read_only")
             remove("saas_client_name")
             remove("saas_logo_url")
+            remove("cuartel_lat")
+            remove("cuartel_lng")
             remove("fire_user")
             remove("USER_ID")
         }.commit()
@@ -555,6 +570,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                             val clientName = resJson.getString("clientName")
                             val firebaseConfig = resJson.getJSONObject("firebaseConfig")
                             val logoUrl = resJson.optString("logoUrl", "")
+                            val cuartelLat = if (resJson.has("cuartelLat")) resJson.optDouble("cuartelLat") else if (resJson.has("latCuartel")) resJson.optDouble("latCuartel") else null
+                            val cuartelLng = if (resJson.has("cuartelLng")) resJson.optDouble("cuartelLng") else if (resJson.has("lngCuartel")) resJson.optDouble("lngCuartel") else null
 
                             // Update preferences
                             prefs.edit().apply {
@@ -562,6 +579,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                                 putString("saas_read_only", if (status == "read_only") "1" else "0")
                                 putString("saas_client_name", clientName)
                                 putString("saas_logo_url", logoUrl)
+                                if (cuartelLat != null && !cuartelLat.isNaN()) putString("cuartel_lat", cuartelLat.toString())
+                                if (cuartelLng != null && !cuartelLng.isNaN()) putString("cuartel_lng", cuartelLng.toString())
                             }.commit()
                             saasClientName = clientName
                             saasLogoUrl = logoUrl
@@ -711,6 +730,14 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("alertas_generales")
             com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("despachos")
             com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("usuario_" + userId)
+            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("personal_" + userId)
+            
+            if (isCentralActive) {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("central_operador")
+            } else {
+                com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("central_operador")
+            }
+
             if (currentUser?.conductor == 1) {
                 com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("conductores")
             } else {
@@ -741,11 +768,53 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                     centralOperatorName = if (isActive) opName else ""
                     centralOperatorId = if (isActive) idReg else ""
 
+                    try {
+                        if (isMeActive) {
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().subscribeToTopic("central_operador")
+                        } else {
+                            com.google.firebase.messaging.FirebaseMessaging.getInstance().unsubscribeFromTopic("central_operador")
+                        }
+                    } catch (_: Exception) {}
+
                     if (isMeActive) {
                         if (currentUser?.estado != "0-9") {
                             changeStatus("0-9")
                         }
                         currentTab = MainTab.Despacho
+                    }
+
+                    // Disparo en tiempo real de timbre: SOLO debe sonar en la app del operador activo en Central (isMeActive == true), y NUNCA en la app de quien tocó el timbre
+                    val solPuerta = data["solicitudPuerta"] as? Map<*, *>
+                    if (solPuerta != null) {
+                        val solEstado = solPuerta["estado"]?.toString() ?: ""
+                        val solDate = solPuerta["fecha"]?.toString() ?: ""
+                        val solUser = solPuerta["idRegistro"]?.toString() ?: ""
+                        val solReqName = solPuerta["nombreBombero"]?.toString() ?: ""
+                        val solId = solPuerta["id"]?.toString() ?: ""
+                        val isPending = solEstado.equals("pendiente", ignoreCase = true)
+                        
+                        val isRequester = (myId.isNotEmpty() && solUser.trim().equals(myId.trim(), ignoreCase = true)) ||
+                                          (myName.isNotEmpty() && solReqName.trim().equals(myName.trim(), ignoreCase = true))
+                        
+                        if (isPending && isMeActive && !isRequester) {
+                            val doorTrackerKey = if (solUser.isNotEmpty() && solDate.isNotEmpty()) {
+                                "door_${solUser}_${solDate}"
+                            } else if (solId.isNotEmpty()) {
+                                "door_$solId"
+                            } else {
+                                "door_${System.currentTimeMillis() / 15000}"
+                            }
+                            if (!PlayedSoundsTracker.hasPlayed(doorTrackerKey)) {
+                                PlayedSoundsTracker.markPlayed(doorTrackerKey)
+                                if (solId.isNotEmpty()) {
+                                    PlayedSoundsTracker.markPlayed("door_$solId")
+                                }
+                                try {
+                                    SoundPlayer.playSound(getApplication(), "alerta")
+                                    SoundPlayer.triggerVibration(getApplication(), true)
+                                } catch (_: Exception) {}
+                            }
+                        }
                     }
                 }
             }
@@ -804,6 +873,17 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                         list.forEach { d ->
                             knownDispatchIds.add(d.idServicio)
                             PlayedSoundsTracker.markPlayed(d.idServicio)
+                        }
+                        val active = list.firstOrNull { it.operadorFinal.isEmpty() && !TimeValidation.isTooOld(it.fechaDespacho, it.horaDespacho) }
+                        if (active != null) {
+                            val myUser = currentUser
+                            val isAttending = myUser?.enServicio?.trim() == active.idServicio
+                            val isDeclined = myUser?.estado?.trim()?.uppercase() == "NO ASISTIR"
+                            val is08 = myUser?.estado?.trim()?.uppercase() == "0-8" || myUser?.estado?.trim()?.uppercase() == "10-8"
+                            val isSuspended = myUser?.hasActiveSuspension() == true || myUser?.hasActiveCDS() == true || myUser?.hasActiveLicense() == true
+                            if (!isAttending && !isDeclined && !is08 && !isSuspended && myUser != null && !isCentralActive) {
+                                fullscreenDispatchId = active.idServicio
+                            }
                         }
                         return@collectLatest
                     }
@@ -1346,12 +1426,18 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         val user = currentUser ?: return
         val finalId = if (isAttending) serviceId else "0"
 
-        if (isAttending) {
-            try {
-                SoundPlayer.release()
-            } catch (e: Exception) {
-                e.printStackTrace()
+        try {
+            SoundPlayer.stop(context)
+            SoundPlayer.release()
+            if (serviceId.isNotEmpty() && serviceId != "0") {
+                NotificationHelper.cancelRepeatAlert(serviceId)
+                NotificationHelper.ignorePayload(context, serviceId)
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        if (isAttending) {
             startFirefighterGpsTracking(serviceId)
 
             // Registro inmediato en la subcolección de asistencias del despacho
@@ -1408,6 +1494,17 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         val user = currentUser ?: return
         val finalService = "-$serviceId"
         
+        try {
+            SoundPlayer.stop(context)
+            SoundPlayer.release()
+            if (serviceId.isNotEmpty() && serviceId != "0") {
+                NotificationHelper.cancelRepeatAlert(serviceId)
+                NotificationHelper.ignorePayload(context, serviceId)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         stopFirefighterGpsTracking()
 
         // Actualización optimista
@@ -1537,11 +1634,12 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             onFailure(Exception("Usuario no autenticado"))
             return
         }
+        val shortName = formatFirefighterName(user.nombreBombero).ifEmpty { user.nombreBombero }
         ensureFreshSession {
             repository.solicitarAperturaPuerta(
                 idRegistro = user.idRegistro,
                 idRadial = user.idRadial,
-                nombreBombero = user.nombreBombero,
+                nombreBombero = shortName,
                 onSuccess = onSuccess,
                 onFailure = onFailure
             )
@@ -1981,10 +2079,12 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         val arr = JSONArray(json)
         for (i in 0 until arr.length()) {
             val j = arr.getJSONObject(i)
+            val rawEst = j.optString("estado", "1").trim().lowercase()
+            val estadoClean = if (rawEst == "0" || rawEst == "0-8" || rawEst == "08" || rawEst == "false") "0" else "1"
             list.add(Vehicle(
                 idCarro = j.getString("idCarro"),
-                clave = j.optString("clave", ""),
-                estado = j.optString("estado", "0-8"),
+                clave = j.optString("clave", j.getString("idCarro")),
+                estado = estadoClean,
                 enServicio = j.optString("enServicio", "0")
             ))
         }
@@ -2017,21 +2117,24 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         val arr = JSONArray(json)
         for (i in 0 until arr.length()) {
             val j = arr.getJSONObject(i)
-            val sheet = AttendanceSheet(
-                idLista = j.getString("idLista"),
-                clave = j.optString("clave", ""),
-                tipo = j.optString("tipo", ""),
-                fecha = j.optString("fecha", ""),
-                hora = j.optString("hora", ""),
-                lugar = j.optString("lugar", ""),
-                aprobadoPor = j.optString("aprobadoPor", ""),
-                anulada = j.get("anulada"),
-                userEstado = j.optString("userEstado", ""),
-                userAbono = j.optget("userAbono", 0),
-                obac = j.optString("obac", ""),
-                detalle = j.optString("detalle", "")
-            )
-            list.add(sheet)
+            val estado = j.optString("userEstado", "")
+            if (estado != "NO_REGISTRA" && estado.isNotEmpty()) {
+                val sheet = AttendanceSheet(
+                    idLista = j.getString("idLista"),
+                    clave = j.optString("clave", ""),
+                    tipo = j.optString("tipo", ""),
+                    fecha = j.optString("fecha", ""),
+                    hora = j.optString("hora", ""),
+                    lugar = j.optString("lugar", ""),
+                    aprobadoPor = j.optString("aprobadoPor", ""),
+                    anulada = j.opt("anulada") ?: 0,
+                    userEstado = estado,
+                    userAbono = j.opt("userAbono") ?: 0,
+                    obac = j.optString("obac", ""),
+                    detalle = j.optString("detalle", "")
+                )
+                list.add(sheet)
+            }
         }
         return list
     }
