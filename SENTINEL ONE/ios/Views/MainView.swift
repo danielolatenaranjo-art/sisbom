@@ -1036,79 +1036,68 @@ struct ChangelogDialog: View {
     }
 }
 
-// MARK: - Fullscreen Emergency Alert View
-// MARK: - Fullscreen Emergency Alert View
-struct FullscreenEmergencyAlertView: View {
+// MARK: - Fullscreen Emergency Alert Subviews
+
+struct FullscreenEmergencyAlertBackgroundView: View {
     let dispatch: Dispatch
-    @ObservedObject var viewModel: SisBomViewModel
-    var onDismiss: (() -> Void)? = nil
-    @State private var pulseGlow: Bool = false
+    let isDark: Bool
+    let coords: (lat: Double, lng: Double)
+    let hasGps: Bool
 
-    var body: some View {
-        let coords = viewModel.getCuartelCoordinates()
-        let hasGps = dispatch.lat != nil && dispatch.lat != 0.0 && dispatch.lng != nil && dispatch.lng != 0.0 && (dispatch.lat != coords.lat || dispatch.lng != coords.lng)
-        let isDark = viewModel.isDarkMode
-        let claveColor = getClaveTacticalColor(clave: dispatch.clave)
-
-        ZStack {
-            backgroundLayers(isDark: isDark, coords: coords, hasGps: hasGps)
-
-            VStack(spacing: 0) {
-                headerBar(isDark: isDark)
-
-                Spacer(minLength: 6)
-
-                detailsCard(isDark: isDark, claveColor: claveColor)
-
-                Spacer(minLength: 8)
-
-                actionButtons(isDark: isDark)
-            }
-        }
-        .onAppear {
-            pulseGlow = true
-        }
-    }
-
-    @ViewBuilder
-    private func backgroundLayers(isDark: Bool, coords: (lat: Double, lng: Double), hasGps: Bool) -> some View {
-        (isDark ? Color(red: 0.06, green: 0.01, blue: 0.01) : Color(red: 0.96, green: 0.97, blue: 0.99))
-            .ignoresSafeArea()
-
-        IncidentMapPreview(
-            lat: dispatch.lat ?? 0.0,
-            lng: dispatch.lng ?? 0.0,
-            cuartelLat: coords.lat,
-            cuartelLng: coords.lng,
-            isPending: !hasGps,
-            clave: dispatch.clave,
-            lugar: dispatch.lugar,
-            isDark: isDark
-        )
-        .ignoresSafeArea()
-
-        LinearGradient(
-            gradient: Gradient(colors: isDark ? [
+    private var gradientColors: [Color] {
+        if isDark {
+            return [
                 Color.black.opacity(0.70),
                 Color.black.opacity(0.35),
                 Color.black.opacity(0.20),
                 Color.black.opacity(0.40),
                 Color.black.opacity(0.85)
-            ] : [
+            ]
+        } else {
+            return [
                 Color.white.opacity(0.75),
                 Color.white.opacity(0.35),
                 Color.white.opacity(0.20),
                 Color.white.opacity(0.40),
                 Color.white.opacity(0.90)
-            ]),
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .ignoresSafeArea()
+            ]
+        }
     }
 
-    @ViewBuilder
-    private func headerBar(isDark: Bool) -> some View {
+    var body: some View {
+        ZStack {
+            (isDark ? Color(red: 0.06, green: 0.01, blue: 0.01) : Color(red: 0.96, green: 0.97, blue: 0.99))
+                .ignoresSafeArea()
+
+            IncidentMapPreview(
+                lat: dispatch.lat ?? 0.0,
+                lng: dispatch.lng ?? 0.0,
+                cuartelLat: coords.lat,
+                cuartelLng: coords.lng,
+                isPending: !hasGps,
+                clave: dispatch.clave,
+                lugar: dispatch.lugar,
+                isDark: isDark
+            )
+            .ignoresSafeArea()
+
+            LinearGradient(
+                gradient: Gradient(colors: gradientColors),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+        }
+    }
+}
+
+struct FullscreenEmergencyHeaderBarView: View {
+    @ObservedObject var viewModel: SisBomViewModel
+    let isDark: Bool
+    let pulseGlow: Bool
+    var onDismiss: (() -> Void)?
+
+    var body: some View {
         HStack(alignment: .center, spacing: 12) {
             Image(uiImage: viewModel.getInstitutionLogo())
                 .resizable()
@@ -1155,9 +1144,14 @@ struct FullscreenEmergencyAlertView: View {
         .padding(.top, 52)
         .padding(.bottom, 8)
     }
+}
 
-    @ViewBuilder
-    private func detailsCard(isDark: Bool, claveColor: Color) -> some View {
+struct FullscreenEmergencyDetailsCardView: View {
+    let dispatch: Dispatch
+    let isDark: Bool
+    let claveColor: Color
+
+    var body: some View {
         let claveText = dispatch.clave.isEmpty ? "10-0" : dispatch.clave
         let cleanHora = dispatch.horaDespacho.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanLugar = cleanLugarDisplay(dispatch.lugar)
@@ -1267,9 +1261,14 @@ struct FullscreenEmergencyAlertView: View {
         )
         .padding(.horizontal, 16)
     }
+}
 
-    @ViewBuilder
-    private func actionButtons(isDark: Bool) -> some View {
+struct FullscreenEmergencyActionButtonsView: View {
+    let dispatch: Dispatch
+    @ObservedObject var viewModel: SisBomViewModel
+    let isDark: Bool
+
+    var body: some View {
         HStack(spacing: 14) {
             Button(action: {
                 let impact = UIImpactFeedbackGenerator(style: .heavy)
@@ -1320,5 +1319,57 @@ struct FullscreenEmergencyAlertView: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 48)
+    }
+}
+
+// MARK: - Fullscreen Emergency Alert View
+struct FullscreenEmergencyAlertView: View {
+    let dispatch: Dispatch
+    @ObservedObject var viewModel: SisBomViewModel
+    var onDismiss: (() -> Void)? = nil
+    @State private var pulseGlow: Bool = false
+
+    var body: some View {
+        let coords = viewModel.getCuartelCoordinates()
+        let hasGps = dispatch.lat != nil && dispatch.lat != 0.0 && dispatch.lng != nil && dispatch.lng != 0.0 && (dispatch.lat != coords.lat || dispatch.lng != coords.lng)
+        let isDark = viewModel.isDarkMode
+        let claveColor = getClaveTacticalColor(clave: dispatch.clave)
+
+        ZStack {
+            FullscreenEmergencyAlertBackgroundView(
+                dispatch: dispatch,
+                isDark: isDark,
+                coords: coords,
+                hasGps: hasGps
+            )
+
+            VStack(spacing: 0) {
+                FullscreenEmergencyHeaderBarView(
+                    viewModel: viewModel,
+                    isDark: isDark,
+                    pulseGlow: pulseGlow,
+                    onDismiss: onDismiss
+                )
+
+                Spacer(minLength: 6)
+
+                FullscreenEmergencyDetailsCardView(
+                    dispatch: dispatch,
+                    isDark: isDark,
+                    claveColor: claveColor
+                )
+
+                Spacer(minLength: 8)
+
+                FullscreenEmergencyActionButtonsView(
+                    dispatch: dispatch,
+                    viewModel: viewModel,
+                    isDark: isDark
+                )
+            }
+        }
+        .onAppear {
+            pulseGlow = true
+        }
     }
 }
