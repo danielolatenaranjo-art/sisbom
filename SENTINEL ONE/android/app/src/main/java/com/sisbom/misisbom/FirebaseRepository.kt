@@ -821,24 +821,30 @@ class FirebaseRepository {
         onSuccess: (() -> Unit)? = null,
         onFailure: ((Exception) -> Unit)? = null
     ) {
-        if (serviceId.isEmpty() || userId.isEmpty()) return
+        if (userId.isEmpty()) return
         val now = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
         val data = hashMapOf(
             "idRegistro" to userId,
             "idRadial" to idRadial,
             "nombre" to nombre,
             "asistira" to isAttending,
+            "enServicio" to serviceId,
             "lat" to lat,
             "lng" to lng,
             "accuracy" to (accuracy?.toDouble() ?: 0.0),
             "hora" to now,
             "timestamp" to System.currentTimeMillis()
         )
-        db.collection("despachos").document(serviceId)
-            .collection("asistencias").document(userId)
-            .set(data, com.google.firebase.firestore.SetOptions.merge())
-            .addOnSuccessListener { onSuccess?.invoke() }
-            .addOnFailureListener { onFailure?.invoke(it) }
+        try {
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+                .getReference("telemetria/bomberos")
+                .child(userId)
+                .setValue(data)
+                .addOnSuccessListener { onSuccess?.invoke() }
+                .addOnFailureListener { onFailure?.invoke(it) }
+        } catch (e: Exception) {
+            onFailure?.invoke(e)
+        }
     }
 
     fun removeFirefighterLocation(
@@ -846,16 +852,16 @@ class FirebaseRepository {
         userId: String,
         onSuccess: (() -> Unit)? = null
     ) {
-        if (serviceId.isEmpty() || userId.isEmpty()) return
-        val data = hashMapOf<String, Any>(
-            "asistira" to false,
-            "enServicio" to "0",
-            "timestamp" to System.currentTimeMillis()
-        )
-        db.collection("despachos").document(serviceId)
-            .collection("asistencias").document(userId)
-            .set(data, com.google.firebase.firestore.SetOptions.merge())
-            .addOnSuccessListener { onSuccess?.invoke() }
+        if (userId.isEmpty()) return
+        try {
+            com.google.firebase.database.FirebaseDatabase.getInstance()
+                .getReference("telemetria/bomberos")
+                .child(userId)
+                .removeValue()
+                .addOnSuccessListener { onSuccess?.invoke() }
+        } catch (_: Exception) {
+            onSuccess?.invoke()
+        }
     }
 
     fun addStatusHistoryEntry(userId: String, status: String, onSuccess: () -> Unit, onFailure: (Exception) -> Unit) {

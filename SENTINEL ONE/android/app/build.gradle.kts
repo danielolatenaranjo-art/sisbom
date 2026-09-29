@@ -13,8 +13,8 @@ android {
         applicationId = "com.sisbom.misisbom"
         minSdk = 24
         targetSdk = 36
-        versionCode = 223
-        versionName = "2.2.3"
+        versionCode = 225
+        versionName = "2.2.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -62,6 +62,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-database")
     implementation("com.google.android.recaptcha:recaptcha:18.6.1")
 
     implementation("androidx.fragment:fragment-ktx:1.8.5")

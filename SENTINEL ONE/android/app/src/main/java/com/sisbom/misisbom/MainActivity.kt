@@ -10,6 +10,7 @@ import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -75,16 +76,32 @@ import coil.compose.AsyncImage
 
 object PlayedSoundsTracker {
     private val playedDispatchIds = LinkedHashSet<String>()
+    private var prefs: SharedPreferences? = null
 
-    fun hasPlayed(dispatchId: String): Boolean {
+    fun init(context: Context) {
+        if (prefs == null) {
+            try {
+                val p = context.applicationContext.getSharedPreferences("SisBomPlayedSounds", Context.MODE_PRIVATE)
+                prefs = p
+                val saved = p.getStringSet("PLAYED_DISPATCH_KEYS", emptySet<String>()) ?: emptySet<String>()
+                synchronized(this) {
+                    playedDispatchIds.addAll(saved)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun hasPlayed(dispatchId: String, context: Context? = null): Boolean {
         synchronized(this) {
+            if (prefs == null && context != null) init(context)
             return playedDispatchIds.contains(dispatchId)
         }
     }
 
-    fun markPlayed(dispatchId: String) {
+    fun markPlayed(dispatchId: String, context: Context? = null) {
         synchronized(this) {
-            if (playedDispatchIds.size > 200) {
+            if (prefs == null && context != null) init(context)
+            if (playedDispatchIds.size > 300) {
                 val iterator = playedDispatchIds.iterator()
                 if (iterator.hasNext()) {
                     iterator.next()
@@ -92,6 +109,9 @@ object PlayedSoundsTracker {
                 }
             }
             playedDispatchIds.add(dispatchId)
+            try {
+                prefs?.edit()?.putStringSet("PLAYED_DISPATCH_KEYS", HashSet<String>(playedDispatchIds))?.apply()
+            } catch (_: Exception) {}
         }
     }
 }
@@ -329,7 +349,10 @@ object NotificationHelper {
                 if (doc.exists()) {
                     val operadorFinal = doc.getString("operadorFinal") ?: ""
                     val est = (doc.getString("estado") ?: "").lowercase().trim()
-                    if (operadorFinal.isNotEmpty() || est == "finalizada" || est == "cancelada" || est == "cerrada") {
+                    val fechaDespacho = doc.getString("fechaDespacho") ?: ""
+                    val horaDespacho = doc.getString("horaDespacho") ?: ""
+                    val isTooOld = TimeValidation.isTooOld(fechaDespacho, horaDespacho)
+                    if (operadorFinal.isNotEmpty() || est == "finalizada" || est == "cancelada" || est == "cerrada" || isTooOld) {
                         isDispatchStillActive = false
                     }
                     val cl = (doc.getString("clave") ?: "").trim()
@@ -1104,9 +1127,23 @@ class DispatchForegroundService : Service() {
                 }
 
                 if (dbListener2 == null) {
+                    var isFirstDispatchServiceSync = true
                     dbListener2 = db.collection("despachos").whereEqualTo("operadorFinal", "")
                         .addSnapshotListener { snapshot, error ->
                             if (error == null && snapshot != null) {
+                                if (isFirstDispatchServiceSync) {
+                                    isFirstDispatchServiceSync = false
+                                    snapshot.documents.forEach { doc ->
+                                        val idServicio = doc.id
+                                        val clave = doc.getString("clave") ?: ""
+                                        val preinforme = doc.getString("preinforme") ?: doc.getString("preInforme") ?: doc.getString("pre_informe") ?: ""
+                                        val is1030 = clave.contains("10-30") || preinforme.contains("10-30")
+                                        val trackerKey = if (is1030) idServicio + "_10_30" else idServicio
+                                        PlayedSoundsTracker.markPlayed(trackerKey, this@DispatchForegroundService)
+                                        PlayedSoundsTracker.markPlayed(idServicio, this@DispatchForegroundService)
+                                    }
+                                    return@addSnapshotListener
+                                }
                                 snapshot.documentChanges.forEach { change ->
                                     val doc = change.document
                                     val idServicio = doc.id
@@ -1128,10 +1165,12 @@ class DispatchForegroundService : Service() {
                                             org.json.JSONObject(cachedUser).optString("enServicio", "").trim()
                                         } catch (_: Exception) { "" }
                                     } else { "" }
+                                    val ignoredPayloads = prefs.getStringSet("IGNORED_PAYLOADS", emptySet()) ?: emptySet()
+                                    val hasDeclined = enServicio.startsWith("-") || (idServicio.isNotEmpty() && (enServicio == "-$idServicio" || ignoredPayloads.contains(idServicio)))
                                     val inService = enServicio.isNotEmpty() && enServicio != "0" && !enServicio.startsWith("-")
-                                    val shouldBeSilent = isTooOld || inService
+                                    val shouldBeSilent = isTooOld || inService || hasDeclined
                                     
-                                    val isReadyToAlert = visibleMovil && !isCancelled && (estado == "activa" || estado == "pre-despacho")
+                                    val isReadyToAlert = visibleMovil && !isCancelled && !hasDeclined && (estado == "activa" || estado == "pre-despacho")
 
                                     if (isReadyToAlert) {
                                         if (is1030) {
@@ -1305,15 +1344,6 @@ class DispatchForegroundService : Service() {
         stopGpsTracking()
         activeGpsServiceId = serviceId
 
-        // Temporizador estricto de 5 minutos (300.000 ms) para auto-detención del GPS
-        gpsTimeoutRunnable?.let { gpsTimeoutHandler.removeCallbacks(it) }
-        val timeoutRunnable = Runnable {
-            android.util.Log.d("SisBom", "⏱️ Límite de 5 minutos alcanzado para GPS de bombero. Auto-deteniendo.")
-            stopGpsTracking()
-        }
-        gpsTimeoutRunnable = timeoutRunnable
-        gpsTimeoutHandler.postDelayed(timeoutRunnable, 5 * 60 * 1000L)
-
         if (androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
             androidx.core.content.ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             android.util.Log.w("SisBom", "Permisos de ubicación no otorgados para rastreo en servicio foreground")
@@ -1326,6 +1356,7 @@ class DispatchForegroundService : Service() {
             val idRadial = snapshot.getString("idRadial") ?: ""
             val nombre = snapshot.getString("nombreBombero") ?: "Bombero"
             val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            val rtdb = com.google.firebase.database.FirebaseDatabase.getInstance()
 
             val cuartelLat = -34.637373
             val cuartelLng = -71.125741
@@ -1349,21 +1380,10 @@ class DispatchForegroundService : Service() {
                     "timestamp" to now
                 )
 
-                // 1. Escribir en subcolección despachos/{serviceId}/asistencias/{userId}
-                db.collection("despachos").document(serviceId).collection("asistencias").document(idRegistro)
-                    .set(locData, com.google.firebase.firestore.SetOptions.merge())
-
-                // 2. Escribir también en personal/{userId}
-                db.collection("personal").document(idRegistro)
-                    .update(
-                        mapOf(
-                            "lat" to loc.latitude,
-                            "lng" to loc.longitude,
-                            "gpsAccuracy" to loc.accuracy,
-                            "gpsHora" to horaStr,
-                            "gpsTimestamp" to now
-                        )
-                    )
+                // 1. Transmisión continua en Realtime Database (Costo Cero / En vivo durante todo el despacho)
+                try {
+                    rtdb.getReference("telemetria/bomberos").child(idRegistro).setValue(locData)
+                } catch (_: Exception) {}
 
                 // 3. Chequear proximidad al Cuartel (<= 100m)
                 val distResults = FloatArray(1)
@@ -1448,11 +1468,13 @@ class DispatchForegroundService : Service() {
         val svcId = activeGpsServiceId
         val prefs = getSharedPreferences("SisBomPrefs", MODE_PRIVATE)
         val userId = prefs.getString("USER_ID", "") ?: ""
-        if (svcId != null && userId.isNotEmpty()) {
+        if (userId.isNotEmpty()) {
             try {
-                val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                db.collection("despachos").document(svcId).collection("asistencias").document(userId).delete()
-            } catch(_: Exception){}
+                com.google.firebase.database.FirebaseDatabase.getInstance()
+                    .getReference("telemetria/bomberos")
+                    .child(userId)
+                    .removeValue()
+            } catch (_: Exception) {}
         }
         activeGpsServiceId = null
     }
@@ -1569,6 +1591,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        PlayedSoundsTracker.init(this)
         val prefsTemp = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         
         // Invalidate attendance cache once to fix entry date & abono calculations
@@ -1737,7 +1760,7 @@ fun SisBomApp(viewModel: SisBomViewModel) {
                             claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" ||
                             claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
                     val isAttending = user.enServicio.trim() == fId
-                    val isDeclined = user.estado.trim().uppercase() == "NO ASISTIR"
+                    val isDeclined = user.enServicio.startsWith("-") || user.enServicio == "-$fId" || user.estado.trim().uppercase() == "NO ASISTIR"
                     val isSuspended = user.hasActiveSuspension() || user.hasActiveCDS() || user.hasActiveLicense()
                     if (!isAttending && !isDeclined && !isSuspended && (!is08 || isEscalationAlarm)) {
                         d
@@ -1846,23 +1869,6 @@ fun EmergencyFullscreenOverlay(
 
     androidx.activity.compose.BackHandler(enabled = true) {
         // Bloqueante: El bombero debe responder ASISTIR o NO ASISTIR
-    }
-
-    val claveUp = dispatch.clave.trim().uppercase()
-    val is1030 = claveUp.contains("10-30") || claveUp.contains("10_30")
-    val isForestal = claveUp.contains("FORESTAL")
-    val is90 = claveUp == "9-0" || claveUp == "9.0" || claveUp == "9_0" || claveUp.contains("COMANDANCIA") || claveUp.contains("LLAMADO")
-    val escalationKey = if (is1030) "10-30" else if (isForestal) "FORESTAL" else if (is90) "9-0" else ""
-
-    androidx.compose.runtime.LaunchedEffect(dispatch.idServicio, escalationKey) {
-        val soundToPlay = if (is1030 || isForestal || is90) {
-            "c10_30"
-        } else {
-            var c = dispatch.clave.trim().replace("-", "_").replace(" ", "_").lowercase()
-            if (c.startsWith("c10") || c.startsWith("c9")) c else "c$c"
-        }
-        SoundPlayer.playSound(context, soundToPlay)
-        SoundPlayer.triggerVibration(context, true)
     }
 
     val (cuartelLat, cuartelLng) = viewModel.getCuartelCoordinates()
@@ -2125,7 +2131,10 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val sentTime = message.sentTime
         val now = System.currentTimeMillis()
-        val forceSilent = sentTime > 0 && (now - sentTime) > 300000
+        val horaDespachoMsg = message.data["horaDespacho"] ?: message.data["hora"] ?: ""
+        val fechaDespachoMsg = message.data["fechaDespacho"] ?: message.data["fecha"] ?: ""
+        val isExpiredByHora = if (horaDespachoMsg.isNotEmpty()) TimeValidation.isTooOld(fechaDespachoMsg, horaDespachoMsg) else false
+        val forceSilent = (sentTime > 0 && (now - sentTime) > 300000) || isExpiredByHora
 
         val prefs = getSharedPreferences("SisBomPrefs", MODE_PRIVATE)
         val userId = prefs.getString("USER_ID", "") ?: ""

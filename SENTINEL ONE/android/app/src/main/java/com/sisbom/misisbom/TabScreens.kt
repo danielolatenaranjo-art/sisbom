@@ -1014,6 +1014,27 @@ fun IncidentMapPreview(
         mv.invalidate()
     }
 
+    val googleMapsTileSource = remember {
+        object : org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase(
+            "GoogleMapsRoadmap",
+            0, 20, 256, ".png",
+            arrayOf(
+                "https://mt0.google.com/vt/lyrs=m&hl=es&x=%d&y=%d&z=%d",
+                "https://mt1.google.com/vt/lyrs=m&hl=es&x=%d&y=%d&z=%d",
+                "https://mt2.google.com/vt/lyrs=m&hl=es&x=%d&y=%d&z=%d",
+                "https://mt3.google.com/vt/lyrs=m&hl=es&x=%d&y=%d&z=%d"
+            )
+        ) {
+            override fun getTileURLString(pMapTileIndex: Long): String {
+                val zoom = org.osmdroid.util.MapTileIndex.getZoom(pMapTileIndex)
+                val x = org.osmdroid.util.MapTileIndex.getX(pMapTileIndex)
+                val y = org.osmdroid.util.MapTileIndex.getY(pMapTileIndex)
+                val server = ((x + y) % 4).toInt()
+                return "https://mt$server.google.com/vt/lyrs=m&hl=es&x=$x&y=$y&z=$zoom"
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .background(if (isDark) Color(0xFF140303) else Color(0xFFF1F5F9))
@@ -1021,10 +1042,10 @@ fun IncidentMapPreview(
         androidx.compose.ui.viewinterop.AndroidView(
             factory = { ctx ->
                 org.osmdroid.config.Configuration.getInstance().load(ctx, ctx.getSharedPreferences("osmdroid", android.content.Context.MODE_PRIVATE))
-                org.osmdroid.config.Configuration.getInstance().userAgentValue = "SENTINEL ONE/2.2.0 (Android Bomberos Emergency App)"
+                org.osmdroid.config.Configuration.getInstance().userAgentValue = "SENTINEL ONE/2.2.5 (Android Bomberos Emergency App)"
 
                 org.osmdroid.views.MapView(ctx).apply {
-                    setTileSource(org.osmdroid.tileprovider.tilesource.TileSourceFactory.MAPNIK)
+                    setTileSource(googleMapsTileSource)
                     setMultiTouchControls(false)
                     zoomController.setVisibility(org.osmdroid.views.CustomZoomButtonsController.Visibility.NEVER)
                     isTilesScaledToDpi = true

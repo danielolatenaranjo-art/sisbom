@@ -52,7 +52,7 @@
             100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
         }
         #mini-map {
-            height: 240px;
+            height: 250px;
             width: 100%;
             border-radius: 1rem;
             z-index: 10;
@@ -61,7 +61,7 @@
 </head>
 <body class="p-4 sm:p-6 flex flex-col justify-between items-center">
 
-    <!-- CABECERA PRINCIPAL CON LOGOS COMBINADOS -->
+    <!-- CABECERA PRINCIPAL CON LOGO SENTINEL LINK Y ESCUDO CUERPO -->
     <header class="w-full max-w-md flex flex-col items-center text-center mt-2 mb-3">
         <!-- Logo SENTINEL LINK Principal -->
         <div class="flex items-center justify-center gap-2 mb-3">
@@ -118,12 +118,24 @@
             </div>
 
             <h3 class="text-lg font-black text-green-400 mb-1">¡UBICACIÓN RECIBIDA!</h3>
-            <p class="text-xs font-bold text-slate-300 mb-4 leading-snug">
+            <p class="text-xs font-bold text-slate-300 mb-3 leading-snug">
                 La Central de Alarmas ha recibido sus coordenadas exactas. Las unidades de emergencia están en camino.
             </p>
 
-            <!-- CONTENEDOR MAPA -->
-            <div id="mini-map" class="mb-4 border border-slate-700 shadow-inner"></div>
+            <!-- CONTENEDOR MAPA CON SELECTOR DE CAPAS GOOGLE MAPS -->
+            <div class="relative w-full mb-4">
+                <div id="mini-map" class="border border-slate-700 shadow-inner rounded-xl overflow-hidden"></div>
+                
+                <!-- Botón Switcher Calles / Satélite -->
+                <div class="absolute top-2 right-2 z-[500] flex bg-slate-900/90 backdrop-blur border border-slate-700 rounded-lg p-0.5 text-[10px] font-black shadow-lg">
+                    <button type="button" id="btn-geo-layer-street" onclick="switchGeoLayer('street')" class="px-2 py-1 rounded bg-blue-600 text-white transition-all">
+                        <i class="fas fa-map mr-0.5"></i> CALLES
+                    </button>
+                    <button type="button" id="btn-geo-layer-sat" onclick="switchGeoLayer('satellite')" class="px-2 py-1 rounded text-slate-400 hover:text-white transition-all">
+                        <i class="fas fa-satellite mr-0.5"></i> SATÉLITE
+                    </button>
+                </div>
+            </div>
 
             <div class="w-full bg-slate-950/80 p-3 rounded-xl border border-slate-800 text-left flex flex-col gap-1 mb-4">
                 <div class="flex justify-between items-center">
@@ -162,12 +174,12 @@
     </main>
 
     <!-- PIE DE PÁGINA CON BRANDING OFICIAL SENTINEL LINK -->
-    <footer class="w-full max-w-md flex flex-col items-center justify-center gap-1 mt-4 mb-2">
-        <div class="flex items-center justify-center gap-2">
-            <span class="text-slate-400 font-extrabold text-[11px] tracking-wider">SENTINEL LINK</span>
-            <span class="text-amber-500 font-black text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">V.2.1.2</span>
+    <footer class="w-full max-w-md flex flex-col items-center justify-center gap-2 mt-4 mb-3">
+        <div class="flex items-center justify-center gap-2 p-2 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-lg">
+            <img src="sentinel_link_logo.png" alt="SENTINEL LINK" class="h-8 w-auto object-contain drop-shadow" onerror="this.onerror=null; this.src='Logo.png';">
+            <span class="text-amber-400 font-black text-[10px] bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">V.2.2.0</span>
         </div>
-        <span class="text-[9px] text-slate-500 font-bold uppercase tracking-wider">
+        <span class="text-[9px] text-slate-400 font-extrabold uppercase tracking-widest text-center">
             SISTEMA OPERACIONAL DE DESPACHO Y GEOLOCALIZACIÓN
         </span>
     </footer>
@@ -176,12 +188,14 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
-        import { getFirestore, doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getDatabase, ref, set as rtdbSet, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
         // DICCIONARIO INTEGRADO DE PROYECTOS FIREBASE PARA ENLACES CORTOS
         const KNOWN_FIREBASE_CONFIGS = {
             "pruebas-sisbom": {
                 projectId: "pruebas-sisbom",
+                databaseURL: "https://pruebas-sisbom-default-rtdb.firebaseio.com",
                 appId: "1:306101642399:web:0f26dd8b37eb90ce91aeaa",
                 storageBucket: "pruebas-sisbom.firebasestorage.app",
                 apiKey: "AIzaSyDyQc_gHlHocYJ5x8Wj0EZdSGSvbt8d9og",
@@ -190,6 +204,7 @@
             },
             "sisbom-de5f8": {
                 projectId: "sisbom-de5f8",
+                databaseURL: "https://sisbom-de5f8-default-rtdb.firebaseio.com",
                 appId: "1:39449538456:web:64f767264356ae587485ed",
                 storageBucket: "sisbom-de5f8.firebasestorage.app",
                 apiKey: "AIzaSyB6alPrjMaahB2r7-9y75_Zw1sPVSJA5CA",
@@ -198,6 +213,7 @@
             },
             "sisbom-central": {
                 projectId: "sisbom-central",
+                databaseURL: "https://sisbom-central-default-rtdb.firebaseio.com",
                 appId: "1:432594591351:web:99a442ea6ae05276beb072",
                 storageBucket: "sisbom-central.firebasestorage.app",
                 apiKey: "AIzaSyBjjSBwmUevGC0vT0GdxtQUw-yvawdrH44",
@@ -234,26 +250,49 @@
         if (headerEl) headerEl.innerText = orgTitle;
 
         let map = null;
+        let mapLayers = {};
+        let currentMapLayer = 'street';
         let userMarker = null;
         let accuracyCircle = null;
         let fbDb = null;
+        let rtdb = null;
         let auth = null;
         let activeWatchId = null;
         let isDisconnectedByCentral = false;
+        let hasInitialFirestoreWrite = false;
 
         function listenToCentralDisconnection() {
-            if (!fbDb || !dispatchId || dispatchId === 'DIRECT_ALERT') return;
-            try {
-                onSnapshot(doc(fbDb, 'geolocalizaciones_alertantes', String(dispatchId)), (docSnap) => {
-                    if (docSnap.exists()) {
-                        const data = docSnap.data();
+            if (!dispatchId || dispatchId === 'DIRECT_ALERT') return;
+
+            // Escucha en RTDB
+            if (rtdb) {
+                try {
+                    const rtdbAlertRef = ref(rtdb, `telemetria/alertantes/${dispatchId}`);
+                    onValue(rtdbAlertRef, (snap) => {
+                        const data = snap.val();
                         if (data && (data.estado === 'desconectado' || data.desconectado === true)) {
                             handleCentralDisconnection();
                         }
-                    }
-                });
-            } catch(e) {
-                console.warn("Error escuchando estado de desconexión en geo.html:", e);
+                    });
+                } catch(e) {
+                    console.warn("Error escuchando RTDB en geo.html:", e);
+                }
+            }
+
+            // Fallback escucha en Firestore
+            if (fbDb) {
+                try {
+                    onSnapshot(doc(fbDb, 'geolocalizaciones_alertantes', String(dispatchId)), (docSnap) => {
+                        if (docSnap.exists()) {
+                            const data = docSnap.data();
+                            if (data && (data.estado === 'desconectado' || data.desconectado === true)) {
+                                handleCentralDisconnection();
+                            }
+                        }
+                    });
+                } catch(e) {
+                    console.warn("Error escuchando Firestore en geo.html:", e);
+                }
             }
         }
 
@@ -287,17 +326,38 @@
             const app = initializeApp(firebaseConfig);
             auth = getAuth(app);
             fbDb = getFirestore(app);
+            rtdb = getDatabase(app);
+            
             signInAnonymously(auth).then(() => {
                 console.log("Autenticación anónima establecida en geo.html para:", firebaseConfig.projectId);
                 listenToCentralDisconnection();
             }).catch(err => {
-                console.warn("Fallo auth anónima (usando reglas públicas):", err);
+                console.warn("Fallo auth anónima (usando conexión pública):", err);
                 listenToCentralDisconnection();
             });
             console.log("SENTINEL LINK conectado a:", firebaseConfig.projectId);
         } catch (e) {
             console.warn("Error iniciando Firebase en geo.html:", e);
         }
+
+        window.switchGeoLayer = function(layerType) {
+            if (!map || !mapLayers[layerType] || layerType === currentMapLayer) return;
+            map.removeLayer(mapLayers[currentMapLayer]);
+            mapLayers[layerType].addTo(map);
+            currentMapLayer = layerType;
+
+            const btnStreet = document.getElementById('btn-geo-layer-street');
+            const btnSat = document.getElementById('btn-geo-layer-sat');
+            if (btnStreet && btnSat) {
+                if (layerType === 'street') {
+                    btnStreet.className = "px-2 py-1 rounded bg-blue-600 text-white transition-all";
+                    btnSat.className = "px-2 py-1 rounded text-slate-400 hover:text-white transition-all";
+                } else {
+                    btnSat.className = "px-2 py-1 rounded bg-blue-600 text-white transition-all";
+                    btnStreet.className = "px-2 py-1 rounded text-slate-400 hover:text-white transition-all";
+                }
+            }
+        };
 
         window.solicitarGeolocalizacion = function() {
             if (!navigator.geolocation) {
@@ -354,40 +414,8 @@
             );
         };
 
-        let lastFirestoreWriteTime = 0;
-        let lastTransmittedLat = null;
-        let lastTransmittedLng = null;
-
-        function getDistanceMeters(lat1, lon1, lat2, lon2) {
-            const R = 6371e3; // Metros
-            const φ1 = lat1 * Math.PI / 180;
-            const φ2 = lat2 * Math.PI / 180;
-            const Δφ = (lat2 - lat1) * Math.PI / 180;
-            const Δλ = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
-                      Math.cos(φ1) * Math.cos(φ2) *
-                      Math.sin(Δλ/2) * Math.sin(Δλ/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c;
-        }
-
-        async function transmitirCoordenadas(lat, lng, accuracy, timeStr, forzar = false) {
+        async function transmitirCoordenadas(lat, lng, accuracy, timeStr, esInicial = false) {
             const now = Date.now();
-            
-            if (!forzar && lastFirestoreWriteTime > 0) {
-                const tiempoTranscurrido = now - lastFirestoreWriteTime;
-                const distanciaMovida = (lastTransmittedLat !== null && lastTransmittedLng !== null)
-                    ? getDistanceMeters(lastTransmittedLat, lastTransmittedLng, lat, lng)
-                    : 999;
-                
-                if (tiempoTranscurrido < 60000 || distanciaMovida < 25) {
-                    return;
-                }
-            }
-
-            lastFirestoreWriteTime = now;
-            lastTransmittedLat = lat;
-            lastTransmittedLng = lng;
 
             const geoData = {
                 lat: parseFloat(Number(lat).toFixed(6)),
@@ -401,7 +429,20 @@
 
             localStorage.setItem('sentinel_last_geo_' + dispatchId, JSON.stringify(geoData));
 
-            if (fbDb && dispatchId) {
+            // 1. TRANSMISIÓN EN TIEMPO REAL VÍA REALTIME DATABASE ($0 COSTO, LATENCIA ULTRA BAJA)
+            if (rtdb && dispatchId) {
+                try {
+                    const alertRef = ref(rtdb, `telemetria/alertantes/${dispatchId}`);
+                    await rtdbSet(alertRef, geoData);
+                    console.log("⚡ [RTDB] Telemetría enviada para despacho:", dispatchId);
+                } catch(e) {
+                    console.warn("Error escribiendo en RTDB:", e);
+                }
+            }
+
+            // 2. ESCRITURA ÚNICA INICIAL EN FIRESTORE PARA COMPATIBILIDAD CON CAD HISTÓRICO
+            if (fbDb && dispatchId && (!hasInitialFirestoreWrite || esInicial)) {
+                hasInitialFirestoreWrite = true;
                 try {
                     const updatePayload = {
                         geolocalizacionAlertante: geoData,
@@ -409,10 +450,9 @@
                         lugar: `COORD: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
                         ultimaActualizacionGps: now
                     };
-
                     await setDoc(doc(fbDb, 'despachos', String(dispatchId)), updatePayload, { merge: true });
                     await setDoc(doc(fbDb, 'geolocalizaciones_alertantes', String(dispatchId)), geoData, { merge: true });
-                    console.log("🛰️ Coordenadas enviadas exitosamente a Central para despacho:", dispatchId);
+                    console.log("🛰️ Coordenadas iniciales registradas en despacho:", dispatchId);
                 } catch (e) {
                     console.error("Fallo guardado en Firestore:", e);
                 }
@@ -436,16 +476,25 @@
                     attributionControl: false
                 }).setView([lat, lng], 16);
 
-                L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19,
-                    attribution: '&copy; OpenStreetMap'
-                }).addTo(map);
+                mapLayers.street = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&hl=es&x={x}&y={y}&z={z}', {
+                    maxZoom: 20,
+                    subdomains: ['0', '1', '2', '3'],
+                    attribution: 'Google Maps'
+                });
+
+                mapLayers.satellite = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&hl=es&x={x}&y={y}&z={z}', {
+                    maxZoom: 20,
+                    subdomains: ['0', '1', '2', '3'],
+                    attribution: 'Google Maps Sat'
+                });
+
+                mapLayers.street.addTo(map);
 
                 const customIcon = L.divIcon({
                     className: 'custom-pin',
-                    html: `<div style="background-color: #ef4444; width: 22px; height: 22px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 12px rgba(239,68,68,0.8); display: flex; align-items: center; justify-content: center; color: white; font-size: 10px;"><i class="fas fa-exclamation"></i></div>`,
-                    iconSize: [22, 22],
-                    iconAnchor: [11, 11]
+                    html: `<div style="background-color: #ef4444; width: 24px; height: 24px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 14px rgba(239,68,68,0.9); display: flex; align-items: center; justify-content: center; color: white; font-size: 11px;"><i class="fas fa-exclamation"></i></div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
                 });
 
                 userMarker = L.marker([lat, lng], { icon: customIcon }).addTo(map)
@@ -456,7 +505,7 @@
                     color: '#22c55e',
                     fillColor: '#22c55e',
                     fillOpacity: 0.15,
-                    weight: 1
+                    weight: 1.5
                 }).addTo(map);
 
             } catch (e) {
@@ -475,8 +524,10 @@
                 const now = new Date();
                 const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
                 
-                document.getElementById('geo-accuracy').innerText = `± ${accuracy} METROS`;
-                document.getElementById('geo-timestamp').innerText = timeStr;
+                const accEl = document.getElementById('geo-accuracy');
+                const timeEl = document.getElementById('geo-timestamp');
+                if (accEl) accEl.innerText = `± ${accuracy} METROS`;
+                if (timeEl) timeEl.innerText = timeStr;
                 
                 initMap(lat, lng, accuracy);
                 transmitirCoordenadas(lat, lng, accuracy, timeStr, false);

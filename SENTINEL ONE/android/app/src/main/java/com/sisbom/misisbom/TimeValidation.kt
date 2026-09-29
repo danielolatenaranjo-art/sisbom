@@ -5,31 +5,93 @@ import java.util.Date
 import java.util.Locale
 
 object TimeValidation {
-    fun isTooOld(fechaStr: String, horaStr: String): Boolean {
-        if (fechaStr.isEmpty() || horaStr.isEmpty()) return false
+    /**
+     * Valida si un despacho o alerta tiene más de 5 minutos de antigüedad tomando como referencia
+     * createdAt o la horaDespacho (y fechaDespacho).
+     *
+     * Retorna true si tiene más de 5 minutos (> 300.000 ms) o no se puede validar -> NO DEBE SONAR.
+     * Retorna false si está dentro de los 5 minutos (<= 300.000 ms) -> PUEDE SONAR.
+     */
+    fun isTooOld(fechaStr: String, horaStr: String, createdAt: Long = 0L): Boolean {
+        val now = System.currentTimeMillis()
+
+        // 1. Si existe createdAt válido (timestamp numérico en ms)
+        if (createdAt > 0L) {
+            val diffMs = now - createdAt
+            return diffMs > 300_000L || diffMs < -180_000L
+        }
+
+        val cleanHora = horaStr.trim()
+            .replace("\"", "")
+            .replace("'", "")
+            .replace("hrs", "", ignoreCase = true)
+            .replace("hr", "", ignoreCase = true)
+            .replace(".", "")
+            .trim()
+
+        if (cleanHora.isEmpty()) return true
+
         try {
-            // Unify dates to dd-MM-yyyy format by changing slashes to dashes
-            val cleanFecha = fechaStr.trim().replace("\"", "").replace("'", "").replace("/", "-")
-            val cleanHora = horaStr.trim().replace("\"", "").replace("'", "")
-            val dateStr = "$cleanFecha $cleanHora"
-            
-            // Choose format based on whether seconds are provided
-            val formatStr = if (cleanHora.count { it == ':' } == 2) {
-                "dd-MM-yyyy HH:mm:ss"
-            } else {
-                "dd-MM-yyyy HH:mm"
+            val cleanFecha = fechaStr.trim()
+                .replace("\"", "")
+                .replace("'", "")
+                .replace("/", "-")
+            val todayStr = SimpleDateFormat("dd-MM-yyyy", Locale.getDefault()).format(Date(now))
+            val finalFecha = if (cleanFecha.isNotEmpty()) cleanFecha else todayStr
+
+            val formatsToTry = listOf(
+                "dd-MM-yyyy HH:mm:ss",
+                "dd-MM-yyyy HH:mm",
+                "dd-MM-yyyy H:mm:ss",
+                "dd-MM-yyyy H:mm",
+                "dd-MM-yyyy hh:mm:ss a",
+                "dd-MM-yyyy hh:mm a",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm",
+                "yyyy-MM-dd H:mm:ss",
+                "yyyy-MM-dd H:mm"
+            )
+
+            var parsedDate: Date? = null
+            for (fmt in formatsToTry) {
+                try {
+                    val sdf = SimpleDateFormat(fmt, Locale.getDefault())
+                    sdf.isLenient = true
+                    val d = sdf.parse("$finalFecha $cleanHora")
+                    if (d != null) {
+                        parsedDate = d
+                        break
+                    }
+                } catch (_: Exception) {}
             }
-            
-            val sdf = SimpleDateFormat(formatStr, Locale.getDefault())
-            val date = sdf.parse(dateStr) ?: return false
-            
-            val diffMs = System.currentTimeMillis() - date.time
-            // 5 minutes in milliseconds = 300,000 ms
-            return diffMs > 300000 || diffMs < -180000
+
+            // Fallback: parsear hora con la fecha de hoy si la fecha guardada falló
+            if (parsedDate == null) {
+                for (fmt in listOf("dd-MM-yyyy HH:mm:ss", "dd-MM-yyyy HH:mm", "dd-MM-yyyy H:mm:ss", "dd-MM-yyyy H:mm", "dd-MM-yyyy hh:mm:ss a", "dd-MM-yyyy hh:mm a")) {
+                    try {
+                        val sdf = SimpleDateFormat(fmt, Locale.getDefault())
+                        sdf.isLenient = true
+                        val d = sdf.parse("$todayStr $cleanHora")
+                        if (d != null) {
+                            parsedDate = d
+                            break
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+
+            if (parsedDate == null) {
+                // Si no se puede verificar la fecha de emisión, por seguridad NO debe sonar
+                return true
+            }
+
+            val diffMs = now - parsedDate.time
+
+            // 5 minutos exactos = 300.000 ms
+            return diffMs > 300_000L || diffMs < -180_000L
         } catch (e: Exception) {
             e.printStackTrace()
-            // On parse failure, default to false (not too old) to avoid missing critical alarms
-            return false
+            return true
         }
     }
 }

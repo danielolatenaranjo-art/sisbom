@@ -872,18 +872,7 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                         isFirstDispatchesSync = false
                         list.forEach { d ->
                             knownDispatchIds.add(d.idServicio)
-                            PlayedSoundsTracker.markPlayed(d.idServicio)
-                        }
-                        val active = list.firstOrNull { it.operadorFinal.isEmpty() && !TimeValidation.isTooOld(it.fechaDespacho, it.horaDespacho) }
-                        if (active != null) {
-                            val myUser = currentUser
-                            val isAttending = myUser?.enServicio?.trim() == active.idServicio
-                            val isDeclined = myUser?.estado?.trim()?.uppercase() == "NO ASISTIR"
-                            val is08 = myUser?.estado?.trim()?.uppercase() == "0-8" || myUser?.estado?.trim()?.uppercase() == "10-8"
-                            val isSuspended = myUser?.hasActiveSuspension() == true || myUser?.hasActiveCDS() == true || myUser?.hasActiveLicense() == true
-                            if (!isAttending && !isDeclined && !is08 && !isSuspended && myUser != null && !isCentralActive) {
-                                fullscreenDispatchId = active.idServicio
-                            }
+                            PlayedSoundsTracker.markPlayed(d.idServicio, context)
                         }
                         return@collectLatest
                     }
@@ -900,9 +889,9 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
                         // 1. Escalamiento a ALARMA DECLARADA (10-0 -> 10-30 o 10-2 -> ALARMA FORESTAL)
                         if (isEscalation && d.operadorFinal.isEmpty()) {
                             val trackerKey = "${d.idServicio}_${if (isEscalation1030) "10_30" else "FORESTAL"}"
-                            if (!PlayedSoundsTracker.hasPlayed(trackerKey)) {
-                                PlayedSoundsTracker.markPlayed(trackerKey)
-                                PlayedSoundsTracker.markPlayed(d.idServicio)
+                            if (!PlayedSoundsTracker.hasPlayed(trackerKey, context)) {
+                                PlayedSoundsTracker.markPlayed(trackerKey, context)
+                                PlayedSoundsTracker.markPlayed(d.idServicio, context)
 
                                 val myUser = currentUser
                                 val isAttending = myUser?.enServicio == d.idServicio
@@ -941,11 +930,13 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
 
                             if (d.operadorFinal.isEmpty() && shouldNotify && !hasCDS && !isCentralActive) {
                                 if (d.idServicio.isNotEmpty()) {
-                                    if (!PlayedSoundsTracker.hasPlayed(d.idServicio)) {
-                                        PlayedSoundsTracker.markPlayed(d.idServicio)
+                                    if (!PlayedSoundsTracker.hasPlayed(d.idServicio, context)) {
+                                        PlayedSoundsTracker.markPlayed(d.idServicio, context)
                                         val isTooOld = TimeValidation.isTooOld(d.fechaDespacho, d.horaDespacho)
-                                        val inService = currentUser?.let { it.enServicio.isNotEmpty() && it.enServicio != "0" && !it.enServicio.startsWith("-") } ?: false
-                                        if (!isTooOld && !isAirplaneMode && !inService) {
+                                        val userEnServicio = currentUser?.enServicio ?: ""
+                                        val hasDeclined = userEnServicio.startsWith("-") || (d.idServicio.isNotEmpty() && userEnServicio == "-${d.idServicio}")
+                                        val inService = userEnServicio.isNotEmpty() && userEnServicio != "0" && !userEnServicio.startsWith("-")
+                                        if (!isTooOld && !isAirplaneMode && !inService && !hasDeclined) {
                                             val soundToPlay = if (is1030OrEscalation) {
                                                 "c10_30"
                                             } else {
@@ -1271,13 +1262,11 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
         ensureFreshSession {
             repository.updatePersonalStatus(user.idRegistro, newStatus,
                 onSuccess = {
+                    showSystemToast("Estado cambiado a $newStatus")
                     repository.addStatusHistoryEntry(user.idRegistro, newStatus,
-                        onSuccess = {
-                            showSystemToast("Estado cambiado a $newStatus")
-                        },
+                        onSuccess = {},
                         onFailure = { err ->
-                            err.printStackTrace()
-                            showSystemToast("Fallo al registrar historial de estado")
+                            android.util.Log.w("SisBom", "Fallo al registrar historial en subcolección: ${err.message}")
                         }
                     )
                 },
@@ -1439,34 +1428,8 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
 
         if (isAttending) {
             startFirefighterGpsTracking(serviceId)
-
-            // Registro inmediato en la subcolección de asistencias del despacho
-            if (serviceId != "0") {
-                try {
-                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                    val now = System.currentTimeMillis()
-                    val horaStr = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(now))
-                    val entry = hashMapOf<String, Any>(
-                        "idRegistro" to user.idRegistro,
-                        "idRadial" to user.idRadial,
-                        "nombre" to user.nombreBombero,
-                        "asistira" to true,
-                        "enServicio" to serviceId,
-                        "hora" to horaStr,
-                        "timestamp" to now
-                    )
-                    db.collection("despachos").document(serviceId).collection("asistencias").document(user.idRegistro)
-                        .set(entry, com.google.firebase.firestore.SetOptions.merge())
-                } catch (_: Exception) {}
-            }
         } else {
             stopFirefighterGpsTracking()
-            if (serviceId != "0") {
-                try {
-                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
-                    db.collection("despachos").document(serviceId).collection("asistencias").document(user.idRegistro).delete()
-                } catch (_: Exception) {}
-            }
         }
 
         // Actualización optimista
@@ -1500,6 +1463,9 @@ class SisBomViewModel(application: Application) : AndroidViewModel(application) 
             if (serviceId.isNotEmpty() && serviceId != "0") {
                 NotificationHelper.cancelRepeatAlert(serviceId)
                 NotificationHelper.ignorePayload(context, serviceId)
+                PlayedSoundsTracker.markPlayed(serviceId, context)
+                PlayedSoundsTracker.markPlayed("${serviceId}_10_30", context)
+                PlayedSoundsTracker.markPlayed("${serviceId}_FORESTAL", context)
             }
         } catch (e: Exception) {
             e.printStackTrace()

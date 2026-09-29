@@ -395,13 +395,15 @@ class SisBomViewModel: ObservableObject {
                 let userEnServicio = self.currentUser?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 let isAttending = !userEnServicio.isEmpty && userEnServicio == d.idServicio
 
+                let isTooOld = TimeValidation.isTooOld(fechaStr: d.fechaDespacho, horaStr: d.horaDespacho)
+
                 // 1. Escalamiento a alarma declarada (10-0 -> 10-30 o 10-2 -> FORESTAL)
                 if isEscalation && d.operadorFinal.isEmpty {
                     if !self.knownDispatchIds.contains(trackerKey1030) {
                         self.knownDispatchIds.insert(trackerKey1030)
                         self.knownDispatchIds.insert(d.idServicio)
 
-                        if !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive && !self.isAirplaneMode {
+                        if !isTooOld && !isSpecial && !isAbsoluteSilence && !isAttending && (is09 || is08) && !self.isCentralActive && !self.isAirplaneMode {
                             self.playSound(soundName: "c10_30")
                             self.triggerVibration()
                             DispatchQueue.main.async {
@@ -429,7 +431,7 @@ class SisBomViewModel: ObservableObject {
                     self.knownDispatchIds.insert(d.idServicio)
                     
                     // Alarma 10-30: Suena c10_30 para 0-9 (sin asistir o no asistir) y 0-8 (sin silencio absoluto)
-                    if !isSpecial && !isAbsoluteSilence && !isAttending && !self.isAirplaneMode {
+                    if !isTooOld && !isSpecial && !isAbsoluteSilence && !isAttending && !self.isAirplaneMode {
                         self.playSound(soundName: "c10_30")
                         self.triggerVibration()
                         if d.operadorFinal.isEmpty && !self.isCentralActive && (is09 || is08) {
@@ -452,7 +454,7 @@ class SisBomViewModel: ObservableObject {
                                 }
                             }
                         }
-                    } else if d.operadorFinal.isEmpty && !self.isCentralActive && !isSpecial && !isAttending && !userEnServicio.hasPrefix("-") && (is09 || is08) {
+                    } else if !isTooOld && d.operadorFinal.isEmpty && !self.isCentralActive && !isSpecial && !isAttending && !userEnServicio.hasPrefix("-") && (is09 || is08) {
                         DispatchQueue.main.async {
                             self.fullscreenDispatchId = d.idServicio
                         }
@@ -461,7 +463,7 @@ class SisBomViewModel: ObservableObject {
                     self.knownDispatchIds.insert(d.idServicio)
                     let soundName = cleanClave.contains("llamado") || cleanClave.contains("comandancia") ? "llamado_comandancia" : (cleanClave == "9-0" || cleanClave == "9_0" ? "c9_0" : "c\(cleanClave.replacingOccurrences(of: "-", with: "_"))")
                     
-                    if !is08 && !isSpecial && !isAbsoluteSilence && !self.isAirplaneMode {
+                    if !isTooOld && !is08 && !isSpecial && !isAbsoluteSilence && !self.isAirplaneMode {
                         self.playSound(soundName: soundName)
                         self.triggerVibration()
 
@@ -1486,5 +1488,62 @@ class SisBomViewModel: ObservableObject {
             self.saveCache(list, key: "cache_attendance")
             self.isSyncingAttendance = false
         }
+    }
+}
+
+// MARK: - Time Validation for Dispatches (5 Minutes from horaDespacho)
+
+struct TimeValidation {
+    static func isTooOld(fechaStr: String, horaStr: String) -> Bool {
+        let cleanHora = horaStr.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "'", with: "")
+        if cleanHora.isEmpty { return true }
+        
+        let cleanFecha = fechaStr.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "/", with: "-")
+        let todayFormatter = DateFormatter()
+        todayFormatter.dateFormat = "dd-MM-yyyy"
+        todayFormatter.locale = Locale(identifier: "es_CL")
+        let todayStr = todayFormatter.string(from: Date())
+        let finalFecha = cleanFecha.isEmpty ? todayStr : cleanFecha
+        
+        let formats = [
+            "dd-MM-yyyy HH:mm:ss",
+            "dd-MM-yyyy HH:mm",
+            "dd-MM-yyyy H:mm:ss",
+            "dd-MM-yyyy H:mm",
+            "dd-MM-yyyy hh:mm:ss a",
+            "dd-MM-yyyy hh:mm a",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd H:mm:ss",
+            "yyyy-MM-dd H:mm"
+        ]
+        
+        var parsedDate: Date? = nil
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "es_CL")
+        
+        for fmt in formats {
+            df.dateFormat = fmt
+            if let d = df.date(from: "\(finalFecha) \(cleanHora)") {
+                parsedDate = d
+                break
+            }
+        }
+        
+        if parsedDate == nil {
+            for fmt in ["dd-MM-yyyy HH:mm:ss", "dd-MM-yyyy HH:mm", "dd-MM-yyyy H:mm:ss", "dd-MM-yyyy H:mm", "dd-MM-yyyy hh:mm:ss a", "dd-MM-yyyy hh:mm a"] {
+                df.dateFormat = fmt
+                if let d = df.date(from: "\(todayStr) \(cleanHora)") {
+                    parsedDate = d
+                    break
+                }
+            }
+        }
+        
+        guard let date = parsedDate else { return true }
+        let diffSec = Date().timeIntervalSince(date)
+        
+        // 5 minutos exactos = 300 segundos
+        return diffSec > 300.0 || diffSec < -180.0
     }
 }

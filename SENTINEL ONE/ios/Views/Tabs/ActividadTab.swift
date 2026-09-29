@@ -767,7 +767,7 @@ struct IncidentWebView: UIViewRepresentable {
         coordinator.isMapLoaded = true
 
         let pinColor = getClavePinHex(clave: clave)
-        let tileUrl = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+        let tileUrl = "https://mt1.google.com/vt/lyrs=m&hl=es&x={x}&y={y}&z={z}"
         let mapBg = isDark ? "#0f172a" : "#f1f5f9"
 
         let html = """
