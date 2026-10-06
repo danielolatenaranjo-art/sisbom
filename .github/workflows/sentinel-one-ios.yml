@@ -16,16 +16,19 @@ permissions:
 jobs:
   build-and-upload-ios:
     name: Build & Deploy SENTINEL ONE
-    runs-on: macos-14
+    runs-on: macos-15
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Xcode 16
+      - name: Setup Latest Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode: '16'
+          xcode-version: 'latest-stable'
+
+      - name: Verify Xcode Version
+        run: xcodebuild -version
 
       - name: Install XcodeGen
         run: brew install xcodegen
