@@ -5,6 +5,8 @@ import FirebaseAuth
 
 // Since we'll import Firebase via Swift Package Manager (SPM) in Xcode, we can use the Firestore APIs directly.
 class FirebaseRepository {
+    static let shared = FirebaseRepository()
+    
     private var db: Firestore {
         return Firestore.firestore()
     }
@@ -92,13 +94,13 @@ class FirebaseRepository {
                 }
                 guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
                 return try? JSONDecoder().decode(AlertaItem.self, from: jsonData)
-            }
+            }.filter { isAlertActive(duracion: $0.duracion) }
             onChange(list)
         }
     }
     
     func getVehicles(onChange: @escaping ([Vehicle]) -> Void) -> ListenerRegistration {
-        return db.collection("moviles").addSnapshotListener { snapshot, error in
+        return db.collection("vehiculos").addSnapshotListener { snapshot, error in
             guard let documents = snapshot?.documents else {
                 print("Error fetching vehicles: \(error?.localizedDescription ?? "Unknown error")")
                 return
@@ -123,38 +125,84 @@ class FirebaseRepository {
             }
             
             var attendanceList = documents.compactMap { doc -> AttendanceSheet? in
-                var data = doc.data()
-                if data["idLista"] == nil {
-                    data["idLista"] = doc.documentID
-                }
-                guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
-                return try? JSONDecoder().decode(AttendanceSheet.self, from: jsonData)
+                let data = doc.data()
+                let idLista = (data["idLista"] as? String) ?? doc.documentID
+                let clave = (data["clave"] as? String) ?? ""
+                let tipo = (data["tipo"] as? String) ?? ""
+                let fecha = (data["fecha"] as? String) ?? ""
+                let hora = (data["hora"] as? String) ?? ""
+                let lugar = (data["lugar"] as? String) ?? ""
+                let aprobadoPor = (data["aprobadoPor"] as? String) ?? ""
+                
+                let anuladaRaw = data["anulada"]
+                let isAnulada: Bool = {
+                    if let b = anuladaRaw as? Bool { return b }
+                    if let n = anuladaRaw as? NSNumber { return n.intValue == 1 }
+                    if let s = anuladaRaw as? String {
+                        let upper = s.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        return upper == "1" || upper == "SI" || upper == "SÍ"
+                    }
+                    return false
+                }()
+                
+                let rawAbono = data["esAbono"] ?? data["abono"] ?? data["tipo"]
+                let defaultAbono: Double = {
+                    if let b = rawAbono as? Bool { return b ? 1.0 : 0.0 }
+                    if let n = rawAbono as? NSNumber { return n.doubleValue }
+                    if let s = rawAbono as? String {
+                        let upper = s.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        return (upper == "1" || upper == "SI" || upper == "SÍ" || upper.contains("ABONO") || upper.contains("EXTRA")) ? 1.0 : 0.0
+                    }
+                    return 0.0
+                }()
+                
+                return AttendanceSheet(
+                    idLista: idLista,
+                    clave: clave,
+                    tipo: tipo,
+                    fecha: fecha,
+                    hora: hora,
+                    lugar: lugar,
+                    aprobadoPor: aprobadoPor,
+                    anulada: isAnulada,
+                    userEstado: "",
+                    userAbono: defaultAbono
+                )
             }
             
-            // For each attendance sheet, fetch the personal subcollection entry for this user to get userEstado/userAbono
+            if userId.isEmpty || attendanceList.isEmpty {
+                onChange(attendanceList)
+                return
+            }
+            
+            // For each attendance sheet, fetch the "bomberos" subcollection entry for this user to get userEstado/userAbono
             let group = DispatchGroup()
             for i in 0..<attendanceList.count {
                 let sheetId = attendanceList[i].idLista
                 group.enter()
-                self.db.collection("asistencia").document(sheetId).collection("personal").document(userId).getDocument { subDoc, subErr in
+                self.db.collection("asistencia").document(sheetId).collection("bomberos").document(userId).getDocument { subDoc, subErr in
                     defer { group.leave() }
                     if let subDoc = subDoc, subDoc.exists, let subData = subDoc.data() {
-                        attendanceList[i].userEstado = subData["estado"] as? String ?? ""
-                        if let abono = subData["abono"] {
-                            if let doubleAbono = abono as? Double {
+                        attendanceList[i].userEstado = (subData["estado"] as? String) ?? "FALTA"
+                        if let subAbono = subData["esAbono"] ?? subData["abono"] {
+                            if let doubleAbono = subAbono as? Double {
                                 attendanceList[i].userAbono = doubleAbono
-                            } else if let intAbono = abono as? Int {
+                            } else if let intAbono = subAbono as? Int {
                                 attendanceList[i].userAbono = Double(intAbono)
-                            } else if let strAbono = abono as? String {
-                                attendanceList[i].userAbono = Double(strAbono) ?? 0.0
+                            } else if let strAbono = subAbono as? String {
+                                let upper = strAbono.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                                attendanceList[i].userAbono = Double(strAbono) ?? ((upper == "SI" || upper == "SÍ" || upper == "1" || upper.contains("ABONO") || upper.contains("EXTRA")) ? 1.0 : 0.0)
                             }
                         }
+                    } else {
+                        attendanceList[i].userEstado = "NO_REGISTRA"
                     }
                 }
             }
             
             group.notify(queue: .main) {
-                onChange(attendanceList)
+                let validList = attendanceList.filter { $0.userEstado != "NO_REGISTRA" && !$0.userEstado.isEmpty }
+                onChange(validList)
             }
         }
     }
@@ -231,12 +279,100 @@ class FirebaseRepository {
         }
     }
     
-    func updateVehicleService(vehicleId: String, enServicio: String, completion: @escaping (Result<Void, Error>) -> Void) {
-        db.collection("moviles").document(vehicleId).updateData(["enServicio": enServicio]) { error in
+    func solicitarAperturaPuerta(user: UserPersonal, completion: @escaping (Result<Void, Error>) -> Void) {
+        let formattedName = formatFirefighterName(user.nombreBombero)
+        let requestData: [String: Any] = [
+            "idBombero": user.id,
+            "idRadial": user.idRadial,
+            "nombreBombero": formattedName,
+            "timestamp": FieldValue.serverTimestamp(),
+            "estado": "PENDIENTE"
+        ]
+        
+        db.collection("solicitudes_puerta").addDocument(data: requestData) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                let centralUpdate: [String: Any] = [
+                    "solicitudPuerta": [
+                        "idRadial": user.idRadial,
+                        "nombreBombero": formattedName,
+                        "timestamp": Date().timeIntervalSince1970 * 1000
+                    ]
+                ]
+                self.db.collection("accesos").document("central").setData(centralUpdate, merge: true) { _ in
+                    completion(.success(()))
+                }
+            }
+        }
+    }
+    
+    func deleteAlert(alertId: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        db.collection("alertas").document(alertId).delete { error in
             if let error = error {
                 completion(.failure(error))
             } else {
                 completion(.success(()))
+            }
+        }
+    }
+    
+    func updateVehicleService(vehicleId: String, enServicio: String, completion: @escaping (Result<Void, Error>) -> Void) {
+        db.collection("vehiculos").document(vehicleId).updateData(["enServicio": enServicio]) { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func closeCentralSession(completion: @escaping (Result<Void, Error>) -> Void) {
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "dd-MM-yyyy"
+        let dateNow = dateFmt.string(from: Date())
+        
+        let timeFmt = DateFormatter()
+        timeFmt.dateFormat = "HH:mm:ss"
+        let timeNow = timeFmt.string(from: Date())
+        
+        db.collection("accesos").document("central").getDocument { [weak self] snapshot, error in
+            guard let self = self else { return }
+            if let error = error {
+                completion(.failure(error))
+                return
+            }
+            
+            let sessionId = snapshot?.data()?["idInicio"] as? String ?? ""
+            if !sessionId.isEmpty {
+                let regClose: [String: Any] = [
+                    "estado": "cerrado",
+                    "fechaCierre": dateNow,
+                    "horaCierre": timeNow
+                ]
+                self.db.collection("accesos").document("central")
+                    .collection("registros").document(sessionId)
+                    .setData(regClose, merge: true)
+            }
+            
+            let closePayload: [String: Any] = [
+                "estado": "cerrado",
+                "idInicio": "",
+                "idRegistro": "",
+                "cargo": "",
+                "nombreBombero": "",
+                "operador": "",
+                "fechaIngreso": "",
+                "horaIngreso": "",
+                "fechaCierre": dateNow,
+                "horaCierre": timeNow
+            ]
+            self.db.collection("accesos").document("central").setData(closePayload, merge: true) { err in
+                if let err = err {
+                    completion(.failure(err))
+                } else {
+                    completion(.success(()))
+                }
             }
         }
     }
@@ -310,4 +446,71 @@ class FirebaseRepository {
             }
         }
     }
+
+    func setDoorOpen(onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
+        db.collection("accesos").document("central").updateData(["puerta": true]) { err in
+            if let err = err {
+                onFailure(err)
+            } else {
+                onSuccess()
+            }
+        }
+    }
+}
+
+func isAlertActive(duracion: String) -> Bool {
+    let durStr = duracion.replacingOccurrences(of: "'", with: "").replacingOccurrences(of: "\"", with: "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    if durStr == "i" || durStr == "c" { return true }
+    if durStr.isEmpty { return false }
+    
+    var dPart = durStr
+    var tPart = "23:59:59"
+    
+    if durStr.contains(" ") {
+        let parts = durStr.components(separatedBy: " ")
+        if parts.count >= 2 {
+            dPart = parts[0]
+            tPart = parts[1]
+            if tPart.filter({ $0 == ":" }).count == 1 {
+                tPart += ":00"
+            }
+        }
+    }
+    
+    if dPart.contains("-") && dPart.components(separatedBy: "-").first?.count == 2 {
+        let parts = dPart.components(separatedBy: "-")
+        let tParts = tPart.components(separatedBy: ":")
+        if parts.count >= 3 {
+            guard let year = Int(parts[2]),
+                  let month = Int(parts[1]),
+                  let day = Int(parts[0]) else { return true }
+            let hour = Int(tParts.first ?? "23") ?? 23
+            let min = (tParts.count > 1 ? Int(tParts[1]) : 59) ?? 59
+            let sec = (tParts.count > 2 ? Int(tParts[2]) : 59) ?? 59
+            
+            var comp = DateComponents()
+            comp.year = year
+            comp.month = month
+            comp.day = day
+            comp.hour = hour
+            comp.minute = min
+            comp.second = sec
+            
+            if let targetDate = Calendar.current.date(from: comp) {
+                return targetDate >= Date()
+            }
+            return true
+        }
+    }
+    
+    let formats = ["yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"]
+    for f in formats {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = f
+        if let d = df.date(from: durStr) {
+            return d >= Date()
+        }
+    }
+    return true
 }

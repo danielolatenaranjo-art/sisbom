@@ -6,8 +6,8 @@ on:
   push:
     branches: [ "main", "master" ]
     paths:
-      - 'DEV/SENTINEL ONE/ios/**'
-      - 'DEV/MiSisBom/iOS/**'
+      - 'SENTINEL ONE/ios/**'
+      - 'MiSisBom/iOS/**'
       - '.github/workflows/sentinel-one-ios.yml'
 
 permissions:
@@ -33,12 +33,14 @@ jobs:
       - name: Locate iOS Directory
         id: locate-ios
         run: |
-          if [ -d "DEV/SENTINEL ONE/ios" ]; then
+          if [ -d "SENTINEL ONE/ios" ]; then
+            echo "ios_path=SENTINEL ONE/ios" >> $GITHUB_OUTPUT
+          elif [ -d "DEV/SENTINEL ONE/ios" ]; then
             echo "ios_path=DEV/SENTINEL ONE/ios" >> $GITHUB_OUTPUT
-          elif [ -d "DEV/MiSisBom/iOS" ]; then
-            echo "ios_path=DEV/MiSisBom/iOS" >> $GITHUB_OUTPUT
           elif [ -d "MiSisBom/iOS" ]; then
             echo "ios_path=MiSisBom/iOS" >> $GITHUB_OUTPUT
+          elif [ -d "DEV/MiSisBom/iOS" ]; then
+            echo "ios_path=DEV/MiSisBom/iOS" >> $GITHUB_OUTPUT
           elif [ -d "iOS" ]; then
             echo "ios_path=iOS" >> $GITHUB_OUTPUT
           else
@@ -64,7 +66,8 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
-          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | tr -d '"')
+          security default-keychain -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
@@ -113,6 +116,8 @@ jobs:
         run: |
           cd "${{ steps.locate-ios.outputs.ios_path }}"
           
+          security unlock-keychain -p "${{ secrets.KEYCHAIN_PASSWORD }}" "$RUNNER_TEMP/app-signing.keychain-db" || true
+
           xcodebuild archive \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
@@ -121,11 +126,7 @@ jobs:
             -archivePath "$RUNNER_TEMP/SisBom.xcarchive" \
             -skipMacroValidation \
             -skipPackagePluginValidation \
-            ENABLE_USER_SCRIPT_SANDBOXING=NO \
-            CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM="NFR3L3CC3L" \
-            PROVISIONING_PROFILE_SPECIFIER="SENTINEL_ONE_AppStore" \
-            CODE_SIGN_IDENTITY="Apple Distribution"
+            ENABLE_USER_SCRIPT_SANDBOXING=NO
 
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/SisBom.xcarchive" \
@@ -142,14 +143,16 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
         run: |
-          mkdir -p ~/.appstoreconnect/private_keys
+          mkdir -p ~/.appstoreconnect/private_keys ~/.private_keys
           echo "$APPSTORE_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
+          echo "$APPSTORE_PRIVATE_KEY" > ~/.private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
 
           xcrun altool --upload-app \
             -f "${{ steps.locate-ios.outputs.ios_path }}/output/SENTINEL_ONE.ipa" \
             -t ios \
             --apiKey "$APPSTORE_KEY_ID" \
-            --apiIssuer "$APPSTORE_ISSUER_ID"
+            --apiIssuer "$APPSTORE_ISSUER_ID" \
+            --show-progress
 
       - name: Upload iOS IPA Artifact
         if: always()
