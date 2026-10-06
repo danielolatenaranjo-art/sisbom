@@ -1,4 +1,5 @@
 name: Build and Upload iOS (SENTINEL ONE)
+# Trigger Release: App Store Connect / TestFlight
 
 on:
   workflow_dispatch:
