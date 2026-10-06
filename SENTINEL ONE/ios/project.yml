@@ -19,7 +19,7 @@ targets:
       - path: GoogleService-Info.plist
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom
+        PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom.NFR3L3CC3L
         CODE_SIGN_IDENTITY: ""
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGNING_ALLOWED: "NO"

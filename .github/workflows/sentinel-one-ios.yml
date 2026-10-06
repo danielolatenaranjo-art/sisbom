@@ -5,10 +5,8 @@ on:
   push:
     branches: [ "main", "master" ]
     paths:
-      - 'SENTINEL ONE/ios/**'
-      - 'SENTINEL ONE/iOS/**'
-      - 'MiSisBom/iOS/**'
-      - 'iOS/**'
+      - 'DEV/SENTINEL ONE/ios/**'
+      - 'DEV/MiSisBom/iOS/**'
       - '.github/workflows/sentinel-one-ios.yml'
 
 permissions:
@@ -26,7 +24,7 @@ jobs:
       - name: Setup Xcode 16
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: '16'
+          xcode: '16'
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -34,10 +32,10 @@ jobs:
       - name: Locate iOS Directory
         id: locate-ios
         run: |
-          if [ -d "SENTINEL ONE/ios" ]; then
-            echo "ios_path=SENTINEL ONE/ios" >> $GITHUB_OUTPUT
-          elif [ -d "SENTINEL ONE/iOS" ]; then
-            echo "ios_path=SENTINEL ONE/iOS" >> $GITHUB_OUTPUT
+          if [ -d "DEV/SENTINEL ONE/ios" ]; then
+            echo "ios_path=DEV/SENTINEL ONE/ios" >> $GITHUB_OUTPUT
+          elif [ -d "DEV/MiSisBom/iOS" ]; then
+            echo "ios_path=DEV/MiSisBom/iOS" >> $GITHUB_OUTPUT
           elif [ -d "MiSisBom/iOS" ]; then
             echo "ios_path=MiSisBom/iOS" >> $GITHUB_OUTPUT
           elif [ -d "iOS" ]; then
@@ -53,29 +51,24 @@ jobs:
           BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
           KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
-          # Rutas temporales en el runner
           CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
           PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
 
-          # Decodificar secretos cargados en GitHub
-          echo -n "\(BUILD_CERTIFICATE_BASE64" | base64 --decode -o\)CERTIFICATE_PATH
-          echo -n "\(BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o\)PP_PATH
+          echo -n "$BUILD_CERTIFICATE_BASE64" | base64 --decode -o "$CERTIFICATE_PATH"
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
 
-          # Crear llavero temporal
-          security create-keychain -p "\(KEYCHAIN_PASSWORD"\)KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "\(KEYCHAIN_PASSWORD"\)KEYCHAIN_PATH
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Importar certificado .p12 y habilitar firma sin ventana emergente
-          security import \(CERTIFICATE_PATH -P "\)P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security list-keychain -d user -s $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "\(KEYCHAIN_PASSWORD"\)KEYCHAIN_PATH
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
 
-          # Instalar el perfil .mobileprovision en la ruta requerida por Xcode
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          UUID=\((/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<<\)(security cms -D -i $PP_PATH))
-          cp "\(PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/\)UUID.mobileprovision
+          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< $(security cms -D -i "$PP_PATH"))
+          cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
           echo "Perfil instalado con UUID: $UUID"
 
       - name: Generate Xcode Project
@@ -91,35 +84,34 @@ jobs:
       - name: Generar ExportOptions.plist
         run: |
           cd "${{ steps.locate-ios.outputs.ios_path }}"
-          cat < ExportOptions.plist
-          
-          
-          
-          
-              method
-              app-store
-              destination
-              export
-              signingStyle
-              manual
-              signingCertificate
-              Apple Distribution
-              teamID
-              NFR3L3CC3L
-              provisioningProfiles
-              
-                  com.misisbom.sisbom.NFR3L3CC3L
-                  SENTINEL_ONE_AppStore
-              
-          
-          
+          cat <<EOF > ExportOptions.plist
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store</string>
+              <key>destination</key>
+              <string>export</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+              <key>signingCertificate</key>
+              <string>Apple Distribution</string>
+              <key>teamID</key>
+              <string>NFR3L3CC3L</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.misisbom.sisbom.NFR3L3CC3L</key>
+                  <string>SENTINEL_ONE_AppStore</string>
+              </dict>
+          </dict>
+          </plist>
           EOF
 
       - name: Archivar y Exportar IPA Oficial
         run: |
           cd "${{ steps.locate-ios.outputs.ios_path }}"
           
-          # 1. Crear el Archive con firma oficial
           xcodebuild archive \
             -workspace SisBom.xcworkspace \
             -scheme SisBom \
@@ -134,13 +126,11 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="SENTINEL_ONE_AppStore" \
             CODE_SIGN_IDENTITY="Apple Distribution"
 
-          # 2. Exportar el archivo .ipa listo para la App Store
           xcodebuild -exportArchive \
             -archivePath "$RUNNER_TEMP/SisBom.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath "$RUNNER_TEMP/build_output"
 
-          # Mover y renombrar el binario para los pasos siguientes
           mkdir -p output
           cp $RUNNER_TEMP/build_output/*.ipa output/SENTINEL_ONE.ipa
           echo "IPA generado con éxito en output/SENTINEL_ONE.ipa"
@@ -151,11 +141,9 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
         run: |
-          # Guardar llave privada API en el directorio de búsqueda de altool
           mkdir -p ~/.appstoreconnect/private_keys
-          echo "\(APPSTORE_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_\){APPSTORE_KEY_ID}.p8
+          echo "$APPSTORE_PRIVATE_KEY" > ~/.appstoreconnect/private_keys/AuthKey_${APPSTORE_KEY_ID}.p8
 
-          # Subida oficial mediante altool
           xcrun altool --upload-app \
             -f "${{ steps.locate-ios.outputs.ios_path }}/output/SENTINEL_ONE.ipa" \
             -t ios \
