@@ -311,6 +311,7 @@ class SisBomViewModel: ObservableObject {
         }
         
         self.setupListeners(userId: userId)
+        self.checkAndManageGpsTracking()
     }
     
     private func setupListeners(userId: String) {
@@ -791,6 +792,7 @@ class SisBomViewModel: ObservableObject {
         }
         
         stopFirebaseSync()
+        LocationService.shared.stopTracking()
         
         try? Auth.auth().signOut()
         
@@ -865,11 +867,39 @@ class SisBomViewModel: ObservableObject {
         )
         self.currentUser = updated
         self.saveCache(updated, key: "fire_user")
+        self.checkAndManageGpsTracking()
         
         self.pendingService = newServiceId
         self.lastServiceChangeTime = Date()
 
         repository.updatePersonalService(userId: user.idRegistro, serviceId: newServiceId) { _ in }
+    }
+    
+    // MARK: - GPS Background Telemetry Control
+    func checkAndManageGpsTracking() {
+        guard let user = self.currentUser else {
+            LocationService.shared.stopTracking()
+            return
+        }
+        
+        let clean = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
+        // El GPS solo debe activarse cuando el bombero tenga un numero en el campo enServicio,
+        // sea distinto a 0 y no contenga -, lo que significa que esta respondiendo activamente a un servicio.
+        let isAttending = !clean.isEmpty &&
+                          clean != "0" &&
+                          !clean.contains("-") &&
+                          clean.rangeOfCharacter(from: .decimalDigits) != nil
+        
+        if isAttending {
+            LocationService.shared.startTracking(
+                serviceId: clean,
+                userId: user.idRegistro,
+                radial: user.idRadial,
+                nombre: user.nombreBombero
+            )
+        } else {
+            LocationService.shared.stopTracking()
+        }
     }
     
     func declineService(dispatchId: String) {
@@ -1388,6 +1418,7 @@ class SisBomViewModel: ObservableObject {
             )
             self.currentUser = updated
             self.saveCache(updated, key: "fire_user")
+            self.checkAndManageGpsTracking()
         }
     }
     

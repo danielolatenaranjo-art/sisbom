@@ -13,23 +13,88 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
     @Published var lastLocation: CLLocation?
 
+    private(set) var isTracking: Bool = false
+    private var activeServiceId: String? = nil
+    private var activeUserId: String? = nil
+    private var activeRadial: String? = nil
+    private var activeNombre: String? = nil
+
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.allowsBackgroundLocationUpdates = true
-        manager.showsBackgroundLocationIndicator = true
+        manager.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         manager.pausesLocationUpdatesAutomatically = false
     }
 
     func requestPermissions() {
-        manager.requestAlwaysAuthorization()
         manager.requestWhenInUseAuthorization()
+        manager.requestAlwaysAuthorization()
+    }
+
+    func startTracking(serviceId: String, userId: String, radial: String, nombre: String) {
+        let clean = serviceId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean != "0", !clean.contains("-"), clean.rangeOfCharacter(from: .decimalDigits) != nil else {
+            stopTracking()
+            return
+        }
+
+        if isTracking && activeServiceId == clean { return }
+
+        self.activeServiceId = clean
+        self.activeUserId = userId
+        self.activeRadial = radial
+        self.activeNombre = nombre
+        self.isTracking = true
+
+        manager.allowsBackgroundLocationUpdates = true
+        manager.showsBackgroundLocationIndicator = true
+        manager.distanceFilter = 5.0
         manager.startUpdatingLocation()
+        print("🛰️ GPS ACTIVATED for service \(clean) (User: \(userId))")
+    }
+
+    func stopTracking() {
+        guard isTracking else { return }
+        isTracking = false
+        activeServiceId = nil
+        activeUserId = nil
+        activeRadial = nil
+        activeNombre = nil
+
+        manager.stopUpdatingLocation()
+        manager.showsBackgroundLocationIndicator = false
+        print("🛑 GPS STOPPED (Not attending service)")
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        lastLocation = locations.last
+        guard let location = locations.last else { return }
+        lastLocation = location
+
+        guard isTracking, let serviceId = activeServiceId, let userId = activeUserId, !userId.isEmpty else {
+            return
+        }
+
+        let now = Date().timeIntervalSince1970 * 1000
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        let horaStr = formatter.string(from: Date())
+
+        let locData: [String: Any] = [
+            "idRegistro": userId,
+            "idRadial": activeRadial ?? "",
+            "nombre": activeNombre ?? "Bombero",
+            "asistira": true,
+            "enServicio": serviceId,
+            "lat": location.coordinate.latitude,
+            "lng": location.coordinate.longitude,
+            "accuracy": location.horizontalAccuracy,
+            "speedKmH": max(0, location.speed * 3.6),
+            "hora": horaStr,
+            "timestamp": Int64(now)
+        ]
+
+        let db = Firestore.firestore()
+        db.collection("despachos").document(serviceId).collection("asistencias").document(userId).setData(locData, merge: true)
     }
 }
 
