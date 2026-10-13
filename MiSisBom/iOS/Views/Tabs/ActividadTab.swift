@@ -83,7 +83,7 @@ struct ActividadTab: View {
                         .padding(.horizontal, 8)
                 }
                 
-                Spacer(minLength: 20)
+                Spacer().frame(height: 8)
             }
         }
     }
@@ -585,7 +585,7 @@ struct DispatchItemCard: View {
                                 let canAttend = (baseState == "0-9" || isDeclined) && !inService && !isSpecial
                                 
                                 HStack(spacing: 10) {
-                                    // ASISTIR (Crimson / Ruby Red Filled Pill Button)
+                                    // ASISTIR (Vibrant Emerald Green Pill Button - Distinct from NO ASISTIR)
                                     Button(action: {
                                         viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
                                     }) {
@@ -598,32 +598,34 @@ struct DispatchItemCard: View {
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 48)
                                         .foregroundColor(canAttend ? .white : Color(red: 0.58, green: 0.64, blue: 0.72))
-                                        .background(canAttend ? Color(red: 0.53, green: 0.10, blue: 0.10) : Color.white.opacity(0.08))
+                                        .background(canAttend ? Color.goGreen : Color.white.opacity(0.08))
                                         .cornerRadius(24)
+                                        .shadow(color: canAttend ? Color.goGreen.opacity(0.3) : Color.clear, radius: 6, x: 0, y: 2)
                                     }
                                     .disabled(!canAttend)
                                     
-                                    // NO ASISTIR (Pill Button with Instant Bold Marked State)
+                                    // NO ASISTIR (Dark Pill with Red Border, turns Solid Red when chosen)
                                     Button(action: {
                                         if !isDeclined && !inService && baseState == "0-9" {
                                             viewModel.declineService(dispatchId: dispatch.idServicio)
                                         }
                                     }) {
                                         HStack(spacing: 6) {
-                                            Image(systemName: isDeclined ? "checkmark.circle.fill" : "xmark")
+                                            Image(systemName: isDeclined ? "xmark.circle.fill" : "xmark")
                                                 .font(.system(size: 13, weight: .bold))
                                             Text(isDeclined ? "NO ASISTIRÉ" : "NO ASISTIR")
                                                 .font(.system(size: 13, weight: .black))
                                         }
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 48)
-                                        .foregroundColor(isDeclined ? .white : (isDark ? Color(red: 0.96, green: 0.44, blue: 0.44) : Color(red: 0.85, green: 0.15, blue: 0.15)))
-                                        .background(isDeclined ? Color.bomberosRed : Color.black.opacity(isDark ? 0.35 : 0.08))
+                                        .foregroundColor(isDeclined ? .white : (isDark ? .white : Color(red: 0.85, green: 0.15, blue: 0.15)))
+                                        .background(isDeclined ? Color.bomberosRed : Color.black.opacity(isDark ? 0.40 : 0.08))
                                         .cornerRadius(24)
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 24)
-                                                .stroke(isDeclined ? Color.white.opacity(0.3) : Color.bomberosRed.opacity(0.5), lineWidth: 1.2)
+                                                .stroke(isDeclined ? Color.white.opacity(0.3) : Color.bomberosRed.opacity(0.8), lineWidth: 1.5)
                                         )
+                                        .shadow(color: isDeclined ? Color.bomberosRed.opacity(0.4) : Color.clear, radius: 6, x: 0, y: 2)
                                     }
                                     .allowsHitTesting(!isDeclined && !inService && baseState == "0-9")
                                 }

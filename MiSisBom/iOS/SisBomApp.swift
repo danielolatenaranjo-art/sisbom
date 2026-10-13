@@ -51,10 +51,16 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.distanceFilter = 5.0
         manager.startUpdatingLocation()
         print("🛰️ GPS ACTIVATED for service \(clean) (User: \(userId))")
+
+        // Inmediato envío de última posición conocida si existe
+        if let location = lastLocation {
+            sendTelemetry(location: location)
+        }
     }
 
     func stopTracking() {
         guard isTracking else { return }
+        let oldUserId = activeUserId
         isTracking = false
         activeServiceId = nil
         activeUserId = nil
@@ -64,15 +70,22 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.stopUpdatingLocation()
         manager.showsBackgroundLocationIndicator = false
         print("🛑 GPS STOPPED (Not attending service)")
+
+        if let uid = oldUserId, !uid.isEmpty {
+            removeRealtimeDatabase(userId: uid)
+        }
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
         lastLocation = location
 
-        guard isTracking, let serviceId = activeServiceId, let userId = activeUserId, !userId.isEmpty else {
-            return
-        }
+        guard isTracking else { return }
+        sendTelemetry(location: location)
+    }
+
+    private func sendTelemetry(location: CLLocation) {
+        guard isTracking, let serviceId = activeServiceId, let userId = activeUserId, !userId.isEmpty else { return }
 
         let now = Date().timeIntervalSince1970 * 1000
         let formatter = DateFormatter()
@@ -93,8 +106,42 @@ class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
             "timestamp": Int64(now)
         ]
 
+        // 1. Transmisión continua a Firebase Realtime Database (telemetria/bomberos/userId) para visualización en vivo en SENTINEL CAD
+        updateRealtimeDatabase(userId: userId, data: locData)
+
+        // 2. Registro histórico y táctico en Firestore
         let db = Firestore.firestore()
         db.collection("despachos").document(serviceId).collection("asistencias").document(userId).setData(locData, merge: true)
+        db.collection("personal").document(userId).setData([
+            "lat": location.coordinate.latitude,
+            "lng": location.coordinate.longitude,
+            "accuracy": location.horizontalAccuracy,
+            "speedKmH": max(0, location.speed * 3.6),
+            "horaGps": horaStr,
+            "gpsTimestamp": Int64(now)
+        ], merge: true)
+    }
+
+    private func updateRealtimeDatabase(userId: String, data: [String: Any]) {
+        let projectId = UserDefaults.standard.string(forKey: "saas_project_id") ?? "sisbom-de5f8"
+        guard let url = URL(string: "https://\(projectId)-default-rtdb.firebaseio.com/telemetria/bomberos/\(userId).json") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: data)
+
+        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
+    }
+
+    private func removeRealtimeDatabase(userId: String) {
+        let projectId = UserDefaults.standard.string(forKey: "saas_project_id") ?? "sisbom-de5f8"
+        guard let url = URL(string: "https://\(projectId)-default-rtdb.firebaseio.com/telemetria/bomberos/\(userId).json") else { return }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        URLSession.shared.dataTask(with: request) { _, _, _ in }.resume()
     }
 }
 

@@ -581,12 +581,11 @@ class SisBomViewModel: ObservableObject {
                 }
             }
             
-            // Clean local service if dispatch is closed or assigned to someone else
+            // Clean local service ONLY if service is explicitly closed with operadorFinal in CAD
             if let my = self.currentUser {
                 let mySvcId = my.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !mySvcId.isEmpty && mySvcId != "0" {
-                    let svc = list.first(where: { $0.idServicio == mySvcId })
-                    if svc == nil || !(svc?.operadorFinal.isEmpty ?? true) {
+                if !mySvcId.isEmpty && mySvcId != "0" && !mySvcId.contains("-") {
+                    if let svc = list.first(where: { $0.idServicio == mySvcId }), !svc.operadorFinal.isEmpty {
                         self.changePersonalService(newServiceId: "0")
                     }
                 }
@@ -905,7 +904,8 @@ class SisBomViewModel: ObservableObject {
     func declineService(dispatchId: String) {
         fullscreenDispatchId = nil
         declinedServiceIds.insert(dispatchId)
-        changePersonalService(newServiceId: "-\(dispatchId)")
+        // Al rechazar la asistencia, se marca '0' en base de datos para no dejar numeros negativos
+        changePersonalService(newServiceId: "0")
     }
     
     func attendService(dispatchId: String, attend: Bool) {
@@ -914,7 +914,18 @@ class SisBomViewModel: ObservableObject {
             declinedServiceIds.remove(dispatchId)
             changePersonalService(newServiceId: dispatchId)
         } else {
-            declineService(dispatchId: dispatchId)
+            // Al cancelar la asistencia, se establece exactamente en "0"
+            declinedServiceIds.remove(dispatchId)
+            changePersonalService(newServiceId: "0")
+
+            // Limpieza explícita en Firestore despachos/{id}/asistencias/{userId}
+            if let user = currentUser {
+                let db = Firestore.firestore()
+                db.collection("despachos").document(dispatchId).collection("asistencias").document(user.idRegistro).setData([
+                    "asistira": false,
+                    "enServicio": "0"
+                ], merge: true)
+            }
         }
     }
     

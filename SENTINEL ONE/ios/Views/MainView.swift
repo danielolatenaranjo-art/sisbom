@@ -128,11 +128,14 @@ struct MainView: View {
                     }
                     .padding(.top, 4) // Positioned immediately under dynamic island / status bar
 
-                    // Floating Bottom Navigation Dock (Exact Android Layout)
+                    // Floating Bottom Navigation Dock (Exact Android Parity: 8px margin to bottom)
                     VStack {
                         Spacer()
                         BottomNavigationBarView(viewModel: viewModel, visibleTabs: visibleTabs)
+                            .padding(.horizontal, 8)
+                            .padding(.bottom, 8)
                     }
+                    .ignoresSafeArea(edges: .bottom)
                 }
             }
             .blur(radius: isDrawerOpen || showingChangePassword ? 4 : 0)
@@ -482,7 +485,6 @@ struct BottomNavigationBarView: View {
                 }
             }
         }
-        .padding(.horizontal, 8)
         .frame(height: 64)
         .background(
             RoundedRectangle(cornerRadius: 26)
@@ -493,8 +495,6 @@ struct BottomNavigationBarView: View {
                 .stroke(isDark ? Color(red: 0.35, green: 0.08, blue: 0.08) : Color(red: 0.886, green: 0.910, blue: 0.941), lineWidth: 1.2)
         )
         .shadow(color: isDark ? Color(red: 0.35, green: 0.08, blue: 0.08).opacity(0.4) : Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-        .padding(.horizontal, 8)
-        .padding(.bottom, 2)
     }
 
     private func tabIcon(for tab: MainTab) -> String {
