@@ -74,13 +74,13 @@ struct ActividadTab: View {
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
                 .padding(.top, 4)
                 
                 // List of Incidents
                 ForEach(activeDispatches) { dispatch in
                     DispatchItemCard(dispatch: dispatch, viewModel: viewModel)
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 8)
                 }
                 
                 Spacer(minLength: 20)
@@ -352,7 +352,7 @@ struct DispatchItemCard: View {
         let isDark = viewModel.isDarkMode
         let user = viewModel.currentUser
         let isAttending = user?.enServicio == dispatch.idServicio
-        let isDeclined = user?.enServicio == "-\(dispatch.idServicio)"
+        let isDeclined = user?.enServicio == "-\(dispatch.idServicio)" || viewModel.declinedServiceIds.contains(dispatch.idServicio)
         let baseState = user?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         let cleanEnServ = user?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let inService = !cleanEnServ.isEmpty && cleanEnServ != "0" && !cleanEnServ.hasPrefix("-")
@@ -603,27 +603,29 @@ struct DispatchItemCard: View {
                                     }
                                     .disabled(!canAttend)
                                     
-                                    // NO ASISTIR (Outlined Pill Button)
+                                    // NO ASISTIR (Pill Button with Instant Bold Marked State)
                                     Button(action: {
-                                        viewModel.declineService(dispatchId: dispatch.idServicio)
+                                        if !isDeclined && !inService && baseState == "0-9" {
+                                            viewModel.declineService(dispatchId: dispatch.idServicio)
+                                        }
                                     }) {
                                         HStack(spacing: 6) {
-                                            Image(systemName: "xmark")
+                                            Image(systemName: isDeclined ? "checkmark.circle.fill" : "xmark")
                                                 .font(.system(size: 13, weight: .bold))
                                             Text(isDeclined ? "NO ASISTIRÉ" : "NO ASISTIR")
                                                 .font(.system(size: 13, weight: .black))
                                         }
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 48)
-                                        .foregroundColor(isDeclined ? .white : Color(red: 0.94, green: 0.27, blue: 0.27))
-                                        .background(isDeclined ? Color.bomberosRed : Color.black.opacity(0.1))
+                                        .foregroundColor(isDeclined ? .white : (isDark ? Color(red: 0.96, green: 0.44, blue: 0.44) : Color(red: 0.85, green: 0.15, blue: 0.15)))
+                                        .background(isDeclined ? Color.bomberosRed : Color.black.opacity(isDark ? 0.35 : 0.08))
                                         .cornerRadius(24)
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 24)
-                                                .stroke(isDeclined ? Color.clear : Color(red: 0.94, green: 0.27, blue: 0.27).opacity(0.5), lineWidth: 1.2)
+                                                .stroke(isDeclined ? Color.white.opacity(0.3) : Color.bomberosRed.opacity(0.5), lineWidth: 1.2)
                                         )
                                     }
-                                    .disabled(isDeclined || inService || baseState != "0-9")
+                                    .allowsHitTesting(!isDeclined && !inService && baseState == "0-9")
                                 }
                             }
                         }
@@ -696,23 +698,32 @@ struct IncidentMapPreview: View {
     let isDark: Bool
     var isFullScreen: Bool = false
 
+    private var hasValidCoordinates: Bool {
+        if isPending { return false }
+        if lat == 0.0 && lng == 0.0 { return false }
+        if abs(lat) < 0.0001 && abs(lng) < 0.0001 { return false }
+        if abs(lat - cuartelLat) < 0.0001 && abs(lng - cuartelLng) < 0.0001 { return false }
+        return true
+    }
+
     var body: some View {
-        let finalLat = (lat == 0.0 || isPending) ? cuartelLat : lat
-        let finalLng = (lng == 0.0 || isPending) ? cuartelLng : lng
+        if hasValidCoordinates {
+            ZStack {
+                // Solid native fallback background
+                (isDark ? Color(red: 0.08, green: 0.02, blue: 0.02) : Color(red: 0.94, green: 0.96, blue: 0.98))
+                    .ignoresSafeArea()
 
-        ZStack {
-            // Solid native fallback background
-            (isDark ? Color(red: 0.08, green: 0.02, blue: 0.02) : Color(red: 0.94, green: 0.96, blue: 0.98))
-                .ignoresSafeArea()
-
-            IncidentWebView(
-                lat: finalLat,
-                lng: finalLng,
-                clave: clave,
-                isDark: isDark,
-                isFullScreen: isFullScreen
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                IncidentWebView(
+                    lat: lat,
+                    lng: lng,
+                    clave: clave,
+                    isDark: isDark,
+                    isFullScreen: isFullScreen
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            TacticalRadarScanner(clave: clave, isDark: isDark)
         }
     }
 }

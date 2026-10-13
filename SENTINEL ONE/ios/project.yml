@@ -17,6 +17,7 @@ targets:
       - path: SisBomApp.swift
       - path: Assets.xcassets
       - path: GoogleService-Info.plist
+      - path: LaunchScreen.storyboard
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.misisbom.sisbom.NFR3L3CC3L
@@ -32,6 +33,7 @@ targets:
         CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "2.2.6"
         CFBundleVersion: "226"
+        UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UISupportedInterfaceOrientations:

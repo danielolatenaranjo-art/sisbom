@@ -3,6 +3,12 @@ name: Build and Upload iOS (SENTINEL ONE)
 
 on:
   workflow_dispatch:
+    inputs:
+      upload_appstore:
+        description: 'Subir a App Store Connect / TestFlight'
+        required: false
+        default: false
+        type: boolean
   push:
     branches: [ "main", "master" ]
     paths:
@@ -141,6 +147,7 @@ jobs:
           echo "IPA generado con éxito en output/SENTINEL_ONE.ipa"
 
       - name: Subir IPA a App Store Connect
+        if: github.event.inputs.upload_appstore == 'true'
         env:
           APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}

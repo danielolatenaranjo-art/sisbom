@@ -427,7 +427,7 @@ struct TopAppBarView: View {
                         .stroke(cardBorderColor, lineWidth: 1)
                 )
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 8)
         )
     }
 
@@ -493,7 +493,7 @@ struct BottomNavigationBarView: View {
                 .stroke(isDark ? Color(red: 0.35, green: 0.08, blue: 0.08) : Color(red: 0.886, green: 0.910, blue: 0.941), lineWidth: 1.2)
         )
         .shadow(color: isDark ? Color(red: 0.35, green: 0.08, blue: 0.08).opacity(0.4) : Color.black.opacity(0.15), radius: 12, x: 0, y: 4)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 8)
         .padding(.bottom, 2)
     }
 

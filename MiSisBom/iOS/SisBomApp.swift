@@ -1,9 +1,11 @@
 import SwiftUI
 import FirebaseCore
+import FirebaseFirestore
 import FirebaseMessaging
 import UserNotifications
 import CoreLocation
 import AVFoundation
+import AudioToolbox
 
 // MARK: - Location Service
 class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -181,14 +183,32 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         
         let type = (userInfo["type"] as? String) ?? ((userInfo["aps"] as? [String: Any])?["type"] as? String) ?? ""
         let payloadId = (userInfo["payloadId"] as? String) ?? (userInfo["doorKey"] as? String) ?? ""
+        let clave = (userInfo["clave"] as? String) ?? (userInfo["key"] as? String) ?? ""
         
         if (type == "DISPATCH" || type == "DISPATCH_UPDATE") && !payloadId.isEmpty {
             AppDelegate.launchDispatchId = payloadId
             NotificationCenter.default.post(
                 name: NSNotification.Name("OpenFullscreenDispatch"),
                 object: nil,
-                userInfo: ["dispatchId": payloadId]
+                userInfo: ["dispatchId": payloadId, "clave": clave]
             )
+            
+            // Play alarm sound and trigger emergency vibration
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+                try AVAudioSession.sharedInstance().setActive(true)
+                let soundName = clave.isEmpty ? "alerta" : clave
+                if let url = Bundle.main.url(forResource: soundName, withExtension: "mp3") ??
+                             Bundle.main.url(forResource: soundName, withExtension: "wav") ??
+                             Bundle.main.url(forResource: "alerta", withExtension: "wav") {
+                    let player = try AVAudioPlayer(contentsOf: url)
+                    player.volume = 1.0
+                    player.play()
+                }
+            } catch {
+                print("Error playing background dispatch sound: \(error)")
+            }
+            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
         }
         
         completionHandler(.newData)
@@ -263,6 +283,34 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     
     func messaging(_ messaging: Messaging, didReceiveRegistrationToken fcmToken: String?) {
         print("Firebase registration token: \(String(describing: fcmToken))")
+        guard let token = fcmToken, !token.isEmpty else { return }
+        UserDefaults.standard.set(token, forKey: "fcm_token")
+        
+        Messaging.messaging().subscribe(toTopic: "all")
+        Messaging.messaging().subscribe(toTopic: "despachos")
+        Messaging.messaging().subscribe(toTopic: "alertas_generales")
+        
+        if let cachedUser = UserDefaults.standard.string(forKey: "fire_user"),
+           let data = cachedUser.data(using: .utf8),
+           let userDict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let idRegistro = userDict["idRegistro"] as? String, !idRegistro.isEmpty {
+            
+            let db = Firestore.firestore()
+            db.collection("personal").document(idRegistro).setData([
+                "tokenFcm": token,
+                "tokenIos": token,
+                "platform": "ios",
+                "lastTokenUpdate": FieldValue.serverTimestamp()
+            ], merge: true)
+            
+            db.collection("fcm_tokens").document(token).setData([
+                "token": token,
+                "platform": "ios",
+                "userId": idRegistro,
+                "topics": ["all", "despachos", "alertas_generales", "usuario_\(idRegistro)", "personal_\(idRegistro)"],
+                "updatedAt": FieldValue.serverTimestamp()
+            ], merge: true)
+        }
     }
 }
 

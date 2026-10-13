@@ -146,7 +146,7 @@ struct AsistenciaTab: View {
                     stats: currentCycleStats,
                     isDark: isDark
                 )
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
 
                 // Historial Section Header with Sincronizar Button
                 HStack {
@@ -168,7 +168,7 @@ struct AsistenciaTab: View {
                         .foregroundColor(Color(red: 0.90, green: 0.20, blue: 0.20))
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
                 .padding(.top, 4)
 
                 // 2-Column Grid of History Items (Exact ANDROID 5.jpeg)
@@ -186,7 +186,7 @@ struct AsistenciaTab: View {
                             AttendanceGridCard(item: item, isDark: isDark)
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 8)
                 }
 
                 Spacer(minLength: 20)

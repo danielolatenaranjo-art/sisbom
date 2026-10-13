@@ -227,7 +227,7 @@ struct DespachoTab: View {
                         }
                     }
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
                 .padding(.bottom, 24)
             }
             

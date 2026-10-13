@@ -38,7 +38,7 @@ struct DisponiblesTab: View {
                         )
                         .cornerRadius(12)
                 }
-                .padding(.horizontal, 16)
+                .padding(.horizontal, 8)
                 .padding(.top, 16)
 
                 // List of Available Firefighters or Empty State
@@ -53,14 +53,14 @@ struct DisponiblesTab: View {
                         }
                         .frame(maxWidth: .infinity)
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 8)
                 } else {
                     LazyVStack(spacing: 12) {
                         ForEach(availableFirefighters) { p in
                             FirefighterRowCard(personnel: p, viewModel: viewModel)
                         }
                     }
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, 8)
                 }
             }
             .padding(.bottom, 24)

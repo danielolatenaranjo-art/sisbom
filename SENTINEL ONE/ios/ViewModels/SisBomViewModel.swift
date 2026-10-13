@@ -71,6 +71,7 @@ class SisBomViewModel: ObservableObject {
     @Published var selectedOrdenId: String? = nil
     @Published var showChangelogDialog: Bool = false
     @Published var fullscreenDispatchId: String? = nil
+    @Published var declinedServiceIds: Set<String> = []
     private var pendingChatId: String? = nil
     
     // Feedback strings
@@ -288,6 +289,25 @@ class SisBomViewModel: ObservableObject {
         if !userId.isEmpty {
             Messaging.messaging().subscribe(toTopic: "usuario_\(userId)")
             Messaging.messaging().subscribe(toTopic: "personal_\(userId)")
+            
+            // Register FCM token in Firestore personal and fcm_tokens collections
+            Messaging.messaging().token { token, error in
+                guard let token = token, !token.isEmpty else { return }
+                UserDefaults.standard.set(token, forKey: "fcm_token")
+                let db = Firestore.firestore()
+                db.collection("personal").document(userId).setData([
+                    "tokenFcm": token,
+                    "tokenIos": token,
+                    "platform": "ios"
+                ], merge: true)
+                db.collection("fcm_tokens").document(token).setData([
+                    "token": token,
+                    "platform": "ios",
+                    "userId": userId,
+                    "topics": ["all", "despachos", "alertas_generales", "usuario_\(userId)", "personal_\(userId)"],
+                    "updatedAt": FieldValue.serverTimestamp()
+                ], merge: true)
+            }
         }
         
         self.setupListeners(userId: userId)
@@ -854,12 +874,14 @@ class SisBomViewModel: ObservableObject {
     
     func declineService(dispatchId: String) {
         fullscreenDispatchId = nil
+        declinedServiceIds.insert(dispatchId)
         changePersonalService(newServiceId: "-\(dispatchId)")
     }
     
     func attendService(dispatchId: String, attend: Bool) {
         fullscreenDispatchId = nil
         if attend {
+            declinedServiceIds.remove(dispatchId)
             changePersonalService(newServiceId: dispatchId)
         } else {
             declineService(dispatchId: dispatchId)

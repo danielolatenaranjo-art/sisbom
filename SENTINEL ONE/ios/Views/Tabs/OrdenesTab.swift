@@ -31,7 +31,7 @@ struct OrdenesTab: View {
                                 OrdenItemCard(orden: orden, viewModel: viewModel)
                             }
                         }
-                        .padding(.horizontal, 16)
+                        .padding(.horizontal, 8)
                     }
                     
                     Spacer(minLength: 80)
