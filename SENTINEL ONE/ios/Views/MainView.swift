@@ -152,15 +152,18 @@ struct MainView: View {
             }
             
             // Side Navigation Drawer
-            GeometryReader { geo in
-                HStack(spacing: 0) {
-                    ProfileDrawerContent(viewModel: viewModel, isDrawerOpen: $isDrawerOpen, showingChangePassword: $showingChangePassword)
-                        .frame(width: geo.size.width * 0.78)
-                    Spacer()
+            if isDrawerOpen {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        ProfileDrawerContent(viewModel: viewModel, isDrawerOpen: $isDrawerOpen, showingChangePassword: $showingChangePassword)
+                            .frame(width: min(geo.size.width * 0.82, 320))
+                        Spacer()
+                    }
                 }
-                .offset(x: isDrawerOpen ? 0 : -geo.size.width)
+                .transition(.move(edge: .leading))
+                .ignoresSafeArea()
+                .zIndex(100)
             }
-            .ignoresSafeArea()
             
             // Change Password Popup Dialog
             if showingChangePassword {

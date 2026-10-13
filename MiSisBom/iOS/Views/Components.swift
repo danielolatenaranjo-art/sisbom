@@ -68,74 +68,80 @@ struct SisBomBackground<Content: View>: View {
         let amberGlowAlpha = isDark ? 0.05 : 0.10
         
         ZStack {
-            // Main Background Gradient / Color
-            if isDark {
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color(red: 0.059, green: 0.004, blue: 0.004), // #0F0101
-                        Color(red: 0.157, green: 0.008, blue: 0.008), // #280202
-                        Color(red: 0.290, green: 0.012, blue: 0.012)  // #4A0303
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .ignoresSafeArea()
-            } else {
-                Color.lightBg
-                    .ignoresSafeArea()
-            }
-            
-            // Firefighter Illustration Background Image
-            if let bgImage = UIImage(named: isDark ? "escudo_bg_dark" : "escudo_bg_light") {
-                Image(uiImage: bgImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .opacity(isDark ? 0.50 : 0.15)
-                    .ignoresSafeArea()
-            }
-            
-            // Radial Glows (Glows in corners)
+            // Background Decorative Canvas (strictly bounded and clipped to screen geometry)
             GeometryReader { geo in
                 ZStack {
-                    // Top Right Red Glow
-                    Circle()
-                        .fill(RadialGradient(
-                            colors: [Color.bomberosRed.opacity(redGlowAlpha), .transparent],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: geo.size.width * 0.8
-                        ))
-                        .frame(width: geo.size.width * 1.6, height: geo.size.width * 1.6)
-                        .position(x: geo.size.width, y: 0)
+                    // Main Background Gradient / Color
+                    if isDark {
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(red: 0.059, green: 0.004, blue: 0.004), // #0F0101
+                                Color(red: 0.157, green: 0.008, blue: 0.008), // #280202
+                                Color(red: 0.290, green: 0.012, blue: 0.012)  // #4A0303
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    } else {
+                        Color.lightBg
+                    }
                     
-                    // Bottom Left Amber Glow
-                    Circle()
-                        .fill(RadialGradient(
-                            colors: [Color.alertAmber.opacity(amberGlowAlpha), .transparent],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: geo.size.width * 0.8
-                        ))
-                        .frame(width: geo.size.width * 1.6, height: geo.size.width * 1.6)
-                        .position(x: 0, y: geo.size.height)
+                    // Firefighter Illustration Background Image (strictly framed to geo size)
+                    if let bgImage = UIImage(named: isDark ? "escudo_bg_dark" : "escudo_bg_light") {
+                        Image(uiImage: bgImage)
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geo.size.width, height: geo.size.height)
+                            .clipped()
+                            .opacity(isDark ? 0.50 : 0.15)
+                    }
+                    
+                    // Radial Glows (Glows in corners, clipped to canvas)
+                    ZStack {
+                        // Top Right Red Glow
+                        Circle()
+                            .fill(RadialGradient(
+                                colors: [Color.bomberosRed.opacity(redGlowAlpha), .transparent],
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: geo.size.width * 0.8
+                            ))
+                            .frame(width: geo.size.width * 1.6, height: geo.size.width * 1.6)
+                            .position(x: geo.size.width, y: 0)
+                        
+                        // Bottom Left Amber Glow
+                        Circle()
+                            .fill(RadialGradient(
+                                colors: [Color.alertAmber.opacity(amberGlowAlpha), .transparent],
+                                center: .center,
+                                startRadius: 0,
+                                endRadius: geo.size.width * 0.8
+                            ))
+                            .frame(width: geo.size.width * 1.6, height: geo.size.width * 1.6)
+                            .position(x: 0, y: geo.size.height)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+                    
+                    // Watermark Shield Logo of Tenant at Bottom-Right
+                    Image(uiImage: viewModel.getInstitutionLogo())
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 240, height: 240)
+                        .opacity(isDark ? 0.18 : 0.22)
+                        .position(x: geo.size.width - 60, y: geo.size.height - 60)
                 }
+                .frame(width: geo.size.width, height: geo.size.height)
+                .clipped()
             }
             .ignoresSafeArea()
             
-            // Watermark Shield Logo of Tenant at Bottom-Right
-            GeometryReader { geo in
-                Image(uiImage: viewModel.getInstitutionLogo())
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .frame(width: 240, height: 240)
-                    .opacity(isDark ? 0.18 : 0.22)
-                    .position(x: geo.size.width - 60, y: geo.size.height - 60)
-            }
-            .ignoresSafeArea()
-            
-            // App Screen Content
+            // App Screen Content (strictly fills screen width without overflow)
             content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
     }
 }
 
