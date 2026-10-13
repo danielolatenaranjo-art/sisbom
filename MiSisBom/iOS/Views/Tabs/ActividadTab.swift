@@ -10,7 +10,8 @@ struct ActividadTab: View {
         let isDark = viewModel.isDarkMode
         let user = viewModel.currentUser
         let rawEstado = user?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let inService = !(user?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) == "0") && !(user?.enServicio.isEmpty ?? true)
+        let cleanEnServ = user?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let inService = !cleanEnServ.isEmpty && cleanEnServ != "0" && !cleanEnServ.hasPrefix("-")
         let isSpecial = rawEstado.contains("SUSPENDIDO") || rawEstado == "CDS" || rawEstado.contains("LICENCIA") || rawEstado == "PERMISO"
         
         let is09Active = rawEstado == "0-9" && !isSpecial
@@ -28,17 +29,19 @@ struct ActividadTab: View {
                 let formattedOpName = isOpActive ? formatOperatorCadName(viewModel.centralOperatorName).uppercased() : "SIN OPERADOR"
 
                 GlassCard(viewModel: viewModel) {
-                    HStack(spacing: 10) {
+                    HStack(spacing: 8) {
                         Circle()
                             .fill(isOpActive ? Color.goGreen : Color.gray.opacity(0.6))
-                            .frame(width: 10, height: 10)
+                            .frame(width: 8, height: 8)
 
                         Text("OPERADOR CAD: \(formattedOpName)")
-                            .font(.system(size: 12, weight: .black))
+                            .font(.system(size: 11, weight: .black))
                             .foregroundColor(isDark ? .white : Color(red: 0.12, green: 0.16, blue: 0.23))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .layoutPriority(1)
 
-                        Spacer()
+                        Spacer(minLength: 4)
 
                         // Botón TIMBRE para solicitar apertura de puerta al Operador CAD (con cooldown de 30 segundos)
                         Button(action: {
@@ -351,7 +354,8 @@ struct DispatchItemCard: View {
         let isAttending = user?.enServicio == dispatch.idServicio
         let isDeclined = user?.enServicio == "-\(dispatch.idServicio)"
         let baseState = user?.estado.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
-        let inService = !(user?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) == "0") && !(user?.enServicio.isEmpty ?? true)
+        let cleanEnServ = user?.enServicio.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let inService = !cleanEnServ.isEmpty && cleanEnServ != "0" && !cleanEnServ.hasPrefix("-")
         let isSpecial = baseState.contains("SUSPENDIDO") || baseState == "CDS" || baseState.contains("LICENCIA") || baseState == "PERMISO"
         
         let coords = viewModel.getCuartelCoordinates()
@@ -376,294 +380,300 @@ struct DispatchItemCard: View {
             }
         }
         
-        VStack(spacing: 0) {
-            // 1. TOP HEADER
-            VStack(alignment: .leading, spacing: 4) {
-                // Top row: ¡DESPACHO ACTIVO! and Time
-                HStack {
-                    Text(titleText)
-                        .font(.system(size: 12, weight: .black))
-                        .foregroundColor(isDark ? titleColor : (isAttending ? Color.goGreen : Color(red: 0.53, green: 0.10, blue: 0.10)))
-                        .tracking(0.5)
-                    
-                    Spacer()
-                    
-                    Text(dispatch.horaDespacho.isEmpty ? "--:--" : dispatch.horaDespacho)
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(isDark ? Color(red: 0.8, green: 0.84, blue: 0.88) : Color(red: 0.53, green: 0.10, blue: 0.10))
-                }
-                
-                Spacer().frame(height: 2)
-                
-                // Clave (Large bold title)
-                let claveText = (dispatch.clave == "10-12" && !dispatch.claveApoyo.isEmpty) ? "\(dispatch.clave) (\(dispatch.claveApoyo))" : (dispatch.clave.isEmpty ? "10-0" : dispatch.clave)
-                Text(claveText)
-                    .font(.system(size: 34, weight: .black))
-                    .foregroundColor(isDark ? .white : Color(red: 0.53, green: 0.10, blue: 0.10))
-                    .lineLimit(1)
-                
-                // Location / Address (Primary address below Clave, displayed ONLY if valid)
-                let cleanLugar = cleanLugarDisplay(dispatch.lugar)
-                if !cleanLugar.isEmpty {
-                    Text(cleanLugar.uppercased())
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(isDark ? Color(red: 0.88, green: 0.91, blue: 0.94) : Color(red: 0.53, green: 0.10, blue: 0.10))
-                        .lineLimit(2)
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Group {
-                    if isDark {
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.18, green: 0.02, blue: 0.02),
-                                Color(red: 0.14, green: 0.02, blue: 0.02).opacity(0.95),
-                                Color(red: 0.12, green: 0.02, blue: 0.02).opacity(0.8)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    } else {
-                        Color.white
-                    }
-                }
+        ZStack {
+            // LAYER 0: MAP AS THE IMMERSIVE BACKGROUND CANVAS (fills exact card height)
+            IncidentMapPreview(
+                lat: dispatch.lat ?? 0.0,
+                lng: dispatch.lng ?? 0.0,
+                cuartelLat: coords.lat,
+                cuartelLng: coords.lng,
+                isPending: !hasValidLocation,
+                clave: dispatch.clave,
+                lugar: dispatch.lugar,
+                isDark: isDark
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             
-            // 2. CENTER MAP VIEWPORT (Fixed height: 175pt, so center never jumps when bottom expands/collapses)
-            ZStack {
-                IncidentMapPreview(
-                    lat: dispatch.lat ?? 0.0,
-                    lng: dispatch.lng ?? 0.0,
-                    cuartelLat: coords.lat,
-                    cuartelLng: coords.lng,
-                    isPending: !hasValidLocation,
-                    clave: dispatch.clave,
-                    lugar: dispatch.lugar,
-                    isDark: isDark
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                
-                Button(action: openNavigation) {
-                    Color.clear
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-            .frame(maxWidth: .infinity)
-            .frame(height: 175)
-            
-            // 3. BOTTOM CONTROLS
-            VStack(alignment: .leading, spacing: 12) {
-                // Pre-informe (if available)
-                let cleanPre = dispatch.preinforme.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "---", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !cleanPre.isEmpty && !cleanPre.localizedCaseInsensitiveContains("A la espera") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("📋 PRE-INFORME:")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.45, blue: 0.55))
-                        Text(cleanPre)
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(isDark ? .white : Color(red: 0.06, green: 0.09, blue: 0.16))
-                    }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(isDark ? Color.black.opacity(0.35) : Color(red: 0.94, green: 0.96, blue: 0.98))
-                    .cornerRadius(14)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(isDark ? Color.white.opacity(0.12) : Color(red: 0.88, green: 0.91, blue: 0.94), lineWidth: 1)
-                    )
-                }
-                
-                // UNIDADES DESPACHADAS (Direct mini-cards without outer card wrapper)
-                let carrosList = dispatch.carros.components(separatedBy: CharacterSet(charactersIn: ",/ ")).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                
-                if carrosList.isEmpty {
-                    Text("---")
-                        .font(.system(size: 13, weight: .black))
-                        .foregroundColor(Color(red: 0.97, green: 0.44, blue: 0.44))
-                } else if carrosList.count == 1 && carrosList[0].caseInsensitiveCompare("PERSONAL") == .orderedSame {
-                    Text("🧑‍🚒 PERSONAL")
-                        .font(.system(size: 13, weight: .black))
-                        .foregroundColor(Color(red: 0.97, green: 0.44, blue: 0.44))
-                } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(carrosList, id: \.self) { carroName in
-                                let vehicleData = dispatch.unidades[carroName]
-                                let solConductor = vehicleData?.solicitudConductorAt ?? ""
-                                let solPersonal = vehicleData?.solicitudPersonalAt ?? ""
-                                let emoji = getVehicleEmoji(carro: carroName)
-                                
-                                HStack(spacing: 6) {
-                                    Text(emoji)
-                                        .font(.system(size: 15))
-                                    Text(carroName)
-                                        .font(.system(size: 13, weight: .black))
-                                        .foregroundColor(isDark ? .white : Color(red: 0.06, green: 0.09, blue: 0.16))
-                                    
-                                    if !solConductor.isEmpty {
-                                        Text("12-10")
-                                            .font(.system(size: 9, weight: .black))
-                                            .foregroundColor(Color(red: 0.98, green: 0.75, blue: 0.14))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Color(red: 0.96, green: 0.62, blue: 0.04).opacity(0.25))
-                                            .cornerRadius(6)
-                                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(red: 0.96, green: 0.62, blue: 0.04).opacity(0.7), lineWidth: 1))
-                                    }
-                                    
-                                    if !solPersonal.isEmpty {
-                                        Text("6-6")
-                                            .font(.system(size: 9, weight: .black))
-                                            .foregroundColor(Color(red: 0.38, green: 0.65, blue: 0.98))
-                                            .padding(.horizontal, 5)
-                                            .padding(.vertical, 2)
-                                            .background(Color(red: 0.23, green: 0.51, blue: 0.96).opacity(0.25))
-                                            .cornerRadius(6)
-                                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(red: 0.23, green: 0.51, blue: 0.96).opacity(0.7), lineWidth: 1))
-                                    }
-                                }
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(isDark ? Color.black.opacity(0.4) : Color.white)
-                                .cornerRadius(10)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(isDark ? Color.white.opacity(0.2) : Color(red: 0.88, green: 0.91, blue: 0.94), lineWidth: 1)
-                                )
-                            }
-                        }
-                    }
-                }
-                
-                let clean67 = dispatch.hora67.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !clean67.isEmpty {
-                    Text("✓ CONTROL DE EMERGENCIA (6-7): \(clean67)")
-                        .font(.system(size: 11, weight: .black))
-                        .foregroundColor(Color.goGreen)
-                        .padding(8)
-                        .frame(maxWidth: .infinity)
-                        .background(Color.goGreen.opacity(0.12))
-                        .cornerRadius(8)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.goGreen.opacity(0.3), lineWidth: 1))
-                }
-                
-                // Action Buttons: Visible only when firefighter is 0-9 or already attending
-                if (baseState == "0-9" || isAttending) && !isSpecial {
-                    VStack(spacing: 0) {
-                        Spacer().frame(height: 4)
+            // LAYER 1: CONTENT WITH TOP & BOTTOM GRADIENT OVERLAYS
+            VStack(spacing: 0) {
+                // TOP HEADER: Gradient fading downwards into transparency over the map
+                VStack(alignment: .leading, spacing: 4) {
+                    // Top row: ¡DESPACHO ACTIVO! and Time
+                    HStack {
+                        Text(titleText)
+                            .font(.system(size: 12, weight: .black))
+                            .foregroundColor(isDark ? titleColor : (isAttending ? Color.goGreen : Color(red: 0.53, green: 0.10, blue: 0.10)))
+                            .tracking(0.5)
                         
-                        if isAttending {
-                            Button(action: {
-                                viewModel.attendService(dispatchId: dispatch.idServicio, attend: false)
-                            }) {
-                                Text("CANCELAR ASISTENCIA")
-                                    .font(.system(size: 13, weight: .black))
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 48)
-                                    .foregroundColor(Color.bomberosRed)
-                                    .background(Color.bomberosRed.opacity(0.15))
-                                    .cornerRadius(24)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 24)
-                                            .stroke(Color.bomberosRed.opacity(0.5), lineWidth: 1)
-                                    )
-                            }
-                        } else {
-                            let canAttend = baseState == "0-9" && !inService && !isSpecial
-                            
-                            HStack(spacing: 10) {
-                                // ASISTIR (Crimson / Ruby Red Filled Pill Button)
-                                Button(action: {
-                                    viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
-                                }) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "checkmark")
-                                            .font(.system(size: 13, weight: .bold))
-                                        Text("ASISTIR")
-                                            .font(.system(size: 13, weight: .black))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 48)
-                                    .foregroundColor(canAttend ? .white : Color(red: 0.58, green: 0.64, blue: 0.72))
-                                    .background(canAttend ? Color(red: 0.53, green: 0.10, blue: 0.10) : Color.white.opacity(0.08))
-                                    .cornerRadius(24)
-                                }
-                                .disabled(!canAttend)
-                                
-                                // NO ASISTIR (Outlined Pill Button)
-                                Button(action: {
-                                    viewModel.declineService(dispatchId: dispatch.idServicio)
-                                }) {
-                                    HStack(spacing: 6) {
-                                        Image(systemName: "xmark")
-                                            .font(.system(size: 13, weight: .bold))
-                                        Text(isDeclined ? "NO ASISTIRÉ" : "NO ASISTIR")
-                                            .font(.system(size: 13, weight: .black))
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 48)
-                                    .foregroundColor(isDeclined ? .white : Color(red: 0.94, green: 0.27, blue: 0.27))
-                                    .background(isDeclined ? Color.bomberosRed : Color.black.opacity(0.1))
-                                    .cornerRadius(24)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 24)
-                                            .stroke(isDeclined ? Color.clear : Color(red: 0.94, green: 0.27, blue: 0.27).opacity(0.5), lineWidth: 1.2)
-                                    )
-                                }
-                                .disabled(isDeclined || inService || baseState != "0-9")
-                            }
-                        }
+                        Spacer()
+                        
+                        Text(dispatch.horaDespacho.isEmpty ? "--:--" : dispatch.horaDespacho)
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(isDark ? Color(red: 0.8, green: 0.84, blue: 0.88) : Color(red: 0.39, green: 0.45, blue: 0.55))
                     }
-                    .transition(.asymmetric(
-                        insertion: .opacity.combined(with: .move(edge: .bottom)),
-                        removal: .opacity.combined(with: .move(edge: .bottom))
-                    ))
+                    
+                    Spacer().frame(height: 2)
+                    
+                    // Clave (Large bold title)
+                    let claveText = (dispatch.clave == "10-12" && !dispatch.claveApoyo.isEmpty) ? "\(dispatch.clave) (\(dispatch.claveApoyo))" : (dispatch.clave.isEmpty ? "10-0" : dispatch.clave)
+                    Text(claveText)
+                        .font(.system(size: 34, weight: .black))
+                        .foregroundColor(isDark ? .white : Color(red: 0.06, green: 0.09, blue: 0.16))
+                        .lineLimit(1)
+                    
+                    // Location / Address (Primary address below Clave, displayed ONLY if valid)
+                    let cleanLugar = cleanLugarDisplay(dispatch.lugar)
+                    if !cleanLugar.isEmpty {
+                        Text(cleanLugar.uppercased())
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(isDark ? Color(red: 0.88, green: 0.91, blue: 0.94) : Color(red: 0.20, green: 0.25, blue: 0.33))
+                            .lineLimit(2)
+                    }
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    LinearGradient(
+                        colors: isDark ? [
+                            Color(red: 0.18, green: 0.02, blue: 0.02, opacity: 0.98),
+                            Color(red: 0.14, green: 0.02, blue: 0.02, opacity: 0.94),
+                            Color(red: 0.12, green: 0.02, blue: 0.02, opacity: 0.85),
+                            Color(red: 0.09, green: 0.01, blue: 0.01, opacity: 0.50),
+                            Color.clear
+                        ] : [
+                            Color.white,
+                            Color.white.opacity(0.96),
+                            Color.white.opacity(0.86),
+                            Color.white.opacity(0.50),
+                            Color.clear
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 
-                // Operator Console Badge ("EN CONSOLA: ...")
-                if !operadorName.isEmpty {
-                    Text("EN CONSOLA: \(formatOperatorCadName(operadorName).uppercased())")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(isDark ? Color(red: 0.8, green: 0.84, blue: 0.88) : Color(red: 0.28, green: 0.33, blue: 0.41))
-                        .tracking(0.5)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .frame(maxWidth: .infinity)
+                // CENTER VIEWPORT: Expanded transparent clickable area to view and tap the map
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 180)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        openNavigation()
+                    }
+                
+                // BOTTOM CONTROLS: Gradient fading upwards into transparency over the map
+                VStack(alignment: .leading, spacing: 12) {
+                    // Pre-informe (if available)
+                    let cleanPre = dispatch.preinforme.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "---", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleanPre.isEmpty && !cleanPre.localizedCaseInsensitiveContains("A la espera") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("📋 PRE-INFORME:")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.45, blue: 0.55))
+                            Text(cleanPre)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(isDark ? .white : Color(red: 0.06, green: 0.09, blue: 0.16))
+                        }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .background(isDark ? Color.black.opacity(0.35) : Color(red: 0.94, green: 0.96, blue: 0.98))
                         .cornerRadius(14)
                         .overlay(
                             RoundedRectangle(cornerRadius: 14)
                                 .stroke(isDark ? Color.white.opacity(0.12) : Color(red: 0.88, green: 0.91, blue: 0.94), lineWidth: 1)
                         )
-                }
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Group {
-                    if isDark {
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.12, green: 0.02, blue: 0.02).opacity(0.8),
-                                Color(red: 0.10, green: 0.02, blue: 0.02).opacity(0.95),
-                                Color(red: 0.06, green: 0.01, blue: 0.01)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+                    }
+                    
+                    // UNIDADES DESPACHADAS (Direct mini-cards without outer card wrapper)
+                    let carrosList = dispatch.carros.components(separatedBy: CharacterSet(charactersIn: ",/ ")).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    
+                    if carrosList.isEmpty {
+                        Text("---")
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundColor(Color(red: 0.97, green: 0.44, blue: 0.44))
+                    } else if carrosList.count == 1 && carrosList[0].caseInsensitiveCompare("PERSONAL") == .orderedSame {
+                        Text("🧑‍🚒 PERSONAL")
+                            .font(.system(size: 13, weight: .black))
+                            .foregroundColor(Color(red: 0.97, green: 0.44, blue: 0.44))
                     } else {
-                        Color(red: 0.97, green: 0.98, blue: 0.99)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(carrosList, id: \.self) { carroName in
+                                    let vehicleData = dispatch.unidades[carroName]
+                                    let solConductor = vehicleData?.solicitudConductorAt ?? ""
+                                    let solPersonal = vehicleData?.solicitudPersonalAt ?? ""
+                                    let emoji = getVehicleEmoji(carro: carroName)
+                                    
+                                    HStack(spacing: 6) {
+                                        Text(emoji)
+                                            .font(.system(size: 15))
+                                        Text(carroName)
+                                            .font(.system(size: 13, weight: .black))
+                                            .foregroundColor(isDark ? .white : Color(red: 0.06, green: 0.09, blue: 0.16))
+                                        
+                                        if !solConductor.isEmpty {
+                                            Text("12-10")
+                                                .font(.system(size: 9, weight: .black))
+                                                .foregroundColor(Color(red: 0.98, green: 0.75, blue: 0.14))
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 2)
+                                                .background(Color(red: 0.96, green: 0.62, blue: 0.04).opacity(0.25))
+                                                .cornerRadius(6)
+                                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(red: 0.96, green: 0.62, blue: 0.04).opacity(0.7), lineWidth: 1))
+                                        }
+                                        
+                                        if !solPersonal.isEmpty {
+                                            Text("6-6")
+                                                .font(.system(size: 9, weight: .black))
+                                                .foregroundColor(Color(red: 0.38, green: 0.65, blue: 0.98))
+                                                .padding(.horizontal, 5)
+                                                .padding(.vertical, 2)
+                                                .background(Color(red: 0.23, green: 0.51, blue: 0.96).opacity(0.25))
+                                                .cornerRadius(6)
+                                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color(red: 0.23, green: 0.51, blue: 0.96).opacity(0.7), lineWidth: 1))
+                                        }
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(isDark ? Color.black.opacity(0.4) : Color.white)
+                                    .cornerRadius(10)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(isDark ? Color.white.opacity(0.2) : Color(red: 0.88, green: 0.91, blue: 0.94), lineWidth: 1)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    let clean67 = dispatch.hora67.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !clean67.isEmpty {
+                        Text("✓ CONTROL DE EMERGENCIA (6-7): \(clean67)")
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundColor(Color.goGreen)
+                            .padding(8)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.goGreen.opacity(0.12))
+                            .cornerRadius(8)
+                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.goGreen.opacity(0.3), lineWidth: 1))
+                    }
+                    
+                    // Action Buttons: Visible only when firefighter is 0-9, already attending, or declined
+                    if (baseState == "0-9" || isAttending || isDeclined) && !isSpecial {
+                        VStack(spacing: 0) {
+                            Spacer().frame(height: 4)
+                            
+                            if isAttending {
+                                Button(action: {
+                                    viewModel.attendService(dispatchId: dispatch.idServicio, attend: false)
+                                }) {
+                                    Text("CANCELAR ASISTENCIA")
+                                        .font(.system(size: 13, weight: .black))
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 48)
+                                        .foregroundColor(Color.bomberosRed)
+                                        .background(Color.bomberosRed.opacity(0.15))
+                                        .cornerRadius(24)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 24)
+                                                .stroke(Color.bomberosRed.opacity(0.5), lineWidth: 1)
+                                        )
+                                }
+                            } else {
+                                let canAttend = (baseState == "0-9" || isDeclined) && !inService && !isSpecial
+                                
+                                HStack(spacing: 10) {
+                                    // ASISTIR (Crimson / Ruby Red Filled Pill Button)
+                                    Button(action: {
+                                        viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
+                                    }) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "checkmark")
+                                                .font(.system(size: 13, weight: .bold))
+                                            Text("ASISTIR")
+                                                .font(.system(size: 13, weight: .black))
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 48)
+                                        .foregroundColor(canAttend ? .white : Color(red: 0.58, green: 0.64, blue: 0.72))
+                                        .background(canAttend ? Color(red: 0.53, green: 0.10, blue: 0.10) : Color.white.opacity(0.08))
+                                        .cornerRadius(24)
+                                    }
+                                    .disabled(!canAttend)
+                                    
+                                    // NO ASISTIR (Outlined Pill Button)
+                                    Button(action: {
+                                        viewModel.declineService(dispatchId: dispatch.idServicio)
+                                    }) {
+                                        HStack(spacing: 6) {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 13, weight: .bold))
+                                            Text(isDeclined ? "NO ASISTIRÉ" : "NO ASISTIR")
+                                                .font(.system(size: 13, weight: .black))
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 48)
+                                        .foregroundColor(isDeclined ? .white : Color(red: 0.94, green: 0.27, blue: 0.27))
+                                        .background(isDeclined ? Color.bomberosRed : Color.black.opacity(0.1))
+                                        .cornerRadius(24)
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 24)
+                                                .stroke(isDeclined ? Color.clear : Color(red: 0.94, green: 0.27, blue: 0.27).opacity(0.5), lineWidth: 1.2)
+                                        )
+                                    }
+                                    .disabled(isDeclined || inService || baseState != "0-9")
+                                }
+                            }
+                        }
+                        .transition(.asymmetric(
+                            insertion: .opacity.combined(with: .move(edge: .bottom)),
+                            removal: .opacity.combined(with: .move(edge: .bottom))
+                        ))
+                    }
+                    
+                    // Operator Console Badge ("EN CONSOLA: ...")
+                    if !operadorName.isEmpty {
+                        Text("EN CONSOLA: \(formatOperatorCadName(operadorName).uppercased())")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(isDark ? Color(red: 0.8, green: 0.84, blue: 0.88) : Color(red: 0.28, green: 0.33, blue: 0.41))
+                            .tracking(0.5)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .frame(maxWidth: .infinity)
+                            .background(isDark ? Color.black.opacity(0.35) : Color(red: 0.94, green: 0.96, blue: 0.98))
+                            .cornerRadius(14)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(isDark ? Color.white.opacity(0.12) : Color(red: 0.88, green: 0.91, blue: 0.94), lineWidth: 1)
+                            )
                     }
                 }
-            )
+                .padding(.horizontal, 16)
+                .padding(.top, 14)
+                .padding(.bottom, 14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    LinearGradient(
+                        colors: isDark ? [
+                            Color.clear,
+                            Color(red: 0.09, green: 0.01, blue: 0.01, opacity: 0.50),
+                            Color(red: 0.10, green: 0.02, blue: 0.02, opacity: 0.85),
+                            Color(red: 0.08, green: 0.01, blue: 0.01, opacity: 0.95),
+                            Color(red: 0.06, green: 0.01, blue: 0.01, opacity: 0.98)
+                        ] : [
+                            Color.clear,
+                            Color.white.opacity(0.50),
+                            Color.white.opacity(0.86),
+                            Color.white.opacity(0.96),
+                            Color.white
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 24))
         .overlay(
@@ -684,31 +694,26 @@ struct IncidentMapPreview: View {
     let clave: String
     var lugar: String = ""
     let isDark: Bool
-
-    private var hasValidCoordinates: Bool {
-        !isPending && lat != 0.0 && lng != 0.0 && (lat != cuartelLat || lng != cuartelLng)
-    }
+    var isFullScreen: Bool = false
 
     var body: some View {
+        let finalLat = (lat == 0.0 || isPending) ? cuartelLat : lat
+        let finalLng = (lng == 0.0 || isPending) ? cuartelLng : lng
+
         ZStack {
             // Solid native fallback background
             (isDark ? Color(red: 0.08, green: 0.02, blue: 0.02) : Color(red: 0.94, green: 0.96, blue: 0.98))
                 .ignoresSafeArea()
 
-            if hasValidCoordinates {
-                IncidentWebView(
-                    lat: lat,
-                    lng: lng,
-                    clave: clave,
-                    isDark: isDark
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                TacticalRadarScanner(clave: clave, isDark: isDark)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            IncidentWebView(
+                lat: finalLat,
+                lng: finalLng,
+                clave: clave,
+                isDark: isDark,
+                isFullScreen: isFullScreen
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .animation(.easeInOut(duration: 0.4), value: hasValidCoordinates)
     }
 }
 
@@ -718,6 +723,7 @@ struct IncidentWebView: UIViewRepresentable {
     let lng: Double
     let clave: String
     let isDark: Bool
+    var isFullScreen: Bool = false
 
     class Coordinator: NSObject {
         var lastLat: Double = 0.0
@@ -754,7 +760,19 @@ struct IncidentWebView: UIViewRepresentable {
         } else if hasCoordChange {
             coord.lastLat = lat
             coord.lastLng = lng
-            let js = "if (window.map) { window.map.setView([\(lat), \(lng)], 15); }"
+            let js: String
+            if isFullScreen {
+                js = "if (window.map) { window.map.setView([\(lat), \(lng)], 15); }"
+            } else {
+                js = """
+                var targetY = 180;
+                var cardHeight = window.innerHeight || document.documentElement.clientHeight || 420;
+                var dy = (cardHeight / 2) - targetY;
+                var dLatPerDp = 0.0000154;
+                var centerLat = \(lat) - (dy * dLatPerDp);
+                if (window.map) { window.map.setView([centerLat, \(lng)], 15); }
+                """
+            }
             uiView.evaluateJavaScript(js, completionHandler: nil)
         }
     }
@@ -769,6 +787,19 @@ struct IncidentWebView: UIViewRepresentable {
         let pinColor = getClavePinHex(clave: clave)
         let tileUrl = "https://mt1.google.com/vt/lyrs=m&hl=es&x={x}&y={y}&z={z}"
         let mapBg = isDark ? "#0f172a" : "#f1f5f9"
+
+        let centerScript: String
+        if isFullScreen {
+            centerScript = "var centerLat = \(lat);"
+        } else {
+            centerScript = """
+            var targetY = 180;
+            var cardHeight = window.innerHeight || document.documentElement.clientHeight || 420;
+            var dy = (cardHeight / 2) - targetY;
+            var dLatPerDp = 0.0000154;
+            var centerLat = \(lat) - (dy * dLatPerDp);
+            """
+        }
 
         let html = """
         <!DOCTYPE html>
@@ -816,11 +847,7 @@ struct IncidentWebView: UIViewRepresentable {
         <body>
             <div id="map"></div>
             <script>
-                var targetY = 135;
-                var cardHeight = window.innerHeight || document.documentElement.clientHeight || 300;
-                var dy = (cardHeight / 2) - targetY;
-                var dLatPerDp = 0.0000154;
-                var centerLat = \(lat) - (dy * dLatPerDp);
+                \(centerScript)
 
                 window.map = L.map('map', {
                     zoomControl: false,

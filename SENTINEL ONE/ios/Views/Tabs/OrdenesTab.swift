@@ -2,36 +2,59 @@ import SwiftUI
 
 struct OrdenesTab: View {
     @ObservedObject var viewModel: SisBomViewModel
+    @State private var showCreateOrderDialog: Bool = false
 
     var body: some View {
         let isDark = viewModel.isDarkMode
+        let myRadial = viewModel.currentUser?.idRadial.uppercased().trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let canPublishOrders = (myRadial == "1" || myRadial == "01" || (viewModel.currentUser?.cargo.uppercased().contains("COMANDANTE") == true))
+        
         let ordenes = viewModel.alertsList
             .filter { $0.tipo == "orden" }
             .sorted(by: { $0.idAlerta > $1.idAlerta })
         
-        ScrollView {
-            VStack(spacing: 16) {
-                if ordenes.isEmpty {
-                    VStack {
-                        Spacer().frame(height: 100)
-                        Text("No se registran órdenes oficiales este mes.")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                } else {
-                    // Display in 2-column Grid matching Android chunking (ANDROID 3.jpeg)
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
-                        ForEach(ordenes) { orden in
-                            OrdenItemCard(orden: orden, viewModel: viewModel)
+        ZStack(alignment: .bottomTrailing) {
+            ScrollView {
+                VStack(spacing: 16) {
+                    if ordenes.isEmpty {
+                        VStack {
+                            Spacer().frame(height: 100)
+                            Text("No se registran órdenes oficiales este mes.")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
                         }
+                    } else {
+                        // Display in 2-column Grid matching Android chunking (ANDROID 3.jpeg)
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                            ForEach(ordenes) { orden in
+                                OrdenItemCard(orden: orden, viewModel: viewModel)
+                            }
+                        }
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
+                    
+                    Spacer(minLength: 80)
                 }
-                
-                Spacer(minLength: 20)
+                .padding(.top, 8)
             }
-            .padding(.top, 8)
+
+            if canPublishOrders {
+                Button(action: { showCreateOrderDialog = true }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 22, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(width: 56, height: 56)
+                        .background(Color.bomberosRed)
+                        .clipShape(Circle())
+                        .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
+        }
+        .sheet(isPresented: $showCreateOrderDialog) {
+            CreateOrderModal(viewModel: viewModel, isPresented: $showCreateOrderDialog)
         }
     }
 }
@@ -284,6 +307,179 @@ struct OrdenDetailView: View {
                         }
                     }
                     .padding(16)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - CreateOrderModal Component (Comandancia)
+struct CreateOrderModal: View {
+    @ObservedObject var viewModel: SisBomViewModel
+    @Binding var isPresented: Bool
+    
+    @State private var numero: String = ""
+    @State private var fecha: String = ""
+    @State private var cuerpo: String = ""
+    @State private var firmaNombre: String = ""
+    @State private var firmaCargo: String = ""
+    @State private var isSaving: Bool = false
+    @State private var errorMessage: String? = nil
+    
+    init(viewModel: SisBomViewModel, isPresented: Binding<Bool>) {
+        self.viewModel = viewModel
+        self._isPresented = isPresented
+        let dateFmt = DateFormatter()
+        dateFmt.dateFormat = "dd-MM-yyyy"
+        let todayStr = dateFmt.string(from: Date())
+        _fecha = State(initialValue: todayStr)
+        _firmaNombre = State(initialValue: viewModel.currentUser?.nombreBombero.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "")
+        _firmaCargo = State(initialValue: viewModel.currentUser?.cargo.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "")
+    }
+    
+    var body: some View {
+        let isDark = viewModel.isDarkMode
+        
+        NavigationView {
+            ZStack {
+                (isDark ? Color.navyDeep : Color(red: 0.94, green: 0.96, blue: 0.98))
+                    .ignoresSafeArea()
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if let error = errorMessage {
+                            Text(error)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.bomberosRed)
+                                .padding(10)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.bomberosRed.opacity(0.1))
+                                .cornerRadius(8)
+                        }
+                        
+                        // Número de Orden
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("NÚMERO DE ORDEN *")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundColor(isDark ? .white.opacity(0.7) : .textSecondary)
+                            TextField("EJ: 12/2024", text: $numero)
+                                .padding(12)
+                                .background(isDark ? Color.navyDark : Color.white)
+                                .cornerRadius(10)
+                                .foregroundColor(isDark ? .white : .textDark)
+                        }
+                        
+                        // Fecha
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("FECHA (DD-MM-YYYY) *")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundColor(isDark ? .white.opacity(0.7) : .textSecondary)
+                            TextField("DD-MM-YYYY", text: $fecha)
+                                .padding(12)
+                                .background(isDark ? Color.navyDark : Color.white)
+                                .cornerRadius(10)
+                                .foregroundColor(isDark ? .white : .textDark)
+                        }
+                        
+                        // Cuerpo / Contenido
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("CUERPO DE LA ORDEN DEL DÍA *")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundColor(isDark ? .white.opacity(0.7) : .textSecondary)
+                            TextEditor(text: $cuerpo)
+                                .frame(height: 120)
+                                .padding(8)
+                                .background(isDark ? Color.navyDark : Color.white)
+                                .cornerRadius(10)
+                                .foregroundColor(isDark ? .white : .textDark)
+                        }
+                        
+                        // Firma Nombre
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("NOMBRE DE QUIEN FIRMA *")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundColor(isDark ? .white.opacity(0.7) : .textSecondary)
+                            TextField("NOMBRE", text: $firmaNombre)
+                                .padding(12)
+                                .background(isDark ? Color.navyDark : Color.white)
+                                .cornerRadius(10)
+                                .foregroundColor(isDark ? .white : .textDark)
+                        }
+                        
+                        // Firma Cargo
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("CARGO DE QUIEN FIRMA *")
+                                .font(.system(size: 11, weight: .black))
+                                .foregroundColor(isDark ? .white.opacity(0.7) : .textSecondary)
+                            TextField("CARGO", text: $firmaCargo)
+                                .padding(12)
+                                .background(isDark ? Color.navyDark : Color.white)
+                                .cornerRadius(10)
+                                .foregroundColor(isDark ? .white : .textDark)
+                        }
+                        
+                        Spacer().frame(height: 10)
+                        
+                        // Submit Button
+                        Button(action: {
+                            let cleanNum = numero.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let cleanFecha = fecha.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let cleanCuerpo = cuerpo.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let cleanFNombre = firmaNombre.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let cleanFCargo = firmaCargo.trimmingCharacters(in: .whitespacesAndNewlines)
+                            
+                            guard !cleanNum.isEmpty, !cleanFecha.isEmpty, !cleanCuerpo.isEmpty,
+                                  !cleanFNombre.isEmpty, !cleanFCargo.isEmpty else {
+                                errorMessage = "Complete todos los campos obligatorios."
+                                return
+                            }
+                            
+                            isSaving = true
+                            errorMessage = nil
+                            viewModel.publishOrder(
+                                numero: cleanNum,
+                                fecha: cleanFecha,
+                                cuerpo: cleanCuerpo,
+                                fNombre: cleanFNombre.uppercased(),
+                                fCargo: cleanFCargo.uppercased(),
+                                onSuccess: {
+                                    isSaving = false
+                                    isPresented = false
+                                },
+                                onFailure: { err in
+                                    isSaving = false
+                                    errorMessage = err.localizedDescription
+                                }
+                            )
+                        }) {
+                            HStack {
+                                if isSaving {
+                                    ProgressView().progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                } else {
+                                    Image(systemName: "doc.text.fill")
+                                    Text("PUBLICAR ORDEN DEL DÍA")
+                                        .font(.system(size: 13, weight: .black))
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .foregroundColor(.white)
+                            .background(Color.bomberosRed)
+                            .cornerRadius(14)
+                        }
+                        .disabled(isSaving)
+                    }
+                    .padding(20)
+                }
+            }
+            .navigationTitle("Emitir Orden")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancelar") {
+                        isPresented = false
+                    }
+                    .foregroundColor(isDark ? .white : .textDark)
                 }
             }
         }

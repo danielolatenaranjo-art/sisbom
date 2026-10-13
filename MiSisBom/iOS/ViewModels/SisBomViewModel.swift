@@ -177,10 +177,7 @@ class SisBomViewModel: ObservableObject {
             AppDelegate.launchDispatchId = nil
         }
         
-        let lastSeenVersion = UserDefaults.standard.string(forKey: "last_seen_version") ?? ""
-        if lastSeenVersion != "2.1.6" {
-            self.showChangelogDialog = true
-        }
+        self.showChangelogDialog = false
     }
     
     @objc private func handleOpenChatRoomNotification(_ notification: Foundation.Notification) {
@@ -911,6 +908,146 @@ class SisBomViewModel: ObservableObject {
         }
     }
     
+    // EMITIR ALERTA OFICIAL (COMANDANCIA)
+    func publishAlert(
+        razon: String,
+        mensaje: String,
+        grado: String,
+        duracion: String,
+        aQuien: String,
+        onSuccess: @escaping () -> Void,
+        onFailure: @escaping (Error) -> Void
+    ) {
+        guard let user = currentUser else { return }
+        let db = Firestore.firestore()
+        db.collection("alertas").getDocuments { [weak self] snapshot, error in
+            if let error = error {
+                DispatchQueue.main.async { onFailure(error) }
+                return
+            }
+            
+            var maxId = 0
+            if let docs = snapshot?.documents {
+                for doc in docs {
+                    if let idNum = Int(doc.documentID), idNum > maxId {
+                        maxId = idNum
+                    }
+                }
+            }
+            let newId = maxId + 1
+            
+            let now = Date()
+            let dateFmt = DateFormatter()
+            dateFmt.dateFormat = "dd-MM-yyyy"
+            let timeFmt = DateFormatter()
+            timeFmt.dateFormat = "HH:mm"
+            
+            let dStr = dateFmt.string(from: now)
+            let tStr = timeFmt.string(from: now)
+            
+            let oficial = "\(user.cargo.trimmingCharacters(in: .whitespacesAndNewlines)) - \(user.nombreBombero.trimmingCharacters(in: .whitespacesAndNewlines))"
+            var finalMensaje = mensaje
+            if duracion == "C" {
+                finalMensaje = "\(dStr)/\(tStr)/\(user.idRegistro.trimmingCharacters(in: .whitespacesAndNewlines)): \(mensaje) |"
+            }
+            
+            let newAlert = AlertaItem(
+                idAlerta: "\(newId)",
+                tipo: "alerta",
+                gradoAlerta: grado,
+                aQuienAlerta: aQuien,
+                quienAlerta: oficial,
+                razonAlerta: razon,
+                mensajeAlerta: finalMensaje,
+                fechaAlerta: "'\(dStr)",
+                horaAlerta: "'\(tStr)",
+                duracion: duracion,
+                conforme: "",
+                fijar: ""
+            )
+            
+            self?.repository.createAlert(alert: newAlert) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        onSuccess()
+                    case .failure(let err):
+                        onFailure(err)
+                    }
+                }
+            }
+        }
+    }
+    
+    // EMITIR ORDEN DEL DÍA (COMANDANCIA)
+    func publishOrder(
+        numero: String,
+        fecha: String,
+        cuerpo: String,
+        fNombre: String,
+        fCargo: String,
+        onSuccess: @escaping () -> Void,
+        onFailure: @escaping (Error) -> Void
+    ) {
+        guard let user = currentUser else { return }
+        let db = Firestore.firestore()
+        db.collection("alertas").getDocuments { [weak self] snapshot, error in
+            if let error = error {
+                DispatchQueue.main.async { onFailure(error) }
+                return
+            }
+            
+            var maxId = 0
+            if let docs = snapshot?.documents {
+                for doc in docs {
+                    if let idNum = Int(doc.documentID), idNum > maxId {
+                        maxId = idNum
+                    }
+                }
+            }
+            let newId = maxId + 1
+            
+            let now = Date()
+            let dateFmt = DateFormatter()
+            dateFmt.dateFormat = "dd-MM-yyyy"
+            let timeFmt = DateFormatter()
+            timeFmt.dateFormat = "HH:mm"
+            
+            let dStr = dateFmt.string(from: now)
+            let tStr = timeFmt.string(from: now)
+            
+            let newAlert = AlertaItem(
+                idAlerta: "\(newId)",
+                tipo: "orden",
+                gradoAlerta: "1",
+                aQuienAlerta: "TC",
+                quienAlerta: "\(user.cargo.trimmingCharacters(in: .whitespacesAndNewlines)) - \(user.nombreBombero.trimmingCharacters(in: .whitespacesAndNewlines))",
+                razonAlerta: "ORDEN DEL DIA \(numero)",
+                mensajeAlerta: cuerpo,
+                fechaAlerta: "'\(dStr)",
+                horaAlerta: "'\(tStr)",
+                duracion: "i",
+                conforme: "",
+                fijar: "",
+                numeroOrden: numero,
+                fechaOrden: "'\(fecha)",
+                firmaNombre: fNombre,
+                firmaCargo: fCargo
+            )
+            
+            self?.repository.createAlert(alert: newAlert) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success:
+                        onSuccess()
+                    case .failure(let err):
+                        onFailure(err)
+                    }
+                }
+            }
+        }
+    }
+    
     // SOLICITAR APERTURA DE PUERTA (TIMBRE)
     func solicitarAperturaPuerta(onSuccess: @escaping () -> Void, onFailure: @escaping (Error) -> Void) {
         guard let user = currentUser else { return }
@@ -1103,8 +1240,22 @@ class SisBomViewModel: ObservableObject {
         }
     }
     
+    private func findVolumeSlider(in view: UIView) -> UISlider? {
+        if let slider = view as? UISlider { return slider }
+        for subview in view.subviews {
+            if let found = findVolumeSlider(in: subview) { return found }
+        }
+        return nil
+    }
+
     private func forceSystemVolumeMax() {
         DispatchQueue.main.async {
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.duckOthers])
+                try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {}
+
             let volumeView = MPVolumeView(frame: CGRect(x: -1000, y: -1000, width: 1, height: 1))
             volumeView.isHidden = false
             volumeView.alpha = 0.01
@@ -1116,12 +1267,10 @@ class SisBomViewModel: ObservableObject {
             
             if let window = keyWindow {
                 window.addSubview(volumeView)
-                for subview in volumeView.subviews {
-                    if let slider = subview as? UISlider {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
-                            slider.setValue(1.0, animated: false)
-                        }
-                        break
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+                    if let slider = self.findVolumeSlider(in: volumeView) {
+                        slider.setValue(1.0, animated: false)
+                        slider.sendActions(for: .valueChanged)
                     }
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {

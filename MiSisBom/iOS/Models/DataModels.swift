@@ -14,9 +14,10 @@ struct UserPersonal: Identifiable, Codable, Equatable {
     let foto: String
     let estado: String
     var deviceId: String
+    let puerta: Bool
 
     enum CodingKeys: String, CodingKey {
-        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado, deviceId
+        case idRegistro, nombreBombero, idRadial, contrasena, activo, conductor, enServicio, cargo, foto, estado, deviceId, puerta
     }
 
     init(
@@ -30,7 +31,8 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         cargo: String = "",
         foto: String = "",
         estado: String = "",
-        deviceId: String = ""
+        deviceId: String = "",
+        puerta: Bool = false
     ) {
         self.idRegistro = idRegistro
         self.nombreBombero = nombreBombero
@@ -43,6 +45,7 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         self.foto = foto
         self.estado = estado
         self.deviceId = deviceId
+        self.puerta = puerta
     }
 
     // Direct initialization from Firestore document dictionary
@@ -115,6 +118,17 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         self.foto = data["foto"] as? String ?? ""
         self.estado = data["estado"] as? String ?? ""
         self.deviceId = data["deviceId"] as? String ?? ""
+
+        if let p = data["puerta"] as? Bool {
+            self.puerta = p
+        } else if let num = data["puerta"] as? NSNumber {
+            self.puerta = (num.intValue == 1)
+        } else if let str = data["puerta"] as? String {
+            let s = str.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            self.puerta = (s == "SI" || s == "1" || s == "TRUE" || s == "S")
+        } else {
+            self.puerta = false
+        }
     }
 
     init(from decoder: Decoder) throws {
@@ -188,6 +202,17 @@ struct UserPersonal: Identifiable, Codable, Equatable {
         } else {
             activo = false
         }
+
+        if let boolVal = try? container.decode(Bool.self, forKey: .puerta) {
+            puerta = boolVal
+        } else if let intVal = try? container.decode(Int.self, forKey: .puerta) {
+            puerta = (intVal == 1)
+        } else if let strVal = try? container.decode(String.self, forKey: .puerta) {
+            let s = strVal.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            puerta = (s == "1" || s == "SI" || s == "TRUE" || s == "S")
+        } else {
+            puerta = false
+        }
     }
 }
 
@@ -200,14 +225,88 @@ struct UnitInfo: Codable, Equatable {
     var driverRad: String = ""
     var obacRad: String = ""
     var count: String = ""
+    var cuantosBomberos: String = ""
     var status: String = ""
+    var conductor: String = ""
+    var obac: String = ""
+
+    enum CodingKeys: String, CodingKey {
+        case solicitudConductorAt, solicitudConductorTimestamp
+        case solicitudPersonalAt, solicitudPersonalTimestamp
+        case driverRad, obacRad, count, cuantosBomberos, status, conductor, obac
+    }
+
+    init(
+        solicitudConductorAt: String = "",
+        solicitudConductorTimestamp: Int64 = 0,
+        solicitudPersonalAt: String = "",
+        solicitudPersonalTimestamp: Int64 = 0,
+        driverRad: String = "",
+        obacRad: String = "",
+        count: String = "",
+        cuantosBomberos: String = "",
+        status: String = "",
+        conductor: String = "",
+        obac: String = ""
+    ) {
+        self.solicitudConductorAt = solicitudConductorAt
+        self.solicitudConductorTimestamp = solicitudConductorTimestamp
+        self.solicitudPersonalAt = solicitudPersonalAt
+        self.solicitudPersonalTimestamp = solicitudPersonalTimestamp
+        self.driverRad = driverRad
+        self.obacRad = obacRad
+        self.count = count
+        self.cuantosBomberos = cuantosBomberos
+        self.status = status
+        self.conductor = conductor.isEmpty ? driverRad : conductor
+        self.obac = obac.isEmpty ? obacRad : obac
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        solicitudConductorAt = try container.decodeIfPresent(String.self, forKey: .solicitudConductorAt) ?? ""
+        if let ts = try? container.decodeIfPresent(Int64.self, forKey: .solicitudConductorTimestamp) {
+            solicitudConductorTimestamp = ts
+        } else if let s = try? container.decodeIfPresent(String.self, forKey: .solicitudConductorTimestamp), let parsed = Int64(s) {
+            solicitudConductorTimestamp = parsed
+        } else {
+            solicitudConductorTimestamp = 0
+        }
+
+        solicitudPersonalAt = try container.decodeIfPresent(String.self, forKey: .solicitudPersonalAt) ?? ""
+        if let ts = try? container.decodeIfPresent(Int64.self, forKey: .solicitudPersonalTimestamp) {
+            solicitudPersonalTimestamp = ts
+        } else if let s = try? container.decodeIfPresent(String.self, forKey: .solicitudPersonalTimestamp), let parsed = Int64(s) {
+            solicitudPersonalTimestamp = parsed
+        } else {
+            solicitudPersonalTimestamp = 0
+        }
+
+        let dRad = try container.decodeIfPresent(String.self, forKey: .driverRad) ?? ""
+        let cRad = try container.decodeIfPresent(String.self, forKey: .conductor) ?? ""
+        driverRad = dRad.isEmpty ? cRad : dRad
+        conductor = cRad.isEmpty ? dRad : cRad
+
+        let oRad = try container.decodeIfPresent(String.self, forKey: .obacRad) ?? ""
+        let oStr = try container.decodeIfPresent(String.self, forKey: .obac) ?? ""
+        obacRad = oRad.isEmpty ? oStr : oRad
+        obac = oStr.isEmpty ? oRad : oStr
+
+        count = try container.decodeIfPresent(String.self, forKey: .count) ?? ""
+        cuantosBomberos = try container.decodeIfPresent(String.self, forKey: .cuantosBomberos) ?? ""
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? ""
+    }
 }
+
+typealias SisBomUser = UserPersonal
+
 
 // MARK: - Dispatch Model
 struct Dispatch: Identifiable, Codable, Equatable {
     var id: String { idServicio }
     let idServicio: String
     let clave: String
+    let claveApoyo: String
     let lugar: String
     let preinforme: String
     let carros: String // Can be parsed flexibly inside Repository
@@ -216,6 +315,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
     let hora67: String
     let quienDespacha: String
     let operadorFinal: String
+    let estado: String
+    let visibleMovil: Bool
     
     // Optional helper fields matching despacho.html
     let carrosTexto: String?
@@ -229,13 +330,14 @@ struct Dispatch: Identifiable, Codable, Equatable {
     var unidades: [String: UnitInfo] = [:]
 
     enum CodingKeys: String, CodingKey {
-        case idServicio, clave, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal
+        case idServicio, clave, claveApoyo, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal, estado, visibleMovil
         case carrosTexto, source, obacServicio, informeObac, fechaTermino, operadorInicial, lat, lng, unidades
     }
 
     init(
         idServicio: String = "",
         clave: String = "",
+        claveApoyo: String = "",
         lugar: String = "",
         preinforme: String = "",
         carros: String = "",
@@ -244,6 +346,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
         hora67: String = "",
         quienDespacha: String = "",
         operadorFinal: String = "",
+        estado: String = "activa",
+        visibleMovil: Bool = true,
         carrosTexto: String? = nil,
         source: String? = nil,
         obacServicio: String? = nil,
@@ -256,6 +360,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
     ) {
         self.idServicio = idServicio
         self.clave = clave
+        self.claveApoyo = claveApoyo
         self.lugar = lugar
         self.preinforme = preinforme
         self.carros = carros
@@ -264,6 +369,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
         self.hora67 = hora67
         self.quienDespacha = quienDespacha
         self.operadorFinal = operadorFinal
+        self.estado = estado
+        self.visibleMovil = visibleMovil
         self.carrosTexto = carrosTexto
         self.source = source
         self.obacServicio = obacServicio
@@ -279,6 +386,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         idServicio = try container.decodeIfPresent(String.self, forKey: .idServicio) ?? ""
         clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
+        claveApoyo = try container.decodeIfPresent(String.self, forKey: .claveApoyo) ?? ""
         lugar = try container.decodeIfPresent(String.self, forKey: .lugar) ?? ""
         preinforme = try container.decodeIfPresent(String.self, forKey: .preinforme) ?? ""
         horaDespacho = try container.decodeIfPresent(String.self, forKey: .horaDespacho) ?? ""
@@ -286,6 +394,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
         hora67 = try container.decodeIfPresent(String.self, forKey: .hora67) ?? ""
         quienDespacha = try container.decodeIfPresent(String.self, forKey: .quienDespacha) ?? ""
         operadorFinal = try container.decodeIfPresent(String.self, forKey: .operadorFinal) ?? ""
+        estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? "activa"
+        visibleMovil = try container.decodeIfPresent(Bool.self, forKey: .visibleMovil) ?? true
         
         carrosTexto = try container.decodeIfPresent(String.self, forKey: .carrosTexto)
         source = try container.decodeIfPresent(String.self, forKey: .source)
@@ -416,7 +526,7 @@ struct Vehicle: Identifiable, Codable, Equatable {
         case idCarro, clave, estado, enServicio
     }
 
-    init(idCarro: String = "", clave: String = "", estado: String = "0-8", enServicio: String = "0") {
+    init(idCarro: String = "", clave: String = "", estado: String = "1", enServicio: String = "0") {
         self.idCarro = idCarro
         self.clave = clave
         self.estado = estado
@@ -427,8 +537,29 @@ struct Vehicle: Identifiable, Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         idCarro = try container.decodeIfPresent(String.self, forKey: .idCarro) ?? ""
         clave = try container.decodeIfPresent(String.self, forKey: .clave) ?? ""
-        estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? "0-8"
-        enServicio = try container.decodeIfPresent(String.self, forKey: .enServicio) ?? "0"
+        
+        if let rawBool = try? container.decodeIfPresent(Bool.self, forKey: .estado) {
+            estado = rawBool ? "1" : "0"
+        } else if let rawInt = try? container.decodeIfPresent(Int.self, forKey: .estado) {
+            estado = rawInt == 0 ? "0" : "1"
+        } else if let rawStr = try? container.decodeIfPresent(String.self, forKey: .estado) {
+            let s = rawStr.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if s == "0" || s == "0-8" || s == "08" || s == "false" || s == "fuera de servicio" {
+                estado = "0"
+            } else {
+                estado = "1"
+            }
+        } else {
+            estado = "1"
+        }
+        
+        if let rawEnServicio = try? container.decodeIfPresent(String.self, forKey: .enServicio) {
+            enServicio = rawEnServicio
+        } else if let rawInt = try? container.decodeIfPresent(Int.self, forKey: .enServicio) {
+            enServicio = String(rawInt)
+        } else {
+            enServicio = "0"
+        }
     }
 }
 

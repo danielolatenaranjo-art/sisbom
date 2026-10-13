@@ -45,40 +45,48 @@ class FirebaseRepository {
     }
     
     func getDispatches(onChange: @escaping ([Dispatch]) -> Void) -> ListenerRegistration {
-        return db.collection("despachos").addSnapshotListener { snapshot, error in
-            guard let documents = snapshot?.documents else {
-                print("Error fetching dispatches: \(error?.localizedDescription ?? "Unknown error")")
-                return
-            }
-            let list = documents.compactMap { doc -> Dispatch? in
-                var data = doc.data()
-                // Inject document ID if missing in the map
-                if data["idServicio"] == nil {
-                    data["idServicio"] = doc.documentID
+        return db.collection("despachos")
+            .whereField("operadorFinal", isEqualTo: "")
+            .addSnapshotListener { snapshot, error in
+                guard let documents = snapshot?.documents else {
+                    print("Error fetching dispatches: \(error?.localizedDescription ?? "Unknown error")")
+                    return
                 }
-                if data["lat"] == nil {
-                    if let geo = data["geo"] as? [String: Any], let lat = geo["lat"] as? Double {
-                        data["lat"] = lat
-                    } else if let gps = data["ubicacionGps"] as? [String: Any], let lat = gps["lat"] as? Double {
-                        data["lat"] = lat
-                    } else if let alertGeo = data["alertanteGeo"] as? [String: Any], let lat = alertGeo["lat"] as? Double {
-                        data["lat"] = lat
+                let list = documents.compactMap { doc -> Dispatch? in
+                    var data = doc.data()
+                    // Inject document ID if missing in the map
+                    if data["idServicio"] == nil {
+                        data["idServicio"] = doc.documentID
                     }
-                }
-                if data["lng"] == nil {
-                    if let geo = data["geo"] as? [String: Any], let lng = (geo["lng"] ?? geo["lon"]) as? Double {
-                        data["lng"] = lng
-                    } else if let gps = data["ubicacionGps"] as? [String: Any], let lng = (gps["lng"] ?? gps["lon"]) as? Double {
-                        data["lng"] = lng
-                    } else if let alertGeo = data["alertanteGeo"] as? [String: Any], let lng = (alertGeo["lng"] ?? alertGeo["lon"]) as? Double {
-                        data["lng"] = lng
+                    if data["lat"] == nil {
+                        if let geo = data["geo"] as? [String: Any], let lat = geo["lat"] as? Double {
+                            data["lat"] = lat
+                        } else if let gps = data["ubicacionGps"] as? [String: Any], let lat = gps["lat"] as? Double {
+                            data["lat"] = lat
+                        } else if let alertGeo = data["alertanteGeo"] as? [String: Any], let lat = alertGeo["lat"] as? Double {
+                            data["lat"] = lat
+                        }
                     }
+                    if data["lng"] == nil {
+                        if let geo = data["geo"] as? [String: Any], let lng = (geo["lng"] ?? geo["lon"]) as? Double {
+                            data["lng"] = lng
+                        } else if let gps = data["ubicacionGps"] as? [String: Any], let lng = (gps["lng"] ?? gps["lon"]) as? Double {
+                            data["lng"] = lng
+                        } else if let alertGeo = data["alertanteGeo"] as? [String: Any], let lng = (alertGeo["lng"] ?? alertGeo["lon"]) as? Double {
+                            data["lng"] = lng
+                        }
+                    }
+                    guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
+                    return try? JSONDecoder().decode(Dispatch.self, from: jsonData)
+                }.filter { d in
+                    let estado = d.estado.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let isVisible = d.visibleMovil
+                    let isActiveState = (estado == "activa" || estado == "pre-despacho" || estado == "en curso" || estado.isEmpty)
+                    let notFinalized = estado != "cancelada" && estado != "finalizada" && estado != "cerrada" && estado != "terminada"
+                    return d.operadorFinal.isEmpty && isVisible && isActiveState && notFinalized
                 }
-                guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return nil }
-                return try? JSONDecoder().decode(Dispatch.self, from: jsonData)
+                onChange(list)
             }
-            onChange(list)
-        }
     }
     
     func getAlerts(onChange: @escaping ([AlertaItem]) -> Void) -> ListenerRegistration {
@@ -309,6 +317,35 @@ class FirebaseRepository {
     
     func deleteAlert(alertId: String, completion: @escaping (Result<Void, Error>) -> Void) {
         db.collection("alertas").document(alertId).delete { error in
+            if let error = error {
+                completion(.failure(error))
+            } else {
+                completion(.success(()))
+            }
+        }
+    }
+    
+    func createAlert(alert: AlertaItem, completion: @escaping (Result<Void, Error>) -> Void) {
+        let alertData: [String: Any] = [
+            "idAlerta": alert.idAlerta,
+            "tipo": alert.tipo,
+            "gradoAlerta": alert.gradoAlerta,
+            "aQuienAlerta": alert.aQuienAlerta,
+            "quienAlerta": alert.quienAlerta,
+            "razonAlerta": alert.razonAlerta,
+            "mensajeAlerta": alert.mensajeAlerta,
+            "fechaAlerta": alert.fechaAlerta,
+            "horaAlerta": alert.horaAlerta,
+            "duracion": alert.duracion,
+            "conforme": alert.conforme,
+            "fijar": alert.fijar,
+            "numeroOrden": alert.numeroOrden,
+            "fechaOrden": alert.fechaOrden,
+            "firmaNombre": alert.firmaNombre,
+            "firmaCargo": alert.firmaCargo
+        ]
+        
+        db.collection("alertas").document(alert.idAlerta).setData(alertData) { error in
             if let error = error {
                 completion(.failure(error))
             } else {

@@ -167,6 +167,33 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         Messaging.messaging().apnsToken = deviceToken
     }
     
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        print("Error registering for remote notifications: \(error.localizedDescription)")
+    }
+    
+    // Background Remote Notification (Wake-up on silent/data/content-available pushes)
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Messaging.messaging().appDidReceiveMessage(userInfo)
+        
+        let type = (userInfo["type"] as? String) ?? ((userInfo["aps"] as? [String: Any])?["type"] as? String) ?? ""
+        let payloadId = (userInfo["payloadId"] as? String) ?? (userInfo["doorKey"] as? String) ?? ""
+        
+        if (type == "DISPATCH" || type == "DISPATCH_UPDATE") && !payloadId.isEmpty {
+            AppDelegate.launchDispatchId = payloadId
+            NotificationCenter.default.post(
+                name: NSNotification.Name("OpenFullscreenDispatch"),
+                object: nil,
+                userInfo: ["dispatchId": payloadId]
+            )
+        }
+        
+        completionHandler(.newData)
+    }
+    
     // Foreground Notification Presentation
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,

@@ -315,6 +315,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
     let hora67: String
     let quienDespacha: String
     let operadorFinal: String
+    let estado: String
+    let visibleMovil: Bool
     
     // Optional helper fields matching despacho.html
     let carrosTexto: String?
@@ -328,7 +330,7 @@ struct Dispatch: Identifiable, Codable, Equatable {
     var unidades: [String: UnitInfo] = [:]
 
     enum CodingKeys: String, CodingKey {
-        case idServicio, clave, claveApoyo, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal
+        case idServicio, clave, claveApoyo, lugar, preinforme, carros, horaDespacho, fechaDespacho, hora67, quienDespacha, operadorFinal, estado, visibleMovil
         case carrosTexto, source, obacServicio, informeObac, fechaTermino, operadorInicial, lat, lng, unidades
     }
 
@@ -344,6 +346,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
         hora67: String = "",
         quienDespacha: String = "",
         operadorFinal: String = "",
+        estado: String = "activa",
+        visibleMovil: Bool = true,
         carrosTexto: String? = nil,
         source: String? = nil,
         obacServicio: String? = nil,
@@ -365,6 +369,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
         self.hora67 = hora67
         self.quienDespacha = quienDespacha
         self.operadorFinal = operadorFinal
+        self.estado = estado
+        self.visibleMovil = visibleMovil
         self.carrosTexto = carrosTexto
         self.source = source
         self.obacServicio = obacServicio
@@ -388,6 +394,8 @@ struct Dispatch: Identifiable, Codable, Equatable {
         hora67 = try container.decodeIfPresent(String.self, forKey: .hora67) ?? ""
         quienDespacha = try container.decodeIfPresent(String.self, forKey: .quienDespacha) ?? ""
         operadorFinal = try container.decodeIfPresent(String.self, forKey: .operadorFinal) ?? ""
+        estado = try container.decodeIfPresent(String.self, forKey: .estado) ?? "activa"
+        visibleMovil = try container.decodeIfPresent(Bool.self, forKey: .visibleMovil) ?? true
         
         carrosTexto = try container.decodeIfPresent(String.self, forKey: .carrosTexto)
         source = try container.decodeIfPresent(String.self, forKey: .source)
