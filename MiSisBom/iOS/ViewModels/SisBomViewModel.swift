@@ -72,6 +72,7 @@ class SisBomViewModel: ObservableObject {
     @Published var showChangelogDialog: Bool = false
     @Published var fullscreenDispatchId: String? = nil
     @Published var declinedServiceIds: Set<String> = []
+    @Published var dismissedDispatchIds: Set<String> = []
     private var pendingChatId: String? = nil
     
     // Feedback strings
@@ -903,19 +904,47 @@ class SisBomViewModel: ObservableObject {
     
     func declineService(dispatchId: String) {
         fullscreenDispatchId = nil
+        let finalService = "-\(dispatchId)"
         declinedServiceIds.insert(dispatchId)
-        // Al rechazar la asistencia, se marca '0' en base de datos para no dejar numeros negativos
-        changePersonalService(newServiceId: "0")
+        dismissedDispatchIds.insert(dispatchId)
+        
+        stopAudio()
+        stopFirefighterGpsTracking()
+        
+        // Optimistic local update
+        if var user = currentUser {
+            user.enServicio = finalService
+            currentUser = user
+            saveCache(user, key: "fire_user")
+        }
+        
+        pendingService = finalService
+        lastServiceChangeTime = Date()
+        
+        // Sincronización en base de datos: enServicio = -{idServicio} (Marca explícita de NO ASISTIR)
+        changePersonalService(newServiceId: finalService)
+
+        // Limpieza explícita en Firestore despachos/{id}/asistencias/{userId}
+        if let user = currentUser {
+            let db = Firestore.firestore()
+            db.collection("despachos").document(dispatchId).collection("asistencias").document(user.idRegistro).setData([
+                "asistira": false,
+                "enServicio": finalService
+            ], merge: true)
+        }
     }
     
     func attendService(dispatchId: String, attend: Bool) {
         fullscreenDispatchId = nil
         if attend {
             declinedServiceIds.remove(dispatchId)
+            dismissedDispatchIds.insert(dispatchId)
             changePersonalService(newServiceId: dispatchId)
         } else {
-            // Al cancelar la asistencia, se establece exactamente en "0"
+            // Al cancelar la asistencia, se establece en "0" y se registra como descartado del modal
             declinedServiceIds.remove(dispatchId)
+            dismissedDispatchIds.insert(dispatchId)
+            fullscreenDispatchId = nil
             changePersonalService(newServiceId: "0")
 
             // Limpieza explícita en Firestore despachos/{id}/asistencias/{userId}

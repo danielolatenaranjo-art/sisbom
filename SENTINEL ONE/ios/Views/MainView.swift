@@ -33,7 +33,7 @@ struct MainView: View {
             if let d = viewModel.dispatchesList.first(where: { $0.idServicio == fId && $0.operadorFinal.isEmpty }) {
                 let userEnServicio = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
                 let isAttending = userEnServicio == fId
-                let hasDeclined = userEnServicio == "-\(fId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(fId))
+                let hasDeclined = userEnServicio == "-\(fId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(fId)) || viewModel.declinedServiceIds.contains(fId)
                 
                 if !isAttending && !hasDeclined {
                     return d
@@ -44,12 +44,12 @@ struct MainView: View {
         // 2. Fallback: If there is an active dispatch without answer and user is 0-9 (or 0-8 on escalation)
         if let activeDispatch = viewModel.dispatchesList.first(where: { $0.operadorFinal.isEmpty }) {
             let dId = activeDispatch.idServicio
-            if dismissedDispatchId == dId {
+            if dismissedDispatchId == dId || viewModel.dismissedDispatchIds.contains(dId) {
                 return nil
             }
             let userEnServicio = user.enServicio.trimmingCharacters(in: .whitespacesAndNewlines)
             let isAttending = userEnServicio == dId
-            let hasDeclined = userEnServicio == "-\(dId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(dId))
+            let hasDeclined = userEnServicio == "-\(dId)" || (userEnServicio.hasPrefix("-") && userEnServicio.contains(dId)) || viewModel.declinedServiceIds.contains(dId)
             let isEscalationAlarm = activeDispatch.clave.contains("10-30") || activeDispatch.clave.uppercased().contains("FORESTAL")
             
             if !isAttending && !hasDeclined {
@@ -68,7 +68,7 @@ struct MainView: View {
         GeometryReader { windowGeo in
             let topInset = windowGeo.safeAreaInsets.top
             let bottomInset = windowGeo.safeAreaInsets.bottom
-            let effectiveTopBarPadding = max(topInset, 16) + 4
+            let effectiveTopBarPadding = max(topInset, 16) + 18
             let effectiveTopContentPadding = effectiveTopBarPadding + 225
             let effectiveBottomPadding = max(bottomInset, 8)
             
@@ -117,7 +117,7 @@ struct MainView: View {
                         VStack {
                             Spacer()
                             BottomNavigationBarView(viewModel: viewModel, visibleTabs: visibleTabs)
-                                .padding(.horizontal, 8)
+                                .padding(.horizontal, 14)
                                 .padding(.bottom, effectiveBottomPadding)
                         }
                     }
@@ -277,8 +277,8 @@ struct TopAppBarView: View {
                     Image(uiImage: logoImg)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(height: 48)
-                        .padding(.top, 2)
+                        .frame(height: 46)
+                        .padding(.top, 4)
                         .padding(.bottom, 2)
                 }
 
@@ -453,7 +453,7 @@ struct BottomNavigationBarView: View {
                 }) {
                     VStack(spacing: 4) {
                         Image(systemName: tabIcon(for: tab))
-                            .font(.system(size: 20, weight: isSelected ? .bold : .regular))
+                            .font(.system(size: 19, weight: isSelected ? .bold : .regular))
                             .foregroundColor(isSelected ? Color.bomberosRed : (isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color.textSecondary))
                         
                         Text(tabLabel(for: tab))
@@ -461,20 +461,22 @@ struct BottomNavigationBarView: View {
                             .foregroundColor(isSelected ? Color.bomberosRed : (isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color.textSecondary))
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: 52)
+                    .frame(height: 50)
                     .background(
                         isSelected ?
-                            RoundedRectangle(cornerRadius: 20)
+                            RoundedRectangle(cornerRadius: 18)
                                 .fill(isDark ? Color.bomberosRed.opacity(0.16) : Color.bomberosRed.opacity(0.10))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 20)
+                                    RoundedRectangle(cornerRadius: 18)
                                         .stroke(isDark ? Color.bomberosRed.opacity(0.35) : Color.bomberosRed.opacity(0.25), lineWidth: 1)
                                 )
+                                .padding(.horizontal, 4)
                             : nil
                     )
                 }
             }
         }
+        .padding(.horizontal, 8)
         .frame(height: 64)
         .background(
             RoundedRectangle(cornerRadius: 26)
@@ -1058,6 +1060,7 @@ struct FullscreenEmergencyAlertView: View {
                 isDark: isDark,
                 isFullScreen: true
             )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
 
             // LAYER 1: FULLSCREEN TRANSLUCENT OVERLAY (Subtle vignette keeping map clearly visible)
@@ -1149,6 +1152,7 @@ struct FullscreenEmergencyAlertView: View {
                         viewModel.stopAudio()
                         viewModel.attendService(dispatchId: dispatch.idServicio, attend: true)
                         viewModel.fullscreenDispatchId = nil
+                        onDismiss?()
                     }) {
                         Text("ASISTIR")
                             .font(.system(size: 18, weight: .black))
@@ -1168,6 +1172,7 @@ struct FullscreenEmergencyAlertView: View {
                         viewModel.stopAudio()
                         viewModel.declineService(dispatchId: dispatch.idServicio)
                         viewModel.fullscreenDispatchId = nil
+                        onDismiss?()
                     }) {
                         Text("NO ASISTIR")
                             .font(.system(size: 17, weight: .bold))
@@ -1188,5 +1193,7 @@ struct FullscreenEmergencyAlertView: View {
                 .padding(.bottom, 36)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
     }
 }

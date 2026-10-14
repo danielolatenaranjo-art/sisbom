@@ -119,7 +119,7 @@ struct SisBomBackground<Content: View>: View {
                             startPoint: .top,
                             endPoint: .bottom
                         )
-                        .frame(height: 190)
+                        .frame(height: 215)
                         Spacer()
                     }
                     

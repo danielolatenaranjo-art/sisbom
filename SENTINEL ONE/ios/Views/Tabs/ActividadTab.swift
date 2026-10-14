@@ -723,9 +723,12 @@ struct IncidentMapPreview: View {
                     isFullScreen: isFullScreen
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
             }
+            .ignoresSafeArea()
         } else {
             TacticalRadarScanner(clave: clave, isDark: isDark)
+                .ignoresSafeArea()
         }
     }
 }
@@ -758,6 +761,7 @@ struct IncidentWebView: UIViewRepresentable {
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.isScrollEnabled = false
         webView.scrollView.bounces = false
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.isUserInteractionEnabled = false
         loadMap(in: webView, coordinator: context.coordinator)
         return webView
@@ -798,13 +802,9 @@ struct IncidentWebView: UIViewRepresentable {
         coordinator.isMapLoaded = true
 
         let pinColor = getClavePinHex(clave: clave)
-        let tileUrl = isDark
-            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-        let fallbackUrl = isDark
-            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
-            : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        let mapBg = isDark ? "#0c1017" : "#f8fafc"
+        let tileUrl = "https://mt{s}.google.com/vt/lyrs=m&hl=es&x={x}&y={y}&z={z}"
+        let fallbackUrl = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        let mapBg = isDark ? "#0f172a" : "#f8fafc"
 
         let centerScript: String
         if isFullScreen {
@@ -824,12 +824,13 @@ struct IncidentWebView: UIViewRepresentable {
         <html>
         <head>
             <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
             <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
             <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
             <style>
                 html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: \(mapBg); overflow: hidden; }
                 .leaflet-control-attribution { display: none !important; }
+                \(isDark ? ".leaflet-tile { filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) saturate(75%); -webkit-filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%) saturate(75%); }" : "")
                 .incident-pin {
                     background: \(pinColor);
                     width: 24px;
@@ -880,12 +881,12 @@ struct IncidentWebView: UIViewRepresentable {
 
                 var tacticalLayer = L.tileLayer('\(tileUrl)', {
                     maxZoom: 20,
-                    subdomains: ['a', 'b', 'c', 'd']
+                    subdomains: ['0', '1', '2', '3']
                 });
 
                 var fallbackOsm = L.tileLayer('\(fallbackUrl)', {
                     maxZoom: 19,
-                    subdomains: ['a', 'b', 'c', 'd']
+                    subdomains: ['a', 'b', 'c']
                 });
 
                 var fallbackDone = false;
