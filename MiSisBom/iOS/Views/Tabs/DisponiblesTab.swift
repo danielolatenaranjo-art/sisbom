@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DisponiblesTab: View {
     @ObservedObject var viewModel: SisBomViewModel
+    var topPadding: CGFloat = 0
+    var bottomPadding: CGFloat = 0
 
     var availableFirefighters: [UserPersonal] {
         viewModel.personnelList.filter { p in
@@ -39,7 +41,7 @@ struct DisponiblesTab: View {
                         .cornerRadius(12)
                 }
                 .padding(.horizontal, 8)
-                .padding(.top, 16)
+                .padding(.top, 4)
 
                 // List of Available Firefighters or Empty State
                 if availableFirefighters.isEmpty {
@@ -63,7 +65,8 @@ struct DisponiblesTab: View {
                     .padding(.horizontal, 8)
                 }
             }
-            .padding(.bottom, 24)
+            .padding(.top, topPadding)
+            .padding(.bottom, bottomPadding)
         }
     }
 }

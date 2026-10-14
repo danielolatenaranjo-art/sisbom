@@ -2,6 +2,8 @@ import SwiftUI
 
 struct AlertasTab: View {
     @ObservedObject var viewModel: SisBomViewModel
+    var topPadding: CGFloat = 0
+    var bottomPadding: CGFloat = 0
     @State private var showCreateDialog: Bool = false
 
     var body: some View {
@@ -57,9 +59,10 @@ struct AlertasTab: View {
                         .padding(.horizontal, 8)
                     }
                     
-                    Spacer(minLength: 80)
+                    Spacer(minLength: 20)
                 }
-                .padding(.top, 8)
+                .padding(.top, topPadding)
+                .padding(.bottom, bottomPadding)
             }
 
             if canPublishAlerts {
@@ -73,7 +76,7 @@ struct AlertasTab: View {
                         .shadow(color: Color.black.opacity(0.35), radius: 6, x: 0, y: 3)
                 }
                 .padding(.trailing, 20)
-                .padding(.bottom, 20)
+                .padding(.bottom, (bottomPadding > 0 ? bottomPadding : 20) + 12)
             }
         }
         .sheet(isPresented: $showCreateDialog) {

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct DespachoTab: View {
     @ObservedObject var viewModel: SisBomViewModel
+    var topPadding: CGFloat = 0
+    var bottomPadding: CGFloat = 0
     
     @State private var clave: String = ""
     @State private var lugar: String = ""
@@ -228,7 +230,8 @@ struct DespachoTab: View {
                     }
                 }
                 .padding(.horizontal, 8)
-                .padding(.bottom, 24)
+                .padding(.top, topPadding)
+                .padding(.bottom, bottomPadding)
             }
             
             // Custom Confirmation Alert Dialog Overlay

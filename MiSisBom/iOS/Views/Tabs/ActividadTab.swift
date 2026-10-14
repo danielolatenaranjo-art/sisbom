@@ -3,6 +3,8 @@ import WebKit
 
 struct ActividadTab: View {
     @ObservedObject var viewModel: SisBomViewModel
+    var topPadding: CGFloat = 0
+    var bottomPadding: CGFloat = 0
     @State private var isRequested: Bool = false
     @State private var isRequesting: Bool = false
 
@@ -85,6 +87,8 @@ struct ActividadTab: View {
                 
                 Spacer().frame(height: 8)
             }
+            .padding(.top, topPadding)
+            .padding(.bottom, bottomPadding)
         }
     }
 }
@@ -779,7 +783,17 @@ struct IncidentWebView: UIViewRepresentable {
             coord.lastLng = lng
             let js: String
             if isFullScreen {
-                js = "if (window.map) { window.map.setView([\(lat), \(lng)], 15); }"
+                js = """
+                if (window.map) {
+                    window.map.setView([\(lat), \(lng)], 15);
+                }
+                if (window.incidentMarker) {
+                    window.incidentMarker.setLatLng([\(lat), \(lng)]);
+                }
+                if (window.incidentCircle) {
+                    window.incidentCircle.setLatLng([\(lat), \(lng)]);
+                }
+                """
             } else {
                 js = """
                 var targetY = 180;
@@ -787,7 +801,15 @@ struct IncidentWebView: UIViewRepresentable {
                 var dy = (cardHeight / 2) - targetY;
                 var dLatPerDp = 0.0000154;
                 var centerLat = \(lat) - (dy * dLatPerDp);
-                if (window.map) { window.map.setView([centerLat, \(lng)], 15); }
+                if (window.map) {
+                    window.map.setView([centerLat, \(lng)], 15);
+                }
+                if (window.incidentMarker) {
+                    window.incidentMarker.setLatLng([\(lat), \(lng)]);
+                }
+                if (window.incidentCircle) {
+                    window.incidentCircle.setLatLng([\(lat), \(lng)]);
+                }
                 """
             }
             uiView.evaluateJavaScript(js, completionHandler: nil)
@@ -902,7 +924,7 @@ struct IncidentWebView: UIViewRepresentable {
 
                 tacticalLayer.addTo(window.map);
 
-                L.circle([\(lat), \(lng)], {
+                window.incidentCircle = L.circle([\(lat), \(lng)], {
                     radius: 350,
                     color: '\(pinColor)',
                     fillColor: '\(pinColor)',
@@ -918,7 +940,7 @@ struct IncidentWebView: UIViewRepresentable {
                     iconSize: [24, 24],
                     iconAnchor: [12, 12]
                 });
-                L.marker([\(lat), \(lng)], { icon: icon }).addTo(window.map);
+                window.incidentMarker = L.marker([\(lat), \(lng)], { icon: icon }).addTo(window.map);
             </script>
         </body>
         </html>

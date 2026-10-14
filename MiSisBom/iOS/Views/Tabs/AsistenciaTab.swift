@@ -93,6 +93,8 @@ func calculateCycleStats(history: [AttendanceSheet]) -> CycleStats {
 
 struct AsistenciaTab: View {
     @ObservedObject var viewModel: SisBomViewModel
+    var topPadding: CGFloat = 0
+    var bottomPadding: CGFloat = 0
 
     var body: some View {
         let isDark = viewModel.isDarkMode
@@ -191,7 +193,8 @@ struct AsistenciaTab: View {
 
                 Spacer(minLength: 20)
             }
-            .padding(.top, 8)
+            .padding(.top, topPadding)
+            .padding(.bottom, bottomPadding)
         }
     }
 }

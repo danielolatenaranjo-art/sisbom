@@ -69,8 +69,9 @@ struct MainView: View {
             let topInset = windowGeo.safeAreaInsets.top
             let bottomInset = windowGeo.safeAreaInsets.bottom
             let effectiveTopBarPadding = max(topInset, 16) + 18
-            let effectiveTopContentPadding = effectiveTopBarPadding + 225
+            let topContentPadding = effectiveTopBarPadding + 195
             let effectiveBottomPadding = max(bottomInset, 8)
+            let bottomContentPadding = effectiveBottomPadding + 84
             
             ZStack {
                 // Main App Background with Firefighter Illustration & Glows
@@ -82,17 +83,17 @@ struct MainView: View {
                                 Group {
                                     switch tab {
                                     case .actividad:
-                                        ActividadTab(viewModel: viewModel)
+                                        ActividadTab(viewModel: viewModel, topPadding: topContentPadding, bottomPadding: bottomContentPadding)
                                     case .despacho:
-                                        DespachoTab(viewModel: viewModel)
+                                        DespachoTab(viewModel: viewModel, topPadding: topContentPadding, bottomPadding: bottomContentPadding)
                                     case .ordenes:
-                                        OrdenesTab(viewModel: viewModel)
+                                        OrdenesTab(viewModel: viewModel, topPadding: topContentPadding, bottomPadding: bottomContentPadding)
                                     case .alertas:
-                                        AlertasTab(viewModel: viewModel)
+                                        AlertasTab(viewModel: viewModel, topPadding: topContentPadding, bottomPadding: bottomContentPadding)
                                     case .asistencia:
-                                        AsistenciaTab(viewModel: viewModel)
+                                        AsistenciaTab(viewModel: viewModel, topPadding: topContentPadding, bottomPadding: bottomContentPadding)
                                     case .disponibles:
-                                        DisponiblesTab(viewModel: viewModel)
+                                        DisponiblesTab(viewModel: viewModel, topPadding: topContentPadding, bottomPadding: bottomContentPadding)
                                     }
                                 }
                                 .tag(tab)
@@ -100,8 +101,14 @@ struct MainView: View {
                         }
                         .tabViewStyle(.page(indexDisplayMode: .never))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .padding(.top, effectiveTopContentPadding) // Space for TopAppBarView without overlapping tab contents
-                        .padding(.bottom, effectiveBottomPadding + 64) // Space for BottomNavigationBarView
+
+                        // Top Header Shield (covers status bar, notch, and logo so scrolled content slides cleanly behind)
+                        VStack(spacing: 0) {
+                            (isDark ? Color(red: 0.04, green: 0.004, blue: 0.004) : Color.lightBg)
+                                .frame(height: effectiveTopBarPadding + 62)
+                                .ignoresSafeArea(edges: .top)
+                            Spacer()
+                        }
 
                         // Floating Top Header & Firefighter Card (Exact Android Layout)
                         VStack(spacing: 0) {
