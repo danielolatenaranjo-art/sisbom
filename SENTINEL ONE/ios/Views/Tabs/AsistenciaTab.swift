@@ -95,6 +95,7 @@ struct AsistenciaTab: View {
     @ObservedObject var viewModel: SisBomViewModel
     var topPadding: CGFloat = 0
     var bottomPadding: CGFloat = 0
+    @State private var selectedAttendance: AttendanceSheet? = nil
 
     var body: some View {
         let isDark = viewModel.isDarkMode
@@ -140,61 +141,77 @@ struct AsistenciaTab: View {
             return !(isAbono && !isPresent)
         }
 
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                // Top Annual Summary Card (Exact ANDROID 5.jpeg)
-                AnnualAttendanceHeaderCard(
-                    cycleYear: currentCycleYear,
-                    stats: currentCycleStats,
-                    isDark: isDark
-                )
-                .padding(.horizontal, 8)
+        ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Top Annual Summary Card (Exact ANDROID 5.jpeg)
+                    AnnualAttendanceHeaderCard(
+                        cycleYear: currentCycleYear,
+                        stats: currentCycleStats,
+                        isDark: isDark
+                    )
+                    .padding(.horizontal, 8)
 
-                // Historial Section Header with Sincronizar Button
-                HStack {
-                    Text("HISTORIAL")
-                        .font(.system(size: 14, weight: .black))
-                        .foregroundColor(isDark ? .white : .textDark)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        viewModel.refreshAttendance()
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 12, weight: .bold))
-                            Text("Sincronizar")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        .foregroundColor(Color(red: 0.90, green: 0.20, blue: 0.20))
-                    }
-                }
-                .padding(.horizontal, 8)
-                .padding(.top, 4)
-
-                // 2-Column Grid of History Items (Exact ANDROID 5.jpeg)
-                if displayedHistory.isEmpty {
-                    VStack {
-                        Spacer().frame(height: 60)
-                        Text("No registra historial de asistencias en este ciclo.")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundColor(.textSecondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    }
-                } else {
-                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                        ForEach(displayedHistory) { item in
-                            AttendanceGridCard(item: item, isDark: isDark)
+                    // Historial Section Header with Sincronizar Button
+                    HStack {
+                        Text("HISTORIAL")
+                            .font(.system(size: 14, weight: .black))
+                            .foregroundColor(isDark ? .white : .textDark)
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            viewModel.refreshAttendance()
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                    .font(.system(size: 12, weight: .bold))
+                                Text("Sincronizar")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            .foregroundColor(Color(red: 0.90, green: 0.20, blue: 0.20))
                         }
                     }
                     .padding(.horizontal, 8)
-                }
+                    .padding(.top, 4)
 
-                Spacer(minLength: 20)
+                    // 2-Column Grid of History Items (Exact ANDROID 5.jpeg)
+                    if displayedHistory.isEmpty {
+                        VStack {
+                            Spacer().frame(height: 60)
+                            Text("No registra historial de asistencias en este ciclo.")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.textSecondary)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                            ForEach(displayedHistory) { item in
+                                Button(action: {
+                                    selectedAttendance = item
+                                }) {
+                                    AttendanceGridCard(item: item, isDark: isDark)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                    }
+
+                    Spacer(minLength: 20)
+                }
+                .padding(.top, topPadding)
+                .padding(.bottom, bottomPadding)
             }
-            .padding(.top, topPadding)
-            .padding(.bottom, bottomPadding)
+
+            // Attendance Detail Dialog (Exact Android Parity)
+            if let selectedItem = selectedAttendance {
+                DetalleAsistenciaDialog(item: selectedItem, isDark: isDark, onDismiss: {
+                    selectedAttendance = nil
+                })
+                .zIndex(100)
+                .transition(.opacity.combined(with: .scale(scale: 0.95)))
+            }
         }
     }
 }
@@ -320,7 +337,7 @@ struct AttendanceGridCard: View {
         let cleanStatus: String = {
             switch rawStatus {
             case "A", "ASISTE": return "ASISTE"
-            case "F", "FALTA": return "FALTA"
+            case "F", "FALTA", "": return "FALTA"
             case "L", "LICENCIA": return "LICENCIA"
             case "P", "PERMISO": return "PERMISO"
             case "S", "SUSPENDIDO": return "SUSPENDIDO"
@@ -340,82 +357,189 @@ struct AttendanceGridCard: View {
             }
         }()
 
-        let statusColor: Color = {
+        let badgeColor: Color = {
             switch cleanStatus {
-            case "ASISTE", "CDS": return Color(red: 0.02, green: 0.59, blue: 0.41)
-            case "FALTA", "SUSPENDIDO": return Color(red: 0.85, green: 0.18, blue: 0.18)
-            case "PERMISO": return Color(red: 0.85, green: 0.48, blue: 0.05)
-            case "LICENCIA": return Color(red: 0.15, green: 0.45, blue: 0.85)
+            case "ASISTE", "CDS": return Color(red: 0.063, green: 0.725, blue: 0.506)
+            case "FALTA", "SUSPENDIDO": return Color.bomberosRed
+            case "PERMISO": return Color.alertAmber
+            case "LICENCIA": return Color.infoBlue
             default: return Color.gray
             }
         }()
 
-        let cardBg: Color = {
-            if isDark {
-                switch cleanStatus {
-                case "ASISTE", "CDS": return Color.goGreen.opacity(0.12)
-                case "FALTA", "SUSPENDIDO": return Color.bomberosRed.opacity(0.12)
-                case "PERMISO": return Color.alertAmber.opacity(0.12)
-                default: return Color.white.opacity(0.06)
-                }
-            } else {
-                switch cleanStatus {
-                case "ASISTE", "CDS": return Color(red: 0.92, green: 0.98, blue: 0.95)
-                case "FALTA", "SUSPENDIDO": return Color(red: 0.99, green: 0.93, blue: 0.93)
-                case "PERMISO": return Color(red: 1.0, green: 0.97, blue: 0.91)
-                default: return Color(red: 0.95, green: 0.96, blue: 0.98)
+        let isAbono = isAbonoValue(value: item.userAbono, clave: item.clave, tipo: item.tipo)
+
+        // Solid dense background (exact Android parity: solid dark slate base + dense tint)
+        let baseBg = isDark ? Color(red: 0.12, green: 0.16, blue: 0.23) : Color.white
+        let tintColor = badgeColor.opacity(isDark ? 0.26 : 0.14)
+        let borderColor = badgeColor.opacity(0.38)
+
+        VStack(alignment: .leading, spacing: 5) {
+            // Clave & optional ABONO badge
+            HStack(alignment: .center) {
+                Text(item.clave)
+                    .font(.system(size: 14, weight: .black))
+                    .foregroundColor(isDark ? .white : .textDark)
+                    .lineLimit(1)
+
+                Spacer()
+
+                if isAbono {
+                    Text("ABONO")
+                        .font(.system(size: 8, weight: .black))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color(red: 0.19, green: 0.18, blue: 0.51)) // #312E81
+                        .cornerRadius(4)
                 }
             }
-        }()
-
-        let borderColor: Color = {
-            if isDark {
-                switch cleanStatus {
-                case "ASISTE", "CDS": return Color.goGreen.opacity(0.35)
-                case "FALTA", "SUSPENDIDO": return Color.bomberosRed.opacity(0.35)
-                case "PERMISO": return Color.alertAmber.opacity(0.35)
-                default: return Color.white.opacity(0.12)
-                }
-            } else {
-                switch cleanStatus {
-                case "ASISTE", "CDS": return Color(red: 0.65, green: 0.90, blue: 0.78)
-                case "FALTA", "SUSPENDIDO": return Color(red: 0.96, green: 0.78, blue: 0.78)
-                case "PERMISO": return Color(red: 0.98, green: 0.88, blue: 0.70)
-                default: return Color(red: 0.88, green: 0.90, blue: 0.94)
-                }
-            }
-        }()
-
-        VStack(alignment: .leading, spacing: 4) {
-            // Clave
-            Text(item.clave)
-                .font(.system(size: 14, weight: .black))
-                .foregroundColor(isDark ? .white : .textDark)
 
             // Status Badge Text
             Text(statusText)
                 .font(.system(size: 11, weight: .black))
-                .foregroundColor(statusColor)
+                .foregroundColor(badgeColor)
 
             // Date & Time
             Text("\(item.fecha) \(item.hora)")
                 .font(.system(size: 9, weight: .bold))
-                .foregroundColor(isDark ? .textSecondaryDark : .textSecondary)
+                .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.28, green: 0.33, blue: 0.41))
                 .lineLimit(1)
 
             // Location
             Text(item.lugar.isEmpty ? "Cuartel General" : item.lugar)
                 .font(.system(size: 9.5, weight: .semibold))
-                .foregroundColor(isDark ? Color.white.opacity(0.7) : Color(red: 0.32, green: 0.38, blue: 0.45))
-                .lineLimit(2)
+                .foregroundColor(isDark ? Color.white.opacity(0.8) : Color(red: 0.20, green: 0.25, blue: 0.32))
+                .lineLimit(1)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(cardBg)
-        .cornerRadius(14)
+        .background(
+            ZStack {
+                baseBg
+                tintColor
+            }
+        )
+        .cornerRadius(12)
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(borderColor, lineWidth: 1.2)
         )
+    }
+}
+
+// MARK: - DetalleAsistenciaDialog (Exact Android Alert Dialog)
+struct DetalleAsistenciaDialog: View {
+    let item: AttendanceSheet
+    let isDark: Bool
+    let onDismiss: () -> Void
+
+    var body: some View {
+        let rawStatus = item.userEstado.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanStatus: String = {
+            switch rawStatus {
+            case "A", "ASISTE": return "ASISTE"
+            case "F", "FALTA", "": return "FALTA"
+            case "L", "LICENCIA": return "LICENCIA"
+            case "P", "PERMISO": return "PERMISO"
+            case "S", "SUSPENDIDO": return "SUSPENDIDO"
+            case "CDS": return "CDS"
+            default: return rawStatus.isEmpty ? "FALTA" : rawStatus
+            }
+        }()
+
+        let statusColor: Color = {
+            switch cleanStatus {
+            case "ASISTE", "CDS": return Color(red: 0.063, green: 0.725, blue: 0.506)
+            case "FALTA", "SUSPENDIDO": return Color.bomberosRed
+            case "PERMISO": return Color.alertAmber
+            case "LICENCIA": return Color.infoBlue
+            default: return Color.gray
+            }
+        }()
+
+        let rawId = item.idLista.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanListId = (rawId.count > 4 && (rawId.hasPrefix("202") || rawId.hasPrefix("203")))
+            ? "#" + String(rawId.dropFirst(4))
+            : "#" + rawId
+
+        let isAbono = isAbonoValue(value: item.userAbono, clave: item.clave, tipo: item.tipo)
+
+        ZStack {
+            // Backdrop
+            Color.black.opacity(0.65)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    onDismiss()
+                }
+
+            // Dialog Card
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Detalle de Asistencia")
+                    .font(.system(size: 16, weight: .black))
+                    .foregroundColor(isDark ? .white : .textDark)
+                    .padding(.bottom, 2)
+
+                VStack(spacing: 9) {
+                    DetailRowView(label: "Clave", value: item.clave, isDark: isDark)
+                    DetailRowView(label: "Nº Lista", value: cleanListId, isDark: isDark)
+                    DetailRowView(label: "Estado", value: cleanStatus, valueColor: statusColor, isDark: isDark)
+                    DetailRowView(label: "Fecha", value: item.fecha, isDark: isDark)
+                    DetailRowView(label: "Hora", value: item.hora, isDark: isDark)
+                    DetailRowView(label: "Lugar", value: item.lugar.isEmpty ? "Cuartel General" : item.lugar, isDark: isDark)
+                    DetailRowView(label: "Abono", value: isAbono ? "Sí" : "No", isDark: isDark)
+
+                    if !item.obac.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        DetailRowView(label: "OBAC", value: item.obac, isDark: isDark)
+                    }
+
+                    if !item.detalle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        DetailRowView(label: "Detalle", value: item.detalle, isDark: isDark)
+                    }
+
+                    if !item.aprobadoPor.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        DetailRowView(label: "Aprobado por", value: item.aprobadoPor, isDark: isDark)
+                    }
+                }
+
+                HStack {
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Text("Cerrar")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.bomberosRed)
+                            .padding(.top, 6)
+                    }
+                }
+            }
+            .padding(22)
+            .frame(maxWidth: min(UIScreen.main.bounds.width - 48, 340))
+            .background(isDark ? Color(red: 0.12, green: 0.16, blue: 0.23) : Color.white)
+            .cornerRadius(18)
+            .shadow(color: Color.black.opacity(0.4), radius: 16, x: 0, y: 8)
+        }
+    }
+}
+
+// MARK: - DetailRowView
+struct DetailRowView: View {
+    let label: String
+    let value: String
+    var valueColor: Color? = nil
+    let isDark: Bool
+
+    var body: some View {
+        HStack(alignment: .top) {
+            Text(label)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(isDark ? Color(red: 0.58, green: 0.64, blue: 0.72) : Color(red: 0.39, green: 0.45, blue: 0.55))
+
+            Spacer(minLength: 12)
+
+            Text(value)
+                .font(.system(size: 13, weight: .black))
+                .foregroundColor(valueColor ?? (isDark ? .white : .textDark))
+                .multilineTextAlignment(.trailing)
+        }
     }
 }

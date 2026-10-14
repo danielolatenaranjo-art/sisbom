@@ -576,9 +576,11 @@ struct AttendanceSheet: Identifiable, Codable, Equatable {
     let anulada: Bool
     var userEstado: String // Populated locally from attendance subcollection
     var userAbono: Double   // Populated locally from attendance subcollection
+    let obac: String
+    let detalle: String
 
     enum CodingKeys: String, CodingKey {
-        case idLista, clave, tipo, fecha, hora, lugar, aprobadoPor, anulada, userEstado, userAbono
+        case idLista, clave, tipo, fecha, hora, lugar, aprobadoPor, anulada, userEstado, userAbono, obac, detalle
     }
 
     init(
@@ -591,7 +593,9 @@ struct AttendanceSheet: Identifiable, Codable, Equatable {
         aprobadoPor: String = "",
         anulada: Bool = false,
         userEstado: String = "",
-        userAbono: Double = 0.0
+        userAbono: Double = 0.0,
+        obac: String = "",
+        detalle: String = ""
     ) {
         self.idLista = idLista
         self.clave = clave
@@ -603,6 +607,8 @@ struct AttendanceSheet: Identifiable, Codable, Equatable {
         self.anulada = anulada
         self.userEstado = userEstado
         self.userAbono = userAbono
+        self.obac = obac
+        self.detalle = detalle
     }
 
     init(from decoder: Decoder) throws {
@@ -615,6 +621,8 @@ struct AttendanceSheet: Identifiable, Codable, Equatable {
         lugar = try container.decodeIfPresent(String.self, forKey: .lugar) ?? ""
         aprobadoPor = try container.decodeIfPresent(String.self, forKey: .aprobadoPor) ?? ""
         userEstado = try container.decodeIfPresent(String.self, forKey: .userEstado) ?? ""
+        obac = try container.decodeIfPresent(String.self, forKey: .obac) ?? ""
+        detalle = try container.decodeIfPresent(String.self, forKey: .detalle) ?? ""
 
         // Flexible decoding for 'anulada' (Bool, Int, or String)
         if let boolVal = try? container.decode(Bool.self, forKey: .anulada) {

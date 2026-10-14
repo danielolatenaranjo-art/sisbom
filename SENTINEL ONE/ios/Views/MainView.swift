@@ -81,7 +81,7 @@ struct MainView: View {
             let topInset = windowGeo.safeAreaInsets.top
             let bottomInset = windowGeo.safeAreaInsets.bottom
             let effectiveTopBarPadding = max(topInset, 16) + 18
-            let topContentPadding = effectiveTopBarPadding + measuredTopBarHeight + 10
+            let topContentPadding = 18 + measuredTopBarHeight + 10
             let effectiveBottomPadding: CGFloat = max(bottomInset, 20)
             let bottomContentPadding = effectiveBottomPadding + 74
             

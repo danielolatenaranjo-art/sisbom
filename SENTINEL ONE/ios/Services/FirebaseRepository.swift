@@ -141,6 +141,8 @@ class FirebaseRepository {
                 let hora = (data["hora"] as? String) ?? ""
                 let lugar = (data["lugar"] as? String) ?? ""
                 let aprobadoPor = (data["aprobadoPor"] as? String) ?? ""
+                let obac = (data["obac"] as? String) ?? ""
+                let detalle = (data["detalle"] as? String) ?? ""
                 
                 let anuladaRaw = data["anulada"]
                 let isAnulada: Bool = {
@@ -174,7 +176,9 @@ class FirebaseRepository {
                     aprobadoPor: aprobadoPor,
                     anulada: isAnulada,
                     userEstado: "",
-                    userAbono: defaultAbono
+                    userAbono: defaultAbono,
+                    obac: obac,
+                    detalle: detalle
                 )
             }
             

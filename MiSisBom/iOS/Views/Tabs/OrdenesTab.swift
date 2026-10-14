@@ -80,6 +80,9 @@ struct OrdenItemCard: View {
         ZStack(alignment: .topTrailing) {
             Button(action: {
                 showDetailSheet = true
+                if !isConforme {
+                    viewModel.registerConforme(alert: orden)
+                }
             }) {
                 VStack(spacing: 10) {
                     // Circle with Clipboard Icon
@@ -166,7 +169,7 @@ struct OrdenItemCard: View {
     }
 }
 
-// MARK: - OrdenDetailView (Full Screen Modal Sheet)
+// MARK: - OrdenDetailView (Full Screen Modal Sheet - Exact Android Parity)
 struct OrdenDetailView: View {
     let orden: AlertaItem
     @ObservedObject var viewModel: SisBomViewModel
@@ -174,145 +177,171 @@ struct OrdenDetailView: View {
 
     var body: some View {
         let isDark = viewModel.isDarkMode
-        let myRadial = viewModel.currentUser?.idRadial.uppercased() ?? ""
-        let isConforme = orden.conforme.split(separator: ",")
-            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines).uppercased() }
-            .contains(myRadial)
         
-        ZStack {
-            // Background
-            (isDark ? Color.navyDeep : Color(red: 0.8, green: 0.84, blue: 0.88))
-                .ignoresSafeArea()
+        GeometryReader { windowGeo in
+            let topInset = windowGeo.safeAreaInsets.top
             
-            VStack(spacing: 0) {
-                // Header Row (unifies status bar area)
-                HStack(spacing: 12) {
-                    Image(systemName: "doc.text.fill")
-                        .foregroundColor(.white)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("ORDEN DEL DÍA \(orden.numeroOrden.uppercased())")
-                            .font(.system(size: 12, weight: .black))
-                            .foregroundColor(.white)
-                        
-                        Text("\(orden.fechaOrden.uppercased())")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(Color.white.opacity(0.6))
-                    }
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        isPresented = false
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .bold))
-                            .padding(8)
-                            .background(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.2))
-                            .foregroundColor(.white)
-                            .clipShape(Circle())
-                    }
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 50)
-                .padding(.bottom, 12)
-                .background(isDark ? Color.navyDark : Color(red: 0.28, green: 0.33, blue: 0.41))
+            ZStack {
+                // Background
+                (isDark ? Color.navyDeep : Color(red: 0.8, green: 0.84, blue: 0.88))
+                    .ignoresSafeArea()
                 
-                // Scrollable Document Sheet
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // White Document Card
-                        VStack(spacing: 16) {
-                            // Official Seal Logo
-                            Image("logo")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 64, height: 64)
-                                .padding(.top, 8)
-                            
-                            VStack(spacing: 2) {
-                                Text("CUERPO DE BOMBEROS")
-                                    .font(.system(size: 14, weight: .black))
-                                    .foregroundColor(isDark ? .white : Color(red: 0.12, green: 0.16, blue: 0.22))
-                                
-                                Text("COMANDANCIA")
-                                    .font(.system(size: 11, weight: .black))
-                                    .foregroundColor(.bomberosRed)
-                            }
-                            
-                            Divider()
-                                .frame(height: 2)
-                                .background(Color.bomberosRed)
-                            
-                            // Order message body
-                            Text(orden.mensajeAlerta.replacingOccurrences(of: "|", with: "\n"))
-                                .font(.system(size: 13))
-                                .lineSpacing(6)
-                                .foregroundColor(isDark ? Color(red: 0.88, green: 0.91, blue: 0.94) : Color(red: 0.22, green: 0.25, blue: 0.32))
-                                .multilineTextAlignment(.center)
-                                .padding(.vertical, 8)
-                            
-                            // Decree label
-                            Text("TODA MODIFICACION A LA PRESENTE SE HARA DE FORMA ESCRITA O VERBAL\n\nCOMUNIQUESE Y CUMPLASE")
-                                .font(.system(size: 9, weight: .black))
-                                .foregroundColor(isDark ? .textSecondaryDark : Color(red: 0.29, green: 0.33, blue: 0.39))
-                                .multilineTextAlignment(.center)
-                                .padding(.vertical, 4)
-                            
-                            Divider()
-                                .background(isDark ? Color.white.opacity(0.1) : Color.black.opacity(0.1))
-                            
-                            // Signature
-                            VStack(spacing: 2) {
-                                Text(orden.firmaNombre.uppercased())
-                                    .font(.system(size: 12, weight: .black))
-                                    .foregroundColor(isDark ? .white : Color(red: 0.12, green: 0.16, blue: 0.22))
-                                
-                                Text(orden.firmaCargo.uppercased())
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(.bomberosRed)
-                            }
-                        }
-                        .padding(24)
-                        .background(isDark ? Color.navyDark : Color.white)
-                        .cornerRadius(12)
-                        .shadow(radius: 5)
+                VStack(spacing: 0) {
+                    // Header Row (unifies status bar area with zero artificial gap)
+                    HStack(spacing: 12) {
+                        Image(systemName: "doc.text.fill")
+                            .foregroundColor(.white)
                         
-                        // Conforme Action Button
-                        if !isConforme {
-                            Button(action: {
-                                viewModel.registerConforme(alert: orden)
-                                isPresented = false
-                            }) {
-                                Text("MARCAR COMO CONFORME")
-                                    .font(.system(size: 12, weight: .black))
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 48)
-                                    .background(Color.goGreen)
-                                    .cornerRadius(12)
-                            }
-                        } else {
-                            HStack {
-                                Image(systemName: "checkmark.circle.fill")
-                                Text("✓ CONFORME REGISTRADO")
-                                    .font(.system(size: 12, weight: .black))
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 48)
-                            .foregroundColor(.goGreen)
-                            .background(Color.goGreen.opacity(0.15))
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.goGreen.opacity(0.5), lineWidth: 1)
-                            )
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("ORDEN DEL DÍA \(orden.numeroOrden.uppercased())")
+                                .font(.system(size: 12, weight: .black))
+                                .foregroundColor(.white)
+                            
+                            Text("\(viewModel.saasClientName.isEmpty ? "SISBOM" : viewModel.saasClientName.uppercased()), \(orden.fechaOrden.uppercased())")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(Color.white.opacity(0.6))
+                        }
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            isPresented = false
+                        }) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 13, weight: .bold))
+                                .padding(8)
+                                .background(isDark ? Color.white.opacity(0.15) : Color.black.opacity(0.2))
+                                .foregroundColor(.white)
+                                .clipShape(Circle())
                         }
                     }
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.top, max(topInset, 16))
+                    .padding(.bottom, 12)
+                    .background(isDark ? Color.navyDark : Color(red: 0.28, green: 0.33, blue: 0.41))
+                    
+                    // Scrollable Document Sheet
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            // Official Document Card (Always White Page for Authentic PDF Look)
+                            VStack(spacing: 0) {
+                                // Official Letterhead Top Row
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("CUERPO DE BOMBEROS")
+                                            .font(.system(size: 12, weight: .black))
+                                            .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+
+                                        Text("“Abnegación y Sacrificio”")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .italic()
+                                            .foregroundColor(.bomberosRed)
+
+                                        Text("Fundado 20-Nov-1963")
+                                            .font(.system(size: 9, weight: .bold))
+                                            .foregroundColor(Color(red: 0.39, green: 0.45, blue: 0.55))
+
+                                        Text("COMANDANCIA")
+                                            .font(.system(size: 11, weight: .black))
+                                            .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+
+                                        Text(viewModel.saasClientName.isEmpty ? "CUERPO DE BOMBEROS DE PLACILLA" : "CUERPO DE BOMBEROS DE \(viewModel.saasClientName.uppercased())")
+                                            .font(.system(size: 11, weight: .black))
+                                            .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+                                    }
+
+                                    Spacer()
+
+                                    if let logoImg = UIImage(named: "logo") {
+                                        Image(uiImage: logoImg)
+                                            .resizable()
+                                            .aspectRatio(contentMode: .fit)
+                                            .frame(width: 64, height: 64)
+                                    }
+                                }
+
+                                Rectangle()
+                                    .fill(Color.black)
+                                    .frame(height: 1.5)
+                                    .padding(.vertical, 10)
+
+                                // Date on the right
+                                Text("\(viewModel.saasClientName.isEmpty ? "Placilla" : viewModel.saasClientName), \(orden.fechaOrden)")
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(Color(red: 0.22, green: 0.25, blue: 0.32))
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
+                                    .padding(.bottom, 14)
+
+                                // Centered Title
+                                Text("ORDEN DEL DIA \(orden.numeroOrden)")
+                                    .font(.system(size: 14, weight: .black))
+                                    .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.bottom, 16)
+
+                                // Order message body (Left aligned / Justified reading)
+                                Text(orden.mensajeAlerta.replacingOccurrences(of: "|", with: "\n"))
+                                    .font(.system(size: 13, weight: .regular))
+                                    .lineSpacing(5)
+                                    .foregroundColor(Color(red: 0.22, green: 0.25, blue: 0.32))
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.bottom, 20)
+
+                                // Decree label
+                                Text("TODA MODIFICACION A LA PRESENTE SE HARA DE FORMA ESCRITA O VERBAL\n\nCOMUNIQUESE Y CUMPLASE")
+                                    .font(.system(size: 9, weight: .black))
+                                    .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+                                    .multilineTextAlignment(.leading)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.bottom, 16)
+
+                                // Stamp & Signature of Comandante
+                                if let firmaImg = UIImage(named: "firma_comandante") {
+                                    Image(uiImage: firmaImg)
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fit)
+                                        .frame(width: 240, height: 110)
+                                        .frame(maxWidth: .infinity, alignment: .center)
+                                        .padding(.bottom, 4)
+                                }
+
+                                Text(orden.firmaNombre.isEmpty ? "CRISTIAN LOPEZ MELLA" : orden.firmaNombre.uppercased())
+                                    .font(.system(size: 12, weight: .black))
+                                    .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+                                    .frame(maxWidth: .infinity, alignment: .center)
+
+                                Text(orden.firmaCargo.isEmpty ? "COMANDANTE" : orden.firmaCargo.uppercased())
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(Color(red: 0.12, green: 0.16, blue: 0.22))
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                                    .padding(.bottom, 10)
+
+                                Rectangle()
+                                    .fill(Color.black)
+                                    .frame(height: 1.5)
+                                    .padding(.vertical, 8)
+
+                                // Footer text
+                                Text("MIRAFLORES Nº 697-FONO 722858606- placilla@bomberos.cl -PLACILLA VI REGION")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundColor(Color(red: 0.39, green: 0.45, blue: 0.55))
+                                    .multilineTextAlignment(.center)
+                                    .frame(maxWidth: .infinity, alignment: .center)
+                            }
+                            .padding(22)
+                            .background(Color.white)
+                            .cornerRadius(10)
+                            .shadow(color: Color.black.opacity(0.18), radius: 8, x: 0, y: 3)
+                        }
+                        .padding(16)
+                        .padding(.bottom, 20)
+                    }
                 }
             }
+            .frame(width: windowGeo.size.width, height: windowGeo.size.height)
         }
+        .ignoresSafeArea()
     }
 }
 
