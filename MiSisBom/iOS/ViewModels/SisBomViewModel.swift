@@ -909,19 +909,9 @@ class SisBomViewModel: ObservableObject {
         dismissedDispatchIds.insert(dispatchId)
         
         stopAudio()
-        stopFirefighterGpsTracking()
+        LocationService.shared.stopTracking()
         
-        // Optimistic local update
-        if var user = currentUser {
-            user.enServicio = finalService
-            currentUser = user
-            saveCache(user, key: "fire_user")
-        }
-        
-        pendingService = finalService
-        lastServiceChangeTime = Date()
-        
-        // Sincronización en base de datos: enServicio = -{idServicio} (Marca explícita de NO ASISTIR)
+        // Sincronización en base de datos y actualización optimista de usuario: enServicio = -{idServicio}
         changePersonalService(newServiceId: finalService)
 
         // Limpieza explícita en Firestore despachos/{id}/asistencias/{userId}
