@@ -141,7 +141,7 @@ struct AsistenciaTab: View {
         }
 
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 10) {
                 // Top Annual Summary Card (Exact ANDROID 5.jpeg)
                 AnnualAttendanceHeaderCard(
                     cycleYear: currentCycleYear,

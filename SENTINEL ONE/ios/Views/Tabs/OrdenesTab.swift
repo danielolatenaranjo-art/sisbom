@@ -17,7 +17,7 @@ struct OrdenesTab: View {
         
         ZStack(alignment: .bottomTrailing) {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 10) {
                     if ordenes.isEmpty {
                         VStack {
                             Spacer().frame(height: 100)
@@ -28,7 +28,7 @@ struct OrdenesTab: View {
                         }
                     } else {
                         // Display in 2-column Grid matching Android chunking (ANDROID 3.jpeg)
-                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 14), GridItem(.flexible(), spacing: 14)], spacing: 14) {
+                        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
                             ForEach(ordenes) { orden in
                                 OrdenItemCard(orden: orden, viewModel: viewModel)
                             }

@@ -20,7 +20,7 @@ struct DespachoTab: View {
         
         ZStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 10) {
                     if !isCentral {
                         // Access Denied Card
                         GlassCard(viewModel: viewModel) {

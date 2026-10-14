@@ -41,7 +41,6 @@ struct DisponiblesTab: View {
                         .cornerRadius(12)
                 }
                 .padding(.horizontal, 8)
-                .padding(.top, 4)
 
                 // List of Available Firefighters or Empty State
                 if availableFirefighters.isEmpty {

@@ -77,15 +77,12 @@ struct ActividadTab: View {
                     .padding(.vertical, 8)
                 }
                 .padding(.horizontal, 8)
-                .padding(.top, 4)
                 
                 // List of Incidents
                 ForEach(activeDispatches) { dispatch in
                     DispatchItemCard(dispatch: dispatch, viewModel: viewModel)
                         .padding(.horizontal, 8)
                 }
-                
-                Spacer().frame(height: 8)
             }
             .padding(.top, topPadding)
             .padding(.bottom, bottomPadding)
@@ -564,8 +561,11 @@ struct DispatchItemCard: View {
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.goGreen.opacity(0.3), lineWidth: 1))
                     }
                     
-                    // Action Buttons: Visible only when firefighter is 0-9, already attending, or declined
-                    if (baseState == "0-9" || isAttending || isDeclined) && !isSpecial {
+                    // Action Buttons: Visible only when firefighter is in active 0-9 state (or currently attending to allow canceling)
+                    let is09Active = (baseState == "0-9")
+                    let showActionButtons = (is09Active || isAttending) && !isSpecial
+
+                    if showActionButtons {
                         VStack(spacing: 0) {
                             Spacer().frame(height: 4)
                             
@@ -586,7 +586,7 @@ struct DispatchItemCard: View {
                                         )
                                 }
                             } else {
-                                let canAttend = (baseState == "0-9" || isDeclined) && !inService && !isSpecial
+                                let canAttend = is09Active && !inService && !isSpecial
                                 
                                 HStack(spacing: 10) {
                                     // ASISTIR (Vibrant Emerald Green Pill Button - Distinct from NO ASISTIR)
@@ -608,30 +608,42 @@ struct DispatchItemCard: View {
                                     }
                                     .disabled(!canAttend)
                                     
-                                    // NO ASISTIR (Dark Pill with Red Border, turns Solid Red when chosen)
+                                    // NO ASISTIR (Dark Pill with Red Border, turns Muted/Quenched when chosen)
                                     Button(action: {
-                                        if !isDeclined && !inService && baseState == "0-9" {
+                                        if !isDeclined && !inService && is09Active {
                                             viewModel.declineService(dispatchId: dispatch.idServicio)
                                         }
                                     }) {
                                         HStack(spacing: 6) {
-                                            Image(systemName: isDeclined ? "xmark.circle.fill" : "xmark")
+                                            Image(systemName: isDeclined ? "xmark.circle" : "xmark")
                                                 .font(.system(size: 13, weight: .bold))
-                                            Text(isDeclined ? "NO ASISTIRÉ" : "NO ASISTIR")
+                                            Text(isDeclined ? "NO ASISTE" : "NO ASISTIR")
                                                 .font(.system(size: 13, weight: .black))
                                         }
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 48)
-                                        .foregroundColor(isDeclined ? .white : (isDark ? .white : Color(red: 0.85, green: 0.15, blue: 0.15)))
-                                        .background(isDeclined ? Color.bomberosRed : Color.black.opacity(isDark ? 0.40 : 0.08))
+                                        .foregroundColor(
+                                            isDeclined ?
+                                                (isDark ? Color.white.opacity(0.40) : Color.black.opacity(0.35)) :
+                                                (isDark ? .white : Color(red: 0.85, green: 0.15, blue: 0.15))
+                                        )
+                                        .background(
+                                            isDeclined ?
+                                                (isDark ? Color.white.opacity(0.05) : Color.black.opacity(0.04)) :
+                                                (isDark ? Color.black.opacity(0.40) : Color.black.opacity(0.08))
+                                        )
                                         .cornerRadius(24)
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 24)
-                                                .stroke(isDeclined ? Color.white.opacity(0.3) : Color.bomberosRed.opacity(0.8), lineWidth: 1.5)
+                                                .stroke(
+                                                    isDeclined ?
+                                                        Color.clear :
+                                                        Color.bomberosRed.opacity(0.8),
+                                                    lineWidth: 1.5
+                                                )
                                         )
-                                        .shadow(color: isDeclined ? Color.bomberosRed.opacity(0.4) : Color.clear, radius: 6, x: 0, y: 2)
                                     }
-                                    .allowsHitTesting(!isDeclined && !inService && baseState == "0-9")
+                                    .disabled(isDeclined || !is09Active || inService)
                                 }
                             }
                         }

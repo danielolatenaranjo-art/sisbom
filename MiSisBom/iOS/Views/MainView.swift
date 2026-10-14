@@ -8,12 +8,24 @@ func formatFirefighterName(_ fullName: String) -> String {
     return "\(first) \(penultimate)"
 }
 
+// MARK: - TopAppBarHeightPreferenceKey
+struct TopAppBarHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 185
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        let next = nextValue()
+        if next > 100 {
+            value = next
+        }
+    }
+}
+
 struct MainView: View {
     @ObservedObject var viewModel: SisBomViewModel
     @State private var isDrawerOpen: Bool = false
     @State private var showingChangePassword: Bool = false
     @State private var newPassword: String = ""
     @State private var dismissedDispatchId: String? = nil
+    @State private var measuredTopBarHeight: CGFloat = 185
 
     var visibleTabs: [MainTab] {
         getVisibleTabs(isCentralActive: viewModel.isCentralActive, user: viewModel.currentUser)
@@ -69,9 +81,9 @@ struct MainView: View {
             let topInset = windowGeo.safeAreaInsets.top
             let bottomInset = windowGeo.safeAreaInsets.bottom
             let effectiveTopBarPadding = max(topInset, 16) + 18
-            let topContentPadding = effectiveTopBarPadding + 195
-            let effectiveBottomPadding = max(bottomInset, 8)
-            let bottomContentPadding = effectiveBottomPadding + 84
+            let topContentPadding = effectiveTopBarPadding + measuredTopBarHeight + 10
+            let effectiveBottomPadding: CGFloat = max(bottomInset, 20)
+            let bottomContentPadding = effectiveBottomPadding + 74
             
             ZStack {
                 // Main App Background with Firefighter Illustration & Glows
@@ -117,10 +129,15 @@ struct MainView: View {
                                     isDrawerOpen = true
                                 }
                             })
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(key: TopAppBarHeightPreferenceKey.self, value: geo.size.height)
+                                }
+                            )
                         }
                         .padding(.top, effectiveTopBarPadding) // Positioned immediately under dynamic island / status bar
 
-                        // Floating Bottom Navigation Dock (Exact Android Parity: 8px margin to bottom)
+                        // Floating Bottom Navigation Dock (Raised to 20px margin from bottom to prevent iOS Home Bar gestures)
                         VStack {
                             Spacer()
                             BottomNavigationBarView(viewModel: viewModel, visibleTabs: visibleTabs)
@@ -172,6 +189,11 @@ struct MainView: View {
                 }
             }
             .frame(width: windowGeo.size.width, height: windowGeo.size.height)
+            .onPreferenceChange(TopAppBarHeightPreferenceKey.self) { height in
+                if height > 100 {
+                    measuredTopBarHeight = height
+                }
+            }
         }
         .ignoresSafeArea()
         .onAppear {

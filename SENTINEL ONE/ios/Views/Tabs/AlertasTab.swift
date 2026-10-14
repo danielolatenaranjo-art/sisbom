@@ -38,7 +38,7 @@ struct AlertasTab: View {
         
         ZStack(alignment: .bottomTrailing) {
             ScrollView {
-                VStack(spacing: 16) {
+                VStack(spacing: 10) {
                     if alerts.isEmpty {
                         VStack {
                             Spacer().frame(height: 100)
@@ -48,7 +48,7 @@ struct AlertasTab: View {
                                 .frame(maxWidth: .infinity, alignment: .center)
                         }
                     } else {
-                        LazyVStack(spacing: 14) {
+                        LazyVStack(spacing: 10) {
                             ForEach(alerts) { alert in
                                 AlertItemCard(alert: alert, viewModel: viewModel) {
                                     viewModel.activeChatAlert = alert
