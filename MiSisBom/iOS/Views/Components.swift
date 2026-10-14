@@ -68,16 +68,16 @@ struct SisBomBackground<Content: View>: View {
         let amberGlowAlpha = isDark ? 0.05 : 0.10
         
         ZStack {
-            // Background Decorative Canvas (strictly bounded and clipped to screen geometry)
+            // Background Decorative Canvas (fills 100% of physical screen including notches)
             GeometryReader { geo in
-                ZStack {
-                    // Main Background Gradient / Color
+                ZStack(alignment: .bottom) {
+                    // 1. Base Background Gradient / Color (Edge-to-edge covering notches)
                     if isDark {
                         LinearGradient(
                             gradient: Gradient(colors: [
-                                Color(red: 0.059, green: 0.004, blue: 0.004), // #0F0101
+                                Color(red: 0.04, green: 0.004, blue: 0.004), // Solid deep black at top
                                 Color(red: 0.157, green: 0.008, blue: 0.008), // #280202
-                                Color(red: 0.290, green: 0.012, blue: 0.012)  // #4A0303
+                                Color(red: 0.290, green: 0.012, blue: 0.012)  // #4A0303 at bottom
                             ]),
                             startPoint: .top,
                             endPoint: .bottom
@@ -86,17 +86,44 @@ struct SisBomBackground<Content: View>: View {
                         Color.lightBg
                     }
                     
-                    // Firefighter Illustration Background Image (strictly framed to geo size)
+                    // 2. Firefighter Illustration Background Image (Shifted down, pinned to bottom edge)
                     if let bgImage = UIImage(named: isDark ? "escudo_bg_dark" : "escudo_bg_light") {
-                        Image(uiImage: bgImage)
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                            .frame(width: geo.size.width, height: geo.size.height)
-                            .clipped()
-                            .opacity(isDark ? 0.50 : 0.15)
+                        VStack(spacing: 0) {
+                            Spacer()
+                            Image(uiImage: bgImage)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: geo.size.width)
+                                .frame(maxHeight: geo.size.height * 0.88)
+                                .clipped()
+                                .opacity(isDark ? 0.50 : 0.15)
+                        }
+                    }
+
+                    // 3. Top Black Gradient: Solid black behind Notch and SENTINEL ONE logo, smoothly fading down into the illustration
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            gradient: Gradient(colors: isDark ? [
+                                Color.black,
+                                Color.black.opacity(0.98),
+                                Color.black.opacity(0.85),
+                                Color.black.opacity(0.35),
+                                Color.clear
+                            ] : [
+                                Color.lightBg,
+                                Color.lightBg.opacity(0.98),
+                                Color.lightBg.opacity(0.85),
+                                Color.lightBg.opacity(0.35),
+                                Color.clear
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 190)
+                        Spacer()
                     }
                     
-                    // Radial Glows (Glows in corners, clipped to canvas)
+                    // 4. Radial Glows (Glows in corners, clipped to canvas)
                     ZStack {
                         // Top Right Red Glow
                         Circle()
@@ -123,7 +150,7 @@ struct SisBomBackground<Content: View>: View {
                     .frame(width: geo.size.width, height: geo.size.height)
                     .clipped()
                     
-                    // Watermark Shield Logo of Tenant at Bottom-Right
+                    // 5. Watermark Shield Logo of Tenant at Bottom-Right
                     Image(uiImage: viewModel.getInstitutionLogo())
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -142,6 +169,7 @@ struct SisBomBackground<Content: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipped()
+        .ignoresSafeArea()
     }
 }
 

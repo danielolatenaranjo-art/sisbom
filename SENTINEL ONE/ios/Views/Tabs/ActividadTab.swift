@@ -798,8 +798,13 @@ struct IncidentWebView: UIViewRepresentable {
         coordinator.isMapLoaded = true
 
         let pinColor = getClavePinHex(clave: clave)
-        let tileUrl = "https://mt1.google.com/vt/lyrs=m&hl=es&x={x}&y={y}&z={z}"
-        let mapBg = isDark ? "#0f172a" : "#f1f5f9"
+        let tileUrl = isDark
+            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+            : "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        let fallbackUrl = isDark
+            ? "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png"
+            : "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        let mapBg = isDark ? "#0c1017" : "#f8fafc"
 
         let centerScript: String
         if isFullScreen {
@@ -878,8 +883,9 @@ struct IncidentWebView: UIViewRepresentable {
                     subdomains: ['a', 'b', 'c', 'd']
                 });
 
-                var fallbackOsm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    maxZoom: 19
+                var fallbackOsm = L.tileLayer('\(fallbackUrl)', {
+                    maxZoom: 19,
+                    subdomains: ['a', 'b', 'c', 'd']
                 });
 
                 var fallbackDone = false;

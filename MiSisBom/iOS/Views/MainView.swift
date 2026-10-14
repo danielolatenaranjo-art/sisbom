@@ -65,121 +65,108 @@ struct MainView: View {
     var body: some View {
         let isDark = viewModel.isDarkMode
         
-        ZStack {
-            // Main App Background with Firefighter Illustration & Glows
-            SisBomBackground(viewModel: viewModel) {
-                ZStack(alignment: .top) {
-                    // Tab Content Wrapper with Horizontal Pager Swipe (Exact Android Parity)
-                    TabView(selection: $viewModel.currentTab) {
-                        ForEach(visibleTabs, id: \.self) { tab in
-                            Group {
-                                switch tab {
-                                case .actividad:
-                                    ActividadTab(viewModel: viewModel)
-                                case .despacho:
-                                    DespachoTab(viewModel: viewModel)
-                                case .ordenes:
-                                    OrdenesTab(viewModel: viewModel)
-                                case .alertas:
-                                    AlertasTab(viewModel: viewModel)
-                                case .asistencia:
-                                    AsistenciaTab(viewModel: viewModel)
-                                case .disponibles:
-                                    DisponiblesTab(viewModel: viewModel)
+        GeometryReader { windowGeo in
+            let topInset = windowGeo.safeAreaInsets.top
+            let bottomInset = windowGeo.safeAreaInsets.bottom
+            let effectiveTopBarPadding = max(topInset, 16) + 4
+            let effectiveTopContentPadding = effectiveTopBarPadding + 225
+            let effectiveBottomPadding = max(bottomInset, 8)
+            
+            ZStack {
+                // Main App Background with Firefighter Illustration & Glows
+                SisBomBackground(viewModel: viewModel) {
+                    ZStack(alignment: .top) {
+                        // Tab Content Wrapper with Horizontal Pager Swipe (Exact Android Parity)
+                        TabView(selection: $viewModel.currentTab) {
+                            ForEach(visibleTabs, id: \.self) { tab in
+                                Group {
+                                    switch tab {
+                                    case .actividad:
+                                        ActividadTab(viewModel: viewModel)
+                                    case .despacho:
+                                        DespachoTab(viewModel: viewModel)
+                                    case .ordenes:
+                                        OrdenesTab(viewModel: viewModel)
+                                    case .alertas:
+                                        AlertasTab(viewModel: viewModel)
+                                    case .asistencia:
+                                        AsistenciaTab(viewModel: viewModel)
+                                    case .disponibles:
+                                        DisponiblesTab(viewModel: viewModel)
+                                    }
                                 }
+                                .tag(tab)
                             }
-                            .tag(tab)
+                        }
+                        .tabViewStyle(.page(indexDisplayMode: .never))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, effectiveTopContentPadding) // Space for TopAppBarView without overlapping tab contents
+                        .padding(.bottom, effectiveBottomPadding + 64) // Space for BottomNavigationBarView
+
+                        // Floating Top Header & Firefighter Card (Exact Android Layout)
+                        VStack(spacing: 0) {
+                            TopAppBarView(viewModel: viewModel, onMenuClick: {
+                                withAnimation(.spring()) {
+                                    isDrawerOpen = true
+                                }
+                            })
+                        }
+                        .padding(.top, effectiveTopBarPadding) // Positioned immediately under dynamic island / status bar
+
+                        // Floating Bottom Navigation Dock (Exact Android Parity: 8px margin to bottom)
+                        VStack {
+                            Spacer()
+                            BottomNavigationBarView(viewModel: viewModel, visibleTabs: visibleTabs)
+                                .padding(.horizontal, 8)
+                                .padding(.bottom, effectiveBottomPadding)
                         }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding(.top, 235) // Space for TopAppBarView without overlapping tab contents
-                    .padding(.bottom, 72) // Space for BottomNavigationBarView
-
-                    // Floating Top Header & Firefighter Card (Exact Android Layout)
-                    VStack(spacing: 0) {
-                        // Top backdrop gradient to cover status bar and logo area
-                        LinearGradient(
-                            colors: isDark ? [
-                                Color(red: 0.059, green: 0.004, blue: 0.004),
-                                Color(red: 0.059, green: 0.004, blue: 0.004).opacity(0.95),
-                                Color(red: 0.059, green: 0.004, blue: 0.004).opacity(0.8),
-                                Color.clear
-                            ] : [
-                                Color(red: 0.988, green: 0.984, blue: 0.973),
-                                Color(red: 0.988, green: 0.984, blue: 0.973).opacity(0.95),
-                                Color(red: 0.988, green: 0.984, blue: 0.973).opacity(0.8),
-                                Color.clear
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                        .frame(height: 110)
-                        .ignoresSafeArea(edges: .top)
-                        Spacer()
-                    }
-
-                    VStack(spacing: 0) {
-                        TopAppBarView(viewModel: viewModel, onMenuClick: {
+                }
+                .blur(radius: isDrawerOpen || showingChangePassword ? 4 : 0)
+                
+                // Side Drawer Overlay Dimmer Background
+                if isDrawerOpen {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                        .onTapGesture {
                             withAnimation(.spring()) {
-                                isDrawerOpen = true
+                                isDrawerOpen = false
                             }
-                        })
-                    }
-                    .padding(.top, 4) // Positioned immediately under dynamic island / status bar
-
-                    // Floating Bottom Navigation Dock (Exact Android Parity: 8px margin to bottom)
-                    VStack {
-                        Spacer()
-                        BottomNavigationBarView(viewModel: viewModel, visibleTabs: visibleTabs)
-                            .padding(.horizontal, 8)
-                            .padding(.bottom, 8)
-                    }
-                    .ignoresSafeArea(edges: .bottom)
+                        }
                 }
-            }
-            .blur(radius: isDrawerOpen || showingChangePassword ? 4 : 0)
-            
-            // Side Drawer Overlay Dimmer Background
-            if isDrawerOpen {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .onTapGesture {
-                        withAnimation(.spring()) {
-                            isDrawerOpen = false
+                
+                // Side Navigation Drawer
+                if isDrawerOpen {
+                    GeometryReader { geo in
+                        HStack(spacing: 0) {
+                            ProfileDrawerContent(viewModel: viewModel, isDrawerOpen: $isDrawerOpen, showingChangePassword: $showingChangePassword)
+                                .frame(width: min(geo.size.width * 0.82, 320))
+                            Spacer()
                         }
                     }
-            }
-            
-            // Side Navigation Drawer
-            if isDrawerOpen {
-                GeometryReader { geo in
-                    HStack(spacing: 0) {
-                        ProfileDrawerContent(viewModel: viewModel, isDrawerOpen: $isDrawerOpen, showingChangePassword: $showingChangePassword)
-                            .frame(width: min(geo.size.width * 0.82, 320))
-                        Spacer()
-                    }
+                    .transition(.move(edge: .leading))
+                    .ignoresSafeArea()
+                    .zIndex(100)
                 }
-                .transition(.move(edge: .leading))
-                .ignoresSafeArea()
-                .zIndex(100)
-            }
-            
-            // Change Password Popup Dialog
-            if showingChangePassword {
-                ChangePasswordDialog(viewModel: viewModel, newPassword: $newPassword, isPresented: $showingChangePassword)
-            }
+                
+                // Change Password Popup Dialog
+                if showingChangePassword {
+                    ChangePasswordDialog(viewModel: viewModel, newPassword: $newPassword, isPresented: $showingChangePassword)
+                }
 
-            // Emergency Fullscreen Overlay Alert
-            if let dispatch = showFullscreenAlert {
-                FullscreenEmergencyAlertView(dispatch: dispatch, viewModel: viewModel, onDismiss: {
-                    dismissedDispatchId = dispatch.idServicio
-                })
-                .transition(.opacity.combined(with: .scale(scale: 0.97)))
-                .zIndex(999)
-                .ignoresSafeArea()
+                // Emergency Fullscreen Overlay Alert
+                if let dispatch = showFullscreenAlert {
+                    FullscreenEmergencyAlertView(dispatch: dispatch, viewModel: viewModel, onDismiss: {
+                        dismissedDispatchId = dispatch.idServicio
+                    })
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .zIndex(999)
+                    .ignoresSafeArea()
+                }
             }
+            .frame(width: windowGeo.size.width, height: windowGeo.size.height)
         }
+        .ignoresSafeArea()
         .onAppear {
             ensureCurrentTabValid()
         }
