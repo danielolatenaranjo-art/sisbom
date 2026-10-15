@@ -107,7 +107,7 @@ function formatFirefighterName(name) {
   return first;
 }
 
-// 1. DESPACHOS - Solo se notifica cuando un despacho pasa a ser activo por primera vez
+// 1. DESPACHOS - Se notifica inmediatamente en pre-despacho o cuando un despacho pasa a ser activo por primera vez
 exports.enviarDespacho = onDocumentWritten(
   { document: "despachos/{id}" },
   async (event) => {
@@ -118,26 +118,46 @@ exports.enviarDespacho = onDocumentWritten(
 
     const id = event.params.id;
 
-    // Si ya fue enviado previamente o antes ya estaba como pushSent, JAMÁS volver a enviar
+    // 1. Si ya fue enviado previamente o antes ya estaba como pushSent, JAMÁS volver a enviar
     if (afterData.pushSent === true || (beforeData && beforeData.pushSent === true)) {
       return null;
     }
 
-    // Solo se debe enviar push si el despacho está activo y visible para los móviles
-    const estado = String(afterData.estado || "").toLowerCase();
-    if (estado === "cancelada" || afterData.visibleMovil !== true) {
+    // 2. Solo se debe enviar push si el despacho está en pre-despacho o activo y visible para los móviles
+    const estado = String(afterData.estado || "").toLowerCase().trim();
+    if (estado !== "pre-despacho" && estado !== "activa" && estado !== "activo" && estado !== "en curso") {
+      return null;
+    }
+    if (afterData.visibleMovil !== true) {
       return null;
     }
 
-    // Si antes ya existía y ya era visibleMovil == true, es una simple modificación/edición: NO ENVIAR PUSH
-    if (beforeData && beforeData.visibleMovil === true) {
-      console.log("Modificación de despacho existente, omitiendo push para no sonar:", id);
+    // 3. BLINDAJE ANTI-FINALIZADOS: Si el despacho ya tiene operadorFinal (cerrado/terminado), JAMÁS sonar
+    if (afterData.operadorFinal && String(afterData.operadorFinal).trim() !== "") {
+      console.log(`Despacho ${id} ya finalizado con operadorFinal, omitiendo push.`);
       return null;
     }
 
-    const clave = afterData.clave || "10-0";
-    const claveApoyo = afterData.claveApoyo || "";
-    const lugar = afterData.lugar || "Sin ubicación";
+    // 4. BLINDAJE ANTI-HISTÓRICOS: Si el despacho fue creado hace más de 20 minutos, JAMÁS sonar
+    const now = Date.now();
+    const createdAtMs = Number(afterData.createdAt || 0);
+    const docCreateTimeMs = (event.data && event.data.after && event.data.after.createTime)
+      ? event.data.after.createTime.toMillis()
+      : 0;
+
+    if (createdAtMs > 0 && (now - createdAtMs > 20 * 60 * 1000)) {
+      console.log(`Despacho ${id} omitido por seguridad (createdAt tiene más de 20 min).`);
+      return null;
+    }
+    if (docCreateTimeMs > 0 && (now - docCreateTimeMs > 20 * 60 * 1000)) {
+      console.log(`Despacho ${id} omitido por seguridad (createTime en Firestore tiene más de 20 min).`);
+      return null;
+    }
+
+    const rawClave = afterData.clave || afterData.key || afterData.claveServicio || "";
+    const clave = String(rawClave).trim() || "10-0";
+    const claveApoyo = String(afterData.claveApoyo || "").trim();
+    const lugar = String(afterData.lugar || "").trim();
 
     let unidadesTexto = "Unidades en despacho";
     if (afterData.carrosTexto && afterData.carrosTexto !== "") {
@@ -153,7 +173,22 @@ exports.enviarDespacho = onDocumentWritten(
       }
     }
 
-    const titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${lugar}` : `${clave} en ${lugar}`;
+    let titleText = "";
+    if (estado === "pre-despacho") {
+      if (clave === "10-12" && claveApoyo) {
+        titleText = `PRE-DESPACHO: ${clave} (${claveApoyo})`;
+      } else {
+        titleText = `PRE-DESPACHO: ${clave}`;
+      }
+      if (lugar && lugar !== "Sin ubicación" && lugar !== "Cuartel General") {
+        titleText += ` en ${lugar}`;
+      }
+      if (unidadesTexto === "Unidades en despacho" || !afterData.carrosTexto) {
+        unidadesTexto = "PRE-DESPACHO EN CURSO";
+      }
+    } else {
+      titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${lugar || "Sin ubicación"}` : `${clave} en ${lugar || "Sin ubicación"}`;
+    }
 
     // Direct topic dispatch (each Fire Department has its own isolated Firebase project)
     const payload = {
@@ -168,11 +203,22 @@ exports.enviarDespacho = onDocumentWritten(
         type: "DISPATCH",
         payloadId: String(id),
         clave: String(clave),
+        key: String(clave),
         claveApoyo: String(claveApoyo),
-        lugar: String(lugar)
+        lugar: String(lugar),
+        estado: String(estado)
       },
       android: {
-        priority: "high"
+        priority: "high",
+        notification: {
+          title: String(titleText),
+          body: String(unidadesTexto),
+          sound: "default",
+          channelId: "sisbom_dispatch_urgent_v1",
+          priority: "max",
+          defaultSound: true,
+          defaultVibrateTimings: true
+        }
       },
       apns: {
         headers: {
@@ -257,7 +303,16 @@ exports.enviarAlerta = onDocumentCreated(
         senderId: String(senderId)
       },
       android: {
-        priority: "high"
+        priority: "high",
+        notification: {
+          title: String(razon),
+          body: String(mensaje),
+          sound: "default",
+          channelId: (typePush === "CHAT") ? "sisbom_alertas_normal_v10" : (gradoAlerta === "3" ? "sisbom_alertas_g3_v1" : "sisbom_alertas_normal_v10"),
+          priority: "high",
+          defaultSound: true,
+          defaultVibrateTimings: true
+        }
       },
       apns: {
         headers: {
@@ -457,7 +512,16 @@ exports.actualizarDespacho = onDocumentUpdated(
             timestamp: String(new1210Ts || Date.now())
           },
           android: {
-            priority: "high"
+            priority: "high",
+            notification: {
+              title: `SOLICITUD 12-10: ${unitName}`,
+              body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`,
+              sound: "default",
+              channelId: "sisbom_alertas_critical_v10",
+              priority: "high",
+              defaultSound: true,
+              defaultVibrateTimings: true
+            }
           },
           apns: {
             headers: {
@@ -512,7 +576,16 @@ exports.actualizarDespacho = onDocumentUpdated(
             timestamp: String(new66Ts || Date.now())
           },
           android: {
-            priority: "high"
+            priority: "high",
+            notification: {
+              title: `SOLICITUD 6-6: ${unitName}`,
+              body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`,
+              sound: "default",
+              channelId: "sisbom_alertas_critical_v10",
+              priority: "high",
+              defaultSound: true,
+              defaultVibrateTimings: true
+            }
           },
           apns: {
             headers: {
@@ -570,7 +643,16 @@ exports.actualizarDespacho = onDocumentUpdated(
           gradoAlerta: "3"
         },
         android: {
-          priority: "high"
+          priority: "high",
+          notification: {
+            title: alarmTitle,
+            body: `${alarmClave} • ${lugar}`,
+            sound: "default",
+            channelId: "sisbom_dispatch_urgent_v1",
+            priority: "max",
+            defaultSound: true,
+            defaultVibrateTimings: true
+          }
         },
         apns: {
           headers: {

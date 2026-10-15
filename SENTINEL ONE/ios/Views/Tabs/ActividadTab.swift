@@ -716,36 +716,56 @@ struct IncidentMapPreview: View {
     let isDark: Bool
     var isFullScreen: Bool = false
 
-    private var hasValidCoordinates: Bool {
+    private var hasGps: Bool {
         if isPending { return false }
         if lat == 0.0 && lng == 0.0 { return false }
         if abs(lat) < 0.0001 && abs(lng) < 0.0001 { return false }
-        if abs(lat - cuartelLat) < 0.0001 && abs(lng - cuartelLng) < 0.0001 { return false }
         return true
     }
 
     var body: some View {
-        if hasValidCoordinates {
-            ZStack {
-                // Solid native fallback background
-                (isDark ? Color(red: 0.08, green: 0.02, blue: 0.02) : Color(red: 0.94, green: 0.96, blue: 0.98))
-                    .ignoresSafeArea()
+        let actualPending = !hasGps
+        let finalLat = actualPending ? cuartelLat : lat
+        let finalLng = actualPending ? cuartelLng : lng
 
-                IncidentWebView(
-                    lat: lat,
-                    lng: lng,
-                    clave: clave,
-                    isDark: isDark,
-                    isFullScreen: isFullScreen
+        ZStack {
+            // Solid native fallback background
+            (isDark ? Color(red: 0.08, green: 0.02, blue: 0.02) : Color(red: 0.94, green: 0.96, blue: 0.98))
+                .ignoresSafeArea()
+
+            IncidentWebView(
+                lat: finalLat,
+                lng: finalLng,
+                clave: clave,
+                isDark: isDark,
+                isFullScreen: isFullScreen,
+                isPending: actualPending
+            )
+            .opacity(actualPending ? (isFullScreen ? 0.45 : 0.35) : 1.0)
+            .animation(.easeInOut(duration: 0.4), value: actualPending)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea()
+
+            if actualPending {
+                // Glassmorphism frosted vignette overlay identical to Android
+                LinearGradient(
+                    colors: isDark ? [
+                        Color(red: 0.08, green: 0.01, blue: 0.01).opacity(0.25),
+                        Color(red: 0.12, green: 0.02, blue: 0.02).opacity(0.15),
+                        Color(red: 0.08, green: 0.01, blue: 0.01).opacity(0.25)
+                    ] : [
+                        Color(red: 0.97, green: 0.98, blue: 0.99).opacity(0.25),
+                        Color(red: 0.95, green: 0.96, blue: 0.98).opacity(0.15),
+                        Color(red: 0.97, green: 0.98, blue: 0.99).opacity(0.25)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(false)
                 .ignoresSafeArea()
             }
-            .ignoresSafeArea()
-        } else {
-            TacticalRadarScanner(clave: clave, isDark: isDark)
-                .ignoresSafeArea()
         }
+        .ignoresSafeArea()
     }
 }
 
@@ -756,12 +776,14 @@ struct IncidentWebView: UIViewRepresentable {
     let clave: String
     let isDark: Bool
     var isFullScreen: Bool = false
+    var isPending: Bool = false
 
     class Coordinator: NSObject {
         var lastLat: Double = 0.0
         var lastLng: Double = 0.0
         var lastClave: String = ""
         var lastIsDark: Bool? = nil
+        var lastIsPending: Bool? = nil
         var isMapLoaded: Bool = false
     }
 
@@ -785,7 +807,7 @@ struct IncidentWebView: UIViewRepresentable {
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
         let coord = context.coordinator
-        let needsFullReload = !coord.isMapLoaded || coord.lastIsDark != isDark || coord.lastClave != clave
+        let needsFullReload = !coord.isMapLoaded || coord.lastIsDark != isDark || coord.lastClave != clave || coord.lastIsPending != isPending
         let hasCoordChange = coord.lastLat != lat || coord.lastLng != lng
         
         if needsFullReload {
@@ -793,17 +815,29 @@ struct IncidentWebView: UIViewRepresentable {
         } else if hasCoordChange {
             coord.lastLat = lat
             coord.lastLng = lng
+            let pinColor = getClavePinHex(clave: clave)
             let js: String
             if isFullScreen {
                 js = """
                 if (window.map) {
                     window.map.setView([\(lat), \(lng)], 15);
                 }
-                if (window.incidentMarker) {
-                    window.incidentMarker.setLatLng([\(lat), \(lng)]);
-                }
-                if (window.incidentCircle) {
-                    window.incidentCircle.setLatLng([\(lat), \(lng)]);
+                if (!\(isPending)) {
+                    if (window.incidentMarker) {
+                        window.incidentMarker.setLatLng([\(lat), \(lng)]);
+                    } else if (window.map) {
+                        var iconHtml = '<div style="position:relative;"><div class="pulse-ring"></div><div class="incident-pin">!</div></div>';
+                        var icon = L.divIcon({ html: iconHtml, className: 'custom-incident-marker', iconSize: [24, 24], iconAnchor: [12, 12] });
+                        window.incidentMarker = L.marker([\(lat), \(lng)], { icon: icon }).addTo(window.map);
+                    }
+                    if (window.incidentCircle) {
+                        window.incidentCircle.setLatLng([\(lat), \(lng)]);
+                    } else if (window.map) {
+                        window.incidentCircle = L.circle([\(lat), \(lng)], { radius: 350, color: '\(pinColor)', fillColor: '\(pinColor)', fillOpacity: 0.14, weight: 2, dashArray: '4, 4' }).addTo(window.map);
+                    }
+                } else {
+                    if (window.incidentMarker && window.map) { window.map.removeLayer(window.incidentMarker); window.incidentMarker = null; }
+                    if (window.incidentCircle && window.map) { window.map.removeLayer(window.incidentCircle); window.incidentCircle = null; }
                 }
                 """
             } else {
@@ -816,11 +850,22 @@ struct IncidentWebView: UIViewRepresentable {
                 if (window.map) {
                     window.map.setView([centerLat, \(lng)], 15);
                 }
-                if (window.incidentMarker) {
-                    window.incidentMarker.setLatLng([\(lat), \(lng)]);
-                }
-                if (window.incidentCircle) {
-                    window.incidentCircle.setLatLng([\(lat), \(lng)]);
+                if (!\(isPending)) {
+                    if (window.incidentMarker) {
+                        window.incidentMarker.setLatLng([\(lat), \(lng)]);
+                    } else if (window.map) {
+                        var iconHtml = '<div style="position:relative;"><div class="pulse-ring"></div><div class="incident-pin">!</div></div>';
+                        var icon = L.divIcon({ html: iconHtml, className: 'custom-incident-marker', iconSize: [24, 24], iconAnchor: [12, 12] });
+                        window.incidentMarker = L.marker([\(lat), \(lng)], { icon: icon }).addTo(window.map);
+                    }
+                    if (window.incidentCircle) {
+                        window.incidentCircle.setLatLng([\(lat), \(lng)]);
+                    } else if (window.map) {
+                        window.incidentCircle = L.circle([\(lat), \(lng)], { radius: 350, color: '\(pinColor)', fillColor: '\(pinColor)', fillOpacity: 0.14, weight: 2, dashArray: '4, 4' }).addTo(window.map);
+                    }
+                } else {
+                    if (window.incidentMarker && window.map) { window.map.removeLayer(window.incidentMarker); window.incidentMarker = null; }
+                    if (window.incidentCircle && window.map) { window.map.removeLayer(window.incidentCircle); window.incidentCircle = null; }
                 }
                 """
             }
@@ -833,6 +878,7 @@ struct IncidentWebView: UIViewRepresentable {
         coordinator.lastLng = lng
         coordinator.lastClave = clave
         coordinator.lastIsDark = isDark
+        coordinator.lastIsPending = isPending
         coordinator.isMapLoaded = true
 
         let pinColor = getClavePinHex(clave: clave)
@@ -850,6 +896,29 @@ struct IncidentWebView: UIViewRepresentable {
             var dy = (cardHeight / 2) - targetY;
             var dLatPerDp = 0.0000154;
             var centerLat = \(lat) - (dy * dLatPerDp);
+            """
+        }
+
+        var markerScript = ""
+        if !isPending {
+            markerScript = """
+            window.incidentCircle = L.circle([\(lat), \(lng)], {
+                radius: 350,
+                color: '\(pinColor)',
+                fillColor: '\(pinColor)',
+                fillOpacity: 0.14,
+                weight: 2,
+                dashArray: '4, 4'
+            }).addTo(window.map);
+
+            var iconHtml = '<div style="position:relative;"><div class="pulse-ring"></div><div class="incident-pin">!</div></div>';
+            var icon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-incident-marker',
+                iconSize: [24, 24],
+                iconAnchor: [12, 12]
+            });
+            window.incidentMarker = L.marker([\(lat), \(lng)], { icon: icon }).addTo(window.map);
             """
         }
 
@@ -936,23 +1005,7 @@ struct IncidentWebView: UIViewRepresentable {
 
                 tacticalLayer.addTo(window.map);
 
-                window.incidentCircle = L.circle([\(lat), \(lng)], {
-                    radius: 350,
-                    color: '\(pinColor)',
-                    fillColor: '\(pinColor)',
-                    fillOpacity: 0.14,
-                    weight: 2,
-                    dashArray: '4, 4'
-                }).addTo(window.map);
-
-                var iconHtml = '<div style="position:relative;"><div class="pulse-ring"></div><div class="incident-pin">!</div></div>';
-                var icon = L.divIcon({
-                    html: iconHtml,
-                    className: 'custom-incident-marker',
-                    iconSize: [24, 24],
-                    iconAnchor: [12, 12]
-                });
-                window.incidentMarker = L.marker([\(lat), \(lng)], { icon: icon }).addTo(window.map);
+                \(markerScript)
             </script>
         </body>
         </html>

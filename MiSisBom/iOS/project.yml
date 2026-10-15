@@ -31,8 +31,8 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
-        CFBundleShortVersionString: "2.2.6"
-        CFBundleVersion: "226"
+        CFBundleShortVersionString: "2.2.7"
+        CFBundleVersion: "227"
         UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true

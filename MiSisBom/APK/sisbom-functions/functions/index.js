@@ -107,7 +107,7 @@ function formatFirefighterName(name) {
   return first;
 }
 
-// 1. DESPACHOS - Solo se notifica cuando un despacho pasa a ser activo por primera vez
+// 1. DESPACHOS - Se notifica inmediatamente en pre-despacho o cuando un despacho pasa a ser activo por primera vez
 exports.enviarDespacho = onDocumentWritten(
   { document: "despachos/{id}" },
   async (event) => {
@@ -118,26 +118,46 @@ exports.enviarDespacho = onDocumentWritten(
 
     const id = event.params.id;
 
-    // Si ya fue enviado previamente o antes ya estaba como pushSent, JAMÁS volver a enviar
+    // 1. Si ya fue enviado previamente o antes ya estaba como pushSent, JAMÁS volver a enviar
     if (afterData.pushSent === true || (beforeData && beforeData.pushSent === true)) {
       return null;
     }
 
-    // Solo se debe enviar push si el despacho está activo y visible para los móviles
-    const estado = String(afterData.estado || "").toLowerCase();
-    if (estado === "cancelada" || afterData.visibleMovil !== true) {
+    // 2. Solo se debe enviar push si el despacho está en pre-despacho o activo y visible para los móviles
+    const estado = String(afterData.estado || "").toLowerCase().trim();
+    if (estado !== "pre-despacho" && estado !== "activa" && estado !== "activo" && estado !== "en curso") {
+      return null;
+    }
+    if (afterData.visibleMovil !== true) {
       return null;
     }
 
-    // Si antes ya existía y ya era visibleMovil == true, es una simple modificación/edición: NO ENVIAR PUSH
-    if (beforeData && beforeData.visibleMovil === true) {
-      console.log("Modificación de despacho existente, omitiendo push para no sonar:", id);
+    // 3. BLINDAJE ANTI-FINALIZADOS: Si el despacho ya tiene operadorFinal (cerrado/terminado), JAMÁS sonar
+    if (afterData.operadorFinal && String(afterData.operadorFinal).trim() !== "") {
+      console.log(`Despacho ${id} ya finalizado con operadorFinal, omitiendo push.`);
       return null;
     }
 
-    const clave = afterData.clave || "10-0";
-    const claveApoyo = afterData.claveApoyo || "";
-    const lugar = afterData.lugar || "Sin ubicación";
+    // 4. BLINDAJE ANTI-HISTÓRICOS: Si el despacho fue creado hace más de 20 minutos, JAMÁS sonar
+    const now = Date.now();
+    const createdAtMs = Number(afterData.createdAt || 0);
+    const docCreateTimeMs = (event.data && event.data.after && event.data.after.createTime)
+      ? event.data.after.createTime.toMillis()
+      : 0;
+
+    if (createdAtMs > 0 && (now - createdAtMs > 20 * 60 * 1000)) {
+      console.log(`Despacho ${id} omitido por seguridad (createdAt tiene más de 20 min).`);
+      return null;
+    }
+    if (docCreateTimeMs > 0 && (now - docCreateTimeMs > 20 * 60 * 1000)) {
+      console.log(`Despacho ${id} omitido por seguridad (createTime en Firestore tiene más de 20 min).`);
+      return null;
+    }
+
+    const rawClave = afterData.clave || afterData.key || afterData.claveServicio || "";
+    const clave = String(rawClave).trim() || "10-0";
+    const claveApoyo = String(afterData.claveApoyo || "").trim();
+    const lugar = String(afterData.lugar || "").trim();
 
     let unidadesTexto = "Unidades en despacho";
     if (afterData.carrosTexto && afterData.carrosTexto !== "") {
@@ -153,7 +173,22 @@ exports.enviarDespacho = onDocumentWritten(
       }
     }
 
-    const titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${lugar}` : `${clave} en ${lugar}`;
+    let titleText = "";
+    if (estado === "pre-despacho") {
+      if (clave === "10-12" && claveApoyo) {
+        titleText = `PRE-DESPACHO: ${clave} (${claveApoyo})`;
+      } else {
+        titleText = `PRE-DESPACHO: ${clave}`;
+      }
+      if (lugar && lugar !== "Sin ubicación" && lugar !== "Cuartel General") {
+        titleText += ` en ${lugar}`;
+      }
+      if (unidadesTexto === "Unidades en despacho" || !afterData.carrosTexto) {
+        unidadesTexto = "PRE-DESPACHO EN CURSO";
+      }
+    } else {
+      titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${lugar || "Sin ubicación"}` : `${clave} en ${lugar || "Sin ubicación"}`;
+    }
 
     // Direct topic dispatch (each Fire Department has its own isolated Firebase project)
     const payload = {
@@ -168,11 +203,22 @@ exports.enviarDespacho = onDocumentWritten(
         type: "DISPATCH",
         payloadId: String(id),
         clave: String(clave),
+        key: String(clave),
         claveApoyo: String(claveApoyo),
-        lugar: String(lugar)
+        lugar: String(lugar),
+        estado: String(estado)
       },
       android: {
-        priority: "high"
+        priority: "high",
+        notification: {
+          title: String(titleText),
+          body: String(unidadesTexto),
+          sound: "default",
+          channelId: "sisbom_dispatch_urgent_v1",
+          priority: "max",
+          defaultSound: true,
+          defaultVibrateTimings: true
+        }
       },
       apns: {
         headers: {
@@ -257,7 +303,16 @@ exports.enviarAlerta = onDocumentCreated(
         senderId: String(senderId)
       },
       android: {
-        priority: "high"
+        priority: "high",
+        notification: {
+          title: String(razon),
+          body: String(mensaje),
+          sound: "default",
+          channelId: (typePush === "CHAT") ? "sisbom_alertas_normal_v10" : (gradoAlerta === "3" ? "sisbom_alertas_g3_v1" : "sisbom_alertas_normal_v10"),
+          priority: "high",
+          defaultSound: true,
+          defaultVibrateTimings: true
+        }
       },
       apns: {
         headers: {
@@ -408,6 +463,19 @@ exports.actualizarDespacho = onDocumentUpdated(
     if (!newData || !oldData) return null;
 
     const id = event.params.id;
+
+    // 1. VALIDACIÓN ESTRICTA: Ignorar despachos finalizados, cancelados o con operador final
+    const estadoNew = String(newData.estado || "").trim().toLowerCase();
+    const isFinalized = estadoNew === "finalizado" || estadoNew === "cancelada" || estadoNew === "anulado" || 
+                        Boolean(newData.operadorFinal && String(newData.operadorFinal).trim() !== "") ||
+                        Boolean(newData.fecha68 && String(newData.fecha68).trim() !== "") ||
+                        Boolean(newData.hora68 && String(newData.hora68).trim() !== "");
+
+    if (isFinalized) {
+      console.log(`Despacho ${id} se encuentra finalizado o cerrado (${estadoNew}). Se omiten notificaciones de actualización.`);
+      return null;
+    }
+
     const oldUnidades = oldData.unidades || {};
     const newUnidades = newData.unidades || {};
     const clave = String(newData.clave || "10-0");
@@ -417,13 +485,14 @@ exports.actualizarDespacho = onDocumentUpdated(
       const oldUnit = oldUnidades[unitName] || {};
       const newUnit = newUnidades[unitName] || {};
 
-      // 12-10 Conductor check
-      const old1210At = oldUnit.solicitudConductorAt || "";
-      const new1210At = newUnit.solicitudConductorAt || "";
-      const old1210Ts = oldUnit.solicitudConductorTimestamp || 0;
-      const new1210Ts = newUnit.solicitudConductorTimestamp || 0;
+      // 12-10 Conductor check con verificación de frescura (máx 3 minutos)
+      const old1210At = String(oldUnit.solicitudConductorAt || "").trim();
+      const new1210At = String(newUnit.solicitudConductorAt || "").trim();
+      const old1210Ts = Number(oldUnit.solicitudConductorTimestamp || 0);
+      const new1210Ts = Number(newUnit.solicitudConductorTimestamp || 0);
+      const is1210Fresh = new1210Ts > 0 ? (Date.now() - new1210Ts < 3 * 60 * 1000) : true;
 
-      if (new1210At && (new1210At !== old1210At || (new1210Ts > 0 && new1210Ts !== old1210Ts))) {
+      if (new1210At && is1210Fresh && (new1210At !== old1210At || (new1210Ts > 0 && new1210Ts !== old1210Ts))) {
         console.log(`Nueva solicitud 12-10 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
           topic: "conductores",
@@ -443,7 +512,16 @@ exports.actualizarDespacho = onDocumentUpdated(
             timestamp: String(new1210Ts || Date.now())
           },
           android: {
-            priority: "high"
+            priority: "high",
+            notification: {
+              title: `SOLICITUD 12-10: ${unitName}`,
+              body: `Se solicita Conductor para la unidad ${unitName} (${clave} en ${lugar})`,
+              sound: "default",
+              channelId: "sisbom_alertas_critical_v10",
+              priority: "high",
+              defaultSound: true,
+              defaultVibrateTimings: true
+            }
           },
           apns: {
             headers: {
@@ -471,13 +549,14 @@ exports.actualizarDespacho = onDocumentUpdated(
         }
       }
 
-      // 6-6 Personal check
-      const old66At = oldUnit.solicitudPersonalAt || "";
-      const new66At = newUnit.solicitudPersonalAt || "";
-      const old66Ts = oldUnit.solicitudPersonalTimestamp || 0;
-      const new66Ts = newUnit.solicitudPersonalTimestamp || 0;
+      // 6-6 Personal check con verificación de frescura (máx 3 minutos)
+      const old66At = String(oldUnit.solicitudPersonalAt || "").trim();
+      const new66At = String(newUnit.solicitudPersonalAt || "").trim();
+      const old66Ts = Number(oldUnit.solicitudPersonalTimestamp || 0);
+      const new66Ts = Number(newUnit.solicitudPersonalTimestamp || 0);
+      const is66Fresh = new66Ts > 0 ? (Date.now() - new66Ts < 3 * 60 * 1000) : true;
 
-      if (new66At && (new66At !== old66At || (new66Ts > 0 && new66Ts !== old66Ts))) {
+      if (new66At && is66Fresh && (new66At !== old66At || (new66Ts > 0 && new66Ts !== old66Ts))) {
         console.log(`Nueva solicitud 6-6 detectada para unidad ${unitName} en despacho ${id}`);
         const payload = {
           topic: "alertas_generales",
@@ -497,7 +576,16 @@ exports.actualizarDespacho = onDocumentUpdated(
             timestamp: String(new66Ts || Date.now())
           },
           android: {
-            priority: "high"
+            priority: "high",
+            notification: {
+              title: `SOLICITUD 6-6: ${unitName}`,
+              body: `Se solicita Personal para la unidad ${unitName} (${clave} en ${lugar})`,
+              sound: "default",
+              channelId: "sisbom_alertas_critical_v10",
+              priority: "high",
+              defaultSound: true,
+              defaultVibrateTimings: true
+            }
           },
           apns: {
             headers: {
@@ -555,7 +643,16 @@ exports.actualizarDespacho = onDocumentUpdated(
           gradoAlerta: "3"
         },
         android: {
-          priority: "high"
+          priority: "high",
+          notification: {
+            title: alarmTitle,
+            body: `${alarmClave} • ${lugar}`,
+            sound: "default",
+            channelId: "sisbom_dispatch_urgent_v1",
+            priority: "max",
+            defaultSound: true,
+            defaultVibrateTimings: true
+          }
         },
         apns: {
           headers: {
@@ -766,6 +863,8 @@ exports.validateLicense = onRequest({ cors: true }, async (req, res) => {
       clientName: clientData.nombreCliente || "Cliente SisBom",
       nombreMostrar: clientData.nombreMostrar || clientData.nombreCliente || "Cliente SisBom",
       logoUrl: clientData.logoUrl || "",
+      cuartelLat: clientData.cuartelLat !== undefined ? clientData.cuartelLat : (clientData.latCuartel !== undefined ? clientData.latCuartel : -34.637373),
+      cuartelLng: clientData.cuartelLng !== undefined ? clientData.cuartelLng : (clientData.lngCuartel !== undefined ? clientData.lngCuartel : -71.125741),
       module: assignedModule,
       firebaseConfig: clientData.firebaseConfig || {},
       vapidKey: clientData.vapidKey || (clientData.firebaseConfig ? clientData.firebaseConfig.vapidKey : "") || ""
@@ -937,47 +1036,101 @@ exports.solicitarAperturaPuerta = onDocumentCreated(
     const idRegistro = String(data.idRegistro || "").trim();
     const formattedName = formatFirefighterName(nombreBombero);
 
-    const titleText = "🚪 SOLICITUD DE ACCESO";
-    const bodyText = `${idRadial ? idRadial + " - " : ""}${formattedName} está en la entrada`;
+    const titleText = "🔔 SOLICITUD DE ACCESO";
+    const bodyText = `${idRadial ? idRadial + " - " : ""}${formattedName} está en la puerta del Cuartel`;
 
     const db = admin.firestore();
+    const targetTopics = new Set();
 
     // 1. Obtener el operador activo en la Central desde accesos/central
-    let operatorId = null;
     try {
-      const centralSnap = await db.collection("accesos").document("central").get();
+      const centralSnap = await db.collection("accesos").doc("central").get();
       if (centralSnap.exists) {
         const centralData = centralSnap.data();
-        if (centralData.estado === "activo" && centralData.idRegistro) {
-          operatorId = String(centralData.idRegistro).trim();
+        const estado = String(centralData.estado || "").trim().toLowerCase();
+        
+        // Si está activo o tiene operador asignado
+        const opId = centralData.idRegistro ? String(centralData.idRegistro).trim() : "";
+        const opName = String(centralData.operador || centralData.nombreBombero || "").trim();
+
+        if (opId) {
+          const safeOp = opId.replace(/\s+/g, "");
+          targetTopics.add("usuario_" + safeOp);
+          targetTopics.add("personal_" + safeOp);
+          console.log(`Operador detectado en accesos/central por idRegistro: usuario_${safeOp}`);
+
+          // Buscar también en personal para obtener todos los identificadores asociados
+          try {
+            let pSnap = await db.collection("personal").where("idRegistro", "==", opId).get();
+            if (pSnap.empty && !isNaN(Number(opId))) {
+              pSnap = await db.collection("personal").where("idRegistro", "==", Number(opId)).get();
+            }
+            pSnap.forEach((doc) => {
+              const p = doc.data();
+              const uId = String(p.idRegistro || doc.id).trim().replace(/\s+/g, "");
+              targetTopics.add("usuario_" + uId);
+              targetTopics.add("personal_" + uId);
+              if (p.idRadial) {
+                targetTopics.add("usuario_" + String(p.idRadial).trim().replace(/\s+/g, ""));
+              }
+            });
+          } catch (e) {}
+        }
+
+        if (opName) {
+          try {
+            const pSnap = await db.collection("personal").where("nombreBombero", "==", opName).limit(2).get();
+            pSnap.forEach((doc) => {
+              const p = doc.data();
+              const pId = String(p.idRegistro || doc.id).trim().replace(/\s+/g, "");
+              targetTopics.add("usuario_" + pId);
+              targetTopics.add("personal_" + pId);
+              console.log(`Operador activo resuelto por nombreBombero: usuario_${pId}`);
+            });
+          } catch (e) {}
         }
       }
     } catch (e) {
       console.error("Error al consultar operador activo en accesos/central:", e);
     }
 
+    // 2. Si no se identificó operador puntual en accesos/central, buscar personal con rol operador / cuartelero / comandante / permiso puerta
+    if (targetTopics.size === 0) {
+      try {
+        const personalSnap = await db.collection("personal").where("activo", "in", [true, "SI", "1", 1]).get();
+        personalSnap.forEach((doc) => {
+          const p = doc.data();
+          const cargo = String(p.cargo || "").trim().toUpperCase();
+          const hasPuerta = p.puerta === true || p.puerta === 1 || p.puerta === "SI" || p.puerta === "true";
+          const isOperadorRole = cargo.includes("OPERADOR") || cargo.includes("CUARTELERO") || cargo.includes("COMANDANTE");
+          if (hasPuerta || isOperadorRole) {
+            const uId = String(p.idRegistro || doc.id).trim().replace(/\s+/g, "");
+            targetTopics.add("usuario_" + uId);
+            targetTopics.add("personal_" + uId);
+          }
+        });
+        console.log(`Fallback a personal autorizado con acceso a puerta: ${Array.from(targetTopics).join(", ")}`);
+      } catch (e) {
+        console.error("Error buscando personal con acceso a puerta:", e);
+      }
+    }
+
+    // 3. SIEMPRE incluir topic general 'central_operador' (al que se suscriben los operadores activos)
     const payload = {
-      notification: {
-        title: titleText,
-        body: bodyText
-      },
+      topic: "central_operador",
       data: {
         title: titleText,
         body: bodyText,
         type: "DOOR_REQUEST",
         requestId: String(id),
+        payloadId: String(id),
         idRadial: String(idRadial),
         nombreBombero: String(nombreBombero),
         idRegistro: String(idRegistro),
         click_action: "FLUTTER_NOTIFICATION_CLICK"
       },
       android: {
-        priority: "high",
-        notification: {
-          sound: "default",
-          channelId: "sisbom_alerts_channel",
-          clickAction: "OPEN_DOOR_REQUEST"
-        }
+        priority: "high"
       },
       apns: {
         headers: {
@@ -990,7 +1143,7 @@ exports.solicitarAperturaPuerta = onDocumentCreated(
               title: titleText,
               body: bodyText
             },
-            sound: "default",
+            sound: "alerta.caf",
             category: "DOOR_REQUEST_ALERT",
             contentAvailable: true
           }
@@ -998,35 +1151,18 @@ exports.solicitarAperturaPuerta = onDocumentCreated(
       }
     };
 
-    const promises = [];
-
-    // Enviar EXCLUSIVAMENTE al operador activo (usuario_ID) y/o topic central_operador
-    if (operatorId) {
-      const safeOpTopic = operatorId.replace(/\s+/g, "");
-      const opPayload = Object.assign({}, payload, { topic: "usuario_" + safeOpTopic });
-      promises.push(
-        admin.messaging().send(opPayload)
-          .then(() => console.log(`Push de timbre enviado EXCLUSIVAMENTE al operador: usuario_${safeOpTopic}`))
-          .catch(err => console.error("Error enviando push a operador:", err))
-      );
-    } else {
-      // Si no hay idRegistro específico pero la consola está abierta, enviar a central_operador
-      const centralPayload = Object.assign({}, payload, { topic: "central_operador" });
-      promises.push(
-        admin.messaging().send(centralPayload)
-          .then(() => console.log("Push de timbre enviado a central_operador (sin operador individual)"))
-          .catch(err => console.error("Error enviando push a central_operador:", err))
-      );
-    }
-
-    await Promise.all(promises);
-
     try {
+      await admin.messaging().send(payload);
+      console.log("Push de timbre enviado exitosamente a topic central_operador");
+
       await event.data.ref.update({
         pushSent: true,
-        pushSentAt: Date.now()
+        pushSentAt: Date.now(),
+        destinatarios: ["central_operador"]
       });
-    } catch (e) {}
+    } catch (err) {
+      console.error("Error enviando push de timbre a topic central_operador:", err);
+    }
 
     return null;
   }
