@@ -12,6 +12,7 @@ on:
   push:
     branches: [ "main", "master" ]
     paths:
+      - 'ios/**'
       - 'SENTINEL ONE/ios/**'
       - 'MiSisBom/iOS/**'
       - '.github/workflows/sentinel-one-ios.yml'
@@ -42,7 +43,9 @@ jobs:
       - name: Locate iOS Directory
         id: locate-ios
         run: |
-          if [ -d "SENTINEL ONE/ios" ]; then
+          if [ -d "ios" ]; then
+            echo "ios_path=ios" >> $GITHUB_OUTPUT
+          elif [ -d "SENTINEL ONE/ios" ]; then
             echo "ios_path=SENTINEL ONE/ios" >> $GITHUB_OUTPUT
           elif [ -d "DEV/SENTINEL ONE/ios" ]; then
             echo "ios_path=DEV/SENTINEL ONE/ios" >> $GITHUB_OUTPUT
