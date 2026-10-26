@@ -1,0 +1,28 @@
+{
+  "name": "dev",
+  "version": "1.0.0",
+  "main": "index.js",
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "expo": "~58.0.14",
+    "expo-haptics": "~58.0.7",
+    "expo-linear-gradient": "~58.0.3",
+    "expo-location": "~58.0.17",
+    "expo-status-bar": "~58.0.3",
+    "firebase": "^13.0.0",
+    "lucide-react-native": "^1.59.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-web": "^0.21.4",
+    "zustand": "^5.0.15"
+  },
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "build:apk": "node build-apk.mjs"
+  },
+  "private": true
+}
