@@ -500,6 +500,7 @@ def main():
                 "parentalControls": False,
                 "userGeneratedContent": False,
                 "gunsOrOtherWeapons": "NONE",
+                "socialMedia": False,
             }
             # Enviar primero el conjunto completo y, si algún campo es de otra versión del esquema, enviar el subconjunto estándar
             age_patch = {
@@ -549,34 +550,102 @@ def main():
     }
     api_request("PATCH", f"/v1/appStoreVersions/{version_id}", body=ver_patch, token=token)
 
-    # También intentar actualizar AgeRatingDeclaration a nivel de versión si existe
-    _, v_age_res = api_request("GET", f"/v1/appStoreVersions/{version_id}/ageRatingDeclaration", token=token)
-    v_age_data = v_age_res.get("data")
-    if v_age_data and v_age_data.get("id"):
-        v_age_id = v_age_data["id"]
-        v_age_attrs = {
-            "alcoholTobaccoOrDrugUseOrReferences": "NONE",
-            "contests": "NONE",
-            "gambling": False,
-            "gamblingSimulated": "NONE",
-            "horrorOrFearThemes": "NONE",
-            "matureOrSuggestiveThemes": "NONE",
-            "medicalOrTreatmentInformation": "NONE",
-            "profanityOrCrudeHumor": "NONE",
-            "sexualContentGraphicAndNudity": "NONE",
-            "sexualContentOrNudity": "NONE",
-            "violenceCartoonOrFantasy": "NONE",
-            "violenceRealistic": "NONE",
-            "violenceRealisticProlongedGraphicOrSadistic": "NONE",
-            "unrestrictedWebAccess": False,
-            "lootBox": False,
-        }
-        api_request(
-            "PATCH",
-            f"/v1/ageRatingDeclarations/{v_age_id}",
-            body={"data": {"type": "ageRatingDeclarations", "id": v_age_id, "attributes": v_age_attrs}},
+    # 4B. Actualizar también /v1/ageRatingDeclarations/{version_id} directamente (Apple lo asocia al mismo UUID de la versión)
+    full_age_attrs = {
+        "alcoholTobaccoOrDrugUseOrReferences": "NONE",
+        "contests": "NONE",
+        "gambling": False,
+        "gamblingSimulated": "NONE",
+        "horrorOrFearThemes": "NONE",
+        "matureOrSuggestiveThemes": "NONE",
+        "medicalOrTreatmentInformation": "NONE",
+        "profanityOrCrudeHumor": "NONE",
+        "sexualContentGraphicAndNudity": "NONE",
+        "sexualContentOrNudity": "NONE",
+        "violenceCartoonOrFantasy": "NONE",
+        "violenceRealistic": "NONE",
+        "violenceRealisticProlongedGraphicOrSadistic": "NONE",
+        "unrestrictedWebAccess": False,
+        "lootBox": False,
+        "ageAssurance": False,
+        "advertising": False,
+        "healthOrWellnessTopics": False,
+        "messagingAndChat": False,
+        "parentalControls": False,
+        "userGeneratedContent": False,
+        "gunsOrOtherWeapons": "NONE",
+        "socialMedia": False,
+    }
+    print(f"🔞 Completando AgeRatingDeclaration de la versión (id={version_id})...")
+    st_va, _ = api_request(
+        "PATCH",
+        f"/v1/ageRatingDeclarations/{version_id}",
+        body={"data": {"type": "ageRatingDeclarations", "id": version_id, "attributes": full_age_attrs}},
+        token=token,
+    )
+    print(f"   ✅ AgeRatingDeclaration de versión respondido con HTTP {st_va}")
+
+    # 4C. Configurar Precio Gratis ($0.00 - FREE) en /v1/appPriceSchedules si aún no tiene precio
+    print("💲 Verificando / Configurando Precio Gratis ($0.00) en App Store Connect...")
+    st_ps, _ = api_request("GET", f"/v1/apps/{app_id}/appPriceSchedule", token=token)
+    if st_ps != 200:
+        # Buscar el price point gratuito (customerPrice == "0.0" o "0" o "0.00") para territorio USA o CHL
+        base_territory = "USA"
+        _, pp_res = api_request(
+            "GET",
+            f"/v1/apps/{app_id}/appPricePoints?filter[territory]={base_territory}&limit=50",
             token=token,
         )
+        pp_list = pp_res.get("data", [])
+        free_pp_id = None
+        for pp in pp_list:
+            cp = str(pp.get("attributes", {}).get("customerPrice", ""))
+            if cp in ("0", "0.0", "0.00"):
+                free_pp_id = pp["id"]
+                break
+        if not free_pp_id and pp_list:
+            free_pp_id = pp_list[0]["id"]
+
+        if free_pp_id:
+            price_schedule_body = {
+                "data": {
+                    "type": "appPriceSchedules",
+                    "relationships": {
+                        "app": {
+                            "data": {"type": "apps", "id": app_id}
+                        },
+                        "baseTerritory": {
+                            "data": {"type": "territories", "id": base_territory}
+                        },
+                        "manualPrices": {
+                            "data": [
+                                {"type": "appPrices", "id": "${price1}"}
+                            ]
+                        },
+                    },
+                },
+                "included": [
+                    {
+                        "type": "appPrices",
+                        "id": "${price1}",
+                        "attributes": {
+                            "startDate": None,
+                        },
+                        "relationships": {
+                            "appPricePoint": {
+                                "data": {
+                                    "type": "appPricePoints",
+                                    "id": free_pp_id,
+                                }
+                            }
+                        },
+                    }
+                ],
+            }
+            st_pcreate, _ = api_request("POST", "/v1/appPriceSchedules", body=price_schedule_body, token=token)
+            print(f"   ✅ Precio Gratis ($0.00) configurado (HTTP {st_pcreate}).")
+    else:
+        print("   ✅ La app ya tiene su esquema de precios configurado.")
 
     # 5. Actualizar URL de Soporte, Descripción, Palabras Clave y Capturas en todas las Localizaciones de la versión
     _, loc_res = api_request("GET", f"/v1/appStoreVersions/{version_id}/appStoreVersionLocalizations", token=token)
