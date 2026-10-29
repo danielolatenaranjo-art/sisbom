@@ -12,7 +12,9 @@ on:
   push:
     branches: [ "main", "master" ]
     paths:
-      - 'ios/**'
+      - 'ios/SisBomApp.swift'
+      - 'ios/project.yml'
+      - 'ios/Resources/**'
       - 'SENTINEL ONE/ios/**'
       - 'MiSisBom/iOS/**'
       - '.github/workflows/sentinel-one-ios.yml'

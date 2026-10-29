@@ -1,0 +1,33 @@
+name: Publish Metadata & Screenshots to App Store Connect
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+    paths:
+      - 'ios/publish_appstore.py'
+      - '.github/workflows/appstore-metadata.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-metadata:
+    name: Configure & Submit SENTINEL ONE 3.0.3
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Python Dependencies
+        run: |
+          pip3 install PyJWT cryptography Pillow requests
+
+      - name: Run Full App Store Connect Automation
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          python3 ios/publish_appstore.py
