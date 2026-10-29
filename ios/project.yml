@@ -71,6 +71,7 @@ targets:
         NSLocationAlwaysUsageDescription: "SENTINEL ONE requiere acceso permanente a su ubicación para alertas de despacho y seguimiento de emergencias en tiempo real."
         NSCameraUsageDescription: "SENTINEL ONE requiere acceso a la cámara para adjuntar fotografías en reportes y bitácora de emergencias."
         NSPhotoLibraryUsageDescription: "SENTINEL ONE requiere acceso a la galería para adjuntar imágenes a reportes de servicio y bitácora."
+        ITSAppUsesNonExemptEncryption: false
         CFBundleIcons:
           CFBundlePrimaryIcon:
             CFBundleIconFiles:
