@@ -854,17 +854,19 @@ export const useDispatchStore = create((set, get) => ({
       if (is1210) {
         const cond = String(uObj.conductor || '').trim();
         if (!cond || cond === 'Sin Conductor') {
-          get().playDispatchSound('importante', {
-            forceMaxVolume: false,
-            vibratePatternCsv: '0,500,250,500'
+          const soundKey = resolveSoundKeyForClave(disp.clave);
+          get().playDispatchSound(soundKey, {
+            forceMaxVolume: true,
+            vibratePatternCsv: '0,1200,400,1200'
           });
         }
       } else {
         const numB = Number(uObj.numBomberos || 0);
         if (numB === 0) {
-          get().playDispatchSound('importante', {
-            forceMaxVolume: false,
-            vibratePatternCsv: '0,500,250,500'
+          const soundKey = resolveSoundKeyForClave(disp.clave);
+          get().playDispatchSound(soundKey, {
+            forceMaxVolume: true,
+            vibratePatternCsv: '0,1200,400,1200'
           });
         }
       }
@@ -888,8 +890,9 @@ export const useDispatchStore = create((set, get) => ({
     const isMeCentral = Boolean(
       !isClosed &&
       (opName || opId) &&
+      opName.toUpperCase() !== 'SIN OPERADOR' &&
       ((opId && (opId === myReg || opId === myRad)) ||
-       (myNameNorm && opNameNorm && (myNameNorm === opNameNorm || shortOperatorName(myNameNorm) === shortOperatorName(opNameNorm))))
+       (myNameNorm && opNameNorm && opNameNorm !== 'SIN OPERADOR' && (myNameNorm === opNameNorm || shortOperatorName(myNameNorm) === shortOperatorName(opNameNorm))))
     );
 
     set({
@@ -1014,8 +1017,18 @@ export const useDispatchStore = create((set, get) => ({
 
     rawDocsArray.forEach(({ id, data, hasPendingWrites }) => {
       const rawData = data || {};
-      const incomingNorm = normalizeDispatchDoc(id, rawData);
-      const docId = String(incomingNorm.idServicio || id).trim();
+      const norm = normalizeDispatchDoc(id, rawData);
+      const docId = String(rawData.idServicio || rawData.id || norm.idServicio || id).trim();
+      const incomingNorm = {
+        ...rawData,
+        ...norm,
+        id: docId,
+        idServicio: docId,
+        estado: String(rawData.estado || norm.estado || 'activa').trim(),
+        unidades: (rawData.unidades && typeof rawData.unidades === 'object') ? rawData.unidades : (norm.unidades || {}),
+        geo: rawData.geo || norm.geo || (rawData.coords ? { lat: Number(rawData.coords.lat), lng: Number(rawData.coords.lng) } : null),
+        visibleMovil: rawData.visibleMovil !== false
+      };
       const existing = existingById.get(docId);
 
       // Ley #4: Fusionar unidades y campos garantizando que NUNCA un snapshot atrasado pise un timestamp mayor
@@ -1043,12 +1056,7 @@ export const useDispatchStore = create((set, get) => ({
         return;
       }
 
-      const isValidActive =
-        (st === 'activa' || st === 'activo' || st === 'pre-despacho' || st === 'en curso' || st === '') &&
-        !isClosed &&
-        mergedItem.visibleMovil !== false;
-
-      if (isValidActive) {
+      if (!isClosed && mergedItem.visibleMovil !== false) {
         activeList.push(mergedItem);
       }
     });
@@ -1232,6 +1240,26 @@ export const useDispatchStore = create((set, get) => ({
         isLiveConnected: true
       });
     } else {
+      // Si la consulta viene vacía por fallo transitorio o snapshot inicial, NO vaciar los despachos locales a menos que el servidor haya cerrado explícitamente los IDs que teníamos
+      const hasUnclosedLocal = currentDispatches.some((d) => {
+        const sId = String(d?.idServicio || d?.id || '').trim();
+        return sId && !closedServerIds.has(sId) && !isDispatchTooOld(d);
+      });
+
+      if (hasUnclosedLocal && rawDocsArray.length === 0) {
+        const preserved = currentDispatches.filter((d) => {
+          const sId = String(d?.idServicio || d?.id || '').trim();
+          return sId && !closedServerIds.has(sId) && !isDispatchTooOld(d);
+        });
+        set({
+          activeDispatch: preserved[0] || null,
+          dispatchesList: preserved,
+          isLoading: false,
+          isLiveConnected: true
+        });
+        return;
+      }
+
       isFirstDispatchesSnapshot = false;
       persistActiveDispatchesToLocalStorage([]);
       set({
@@ -1471,51 +1499,24 @@ export const useDispatchStore = create((set, get) => ({
         return parsed;
       };
 
-      const fetchDespachosViaStructuredQuery = async () => {
+      const fetchDespachosRest = async () => {
         try {
-          const queryRes = await fetchFirestoreWithAuth(`${baseUrl}:runQuery`, apiKey, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              structuredQuery: {
-                from: [{ collectionId: 'despachos' }],
-                orderBy: [{ field: { fieldPath: '__name__' }, direction: 'DESCENDING' }],
-                limit: 150
-              }
-            })
-          });
-          if (queryRes && queryRes.ok) {
-            const qJson = await queryRes.json();
-            if (Array.isArray(qJson)) {
-              const docs = [];
-              qJson.forEach((row) => {
-                if (row?.document?.name) {
-                  docs.push({
-                    id: row.document.name.split('/').pop(),
-                    data: parseRestDocFields(row.document),
-                    hasPendingWrites: false
-                  });
-                }
-              });
-              return docs;
-            }
+          const res = await fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=300`, apiKey).catch(() => null);
+          if (res && res.ok) {
+            const dJson = await res.json();
+            return (dJson?.documents || []).map((docItem) => ({
+              id: docItem.name.split('/').pop(),
+              data: parseRestDocFields(docItem),
+              hasPendingWrites: false
+            }));
           }
         } catch (_) {}
-        const fallbackRes = await fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=300`, apiKey).catch(() => null);
-        if (fallbackRes && fallbackRes.ok) {
-          const dJson = await fallbackRes.json();
-          return (dJson?.documents || []).map((docItem) => ({
-            id: docItem.name.split('/').pop(),
-            data: parseRestDocFields(docItem),
-            hasPendingWrites: false
-          }));
-        }
         return null;
       };
 
       const [centralRes, despDocs, vehRes, alertRes] = await Promise.all([
         fetchFirestoreWithAuth(`${baseUrl}/accesos/central`, apiKey).catch(() => null),
-        fetchDespachosViaStructuredQuery(),
+        fetchDespachosRest(),
         fetchFirestoreWithAuth(`${baseUrl}/vehiculos?pageSize=100`, apiKey).catch(() => null),
         fetchFirestoreWithAuth(`${baseUrl}/alertas?pageSize=100`, apiKey).catch(() => null)
       ]);
@@ -1593,9 +1594,11 @@ export const useDispatchStore = create((set, get) => ({
       }
       await reinitFirebaseWithConfig(fbConfig);
 
-      // Disparar hidratación inmediata vía REST en paralelo (garantiza carga instantánea en iOS y Android)
+      // Asegurar autenticación primero para que los tokens REST y onSnapshot tengan permisos válidos
+      await ensureFirebaseAuth().catch(() => {});
+
+      // Disparar hidratación inmediata vía REST
       get().hydrateFromFirestoreRest();
-      ensureFirebaseAuth();
 
       const db = getDb();
       if (!db) {

@@ -355,7 +355,20 @@ export const useLicenseStore = create((set, get) => ({
       }
 
       const isReadOnly = normalizedClient.soloLectura || subStatus === 'lectura' || subStatus === 'readonly';
-      const clientFbConfig = normalizedClient.firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const clientFbConfig =
+        normalizedClient.firebaseConfig && normalizedClient.firebaseConfig.projectId && normalizedClient.firebaseConfig.apiKey
+          ? normalizedClient.firebaseConfig
+          : null;
+
+      if (!clientFbConfig) {
+        set({
+          authorized: false,
+          status: 'no_autorizado',
+          isChecking: false,
+          errorReason: 'Esta licencia no tiene un proyecto Firebase asignado en el Servidor Central.'
+        });
+        return false;
+      }
       const cuartelesObj = normalizedClient.companias || normalizedClient.cuarteles || null;
       const cg = normalizedClient.cuartelGeneral || parsedFields.cuartelGeneral || {};
       const cLat = Number(cg.lat ?? parsedFields.latCuartel ?? -34.637373) || -34.637373;

@@ -57,7 +57,8 @@ export function formatProfilePhotoUrl(foto) {
 
 // Consulta primero el documento exacto `personal/{idRegistro}` y como respaldo busca estrictamente por `idRegistro` (NUNCA por `idRadial`)
 async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
-  const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+  const fbConfig = useLicenseStore.getState().firebaseConfig;
+  if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return null;
   const projId = fbConfig.projectId;
   const apiKey = fbConfig.apiKey;
 
@@ -579,10 +580,25 @@ export const useAuthStore = create((set, get) => ({
           return { success: false, error: 'Contraseña operacional incorrecta' };
         }
 
+        const securePass = cleanPass.endsWith('_secure_sisbom') ? cleanPass : `${cleanPass}_secure_sisbom`;
+        const email = cleanId.includes('@') ? cleanId : `${cleanId}@sisbom.com`;
+
+        // Conectar sesión activa en Firebase Auth para permisos de Firestore/RTDB
+        await ensureFirebaseAuth(null, email, securePass).catch(() => {});
+
+        // Persistir credenciales seguras para reconexión automática en reinicios de la app
+        syncNativeStorageKey('authUserId', cleanId);
+        syncNativeStorageKey('authPasswordSecure', securePass);
+        if (typeof window !== 'undefined' && window.localStorage) {
+          window.localStorage.setItem('authUserId', cleanId);
+          window.localStorage.setItem('authPasswordSecure', securePass);
+        }
+
         const userObj = buildNormalizedUserObject(foundMatch, {
           idRegistro: String(foundMatch.idRegistro || cleanId),
           idRadial: String(foundMatch.idRadial || ''),
-          loginIdentifier: cleanId
+          loginIdentifier: cleanId,
+          contrasena: cleanPass
         });
 
         try {
@@ -675,7 +691,8 @@ export const useAuthStore = create((set, get) => ({
         console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${newStatus}`);
       }
     } catch (dbErr) {
-      const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const fbConfig = useLicenseStore.getState().firebaseConfig;
+      if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
       const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_metaTimestamp`;
@@ -840,7 +857,8 @@ export const useAuthStore = create((set, get) => ({
         }
       }
     } catch (dbErr) {
-      const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const fbConfig = useLicenseStore.getState().firebaseConfig;
+      if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
       const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=enServicio&updateMask.fieldPaths=_metaTimestamp`;
@@ -1179,6 +1197,12 @@ export const useAuthStore = create((set, get) => ({
     clearNativeUserSession();
     try {
       syncNativeStorageKey(USER_SESSION_KEY, null);
+      syncNativeStorageKey('authUserId', null);
+      syncNativeStorageKey('authPasswordSecure', null);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem('authUserId');
+        window.localStorage.removeItem('authPasswordSecure');
+      }
       await AsyncStorage.removeItem(USER_SESSION_KEY);
     } catch (e) {}
     set({ user: null, isAuthenticated: false, error: '' });

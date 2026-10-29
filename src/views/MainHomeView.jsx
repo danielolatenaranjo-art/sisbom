@@ -475,10 +475,12 @@ export const MainHomeView = ({ onLogout }) => {
 
   // Reconocimiento reactivo instantáneo del Operador Central Activo (por idRegistro, idRadial o Nombre normalizado)
   const isMeCentralOperator = useMemo(() => {
-    if (isCentralActive) return true;
+    const opId = String(centralOperatorId || '').trim();
+    const opName = String(centralOperatorName || '').trim();
+    if (!opId && (!opName || opName.toUpperCase() === 'SIN OPERADOR')) return false;
+
     const myReg = String(user?.idRegistro || '').trim();
     const myRad = String(user?.idRadial || '').trim();
-    const opId = String(centralOperatorId || '').trim();
     if (opId && ((myReg && opId === myReg) || (myRad && opId === myRad))) return true;
     const norm = (s) =>
       String(s || '')
@@ -487,17 +489,18 @@ export const MainHomeView = ({ onLogout }) => {
         .trim()
         .toUpperCase();
     const myNameNorm = norm(user?.nombreBombero || user?.nombre);
-    const opNameNorm = norm(centralOperatorName);
+    const opNameNorm = norm(opName);
     if (
       myNameNorm &&
       opNameNorm &&
+      opNameNorm !== 'SIN OPERADOR' &&
       (myNameNorm === opNameNorm ||
         formatOperatorCadName(myNameNorm) === formatOperatorCadName(opNameNorm))
     ) {
       return true;
     }
     return false;
-  }, [isCentralActive, user?.idRegistro, user?.idRadial, user?.nombreBombero, user?.nombre, centralOperatorId, centralOperatorName]);
+  }, [user?.idRegistro, user?.idRadial, user?.nombreBombero, user?.nombre, centralOperatorId, centralOperatorName]);
 
   // Sincronizar modo Operador Central con el puente nativo (iOS + Android) y silenciar cualquier alerta de asistencia
   useEffect(() => {
@@ -3836,85 +3839,83 @@ export const MainHomeView = ({ onLogout }) => {
         </Modal>
 
         {/* =================================================================== */}
-        {/* LISTA DE DESPACHOS ACTIVOS PARA BOMBEROS (SIEMPRE VISIBLE SALVO QUE EL USUARIO SEA EL OPERADOR ACTIVO EN LA CENTRAL) */}
+        {/* LISTA DE DESPACHOS ACTIVOS PARA BOMBEROS (SIEMPRE VISIBLE EN PANTALLA) */}
         {/* =================================================================== */}
-        {!isMeCentralOperator ? (
-          allActiveDispatches.length > 0 ? (
-            <View style={{ gap: 14 }}>
-              {allActiveDispatches.length > 1 ? (
-                <View
-                  style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    paddingHorizontal: 4
-                  }}
-                >
-                  <Text
-                    style={{
-                      color: '#F87171',
-                      fontSize: 11,
-                      fontWeight: '900',
-                      letterSpacing: 0.8
-                    }}
-                  >
-                    🚨 EMERGENCIAS EN CURSO ({allActiveDispatches.length})
-                  </Text>
-                </View>
-              ) : null}
-
-              {allActiveDispatches.map((disp, idx) => {
-                const dispId = String(disp.idServicio || disp.id || idx);
-                const myAssistedThis = Boolean(
-                  myResponse && String(myResponse).trim() === dispId
-                );
-                const myDeclinedThis = Boolean(
-                  myResponse && String(myResponse).trim() === `-${dispId}`
-                );
-
-                return (
-                  <TacticalDispatchMap
-                    key={dispId}
-                    dispatch={disp}
-                    hasAssisted={myAssistedThis}
-                    hasDeclined={myDeclinedThis}
-                    is08={is08 || isRestrictedStatus}
-                    onAsistir={() =>
-                      handleResponseForDispatch(dispId, myAssistedThis ? 'LIBRE' : 'ASISTO')
-                    }
-                    onNoAsistir={() => handleResponseForDispatch(dispId, 'NO_ASISTO')}
-                    onCancelarAsistencia={() => handleResponseForDispatch(dispId, 'LIBRE')}
-                  />
-                );
-              })}
-            </View>
-          ) : (
-            <View
-              style={[
-                styles.glassCard,
-                {
-                  backgroundColor: isDarkMode ? '#120A0A' : '#FFFFFF',
-                  borderColor: isDarkMode ? 'rgba(239, 68, 68, 0.10)' : 'rgba(15, 23, 42, 0.12)',
-                  paddingVertical: 32,
-                  paddingHorizontal: 20,
-                  alignItems: 'center'
-                }
-              ]}
-            >
-              <Text style={{ fontSize: 32, marginBottom: 8 }}>🚒</Text>
-              <Text
+        {allActiveDispatches.length > 0 ? (
+          <View style={{ gap: 14 }}>
+            {allActiveDispatches.length > 1 ? (
+              <View
                 style={{
-                  color: '#94A3B8',
-                  fontSize: 13,
-                  fontWeight: '500',
-                  textAlign: 'center'
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  paddingHorizontal: 4
                 }}
               >
-                Sin Despachos Activos
-              </Text>
-            </View>
-          )
-        ) : null}
+                <Text
+                  style={{
+                    color: '#F87171',
+                    fontSize: 11,
+                    fontWeight: '900',
+                    letterSpacing: 0.8
+                  }}
+                >
+                  🚨 EMERGENCIAS EN CURSO ({allActiveDispatches.length})
+                </Text>
+              </View>
+            ) : null}
+
+            {allActiveDispatches.map((disp, idx) => {
+              const dispId = String(disp.idServicio || disp.id || idx);
+              const myAssistedThis = Boolean(
+                myResponse && String(myResponse).trim() === dispId
+              );
+              const myDeclinedThis = Boolean(
+                myResponse && String(myResponse).trim() === `-${dispId}`
+              );
+
+              return (
+                <TacticalDispatchMap
+                  key={dispId}
+                  dispatch={disp}
+                  hasAssisted={myAssistedThis}
+                  hasDeclined={myDeclinedThis}
+                  is08={is08 || isRestrictedStatus}
+                  onAsistir={() =>
+                    handleResponseForDispatch(dispId, myAssistedThis ? 'LIBRE' : 'ASISTO')
+                  }
+                  onNoAsistir={() => handleResponseForDispatch(dispId, 'NO_ASISTO')}
+                  onCancelarAsistencia={() => handleResponseForDispatch(dispId, 'LIBRE')}
+                />
+              );
+            })}
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.glassCard,
+              {
+                backgroundColor: isDarkMode ? '#120A0A' : '#FFFFFF',
+                borderColor: isDarkMode ? 'rgba(239, 68, 68, 0.10)' : 'rgba(15, 23, 42, 0.12)',
+                paddingVertical: 32,
+                paddingHorizontal: 20,
+                alignItems: 'center'
+              }
+            ]}
+          >
+            <Text style={{ fontSize: 32, marginBottom: 8 }}>🚒</Text>
+            <Text
+              style={{
+                color: '#94A3B8',
+                fontSize: 13,
+                fontWeight: '500',
+                textAlign: 'center'
+              }}
+            >
+              Sin Despachos Activos
+            </Text>
+          </View>
+        )}
       </View>
     );
   };

@@ -1,3 +1,22 @@
+# SENTINEL ONE - App Móvil Bomberos y Maquinistas (React Native / Expo)
+
+> [!IMPORTANT]
+> **CONTRATO DE INTEROPERABILIDAD Y SINCRONIZACIÓN CON SENTINEL CAD**:
+> Toda la lógica de datos, despachos, lectura de solicitudes 12-10 (conductor urgente) y 6-6 (personal de refuerzo), geolocalización `geo` y asistencia debe cumplir estrictamente con:
+> - [`CONTRATO_INTEROPERABILIDAD_SENTINEL_ONE.md`](file:///c:/Users/danie/Desktop/SENTINEL%20V3/SHARED/CONTRATO_INTEROPERABILIDAD_SENTINEL_ONE.md)
+> - [`ESQUEMA_CANONICO_V3.md`](file:///c:/Users/danie/Desktop/SENTINEL%20V3/SHARED/ESQUEMA_CANONICO_V3.md)
+> 
+> **Reglas Clave para SENTINEL ONE**:
+> 1. **Construcción Dual Obligatoria (iOS + Android) y Compilación Bajo Demanda**:
+>    - **Siempre que trabajes en `SENTINEL ONE`**, debes construir y sincronizar el bundle simultáneamente para **iOS (`ios/Resources/www` + archivos nativos `ios/`)** y **Android (`android/app/src/main/assets/www` + archivos nativos `android/`)** ejecutando `npm run prepare:platforms` (`node build-apk.mjs --prepare-only`), asegurando paridad 100% entre ambas plataformas en todo cambio.
+>    - **Cuando el usuario te pida compilar**, compila **únicamente para el sistema que el usuario te pida**:
+>      - Si pide **Android**: ejecuta `node build-apk.mjs` (o `npm run build:apk`) para generar `TERMINADOS/SENTINEL_ONE_V3.apk` y `TERMINADOS/SENTINEL_ONE_V3.aab`.
+>      - Si pide **iOS**: sincroniza `ios/Resources/www` (`node build-apk.mjs --prepare-only`), incrementa `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` en `ios/project.yml` si corresponde, y ejecuta el workflow de compilación iOS (`.github/workflows/sentinel-one-ios.yml` / GitHub Actions TestFlight/App Store).
+>      - Si pide **ambos**, compila ambos sistemas.
+> 2. **12-10 y 6-6**: Se leen desde `despachos/{idServicio}.unidades[carro].solicitudConductorTimestamp` y `solicitudPersonalTimestamp`. Si `Date.now() - timestamp < 60000`, la solicitud está activa (cooldown 1 minuto).
+> 3. **Geolocalización**: Leer únicamente `despachos/{idServicio}.geo: { lat, lng, accuracy, origen }`.
+> 4. **Asistencias**: Al responder asistencia, escribir en `despachos/{idServicio}/asistencias/{idRegistro}` y actualizar `personal/{idRegistro}.enServicio`.
+
 This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
 
 ## Expo has changed — do not trust your training data

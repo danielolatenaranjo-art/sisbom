@@ -18,21 +18,63 @@ export const CENTRAL_FIREBASE_CONFIG = {
   messagingSenderId: "432594591351"
 };
 
-export const DEFAULT_FIREBASE_CONFIG = {
-  projectId: "pruebas-sisbom",
-  apiKey: "AIzaSyDyQc_gHlHocYJ5x8Wj0EZdSGSvbt8d9og",
-  authDomain: "pruebas-sisbom.firebaseapp.com",
-  storageBucket: "pruebas-sisbom.firebasestorage.app",
-  messagingSenderId: "306101642399",
-  appId: "1:306101642399:web:0f26dd8b37eb90ce91aeaa",
-  databaseURL: "https://pruebas-sisbom-default-rtdb.firebaseio.com"
-};
+// Prohibido tener un proyecto de cliente o de pruebas por defecto ni usuarios preconfigurados (Ley #5).
+export const DEFAULT_FIREBASE_CONFIG = null;
 
 let app = null;
 let db = null;
 let auth = null;
 let rtdb = null;
 let authPromise = null;
+
+function resolveCachedTenantConfig() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw =
+        window.localStorage.getItem('@sentinel_one_v3_license_cache') ||
+        window.localStorage.getItem('saas_firebase_config') ||
+        window.localStorage.getItem('firebaseConfig');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const cfg = parsed.firebaseConfig || (parsed.projectId ? parsed : null);
+        if (cfg && cfg.projectId && cfg.apiKey) {
+          return cfg;
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
+
+function resolveCachedUserAuthCredentials() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const savedId = String(window.localStorage.getItem('authUserId') || '').trim();
+      const savedPass = String(window.localStorage.getItem('authPasswordSecure') || '').trim();
+      if (savedId && savedPass) {
+        return {
+          email: savedId.includes('@') ? savedId : `${savedId}@sisbom.com`,
+          password: savedPass.endsWith('_secure_sisbom') ? savedPass : `${savedPass}_secure_sisbom`,
+          rawPassword: savedPass.replace(/_secure_sisbom$/, '')
+        };
+      }
+      const rawSession = window.localStorage.getItem('@sentinel_one_v3_user_session');
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession);
+        const idReg = String(parsed.idRegistro || parsed.id || '').trim();
+        const pass = String(parsed.contrasena || parsed.password || parsed.claveAcceso || '').trim();
+        if (idReg && pass) {
+          return {
+            email: idReg.includes('@') ? idReg : `${idReg}@sisbom.com`,
+            password: pass.endsWith('_secure_sisbom') ? pass : `${pass}_secure_sisbom`,
+            rawPassword: pass.replace(/_secure_sisbom$/, '')
+          };
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
 
 function getOrInitFirestore(firebaseApp) {
   if (!firebaseApp) return null;
@@ -58,18 +100,35 @@ function getOrInitAuth(firebaseApp) {
 }
 
 function getOrCreateFirebaseApp(config) {
-  const cfg = config || DEFAULT_FIREBASE_CONFIG;
-  const targetProjectId = String(cfg.projectId || DEFAULT_FIREBASE_CONFIG.projectId).trim();
-  const appName = targetProjectId === DEFAULT_FIREBASE_CONFIG.projectId ? '[DEFAULT]' : `tenant_${targetProjectId}`;
+  const cfg = config || resolveCachedTenantConfig();
+  if (!cfg || !cfg.projectId || !cfg.apiKey) return null;
+  const targetProjectId = String(cfg.projectId).trim();
+  const appName = `tenant_${targetProjectId}`;
   const existing = getApps().find((a) => a.name === appName || a.options?.projectId === targetProjectId);
   if (existing) return existing;
   return initializeApp(cfg, appName);
 }
 
-// Asegurar autenticación de Firebase Auth para permisos de lectura/escritura de Firestore y RTDB
-export async function ensureFirebaseAuth(customAuth = null) {
+// Asegurar autenticación de Firebase Auth para permisos de lectura/escritura de Firestore y RTDB (sin usuarios por defecto)
+export async function ensureFirebaseAuth(customAuth = null, customEmail = null, customPass = null) {
   const currentAuth = customAuth || auth || getAuthInstance();
   if (!currentAuth) return null;
+
+  if (customEmail && customPass) {
+    const email = customEmail.includes('@') ? customEmail : `${String(customEmail).trim()}@sisbom.com`;
+    const securePass = String(customPass).endsWith('_secure_sisbom')
+      ? String(customPass)
+      : `${String(customPass).trim()}_secure_sisbom`;
+    try {
+      const cred = await signInWithEmailAndPassword(currentAuth, email, securePass);
+      return cred?.user || null;
+    } catch {
+      try {
+        const credRaw = await signInWithEmailAndPassword(currentAuth, email, String(customPass).trim());
+        return credRaw?.user || null;
+      } catch (_) {}
+    }
+  }
 
   if (currentAuth.currentUser) {
     return currentAuth.currentUser;
@@ -79,27 +138,30 @@ export async function ensureFirebaseAuth(customAuth = null) {
 
   authPromise = (async () => {
     try {
-      const cred = await Promise.race([
-        signInWithEmailAndPassword(
-          currentAuth,
-          '137@sisbom.com',
-          'ADASME137_secure_sisbom'
-        ),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 3500))
-      ]);
-      if (cred?.user) {
-        console.log('🔥 [Firebase Auth] Autenticado exitosamente para Firestore y RTDB.');
-        return cred.user;
+      const userCreds = resolveCachedUserAuthCredentials();
+      if (userCreds) {
+        try {
+          const cred = await Promise.race([
+            signInWithEmailAndPassword(currentAuth, userCreds.email, userCreds.password),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 3500))
+          ]);
+          if (cred?.user) return cred.user;
+        } catch (_) {
+          if (userCreds.rawPassword && userCreds.rawPassword !== userCreds.password) {
+            try {
+              const credRaw = await signInWithEmailAndPassword(currentAuth, userCreds.email, userCreds.rawPassword);
+              if (credRaw?.user) return credRaw.user;
+            } catch (_) {}
+          }
+        }
       }
-    } catch (err) {
-      try {
-        const anonCred = await Promise.race([
-          signInAnonymously(currentAuth),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Anon auth timeout')), 2500))
-        ]);
-        if (anonCred?.user) return anonCred.user;
-      } catch (_) {}
-      console.warn('⚠️ [Firebase Auth] Advertencia autenticando usuario maestro:', err?.message || err);
+
+      const anonCred = await Promise.race([
+        signInAnonymously(currentAuth),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Anon auth timeout')), 2500))
+      ]);
+      if (anonCred?.user) return anonCred.user;
+    } catch (_) {
     } finally {
       authPromise = null;
     }
@@ -110,10 +172,14 @@ export async function ensureFirebaseAuth(customAuth = null) {
 }
 
 export function initFirebase(customConfig = null) {
-  const config = customConfig || DEFAULT_FIREBASE_CONFIG;
+  const config = customConfig || resolveCachedTenantConfig();
+  if (!config || !config.projectId || !config.apiKey) {
+    return { app: null, db: null, auth: null };
+  }
 
   try {
     app = getOrCreateFirebaseApp(config);
+    if (!app) return { app: null, db: null, auth: null };
     db = getOrInitFirestore(app);
     auth = getOrInitAuth(app);
 
@@ -168,7 +234,8 @@ export function getRtdb() {
     initFirebase();
   }
   if (!rtdb && app) {
-    const config = app.options || DEFAULT_FIREBASE_CONFIG;
+    const config = app.options || resolveCachedTenantConfig() || {};
+    if (!config.projectId) return null;
     const dbUrl = config.databaseURL || `https://${config.projectId}-default-rtdb.firebaseio.com`;
     try {
       rtdb = getDatabase(app, dbUrl);
@@ -209,28 +276,62 @@ export function parseFirestoreValue(v) {
 // Caché de tokens de Firebase Auth en memoria para REST (indexado por apiKey)
 const cachedAuthTokensByKey = new Map();
 
-export async function getFirebaseAuthToken(apiKey, email = '137@sisbom.com', password = 'ADASME137_secure_sisbom') {
+export async function getFirebaseAuthToken(apiKey, email = null, password = null) {
+  if (!apiKey) return null;
   const now = Date.now();
   const cached = cachedAuthTokensByKey.get(apiKey);
   if (cached && cached.token && now < cached.expiresAt - 60000) {
     return cached.token;
   }
 
+  // Si ya hay un usuario autenticado en el SDK de Firebase Auth para esta app, usar su idToken directo
   try {
-    const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+    if (auth && auth.currentUser) {
+      const sdkToken = await auth.currentUser.getIdToken();
+      if (sdkToken) {
+        cachedAuthTokensByKey.set(apiKey, {
+          token: sdkToken,
+          expiresAt: now + 3000 * 1000
+        });
+        return sdkToken;
+      }
+    }
+  } catch (_) {}
+
+  const creds = email && password ? { email, password } : resolveCachedUserAuthCredentials();
+  try {
+    if (creds && creds.email && creds.password) {
+      const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: creds.email, password: creds.password, returnSecureToken: true })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const expiresInSec = parseInt(data.expiresIn || '3600', 10);
+        cachedAuthTokensByKey.set(apiKey, {
+          token: data.idToken,
+          expiresAt: now + (expiresInSec * 1000)
+        });
+        return data.idToken;
+      }
+    }
+
+    // Respaldo: sesión anónima vía REST (sin usuarios hardcodeados)
+    const anonRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, returnSecureToken: true })
+      body: JSON.stringify({ returnSecureToken: true })
     });
-
-    if (res.ok) {
-      const data = await res.json();
-      const expiresInSec = parseInt(data.expiresIn || '3600', 10);
+    if (anonRes.ok) {
+      const anonData = await anonRes.json();
+      const expiresInSec = parseInt(anonData.expiresIn || '3600', 10);
       cachedAuthTokensByKey.set(apiKey, {
-        token: data.idToken,
+        token: anonData.idToken,
         expiresAt: now + (expiresInSec * 1000)
       });
-      return data.idToken;
+      return anonData.idToken;
     }
   } catch (err) {
     console.warn('Error obtaining Firebase Auth token:', err);

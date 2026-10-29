@@ -576,22 +576,32 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
 
 /**
  * Extrae el código radial desde un campo que puede ser objeto canónico V3 `{ idRadial, nombre }`
- * o string histórico V2 `"112"`.
+ * o string histórico V2 `"112"` o `"1 - CRISTIAN LOPEZ MELLA"`.
  */
 export function extractPersonRadial(val) {
   if (!val) return '';
   if (typeof val === 'object') {
-    return String(val.idRadial || val.codigoRadial || val.id || '').trim();
+    const rawRad = String(val.idRadial || val.codigoRadial || val.id || '').trim();
+    const sepMatch = rawRad.match(/^([A-Z0-9-]+)\s*(?:•|-)\s*(.+)$/);
+    return sepMatch ? sepMatch[1].trim() : rawRad;
   }
-  return String(val).trim();
+  const str = String(val).trim();
+  const sepMatch = str.match(/^([A-Z0-9-]+)\s*(?:•|-)\s*(.+)$/);
+  return sepMatch ? sepMatch[1].trim() : str;
 }
 
 export function extractPersonName(val) {
   if (!val) return '';
   if (typeof val === 'object') {
-    return String(val.nombre || val.nombreBombero || '').trim();
+    const explicitName = String(val.nombre || val.nombreBombero || '').trim();
+    if (explicitName) return explicitName;
+    const rawRad = String(val.idRadial || val.codigoRadial || '').trim();
+    const sepMatch = rawRad.match(/^([A-Z0-9-]+)\s*(?:•|-)\s*(.+)$/);
+    return sepMatch ? sepMatch[2].trim() : '';
   }
-  return '';
+  const str = String(val).trim();
+  const sepMatch = str.match(/^([A-Z0-9-]+)\s*(?:•|-)\s*(.+)$/);
+  return sepMatch ? sepMatch[2].trim() : '';
 }
 
 /**
@@ -924,10 +934,15 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
   const resolvePersonObj = (rawVal) => {
     if (!rawVal) return { idRadial: '', nombre: '' };
     if (typeof rawVal === 'object' && rawVal.idRadial !== undefined) {
-      return {
-        idRadial: String(rawVal.idRadial || '').trim(),
-        nombre: String(rawVal.nombre || '').trim()
-      };
+      const rawIdStr = String(rawVal.idRadial || '').trim();
+      const rawNomStr = String(rawVal.nombre || rawVal.nombreBombero || '').trim();
+      if (rawNomStr) {
+        return {
+          idRadial: extractPersonRadial(rawIdStr),
+          nombre: rawNomStr.toUpperCase()
+        };
+      }
+      rawVal = rawIdStr;
     }
     const rawStr = String(rawVal).trim().toUpperCase();
     // Si el usuario ingresó formato "124 - BRIGIDA ADASME" o "124 • BRIGIDA ADASME", separar radial de nombre
@@ -972,12 +987,49 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
     10
   ) || 0;
 
-  const h60 = parseToEpochMs(sourceUnit.epoch60 ?? sourceUnit.h60 ?? sourceUnit.tiempos?.h60, sourceUnit.departureTime ?? sourceUnit.hora60);
-  const h63 = parseToEpochMs(sourceUnit.epoch63 ?? sourceUnit.h63 ?? sourceUnit.tiempos?.h63, sourceUnit.arrivalTime ?? sourceUnit.hora63);
-  const h69 = parseToEpochMs(sourceUnit.epoch69 ?? sourceUnit.h69 ?? sourceUnit.tiempos?.h69, sourceUnit.time69 ?? sourceUnit.hora69);
-  const h610 = parseToEpochMs(sourceUnit.epoch610 ?? sourceUnit.h610 ?? sourceUnit.tiempos?.h610, sourceUnit.time610 ?? sourceUnit.hora610);
-  const h68 = parseToEpochMs(sourceUnit.epoch68 ?? sourceUnit.h68 ?? sourceUnit.tiempos?.h68, sourceUnit.time68 ?? sourceUnit.hora68);
-  const h615 = parseToEpochMs(sourceUnit.epoch615 ?? sourceUnit.h615 ?? sourceUnit.tiempos?.h615, sourceUnit.departureTime615);
+  const baseRefDate = String(
+    sourceUnit.fecha60 ||
+    sourceUnit.fechaDespacho ||
+    sourceUnit.fecha ||
+    sourceSvc.fechaDespacho ||
+    sourceSvc.fecha ||
+    sourceUnit.fecha63 ||
+    sourceUnit.fecha69 ||
+    sourceUnit.fecha610 ||
+    sourceUnit.fecha68 ||
+    ''
+  ).trim();
+
+  const h60 = parseToEpochMs(
+    sourceUnit.epoch60 ?? sourceUnit.h60 ?? sourceUnit.tiempos?.h60,
+    sourceUnit.departureTime ?? sourceUnit.hora60,
+    sourceUnit.fecha60 || baseRefDate
+  );
+  const h63 = parseToEpochMs(
+    sourceUnit.epoch63 ?? sourceUnit.h63 ?? sourceUnit.tiempos?.h63,
+    sourceUnit.arrivalTime ?? sourceUnit.hora63,
+    sourceUnit.fecha63 || baseRefDate
+  );
+  const h69 = parseToEpochMs(
+    sourceUnit.epoch69 ?? sourceUnit.h69 ?? sourceUnit.tiempos?.h69,
+    sourceUnit.time69 ?? sourceUnit.hora69,
+    sourceUnit.fecha69 || baseRefDate
+  );
+  const h610 = parseToEpochMs(
+    sourceUnit.epoch610 ?? sourceUnit.h610 ?? sourceUnit.tiempos?.h610,
+    sourceUnit.time610 ?? sourceUnit.hora610,
+    sourceUnit.fecha610 || baseRefDate
+  );
+  const h68 = parseToEpochMs(
+    sourceUnit.epoch68 ?? sourceUnit.h68 ?? sourceUnit.tiempos?.h68,
+    sourceUnit.time68 ?? sourceUnit.hora68,
+    sourceUnit.fecha68 || baseRefDate
+  );
+  const h615 = parseToEpochMs(
+    sourceUnit.epoch615 ?? sourceUnit.h615 ?? sourceUnit.tiempos?.h615,
+    sourceUnit.departureTime615,
+    sourceUnit.fecha615 || baseRefDate
+  );
 
   let estadoMovil = 'en cuartel';
   if (h68) estadoMovil = 'en cuartel';
@@ -1530,6 +1582,13 @@ export function buildCanonicalSaasClientDoc(raw = {}) {
 export function formatAttendanceIdShort(idLista = '') {
   const s = String(idLista || '').trim();
   if (!s) return '';
+  if (s.includes(',')) {
+    return s
+      .split(',')
+      .map((part) => formatAttendanceIdShort(part.trim()))
+      .filter(Boolean)
+      .join(', ');
+  }
   if (/^\d{4}-\d+$/.test(s)) {
     const seq = parseInt(s.split('-')[1], 10);
     return !isNaN(seq) ? String(seq) : s;
@@ -2249,6 +2308,7 @@ export function normalizeDispatchDoc(docId, raw = {}) {
   }
 
   return {
+    ...raw,
     id: idServicio,
     idServicio,
     clave,
@@ -2263,6 +2323,10 @@ export function normalizeDispatchDoc(docId, raw = {}) {
     obac: raw.obac || '',
     idLista: String(raw.idLista || '').trim(),
     idListaPrincipal: String(raw.idListaPrincipal || '').trim(),
+    estado: String(raw.estado || 'activa').trim(),
+    unidades: (raw.unidades && typeof raw.unidades === 'object') ? raw.unidades : {},
+    geo: raw.geo || (raw.coords ? { lat: Number(raw.coords.lat), lng: Number(raw.coords.lng) } : null),
+    visibleMovil: raw.visibleMovil !== false,
     _metaTimestamp: Number(raw._metaTimestamp || 0),
     _fieldTimestamps: (raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object') ? raw._fieldTimestamps : {}
   };

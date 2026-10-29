@@ -146,7 +146,7 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
             "idServicio": activeServiceId ?? ""
         ]
 
-        let projectId = UserDefaults.standard.string(forKey: "saas_project_id") ?? "sisbom-de5f8"
+        guard let projectId = UserDefaults.standard.string(forKey: "saas_project_id"), !projectId.isEmpty else { return }
         let dbUrl = UserDefaults.standard.string(forKey: "saas_database_url") ?? "https://\(projectId)-default-rtdb.firebaseio.com"
         let cleanBase = dbUrl.hasSuffix("/") ? String(dbUrl.dropLast()) : dbUrl
         guard let url = URL(string: "\(cleanBase)/telemetria/bomberos/\(userId).json") else { return }
@@ -159,7 +159,7 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
     }
 
     private func removeFromRtdb(userId: String) {
-        let projectId = UserDefaults.standard.string(forKey: "saas_project_id") ?? "sisbom-de5f8"
+        guard let projectId = UserDefaults.standard.string(forKey: "saas_project_id"), !projectId.isEmpty else { return }
         let dbUrl = UserDefaults.standard.string(forKey: "saas_database_url") ?? "https://\(projectId)-default-rtdb.firebaseio.com"
         let cleanBase = dbUrl.hasSuffix("/") ? String(dbUrl.dropLast()) : dbUrl
         guard let url = URL(string: "\(cleanBase)/telemetria/bomberos/\(userId).json") else { return }
@@ -500,7 +500,7 @@ final class IOSRealtimeService {
                             self.lastUnitConductorReq[key] = cTs
                             if isConductor && !isAttending && !hasDeclined {
                                 if is09 {
-                                    IOSSoundPlayer.shared.play(nameOrClave: "importante", forceMaxVolume: false)
+                                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                                 } else {
                                     IOSSoundPlayer.shared.vibrateEmergency()
                                 }
@@ -508,7 +508,7 @@ final class IOSRealtimeService {
                                     id: "req1210_\(key)_\(cTs)",
                                     title: "🚨 SOLICITUD 12-10 (\(uName))",
                                     body: "Se solicita conductor para unidad \(uName) en \(direccion)",
-                                    soundName: is09 ? "importante.mp3" : nil,
+                                    soundName: is09 ? IOSSoundPlayer.shared.soundFileName(for: clave) : nil,
                                     userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
                                 )
                             }
@@ -521,7 +521,7 @@ final class IOSRealtimeService {
                             self.lastUnitPersonalReq[key] = pTs
                             if !isAttending && !hasDeclined {
                                 if is09 {
-                                    IOSSoundPlayer.shared.play(nameOrClave: "importante", forceMaxVolume: false)
+                                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                                 } else {
                                     IOSSoundPlayer.shared.vibrateEmergency()
                                 }
@@ -529,7 +529,7 @@ final class IOSRealtimeService {
                                     id: "req66_\(key)_\(pTs)",
                                     title: "🚨 SOLICITUD 6-6 (\(uName))",
                                     body: "Se solicita personal para unidad \(uName) en \(direccion)",
-                                    soundName: is09 ? "importante.mp3" : nil,
+                                    soundName: is09 ? IOSSoundPlayer.shared.soundFileName(for: clave) : nil,
                                     userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
                                 )
                             }
@@ -620,8 +620,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     static var currentTenantProjectId: String?
 
     private static let knownIosAppIdsByProject: [String: String] = [
-        "pruebas-sisbom": "1:306101642399:ios:a7ba95a2a0a0130c91aeaa",
-        "sisbom-de5f8": "1:39449538456:ios:784ffe39d1b3b8857485ed",
         "sisbom-central": "1:432594591351:ios:a2be8d98704f46d5beb072"
     ]
 
@@ -635,7 +633,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if let rawAppId = configDict["appId"] as? String, rawAppId.contains(":ios:") {
             return rawAppId
         }
-        return "1:306101642399:ios:a7ba95a2a0a0130c91aeaa"
+        let senderId = (configDict["messagingSenderId"] as? String) ?? "432594591351"
+        return "1:\(senderId):ios:a2be8d98704f46d5beb072"
     }
 
     static func configureDynamicFirebase(configDict: [String: Any]) {
@@ -705,14 +704,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             completion?()
             return
         }
-        auth.signIn(withEmail: "137@sisbom.com", password: "ADASME137_secure_sisbom") { result, error in
-            if error != nil || result == nil {
-                auth.signInAnonymously { _, _ in
-                    completion?()
+        if let rawSession = UserDefaults.standard.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
+           let data = rawSession.data(using: .utf8),
+           let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let idReg = ((dict["idRegistro"] as? String) ?? (dict["id"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let pass = ((dict["contrasena"] as? String) ?? (dict["password"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !idReg.isEmpty && !pass.isEmpty {
+                let email = idReg.contains("@") ? idReg : "\(idReg)@sisbom.com"
+                let securePass = pass.hasSuffix("_secure_sisbom") ? pass : "\(pass)_secure_sisbom"
+                auth.signIn(withEmail: email, password: securePass) { result, error in
+                    if error != nil || result == nil {
+                        auth.signInAnonymously { _, _ in
+                            completion?()
+                        }
+                    } else {
+                        completion?()
+                    }
                 }
-            } else {
-                completion?()
+                return
             }
+        }
+        auth.signInAnonymously { _, _ in
+            completion?()
         }
     }
 
@@ -1006,7 +1019,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         if is1210or66 {
             if is09 && application.applicationState != .active {
-                IOSSoundPlayer.shared.play(nameOrClave: "importante", forceMaxVolume: false)
+                IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
             }
             if is09 && !payloadId.isEmpty {
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
