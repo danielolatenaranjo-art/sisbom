@@ -88,17 +88,26 @@ export function parseToEpochMs(val, fallbackHoraStr = '', fallbackFechaStr = '')
   if (typeof val === 'string' && /^\d{10,15}$/.test(val.trim())) {
     return Number(val.trim());
   }
+  const parseDateStr = (dStr) => {
+    const clean = String(dStr || '').replace(/['"]/g, '').trim();
+    if (!clean) return null;
+    const m1 = clean.match(/^(\d{2})[-/](\d{2})[-/](\d{4})$/);
+    if (m1) return { y: parseInt(m1[3], 10), m: parseInt(m1[2], 10), d: parseInt(m1[1], 10) };
+    const m2 = clean.match(/^(\d{4})[-/](\d{2})[-/](\d{2})/);
+    if (m2) return { y: parseInt(m2[1], 10), m: parseInt(m2[2], 10), d: parseInt(m2[3], 10) };
+    return null;
+  };
   const timeStr = (typeof val === 'string' && val.includes(':')) ? val.trim() : String(fallbackHoraStr || '').trim();
   if (timeStr && timeStr.includes(':')) {
     const [hh, mm] = timeStr.replace(/['"]/g, '').split(':').map(n => parseInt(n, 10));
     if (!isNaN(hh) && !isNaN(mm)) {
-      const base = new Date();
-      if (fallbackFechaStr && /^\d{2}-\d{2}-\d{4}$/.test(fallbackFechaStr.trim())) {
-        const [d, m, y] = fallbackFechaStr.trim().split('-').map(n => parseInt(n, 10));
-        if (!isNaN(d) && !isNaN(m) && !isNaN(y)) {
-          return new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
-        }
+      const parsedD = parseDateStr(fallbackFechaStr);
+      if (parsedD && !isNaN(parsedD.y) && !isNaN(parsedD.m) && !isNaN(parsedD.d)) {
+        return new Date(parsedD.y, parsedD.m - 1, parsedD.d, hh, mm, 0, 0).getTime();
       }
+      // Si no hay fecha de respaldo explícita y val era nulo/vacío, no inventar fecha "hoy" para registros vacíos
+      if (!val && !fallbackFechaStr) return null;
+      const base = new Date();
       base.setHours(hh, mm, 0, 0);
       return base.getTime();
     }
@@ -655,12 +664,16 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
 
   const kmLlegada = parseInt(String(raw.kmLlegada ?? raw.km ?? '0').replace(/\D/g, ''), 10) || 0;
 
-  const h60 = parseToEpochMs(raw.tiempos?.h60 ?? raw.h60, raw.hora60, raw.fecha60);
-  const h63 = parseToEpochMs(raw.tiempos?.h63 ?? raw.h63, raw.hora63, raw.fecha63);
-  const h69 = parseToEpochMs(raw.tiempos?.h69 ?? raw.h69, raw.hora69, raw.fecha69);
-  const h610 = parseToEpochMs(raw.tiempos?.h610 ?? raw.h610, raw.hora610, raw.fecha610);
-  const h68 = parseToEpochMs(raw.tiempos?.h68 ?? raw.h68, raw.hora68, raw.fecha68);
-  const h615 = parseToEpochMs(raw.tiempos?.h615 ?? raw.h615, raw.hora615, raw.fecha615);
+  const baseRefDate = String(
+    raw.fecha60 || raw.fechaDespacho || raw.fecha || raw.fecha63 || raw.fecha69 || raw.fecha610 || raw.fecha68 || ''
+  ).trim();
+
+  const h60 = parseToEpochMs(raw.tiempos?.h60 ?? raw.h60, raw.hora60, raw.fecha60 || baseRefDate);
+  const h63 = parseToEpochMs(raw.tiempos?.h63 ?? raw.h63, raw.hora63, raw.fecha63 || baseRefDate);
+  const h69 = parseToEpochMs(raw.tiempos?.h69 ?? raw.h69, raw.hora69, raw.fecha69 || baseRefDate);
+  const h610 = parseToEpochMs(raw.tiempos?.h610 ?? raw.h610, raw.hora610, raw.fecha610 || baseRefDate);
+  const h68 = parseToEpochMs(raw.tiempos?.h68 ?? raw.h68, raw.hora68, raw.fecha68 || baseRefDate);
+  const h615 = parseToEpochMs(raw.tiempos?.h615 ?? raw.h615, raw.hora615, raw.fecha615 || baseRefDate);
 
   const hora60 = formatEpochToHHMM(h60) || String(raw.hora60 || '').replace(/['"]/g, '').trim();
   const hora63 = formatEpochToHHMM(h63) || String(raw.hora63 || '').replace(/['"]/g, '').trim();
@@ -668,8 +681,11 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
   const hora610 = formatEpochToHHMM(h610) || String(raw.hora610 || '').replace(/['"]/g, '').trim();
   const hora68 = formatEpochToHHMM(h68) || String(raw.hora68 || '').replace(/['"]/g, '').trim();
 
-  const fecha60 = formatEpochToDDMMYYYY(h60) || String(raw.fecha60 || '').trim();
-  const fecha68 = formatEpochToDDMMYYYY(h68) || String(raw.fecha68 || '').trim();
+  const fecha60 = formatEpochToDDMMYYYY(h60) || String(raw.fecha60 || baseRefDate).trim();
+  const fecha63 = formatEpochToDDMMYYYY(h63) || String(raw.fecha63 || fecha60).trim();
+  const fecha69 = formatEpochToDDMMYYYY(h69) || String(raw.fecha69 || fecha60).trim();
+  const fecha610 = formatEpochToDDMMYYYY(h610) || String(raw.fecha610 || fecha60).trim();
+  const fecha68 = formatEpochToDDMMYYYY(h68) || String(raw.fecha68 || fecha60).trim();
 
   const preinforme = String(raw.preinforme ?? raw.preInforme ?? raw.preinformeUnidad ?? '').trim();
   const informe63 = String(raw.informe63 ?? raw.report ?? '').trim();
@@ -730,6 +746,9 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
     hora610,
     hora68,
     fecha60,
+    fecha63,
+    fecha69,
+    fecha610,
     fecha68,
     unitStatus,
     _metaTimestamp: maxTs
@@ -822,6 +841,11 @@ export const CANONICAL_DISPATCH_KEYS = new Set([
   'operadorFinal',
   'preinforme',
   'informeObac',
+  'observacion',
+  'idLista',
+  'idListaPrincipal',
+  'obacRad',
+  'obacServicio',
   'sirena',
   'visibleMovil',
   'pushSent'
@@ -898,21 +922,38 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
         nombre: String(rawVal.nombre || '').trim()
       };
     }
-    const rad = String(rawVal).trim().toUpperCase();
-    const pMatch = (Array.isArray(personnelList) ? personnelList : []).find(
-      p => String(p.idRadial || p.codigoRadial || '').trim().toUpperCase() === rad
+    const rawStr = String(rawVal).trim().toUpperCase();
+    // Si el usuario ingresó formato "124 - BRIGIDA ADASME" o "124 • BRIGIDA ADASME", separar radial de nombre
+    const sepMatch = rawStr.match(/^([A-Z0-9-]+)\s*(?:•|-)\s*(.+)$/);
+    const radCandidate = sepMatch ? sepMatch[1].trim() : rawStr;
+    const pList = Array.isArray(personnelList) ? personnelList : [];
+    let pMatch = pList.find(
+      p => String(p.idRadial || p.codigoRadial || '').trim().toUpperCase() === radCandidate
     );
+    if (!pMatch) {
+      pMatch = pList.find(
+        p => String(p.idRegistro || p.id || '').trim().toUpperCase() === radCandidate
+      );
+    }
+    if (!pMatch && rawStr.length > 2) {
+      pMatch = pList.find(
+        p => String(p.nombreBombero || p.nombre || `${p.nombres || ''} ${p.apellidos || ''}`).trim().toUpperCase().includes(rawStr)
+      );
+    }
+    const finalRad = pMatch
+      ? String(pMatch.idRadial || pMatch.codigoRadial || radCandidate).trim().toUpperCase()
+      : radCandidate;
     const fullName = pMatch
       ? (pMatch.nombreBombero || `${pMatch.nombres || ''} ${pMatch.apellidos || ''}`.trim())
-      : '';
+      : (sepMatch ? sepMatch[2].trim() : '');
     return {
-      idRadial: rad,
+      idRadial: finalRad,
       nombre: String(fullName || '').trim().toUpperCase()
     };
   };
 
-  const conductorObj = resolvePersonObj(sourceUnit.driverRad ?? sourceUnit.conductorObj ?? sourceUnit.conductor);
-  const obacObj = resolvePersonObj(sourceUnit.obacRad ?? sourceUnit.obacObj ?? sourceUnit.obac);
+  const conductorObj = resolvePersonObj(sourceUnit.driverRad ?? sourceUnit.conductor ?? sourceUnit.conductorObj);
+  const obacObj = resolvePersonObj(sourceUnit.obacRad ?? sourceUnit.obac ?? sourceUnit.obacObj);
 
   const rawCount = sourceUnit.count ?? sourceUnit.cuantosBomberos ?? sourceUnit.cantidadTripulantes ?? sourceUnit.tripulantes ?? '';
   const rawCountStr = String(rawCount ?? '').trim().toUpperCase();

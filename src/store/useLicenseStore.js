@@ -79,6 +79,28 @@ function getInitialCachedLicense() {
   return null;
 }
 
+function syncNativeStorageKey(key, valueStr) {
+  if (typeof window === 'undefined' || !key) return;
+  try {
+    if (window.localStorage) {
+      if (valueStr === null || valueStr === undefined) {
+        window.localStorage.removeItem(key);
+      } else {
+        window.localStorage.setItem(key, String(valueStr));
+      }
+    }
+  } catch (_) {}
+  try {
+    if (window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+      window.webkit.messageHandlers.iOSApp.postMessage({
+        action: 'syncStorageCache',
+        key: String(key),
+        value: valueStr === null || valueStr === undefined ? '' : String(valueStr)
+      });
+    }
+  } catch (_) {}
+}
+
 function syncNativeFirebaseConfig(fbConfig) {
   if (!fbConfig || typeof window === 'undefined') return;
   try {
@@ -135,12 +157,15 @@ export const useLicenseStore = create((set, get) => ({
               parsed.logoDataUri = downloaded;
               parsed.rawLogoUrl = remoteLogoUrl;
               try {
-                await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(parsed));
+                const serializedParsed = JSON.stringify(parsed);
+                syncNativeStorageKey(CACHE_KEY, serializedParsed);
+                await AsyncStorage.setItem(CACHE_KEY, serializedParsed);
               } catch (_) {}
             }
           }
 
           syncNativeFirebaseConfig(parsed.firebaseConfig);
+          syncNativeStorageKey(CACHE_KEY, JSON.stringify(parsed));
 
           set({
             licenseKey: parsed.licenseKey,
@@ -248,7 +273,9 @@ export const useLicenseStore = create((set, get) => ({
       };
 
       try {
-        await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(licenseData));
+        const serializedLicense = JSON.stringify(licenseData);
+        syncNativeStorageKey(CACHE_KEY, serializedLicense);
+        await AsyncStorage.setItem(CACHE_KEY, serializedLicense);
       } catch (e) {}
 
       syncNativeFirebaseConfig(clientFbConfig);
@@ -273,6 +300,8 @@ export const useLicenseStore = create((set, get) => ({
 
   resetLicense: async () => {
     try {
+      syncNativeStorageKey(CACHE_KEY, null);
+      syncNativeStorageKey('@sentinel_one_v3_user_session', null);
       await AsyncStorage.removeItem(CACHE_KEY);
       await AsyncStorage.removeItem('@sentinel_one_v3_user_session');
     } catch (e) {}

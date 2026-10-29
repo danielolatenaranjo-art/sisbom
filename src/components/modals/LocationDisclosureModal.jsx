@@ -47,6 +47,7 @@ export function readNativePermissionsStatus() {
 
 export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
   const [perms, setPerms] = useState(() => readNativePermissionsStatus());
+  const isIos = typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.iOSApp || window.__SENTINEL_PLATFORM__ === 'ios');
 
   const refreshPerms = useCallback(() => {
     const next = readNativePermissionsStatus();
@@ -214,61 +215,65 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
               )}
             </TouchableOpacity>
 
-            {/* 2. Mostrar sobre otras aplicaciones */}
-            <TouchableOpacity
-              style={[
-                styles.permCard,
-                perms.overlay ? styles.permCardActive : styles.permCardPending
-              ]}
-              activeOpacity={0.8}
-              onPress={handleRequestOverlay}
-            >
-              <View style={styles.permIconBox}>
-                <Layers size={18} color="#CBD5E1" />
-              </View>
-              <View style={styles.permInfo}>
-                <Text style={styles.permTitle}>Mostrar sobre otras aplicaciones</Text>
-                <Text style={styles.permDesc}>
-                  Muestra la alarma de despacho sobre otras pantallas.
-                </Text>
-              </View>
-              {perms.overlay ? (
-                <CheckCircle2 size={20} color="#10B981" />
-              ) : (
-                <View style={styles.activatePill}>
-                  <Text style={styles.activatePillText}>Activar</Text>
-                  <ChevronRight size={13} color="#FFFFFF" />
+            {/* 2. Mostrar sobre otras aplicaciones (Exclusivo Android) */}
+            {!isIos && (
+              <TouchableOpacity
+                style={[
+                  styles.permCard,
+                  perms.overlay ? styles.permCardActive : styles.permCardPending
+                ]}
+                activeOpacity={0.8}
+                onPress={handleRequestOverlay}
+              >
+                <View style={styles.permIconBox}>
+                  <Layers size={18} color="#CBD5E1" />
                 </View>
-              )}
-            </TouchableOpacity>
+                <View style={styles.permInfo}>
+                  <Text style={styles.permTitle}>Mostrar sobre otras aplicaciones</Text>
+                  <Text style={styles.permDesc}>
+                    Muestra la alarma de despacho sobre otras pantallas.
+                  </Text>
+                </View>
+                {perms.overlay ? (
+                  <CheckCircle2 size={20} color="#10B981" />
+                ) : (
+                  <View style={styles.activatePill}>
+                    <Text style={styles.activatePillText}>Activar</Text>
+                    <ChevronRight size={13} color="#FFFFFF" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
 
-            {/* 3. Encendido y segundo plano 24/7 */}
-            <TouchableOpacity
-              style={[
-                styles.permCard,
-                perms.batteryUnrestricted ? styles.permCardActive : styles.permCardPending
-              ]}
-              activeOpacity={0.8}
-              onPress={handleRequestBattery}
-            >
-              <View style={styles.permIconBox}>
-                <Zap size={18} color="#CBD5E1" />
-              </View>
-              <View style={styles.permInfo}>
-                <Text style={styles.permTitle}>Encendido y segundo plano 24/7</Text>
-                <Text style={styles.permDesc}>
-                  Activo sin restricciones en segundo plano.
-                </Text>
-              </View>
-              {perms.batteryUnrestricted ? (
-                <CheckCircle2 size={20} color="#10B981" />
-              ) : (
-                <View style={styles.activatePill}>
-                  <Text style={styles.activatePillText}>Activar</Text>
-                  <ChevronRight size={13} color="#FFFFFF" />
+            {/* 3. Encendido y segundo plano 24/7 (Exclusivo Android) */}
+            {!isIos && (
+              <TouchableOpacity
+                style={[
+                  styles.permCard,
+                  perms.batteryUnrestricted ? styles.permCardActive : styles.permCardPending
+                ]}
+                activeOpacity={0.8}
+                onPress={handleRequestBattery}
+              >
+                <View style={styles.permIconBox}>
+                  <Zap size={18} color="#CBD5E1" />
                 </View>
-              )}
-            </TouchableOpacity>
+                <View style={styles.permInfo}>
+                  <Text style={styles.permTitle}>Encendido y segundo plano 24/7</Text>
+                  <Text style={styles.permDesc}>
+                    Activo sin restricciones en segundo plano.
+                  </Text>
+                </View>
+                {perms.batteryUnrestricted ? (
+                  <CheckCircle2 size={20} color="#10B981" />
+                ) : (
+                  <View style={styles.activatePill}>
+                    <Text style={styles.activatePillText}>Activar</Text>
+                    <ChevronRight size={13} color="#FFFFFF" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            )}
           </ScrollView>
 
           {/* Botones de Acción: Aceptar y No acepto */}

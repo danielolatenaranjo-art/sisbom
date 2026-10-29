@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>SENTINEL ONE</title>
     <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
     <style id="expo-reset">
@@ -23,13 +23,53 @@
         flex: 1;
       }
     </style>
-  <link rel="icon" href="/favicon.ico"/></head>
+  <link rel="icon" href="/favicon.ico"/>
+    <style id="sentinel-mobile-lock">
+      *, *::before, *::after {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none !important;
+        -webkit-user-drag: none !important;
+        -webkit-tap-highlight-color: transparent !important;
+        outline: none !important;
+        outline-width: 0 !important;
+        outline-style: none !important;
+        outline-color: transparent !important;
+      }
+      input, textarea, input:focus, textarea:focus, input:focus-visible, textarea:focus-visible {
+        -webkit-user-select: text !important;
+        user-select: text !important;
+        outline: none !important;
+        outline-width: 0 !important;
+        outline-style: none !important;
+        outline-color: transparent !important;
+        box-shadow: none !important;
+      }
+      html, body, #root {
+        width: 100% !important;
+        height: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: hidden !important;
+        overscroll-behavior: none !important;
+        touch-action: pan-y !important;
+        background-color: #060911 !important;
+      }
+    </style>
+    <script>
+      document.addEventListener('contextmenu', function(e) { e.preventDefault(); }, { passive: false });
+      document.addEventListener('selectstart', function(e) {
+        var tag = e.target && e.target.tagName;
+        if (tag !== 'INPUT' && tag !== 'TEXTAREA') e.preventDefault();
+      }, { passive: false });
+      document.addEventListener('dragstart', function(e) { e.preventDefault(); }, { passive: false });
+    </script></head>
 
   <body>
     <!-- Use static rendering with Expo Router to support running without JavaScript. -->
     <noscript> You need to enable JavaScript to run this app. </noscript>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
-  <script src="/_expo/static/js/web/index-989916959a3d37326d6652ef345d3a70.js" defer></script>
+  <script src="/expo_bundle/static/js/web/index-f3a5615d427064dfe7aac73ee59efd46.js" defer></script>
 </body>
 </html>

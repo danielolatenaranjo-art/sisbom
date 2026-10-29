@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
-import { doc, setDoc, updateDoc, addDoc, getDoc, collection } from 'firebase/firestore';
+import { doc, getDoc, collection } from 'firebase/firestore';
+import { setDoc, updateDoc, addDoc } from '../config/firestoreMeta';
 import { ref, set as rtdbSet, remove as rtdbRemove } from 'firebase/database';
 import { useLicenseStore } from './useLicenseStore';
 import {
@@ -12,6 +13,7 @@ import {
   parseFirestoreValue,
   fetchFirestoreWithAuth
 } from '../config/firebase';
+import { getEntityMaxTimestamp } from '../shared/sentinelCore';
 
 const USER_SESSION_KEY = '@sentinel_one_v3_user_session';
 const PREFS_KEY = '@sentinel_one_v3_user_prefs';
@@ -171,6 +173,14 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     : Boolean(fallbackUser.puerta);
 
   const rawPhoto = raw.foto !== undefined ? raw.foto : (fallbackUser.foto || '');
+  const metaTs = Math.max(
+    Number(raw._metaTimestamp || 0),
+    Number(fallbackUser._metaTimestamp || 0)
+  ) || 0;
+  const mergedFieldTs = {
+    ...(fallbackUser._fieldTimestamps || {}),
+    ...(raw._fieldTimestamps || {})
+  };
 
   return {
     ...fallbackUser,
@@ -192,7 +202,9 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     licenciaMedica: raw.licenciaMedica ?? fallbackUser.licenciaMedica ?? '',
     fechaSuspensionFin: raw.fechaSuspensionFin ?? fallbackUser.fechaSuspensionFin ?? '',
     permiso: raw.permiso ?? fallbackUser.permiso ?? 0,
-    cds: raw.cds ?? fallbackUser.cds ?? 0
+    cds: raw.cds ?? fallbackUser.cds ?? 0,
+    _metaTimestamp: metaTs,
+    _fieldTimestamps: mergedFieldTs
   };
 }
 
@@ -294,6 +306,28 @@ function syncNativeAirplaneMode(active) {
   } catch (_) {}
 }
 
+function syncNativeStorageKey(key, valueStr) {
+  if (typeof window === 'undefined' || !key) return;
+  try {
+    if (window.localStorage) {
+      if (valueStr === null || valueStr === undefined) {
+        window.localStorage.removeItem(key);
+      } else {
+        window.localStorage.setItem(key, String(valueStr));
+      }
+    }
+  } catch (_) {}
+  try {
+    if (window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+      window.webkit.messageHandlers.iOSApp.postMessage({
+        action: 'syncStorageCache',
+        key: String(key),
+        value: valueStr === null || valueStr === undefined ? '' : String(valueStr)
+      });
+    }
+  } catch (_) {}
+}
+
 function clearNativeUserSession() {
   if (typeof window === 'undefined') return;
   try {
@@ -366,11 +400,19 @@ export const useAuthStore = create((set, get) => ({
     try {
       const freshMatch = await fetchPersonalUserFromFirestoreRest(currentUser);
       if (freshMatch) {
+        const localMaxTs = getEntityMaxTimestamp(currentUser);
+        const incomingMaxTs = getEntityMaxTimestamp(freshMatch);
+        // Ley #4: "Mayor Timestamp Gana" — si el estado local tiene un timestamp estrictamente mayor que el entrante de red, no pisar
+        if (localMaxTs > 0 && incomingMaxTs > 0 && localMaxTs > incomingMaxTs) {
+          return currentUser;
+        }
         const updatedUser = buildNormalizedUserObject(freshMatch, currentUser);
         set({ user: updatedUser });
         syncNativeUserSession(updatedUser);
         try {
-          await AsyncStorage.setItem(USER_SESSION_KEY, JSON.stringify(updatedUser));
+          const serialized = JSON.stringify(updatedUser);
+          syncNativeStorageKey(USER_SESSION_KEY, serialized);
+          await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
         } catch (e) {}
         return updatedUser;
       }
@@ -436,7 +478,25 @@ export const useAuthStore = create((set, get) => ({
 
     if (match) {
       const now = Date.now();
+      const localMaxTs = getEntityMaxTimestamp(currentUser);
+      const incomingMaxTs = getEntityMaxTimestamp(match);
+      const localFieldTs = currentUser._fieldTimestamps || {};
+      const incomingFieldTs = match._fieldTimestamps || {};
+
+      // Ley #4: "Mayor Timestamp Gana" — si el documento local en memoria tiene un timestamp estrictamente mayor al entrante, conservar los campos locales más recientes
       const updatedUser = buildNormalizedUserObject(match, currentUser);
+      if (localMaxTs > 0 && incomingMaxTs > 0 && localMaxTs > incomingMaxTs) {
+        const localEstTs = Number(localFieldTs.estado || localMaxTs);
+        const incEstTs = Number(incomingFieldTs.estado || incomingMaxTs);
+        if (localEstTs >= incEstTs) {
+          updatedUser.estado = currentUser.estado;
+        }
+        const localSvcTs = Number(localFieldTs.enServicio || localMaxTs);
+        const incSvcTs = Number(incomingFieldTs.enServicio || incomingMaxTs);
+        if (localSvcTs >= incSvcTs) {
+          updatedUser.enServicio = currentUser.enServicio;
+        }
+      }
 
       // Protección anti-rebote (4s) para estado y enServicio frente a snapshots en vuelo (idéntico a SisBomViewModel.kt)
       if (pendingStatusValue !== null && (now - lastStatusChangeTs) < 4000) {
@@ -476,7 +536,9 @@ export const useAuthStore = create((set, get) => ({
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
       try {
-        await AsyncStorage.setItem(USER_SESSION_KEY, JSON.stringify(updatedUser));
+        const serialized = JSON.stringify(updatedUser);
+        syncNativeStorageKey(USER_SESSION_KEY, serialized);
+        await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
       } catch (e) {}
     }
   },
@@ -514,7 +576,9 @@ export const useAuthStore = create((set, get) => ({
         });
 
         try {
-          await AsyncStorage.setItem(USER_SESSION_KEY, JSON.stringify(userObj));
+          const serialized = JSON.stringify(userObj);
+          syncNativeStorageKey(USER_SESSION_KEY, serialized);
+          await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
         } catch (e) {}
 
         set({ user: userObj, isAuthenticated: true, isLoading: false, error: '' });
@@ -536,31 +600,41 @@ export const useAuthStore = create((set, get) => ({
 
     const isSelf = !targetDocId || String(targetDocId) === String(currentUser.idRegistro);
     const docId = isSelf ? String(currentUser.idRegistro || currentUser.idRadial) : String(targetDocId);
+    const nowTs = Date.now();
 
     if (isSelf) {
       pendingStatusValue = newStatus;
-      lastStatusChangeTs = Date.now();
+      lastStatusChangeTs = nowTs;
       // Si el usuario cambia explícitamente a 0-9, desactivar automáticamente el Modo Avión (0-8 Absoluto) igual que en V2
       if (newStatus === '0-9' && get().isAirplaneMode) {
         set({ isAirplaneMode: false });
         syncNativeAirplaneMode(false);
         try {
           const { isDarkMode, previousStatusBeforeAirplane } = get();
-          AsyncStorage.setItem(PREFS_KEY, JSON.stringify({
+          const prefsStr = JSON.stringify({
             isDarkMode,
             isAirplaneMode: false,
             previousStatusBeforeAirplane
-          })).catch(() => {});
+          });
+          syncNativeStorageKey(PREFS_KEY, prefsStr);
+          AsyncStorage.setItem(PREFS_KEY, prefsStr).catch(() => {});
         } catch (_) {}
       }
       const updatedUser = {
         ...currentUser,
-        estado: newStatus
+        estado: newStatus,
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: {
+          ...(currentUser._fieldTimestamps || {}),
+          estado: nowTs
+        }
       };
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
       try {
-        await AsyncStorage.setItem(USER_SESSION_KEY, JSON.stringify(updatedUser));
+        const serialized = JSON.stringify(updatedUser);
+        syncNativeStorageKey(USER_SESSION_KEY, serialized);
+        await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
       } catch (e) {}
     }
 
@@ -568,21 +642,24 @@ export const useAuthStore = create((set, get) => ({
     const isReadOnly = useLicenseStore.getState().isReadOnly;
     if (isBypass || isReadOnly || !docId) return;
 
-    const nowTs = Date.now();
     try {
       const db = getDb();
       if (db) {
         await ensureFirebaseAuth();
         await updateDoc(doc(db, 'personal', String(docId)), {
           estado: newStatus,
-          _metaTimestamp: nowTs
+          _metaTimestamp: nowTs,
+          _fieldTimestamps: {
+            estado: nowTs
+          }
         });
         try {
           await addDoc(collection(db, 'personal', String(docId), 'estados'), {
             estado: newStatus,
             timestamp: nowTs,
             origen: 'SENTINEL_ONE',
-            autorizadoPor: currentUser.nombreBombero || currentUser.idRadial || ''
+            autorizadoPor: currentUser.nombreBombero || currentUser.idRadial || '',
+            _metaTimestamp: nowTs
           });
         } catch (e) {}
         console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${newStatus}`);
@@ -591,14 +668,15 @@ export const useAuthStore = create((set, get) => ({
       const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado`;
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_metaTimestamp`;
 
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fields: {
-            estado: { stringValue: newStatus }
+            estado: { stringValue: newStatus },
+            _metaTimestamp: { integerValue: String(nowTs) }
           }
         })
       }).catch(() => {});
@@ -663,12 +741,18 @@ export const useAuthStore = create((set, get) => ({
       newEnServicio = `-${idServicio}`;
     }
 
+    const nowTs = Date.now();
     pendingServiceValue = newEnServicio;
-    lastServiceChangeTs = Date.now();
+    lastServiceChangeTs = nowTs;
 
     const updatedUser = {
       ...currentUser,
-      enServicio: newEnServicio
+      enServicio: newEnServicio,
+      _metaTimestamp: nowTs,
+      _fieldTimestamps: {
+        ...(currentUser._fieldTimestamps || {}),
+        enServicio: nowTs
+      }
     };
 
     set({ user: updatedUser });
@@ -703,7 +787,9 @@ export const useAuthStore = create((set, get) => ({
     } catch (_) {}
 
     try {
-      await AsyncStorage.setItem(USER_SESSION_KEY, JSON.stringify(updatedUser));
+      const serialized = JSON.stringify(updatedUser);
+      syncNativeStorageKey(USER_SESSION_KEY, serialized);
+      await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
     } catch (e) {}
 
     if (responseType !== 'ASISTO') {
@@ -716,7 +802,6 @@ export const useAuthStore = create((set, get) => ({
 
     const docId = String(currentUser.idRegistro || currentUser.idRadial).trim();
     if (!docId) return;
-    const nowTs = Date.now();
 
     // 1. Actualizar inmediatamente `enServicio` en `personal/{idRegistro}` sin esperar al GPS
     try {
@@ -729,12 +814,18 @@ export const useAuthStore = create((set, get) => ({
             enServicio: newEnServicio,
             previousEstado: currentUser.estado || '0-9',
             restoreEstadoAt: restoreAt,
-            _metaTimestamp: nowTs
+            _metaTimestamp: nowTs,
+            _fieldTimestamps: {
+              enServicio: nowTs
+            }
           });
         } else {
           await updateDoc(doc(db, 'personal', docId), {
             enServicio: newEnServicio,
-            _metaTimestamp: nowTs
+            _metaTimestamp: nowTs,
+            _fieldTimestamps: {
+              enServicio: nowTs
+            }
           });
         }
       }
@@ -742,14 +833,15 @@ export const useAuthStore = create((set, get) => ({
       const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=enServicio`;
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=enServicio&updateMask.fieldPaths=_metaTimestamp`;
 
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fields: {
-            enServicio: { stringValue: String(newEnServicio) }
+            enServicio: { stringValue: String(newEnServicio) },
+            _metaTimestamp: { integerValue: String(nowTs) }
           }
         })
       }).catch(() => {});
@@ -1076,6 +1168,7 @@ export const useAuthStore = create((set, get) => ({
     get().stopLiveTelemetry();
     clearNativeUserSession();
     try {
+      syncNativeStorageKey(USER_SESSION_KEY, null);
       await AsyncStorage.removeItem(USER_SESSION_KEY);
     } catch (e) {}
     set({ user: null, isAuthenticated: false, error: '' });

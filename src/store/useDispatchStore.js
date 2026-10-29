@@ -7,11 +7,13 @@ import {
   onSnapshot,
   getDoc,
   getDocs,
-  setDoc,
-  updateDoc,
-  addDoc,
   deleteDoc
 } from 'firebase/firestore';
+import {
+  setDoc,
+  updateDoc,
+  addDoc
+} from '../config/firestoreMeta';
 import { ref, set as rtdbSet } from 'firebase/database';
 import { useLicenseStore } from './useLicenseStore';
 import { useAuthStore } from './useAuthStore';
@@ -20,14 +22,18 @@ import {
   getRtdb,
   ensureFirebaseAuth,
   reinitFirebaseWithConfig,
-  DEFAULT_FIREBASE_CONFIG
+  DEFAULT_FIREBASE_CONFIG,
+  parseFirestoreValue,
+  fetchFirestoreWithAuth
 } from '../config/firebase';
 import {
   formatEpochToHHMM,
   formatEpochToDDMMYYYY,
   getLocalDateString,
   getLocalTimeString,
-  resolveCompanyFromVehicleId
+  resolveCompanyFromVehicleId,
+  getEntityMaxTimestamp,
+  mergeServiceUnitByHigherTimestamp
 } from '../shared/sentinelCore';
 
 // Mapeo de clave de emergencia / evento a recurso raw nativo de Android/iOS (res/raw/*.mp3)
@@ -225,6 +231,123 @@ let knownDoorRequestKeys = new Set();
 let isFirstCentralSnapshot = true;
 let lastSubscribedAttendanceUserId = '';
 let lastCentralRawData = null;
+let restFallbackIntervalId = null;
+let lastSnapshotReceivedTs = 0;
+
+// ============================================================================
+// LEY #4: CONTROL MONOTÓNICO POR TIMESTAMP ("EL MAYOR TIMESTAMP GANA")
+// Ningún snapshot atrasado de red ni caché antigua puede pisar un dato con timestamp mayor
+// ============================================================================
+const ENTITY_META_TS_KEY = '@sentinel_one_v3_entity_meta_timestamps';
+const recentLocalWrites = new Map(); // key: `${col}:${docId}` -> timestamp ms
+
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const rawMetaTs = window.localStorage.getItem(ENTITY_META_TS_KEY);
+    if (rawMetaTs) {
+      const parsedMeta = JSON.parse(rawMetaTs);
+      if (parsedMeta && typeof parsedMeta === 'object') {
+        Object.entries(parsedMeta).forEach(([k, v]) => {
+          const num = Number(v);
+          if (!isNaN(num) && num > 0) recentLocalWrites.set(k, num);
+        });
+      }
+    }
+  }
+} catch (_) {}
+
+function persistEntityMetaTimestamps() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const obj = {};
+      recentLocalWrites.forEach((v, k) => {
+        obj[k] = v;
+      });
+      window.localStorage.setItem(ENTITY_META_TS_KEY, JSON.stringify(obj));
+    }
+  } catch (_) {}
+}
+
+export function markLocalWrite(colName, docId, explicitTs = null) {
+  if (!colName || !docId) return 0;
+  const key = `${colName}:${String(docId).trim()}`;
+  const prevTs = recentLocalWrites.get(key) || 0;
+  const nextTs = Math.max(prevTs, Number(explicitTs) || Date.now());
+  recentLocalWrites.set(key, nextTs);
+  persistEntityMetaTimestamps();
+  return nextTs;
+}
+
+export function getLocalWriteTimestamp(colName, docId) {
+  if (!colName || !docId) return 0;
+  return recentLocalWrites.get(`${colName}:${String(docId).trim()}`) || 0;
+}
+
+export function shouldKeepLocalByTimestamp(colName, docId, localEntity, incomingEntity, windowMs = 10000) {
+  const cleanId = String(docId || '').trim();
+  const recordedLocalTs = getLocalWriteTimestamp(colName, cleanId);
+  const localMaxTs = Math.max(recordedLocalTs, getEntityMaxTimestamp(localEntity));
+  const incomingMaxTs = getEntityMaxTimestamp(incomingEntity);
+
+  // 1. Si el timestamp del estado local es estrictamente MAYOR que el timestamp entrante de red, gana el mayor
+  if (localMaxTs > 0 && incomingMaxTs > 0 && localMaxTs > incomingMaxTs) {
+    return true;
+  }
+
+  // 2. Si el estado local tiene _metaTimestamp V3 (> 0) y el entrante viene sin timestamp (0) dentro de la ventana de protección
+  if (localMaxTs > 0 && incomingMaxTs === 0 && recordedLocalTs > 0 && (Date.now() - recordedLocalTs) < windowMs) {
+    return true;
+  }
+
+  // 3. Ventana de seguridad inmediata tras una escritura local si el entrante no supera al local
+  if (recordedLocalTs > 0 && (Date.now() - recordedLocalTs) < windowMs && incomingMaxTs < recordedLocalTs) {
+    return true;
+  }
+
+  return false;
+}
+
+function mergeDispatchEntitiesByHigherTimestamp(localDisp, incomingDisp) {
+  if (!localDisp) return incomingDisp;
+  if (!incomingDisp) return localDisp;
+
+  const localTs = getEntityMaxTimestamp(localDisp);
+  const incomingTs = getEntityMaxTimestamp(incomingDisp);
+
+  const localUnits = (localDisp.unidades && typeof localDisp.unidades === 'object') ? localDisp.unidades : {};
+  const incomingUnits = (incomingDisp.unidades && typeof incomingDisp.unidades === 'object') ? incomingDisp.unidades : {};
+  const allUnitKeys = new Set([...Object.keys(localUnits), ...Object.keys(incomingUnits)]);
+  const mergedUnits = {};
+
+  allUnitKeys.forEach((uKey) => {
+    const lU = localUnits[uKey] ? { ...localUnits[uKey], name: uKey } : null;
+    const rU = incomingUnits[uKey] ? { ...incomingUnits[uKey], name: uKey } : null;
+    if (lU && rU) {
+      const mergedU = mergeServiceUnitByHigherTimestamp(lU, rU);
+      const lCondTs = Number(lU.solicitudConductorTimestamp || 0);
+      const rCondTs = Number(rU.solicitudConductorTimestamp || 0);
+      const lPersTs = Number(lU.solicitudPersonalTimestamp || 0);
+      const rPersTs = Number(rU.solicitudPersonalTimestamp || 0);
+      mergedUnits[uKey] = {
+        ...rU,
+        ...lU,
+        ...mergedU,
+        solicitudConductorTimestamp: Math.max(lCondTs, rCondTs) || null,
+        solicitudPersonalTimestamp: Math.max(lPersTs, rPersTs) || null,
+        _metaTimestamp: Math.max(getEntityMaxTimestamp(lU), getEntityMaxTimestamp(rU)) || Date.now()
+      };
+    } else {
+      mergedUnits[uKey] = rU || lU;
+    }
+  });
+
+  const winner = localTs > incomingTs ? { ...incomingDisp, ...localDisp } : { ...localDisp, ...incomingDisp };
+  return {
+    ...winner,
+    unidades: mergedUnits,
+    _metaTimestamp: Math.max(localTs, incomingTs)
+  };
+}
 
 export const CHILEAN_DISPATCH_KEYS = [
   { key: '10-0', desc: 'Incendio Estructural' },
@@ -446,7 +569,9 @@ function normalizeDispatchDoc(docId, raw = {}) {
     lng,
     unidades,
     carros: carrosList,
-    carrosStr: carrosList.join(' / ')
+    carrosStr: carrosList.join(' / '),
+    _metaTimestamp: Number(raw._metaTimestamp || raw.updatedAt || createdAt || 0) || 0,
+    _fieldTimestamps: raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object' ? raw._fieldTimestamps : {}
   };
 }
 
@@ -455,6 +580,7 @@ function normalizeAlertDoc(docId, raw = {}) {
   const idAlerta = cleanSheetPrefix(raw.idAlerta || raw.id || docId);
   const tipo = String(raw.tipo || (raw.numeroOrden ? 'orden' : 'alerta')).trim().toLowerCase();
   const timestamp = Number(raw.timestamp || raw.createdAt || 0) || 0;
+  const metaTs = Number(raw._metaTimestamp || raw.updatedAt || timestamp || 0) || 0;
   const fechaAlerta = cleanSheetPrefix(
     raw.fechaAlerta || raw.fecha || formatEpochToDDMMYYYY(timestamp) || getLocalDateString()
   );
@@ -497,7 +623,9 @@ function normalizeAlertDoc(docId, raw = {}) {
     fechaOrden: cleanSheetPrefix(raw.fechaOrden || fechaAlerta),
     firmaNombre: cleanSheetPrefix(raw.firmaNombre || ''),
     firmaCargo: cleanSheetPrefix(raw.firmaCargo || ''),
-    timestamp
+    timestamp,
+    _metaTimestamp: metaTs,
+    _fieldTimestamps: raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object' ? raw._fieldTimestamps : {}
   };
 }
 
@@ -505,6 +633,7 @@ function normalizeAlertDoc(docId, raw = {}) {
 function normalizeAttendanceSheetDoc(docId, raw = {}) {
   const idLista = String(raw.idLista || raw.id || docId || '').trim();
   const ts = Number(raw.timestamp || raw.createdAt || 0) || 0;
+  const metaTs = Number(raw._metaTimestamp || raw.updatedAt || ts || 0) || 0;
   const fecha = String(raw.fecha || formatEpochToDDMMYYYY(ts) || '').replace(/['"]/g, '').trim();
   const hora = String(raw.hora || formatEpochToHHMM(ts) || '').replace(/['"]/g, '').trim();
 
@@ -535,7 +664,10 @@ function normalizeAttendanceSheetDoc(docId, raw = {}) {
     anulada: anuladaVal,
     userEstado: String(raw.userEstado || ''),
     userAbono: rawAbono,
-    inlineBomberos: raw.bomberos && typeof raw.bomberos === 'object' ? raw.bomberos : null
+    inlineBomberos: raw.bomberos && typeof raw.bomberos === 'object' ? raw.bomberos : null,
+    timestamp: ts,
+    _metaTimestamp: metaTs,
+    _fieldTimestamps: raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object' ? raw._fieldTimestamps : {}
   };
 }
 
@@ -784,7 +916,541 @@ export const useDispatchStore = create((set, get) => ({
     get().subscribeRealtime();
   },
 
-  // Subscripción en tiempo real con onSnapshot (WebSockets / streaming directo)
+  // Procesadores compartidos entre onSnapshot y REST Hydration (Ley #4: "Mayor Timestamp Gana")
+  applyDispatchesRawDocs: (rawDocsArray = []) => {
+    const currentDispatches = get().dispatchesList || [];
+    const existingById = new Map();
+    currentDispatches.forEach((d) => {
+      if (d?.idServicio) existingById.set(String(d.idServicio).trim(), d);
+    });
+
+    const activeList = [];
+    const closedServerIds = new Set();
+
+    rawDocsArray.forEach(({ id, data, hasPendingWrites }) => {
+      const rawData = data || {};
+      const incomingNorm = normalizeDispatchDoc(id, rawData);
+      const docId = String(incomingNorm.idServicio || id).trim();
+      const existing = existingById.get(docId);
+
+      // Ley #4: Fusionar unidades y campos garantizando que NUNCA un snapshot atrasado pise un timestamp mayor
+      const mergedItem = existing
+        ? (shouldKeepLocalByTimestamp('despachos', docId, existing, incomingNorm) || hasPendingWrites
+            ? mergeDispatchEntitiesByHigherTimestamp(existing, incomingNorm)
+            : mergeDispatchEntitiesByHigherTimestamp(existing, incomingNorm))
+        : incomingNorm;
+
+      const st = String(mergedItem.estado || '').toLowerCase().trim();
+      const isClosed =
+        st === 'cancelada' ||
+        st === 'cancelado' ||
+        st === 'finalizada' ||
+        st === 'finalizado' ||
+        st === 'cerrada' ||
+        st === 'cerrado' ||
+        st === 'terminada' ||
+        st === 'terminado' ||
+        Boolean(mergedItem.operadorFinal) ||
+        Boolean(mergedItem.finalizadoAt);
+
+      if (isClosed) {
+        closedServerIds.add(docId);
+        return;
+      }
+
+      const isValidActive =
+        (st === 'activa' || st === 'activo' || st === 'pre-despacho' || st === 'en curso' || st === '') &&
+        !isClosed &&
+        mergedItem.visibleMovil !== false;
+
+      if (isValidActive) {
+        activeList.push(mergedItem);
+      }
+    });
+
+    // Preservar despachos locales recién creados dentro de la ventana de protección si aún no están cerrados
+    currentDispatches.forEach((localDisp) => {
+      const sId = String(localDisp?.idServicio || '').trim();
+      if (
+        sId &&
+        !closedServerIds.has(sId) &&
+        shouldKeepLocalByTimestamp('despachos', sId, localDisp, null) &&
+        !activeList.some((a) => String(a.idServicio).trim() === sId)
+      ) {
+        activeList.unshift(localDisp);
+      }
+    });
+
+    activeList.sort((a, b) => {
+      const tsA = a.createdAt || 0;
+      const tsB = b.createdAt || 0;
+      if (tsA !== tsB) return tsB - tsA;
+      return String(b.idServicio).localeCompare(String(a.idServicio));
+    });
+
+    const isAirplane = useAuthStore.getState().isAirplaneMode;
+    const currentUser = useAuthStore.getState().user;
+    const isMeCentral = get().isCentralActive;
+    const userEstado = String(currentUser?.estado || '0-8').trim();
+    const is09 = userEstado === '0-9';
+    const isHonorario = String(currentUser?.cargo || '').toUpperCase().trim() === 'BOMBERO HONORARIO';
+    const isSilentSpecial =
+      ['CDS', 'SUSPENDIDO', 'LICENCIA', 'SILENCIO_ABSOLUTO'].includes(userEstado.toUpperCase()) ||
+      Number(currentUser?.cds) === 1 ||
+      Boolean(currentUser?.licenciaMedica) ||
+      Boolean(currentUser?.fechaSuspensionFin);
+    const isPartialSpecial =
+      ['PERMISO', 'COMISION_SERVICIO'].includes(userEstado.toUpperCase()) ||
+      Number(currentUser?.permiso) > 0;
+
+    if (activeList.length > 0) {
+      const newest = activeList[0];
+
+      // REGLA V2: En la carga inicial al abrir la app NUNCA hacer sonar ni levantar tonos desde los listeners JS.
+      // Todos los tonos y notificaciones son gestionados exclusivamente por la capa Push / Servicio Nativo.
+      if (isFirstDispatchesSnapshot) {
+        isFirstDispatchesSnapshot = false;
+        activeList.forEach((disp) => {
+          notifiedDispatchIds.add(disp.idServicio);
+          lastDispatchClaves[disp.idServicio] = disp.clave || '';
+          markPlayedSoundKey(disp.idServicio);
+          Object.entries(disp.unidades || {}).forEach(([uId, uData]) => {
+            lastUnitConductorReq[`${disp.idServicio}_${uId}`] = Number(uData?.solicitudConductorTimestamp || 0);
+            lastUnitPersonalReq[`${disp.idServicio}_${uId}`] = Number(uData?.solicitudPersonalTimestamp || 0);
+          });
+        });
+        lastKnownDispatchId = newest.idServicio;
+
+        // Si al abrir la app hay un despacho activo reciente sin responder y está en 0-9, mostrar la pantalla del despacho en silencio (sin sonar)
+        if (
+          !isAirplane &&
+          !isMeCentral &&
+          !isHonorario &&
+          !isSilentSpecial &&
+          !isPartialSpecial &&
+          is09 &&
+          !isDispatchTooOld(newest) &&
+          !hasUserRespondedToDispatch(newest, currentUser)
+        ) {
+          set({ fullscreenDispatchId: newest.idServicio });
+        }
+      } else {
+        // Procesar cambios en vivo únicamente para actualizar estado UI (los tonos suenan exclusivamente por Push / Servicio Nativo)
+        activeList.forEach((disp) => {
+          const id = disp.idServicio;
+          const clave = String(disp.clave || '10-0').trim();
+
+          // A. Nuevo despacho en vivo: solo mostrar overlay si el usuario está en 0-9 y no en Modo Avión (0-8 Absoluto)
+          if (!notifiedDispatchIds.has(id)) {
+            notifiedDispatchIds.add(id);
+            lastDispatchClaves[id] = clave;
+
+            if (
+              !isAirplane &&
+              !isMeCentral &&
+              !isHonorario &&
+              !isSilentSpecial &&
+              !isPartialSpecial &&
+              is09 &&
+              !isDispatchTooOld(disp) &&
+              !hasUserRespondedToDispatch(disp, currentUser)
+            ) {
+              set({ fullscreenDispatchId: id });
+            }
+          } else {
+            // B. Detectar escalamiento (10-0 -> 10-30, 10-2 -> ALARMA FORESTAL)
+            const oldClave = lastDispatchClaves[id] || '';
+            if (oldClave && oldClave !== clave) {
+              lastDispatchClaves[id] = clave;
+              const cUp = clave.toUpperCase();
+              const isEscalation =
+                cUp.includes('10-30') ||
+                cUp.includes('FORESTAL') ||
+                cUp.includes('9-0') ||
+                cUp.includes('COMANDANCIA');
+
+              if (
+                isEscalation &&
+                !isAirplane &&
+                !isMeCentral &&
+                !isHonorario &&
+                !isSilentSpecial &&
+                !isUserAttendingDispatch(disp, currentUser)
+              ) {
+                set({
+                  fullscreenDispatchId: id,
+                  urgentBannerMessage: `🔥 CAMBIO DE CLAVE A ${clave}: ¡SE REQUIERE PERSONAL!`
+                });
+              }
+            } else {
+              lastDispatchClaves[id] = clave;
+            }
+          }
+
+          // C. Detectar solicitudes urgentes 12-10 (Conductor) y 6-6 (Personal) por unidad (solo banner UI)
+          if (!isAirplane && !isMeCentral && !isHonorario && !isSilentSpecial && !isUserAttendingDispatch(disp, currentUser)) {
+            Object.entries(disp.unidades || {}).forEach(([uId, uData]) => {
+              const condTs = Number(uData?.solicitudConductorTimestamp || 0);
+              const persTs = Number(uData?.solicitudPersonalTimestamp || 0);
+              const mapKey = `${id}_${uId}`;
+
+              const prevCondTs = lastUnitConductorReq[mapKey] || 0;
+              if (condTs > prevCondTs && condTs > 0 && (Date.now() - condTs) < 120000) {
+                lastUnitConductorReq[mapKey] = condTs;
+                if (currentUser?.conductor) {
+                  if (is09) set({ fullscreenDispatchId: id });
+                  set({
+                    urgentBannerMessage: `🚨 SOLICITUD 12-10 (${uId}): Se solicita conductor para unidad ${uId}`
+                  });
+                }
+              } else if (prevCondTs === 0) {
+                lastUnitConductorReq[mapKey] = condTs;
+              }
+
+              const prevPersTs = lastUnitPersonalReq[mapKey] || 0;
+              if (persTs > prevPersTs && persTs > 0 && (Date.now() - persTs) < 120000) {
+                lastUnitPersonalReq[mapKey] = persTs;
+                if (is09) set({ fullscreenDispatchId: id });
+                set({
+                  urgentBannerMessage: `🚨 SOLICITUD 6-6 (${uId}): Se solicita personal para unidad ${uId}`
+                });
+              } else if (prevPersTs === 0) {
+                lastUnitPersonalReq[mapKey] = persTs;
+              }
+            });
+          }
+        });
+
+        lastKnownDispatchId = newest.idServicio;
+      }
+
+      // Si el despacho en pantalla completa ya fue respondido o cerrado, cerrarlo automáticamente
+      const curFsId = get().fullscreenDispatchId;
+      if (curFsId) {
+        const fsDisp = activeList.find((d) => String(d.idServicio) === String(curFsId));
+        if (!fsDisp || hasUserRespondedToDispatch(fsDisp, currentUser)) {
+          set({ fullscreenDispatchId: null });
+        }
+      }
+
+      set({
+        activeDispatch: newest,
+        dispatchesList: activeList,
+        isLoading: false,
+        isLiveConnected: true
+      });
+    } else {
+      isFirstDispatchesSnapshot = false;
+      set({
+        activeDispatch: null,
+        dispatchesList: [],
+        fullscreenDispatchId: null,
+        isLoading: false,
+        isLiveConnected: true
+      });
+    }
+
+    // Si el bombero tenía `enServicio` asociado a un despacho que ya se cerró, liberar a "0" (Idéntico a SisBomViewModel.kt líneas 977-989)
+    const latestUser = useAuthStore.getState().user;
+    const rawSvc = String(latestUser?.enServicio || '0').trim();
+    if (rawSvc && rawSvc !== '0') {
+      const cleanSvcId = rawSvc.replace(/^-/, '').trim();
+      const stillActive = activeList.some((d) => String(d.idServicio).trim() === cleanSvcId);
+      if (!stillActive && cleanSvcId) {
+        useAuthStore.getState().setEmergencyResponse(cleanSvcId, 'LIBRE');
+      } else if (stillActive && !rawSvc.startsWith('-')) {
+        useAuthStore.getState().startLiveTelemetry(cleanSvcId);
+      }
+    } else {
+      const attendingDisp = activeList.find((d) => isUserAttendingDispatch(d, latestUser));
+      if (attendingDisp) {
+        useAuthStore.getState().startLiveTelemetry(attendingDisp.idServicio);
+      } else {
+        useAuthStore.getState().stopLiveTelemetry();
+      }
+    }
+  },
+
+  applyPersonalRawDocs: (rawDocsArray = []) => {
+    const existingList = get().firefightersList || [];
+    const existingById = new Map();
+    existingList.forEach((p) => {
+      if (p?.idRegistro) existingById.set(String(p.idRegistro).trim(), p);
+    });
+
+    const list = [];
+    rawDocsArray.forEach(({ id, data, hasPendingWrites }) => {
+      const rawData = data || {};
+      const docId = String(id || rawData.idRegistro || '').trim();
+      const existing = existingById.get(docId);
+
+      const isActiveVal = rawData.activo === undefined
+        ? true
+        : (rawData.activo === true || rawData.activo === 1 || String(rawData.activo).toUpperCase() === 'SI' || String(rawData.activo) === '1');
+      const isConductorVal = rawData.conductor === true || rawData.conductor === 1 || String(rawData.conductor) === '1' || String(rawData.conductor).toUpperCase() === 'SI';
+      const hasPuertaVal =
+        rawData.puerta === true ||
+        rawData.Puerta === true ||
+        rawData.puerta === 1 ||
+        String(rawData.puerta ?? rawData.Puerta ?? '').trim().toLowerCase() === 'true' ||
+        String(rawData.puerta ?? rawData.Puerta ?? '').trim().toUpperCase() === 'SI' ||
+        String(rawData.puerta ?? rawData.Puerta ?? '').trim() === '1';
+
+      const incomingItem = {
+        idRegistro: docId,
+        idRadial: String(rawData.idRadial || '').trim(),
+        nombre: rawData.nombreBombero || rawData.nombre || 'BOMBERO',
+        nombreBombero: rawData.nombreBombero || rawData.nombre || 'BOMBERO',
+        cargo: rawData.cargo || 'Voluntario',
+        estado: rawData.estado || '0-9',
+        conductor: isConductorVal,
+        activo: isActiveVal,
+        puerta: hasPuertaVal,
+        compania: parseInt(String(rawData.compania || '1').replace(/\D/g, ''), 10) || 1,
+        telefono: rawData.telefono || '',
+        foto: rawData.foto || '',
+        enServicio: String(rawData.enServicio ?? '0'),
+        contrasena: rawData.contrasena !== undefined ? String(rawData.contrasena) : '',
+        licenciaMedica: rawData.licenciaMedica || '',
+        fechaSuspensionFin: rawData.fechaSuspensionFin || '',
+        permiso: rawData.permiso ?? 0,
+        cds: rawData.cds ?? 0,
+        _metaTimestamp: Number(rawData._metaTimestamp || rawData.updatedAt || 0) || 0,
+        _fieldTimestamps: rawData._fieldTimestamps && typeof rawData._fieldTimestamps === 'object' ? rawData._fieldTimestamps : {}
+      };
+
+      // Ley #4: Si el registro local en memoria tiene un timestamp mayor al entrante, conservar el local
+      if (existing && (shouldKeepLocalByTimestamp('personal', docId, existing, incomingItem) || hasPendingWrites)) {
+        list.push({
+          ...incomingItem,
+          ...existing,
+          foto: incomingItem.foto || existing.foto || '',
+          _metaTimestamp: Math.max(getEntityMaxTimestamp(existing), getEntityMaxTimestamp(incomingItem))
+        });
+      } else {
+        list.push(incomingItem);
+      }
+    });
+
+    list.sort((a, b) => {
+      const numA = parseInt(String(a.idRadial).replace(/\D/g, ''), 10) || 9999;
+      const numB = parseInt(String(b.idRadial).replace(/\D/g, ''), 10) || 9999;
+      return numA - numB;
+    });
+
+    set({ firefightersList: list });
+    useAuthStore.getState().syncUserFromPersonalList(list);
+    get().recomputeCentralState();
+    const syncedUser = useAuthStore.getState().user;
+    const syncedId = String(syncedUser?.idRegistro || '').trim();
+    if (syncedId && syncedId !== lastSubscribedAttendanceUserId) {
+      get().subscribeAttendanceRealtime();
+    }
+    const syncedSvc = String(syncedUser?.enServicio || '0').trim();
+    if (syncedSvc && syncedSvc !== '0' && !syncedSvc.startsWith('-')) {
+      const activeListNow = get().dispatchesList || [];
+      if (activeListNow.some((d) => String(d.idServicio).trim() === syncedSvc)) {
+        useAuthStore.getState().startLiveTelemetry(syncedSvc);
+      }
+    }
+  },
+
+  applyVehiclesRawDocs: (rawDocsArray = []) => {
+    const existingList = get().vehiclesList || [];
+    const existingById = new Map();
+    existingList.forEach((v) => {
+      if (v?.idCarro) existingById.set(String(v.idCarro).trim().toUpperCase(), v);
+    });
+
+    const vList = [];
+    rawDocsArray.forEach(({ id, data, hasPendingWrites }) => {
+      const rawData = data || {};
+      const idCarro = String(rawData.idCarro || id).trim().toUpperCase();
+      const existing = existingById.get(idCarro);
+      const incomingVeh = {
+        id: idCarro,
+        nombre: idCarro,
+        idCarro,
+        compania: resolveCompanyFromVehicleId(idCarro, rawData.compania),
+        tipo: String(
+          rawData.tipo ||
+          (idCarro.startsWith('BF')
+            ? 'FORESTAL'
+            : idCarro.startsWith('BT')
+              ? 'CISTERNA'
+              : idCarro.startsWith('RS')
+                ? 'RESCATE PESADO'
+                : idCarro.startsWith('R')
+                  ? 'RESCATE'
+                  : idCarro.startsWith('K')
+                    ? 'COMANDANCIA'
+                    : 'BOMBA')
+        ).toUpperCase(),
+        conductor: String(rawData.conductor || ''),
+        estado: String(rawData.estado ?? '0-9').trim(),
+        enServicio: String(rawData.enServicio ?? '0').trim(),
+        patente: String(rawData.patente || ''),
+        kmActual: Number(rawData.kmActual || 0),
+        _metaTimestamp: Number(rawData._metaTimestamp || rawData.updatedAt || 0) || 0,
+        _fieldTimestamps: rawData._fieldTimestamps && typeof rawData._fieldTimestamps === 'object' ? rawData._fieldTimestamps : {}
+      };
+
+      if (existing && (shouldKeepLocalByTimestamp('vehiculos', idCarro, existing, incomingVeh) || hasPendingWrites)) {
+        vList.push({
+          ...incomingVeh,
+          ...existing,
+          _metaTimestamp: Math.max(getEntityMaxTimestamp(existing), getEntityMaxTimestamp(incomingVeh))
+        });
+      } else {
+        vList.push(incomingVeh);
+      }
+    });
+
+    vList.sort((a, b) => a.idCarro.localeCompare(b.idCarro));
+    set({ vehiclesList: vList, vehiculosList: vList });
+  },
+
+  applyAlertsRawDocs: (rawDocsArray = []) => {
+    const existingAlerts = get().allAlertsList || [];
+    const existingById = new Map();
+    existingAlerts.forEach((a) => {
+      if (a?.idAlerta) existingById.set(String(a.idAlerta).trim(), a);
+    });
+
+    const aList = [];
+    rawDocsArray.forEach(({ id, data, hasPendingWrites }) => {
+      const incomingNorm = normalizeAlertDoc(id, data || {});
+      const docId = String(incomingNorm.idAlerta || id).trim();
+      const existing = existingById.get(docId);
+
+      // Ley #4: Mayor Timestamp Gana en alertas y canales de chat
+      const finalAlert = (existing && (shouldKeepLocalByTimestamp('alertas', docId, existing, incomingNorm) || hasPendingWrites))
+        ? { ...incomingNorm, ...existing, _metaTimestamp: Math.max(getEntityMaxTimestamp(existing), getEntityMaxTimestamp(incomingNorm)) }
+        : incomingNorm;
+
+      if (isAlertActiveByDuration(finalAlert)) {
+        aList.push(finalAlert);
+        if (!knownAlertIds.has(finalAlert.idAlerta)) {
+          knownAlertIds.add(finalAlert.idAlerta);
+        }
+      }
+    });
+
+    isFirstAlertsSnapshot = false;
+
+    aList.sort((a, b) => {
+      const numA = parseInt(String(a.idAlerta).replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.idAlerta).replace(/\D/g, ''), 10) || 0;
+      if (numB !== numA) return numB - numA;
+      return String(b.idAlerta).localeCompare(String(a.idAlerta));
+    });
+
+    set(splitAlertsAndOrders(aList, get().activeChatAlert));
+  },
+
+  applyCentralRawDoc: (rawData = {}) => {
+    const incomingData = rawData && typeof rawData === 'object' ? rawData : {};
+    if (lastCentralRawData && shouldKeepLocalByTimestamp('accesos', 'central', lastCentralRawData, incomingData)) {
+      get().recomputeCentralState(lastCentralRawData);
+      return;
+    }
+    lastCentralRawData = incomingData;
+    get().recomputeCentralState(incomingData);
+    isFirstCentralSnapshot = false;
+  },
+
+  // Hidratación inmediata y respaldo en vivo por Firestore REST (garantiza 100% conexión en iOS WKWebView y redes restringidas)
+  hydrateFromFirestoreRest: async () => {
+    try {
+      const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const projId = fbConfig.projectId;
+      const apiKey = fbConfig.apiKey;
+      if (!projId || !apiKey) return;
+
+      const baseUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents`;
+
+      const parseRestDocFields = (docObj) => {
+        const fields = docObj?.fields || {};
+        const parsed = {};
+        for (const k of Object.keys(fields)) {
+          parsed[k] = parseFirestoreValue(fields[k]);
+        }
+        return parsed;
+      };
+
+      const [centralRes, despRes, vehRes, alertRes] = await Promise.all([
+        fetchFirestoreWithAuth(`${baseUrl}/accesos/central`, apiKey).catch(() => null),
+        fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=100`, apiKey).catch(() => null),
+        fetchFirestoreWithAuth(`${baseUrl}/vehiculos?pageSize=100`, apiKey).catch(() => null),
+        fetchFirestoreWithAuth(`${baseUrl}/alertas?pageSize=100`, apiKey).catch(() => null)
+      ]);
+
+      if (centralRes && centralRes.ok) {
+        const cJson = await centralRes.json();
+        if (cJson && cJson.fields) {
+          get().applyCentralRawDoc(parseRestDocFields(cJson));
+        }
+      }
+
+      if (despRes && despRes.ok) {
+        const dJson = await despRes.json();
+        const docs = (dJson?.documents || []).map((docItem) => ({
+          id: docItem.name.split('/').pop(),
+          data: parseRestDocFields(docItem),
+          hasPendingWrites: false
+        }));
+        get().applyDispatchesRawDocs(docs);
+      }
+
+      if (vehRes && vehRes.ok) {
+        const vJson = await vehRes.json();
+        const docs = (vJson?.documents || []).map((docItem) => ({
+          id: docItem.name.split('/').pop(),
+          data: parseRestDocFields(docItem),
+          hasPendingWrites: false
+        }));
+        if (docs.length > 0) {
+          get().applyVehiclesRawDocs(docs);
+        }
+      }
+
+      if (alertRes && alertRes.ok) {
+        const aJson = await alertRes.json();
+        const docs = (aJson?.documents || []).map((docItem) => ({
+          id: docItem.name.split('/').pop(),
+          data: parseRestDocFields(docItem),
+          hasPendingWrites: false
+        }));
+        get().applyAlertsRawDocs(docs);
+      }
+
+      // Si aún no se ha cargado la lista de personal, hidratar resumen ligero por REST
+      if ((get().firefightersList || []).length === 0) {
+        const maskFields = [
+          'idRegistro', 'idRadial', 'nombreBombero', 'nombre', 'cargo',
+          'compania', 'estado', 'enServicio', 'conductor', 'activo',
+          'puerta', 'Puerta', 'telefono', 'licenciaMedica',
+          'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp'
+        ].map((f) => `mask.fieldPaths=${f}`).join('&');
+        const persRes = await fetchFirestoreWithAuth(`${baseUrl}/personal?pageSize=300&${maskFields}`, apiKey).catch(() => null);
+        if (persRes && persRes.ok) {
+          const pJson = await persRes.json();
+          const pDocs = (pJson?.documents || []).map((docItem) => ({
+            id: docItem.name.split('/').pop(),
+            data: parseRestDocFields(docItem),
+            hasPendingWrites: false
+          }));
+          if (pDocs.length > 0) {
+            get().applyPersonalRawDocs(pDocs);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('⚠️ [SENTINEL ONE] Advertencia en hydrateFromFirestoreRest:', err?.message || err);
+    }
+  },
+
+  // Subscripción en tiempo real con onSnapshot (WebSockets / Long-Polling + Respaldo REST inmediato)
   subscribeRealtime: async () => {
     get().unsubscribeRealtime();
 
@@ -793,11 +1459,14 @@ export const useDispatchStore = create((set, get) => ({
     try {
       const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
       await reinitFirebaseWithConfig(fbConfig);
-      await ensureFirebaseAuth();
+
+      // Disparar hidratación inmediata vía REST en paralelo (garantiza carga instantánea en iOS y Android)
+      get().hydrateFromFirestoreRest();
+      ensureFirebaseAuth();
 
       const db = getDb();
       if (!db) {
-        console.warn('⚠️ [useDispatchStore] Firestore db no disponible.');
+        console.warn('⚠️ [useDispatchStore] Firestore db no disponible, operando con sincronización REST.');
         set({ isLoading: false });
         return;
       }
@@ -808,225 +1477,20 @@ export const useDispatchStore = create((set, get) => ({
       // 1. LISTENER EN TIEMPO REAL: DESPACHOS ACTIVOS (`despachos`)
       // =====================================================================
       unsubDespachos = onSnapshot(collection(db, 'despachos'), (snap) => {
-        const activeList = [];
-
+        lastSnapshotReceivedTs = Date.now();
+        const rawDocs = [];
         snap.forEach((d) => {
-          const data = d.data() || {};
-          const item = normalizeDispatchDoc(d.id, data);
-          const st = String(item.estado || '').toLowerCase().trim();
-
-          const isClosed =
-            st === 'cancelada' ||
-            st === 'cancelado' ||
-            st === 'finalizada' ||
-            st === 'finalizado' ||
-            st === 'cerrada' ||
-            st === 'cerrado' ||
-            st === 'terminada' ||
-            st === 'terminado' ||
-            Boolean(item.operadorFinal) ||
-            Boolean(item.finalizadoAt);
-          const isValidActive =
-            (st === 'activa' || st === 'activo' || st === 'pre-despacho' || st === 'en curso' || st === '') &&
-            !isClosed &&
-            item.visibleMovil !== false;
-
-          if (isValidActive) {
-            activeList.push(item);
-          }
-        });
-
-        activeList.sort((a, b) => {
-          const tsA = a.createdAt || 0;
-          const tsB = b.createdAt || 0;
-          if (tsA !== tsB) return tsB - tsA;
-          return String(b.idServicio).localeCompare(String(a.idServicio));
-        });
-
-        const isAirplane = useAuthStore.getState().isAirplaneMode;
-        const currentUser = useAuthStore.getState().user;
-        const isMeCentral = get().isCentralActive;
-        const userEstado = String(currentUser?.estado || '0-8').trim();
-        const is09 = userEstado === '0-9';
-        const isHonorario = String(currentUser?.cargo || '').toUpperCase().trim() === 'BOMBERO HONORARIO';
-        const isSilentSpecial =
-          ['CDS', 'SUSPENDIDO', 'LICENCIA', 'SILENCIO_ABSOLUTO'].includes(userEstado.toUpperCase()) ||
-          Number(currentUser?.cds) === 1 ||
-          Boolean(currentUser?.licenciaMedica) ||
-          Boolean(currentUser?.fechaSuspensionFin);
-        const isPartialSpecial =
-          ['PERMISO', 'COMISION_SERVICIO'].includes(userEstado.toUpperCase()) ||
-          Number(currentUser?.permiso) > 0;
-
-        if (activeList.length > 0) {
-          const newest = activeList[0];
-
-          // REGLA V2: En la carga inicial al abrir la app NUNCA hacer sonar ni levantar tonos desde los listeners JS.
-          // Todos los tonos y notificaciones son gestionados exclusivamente por la capa Push / Servicio Nativo.
-          if (isFirstDispatchesSnapshot) {
-            isFirstDispatchesSnapshot = false;
-            activeList.forEach((disp) => {
-              notifiedDispatchIds.add(disp.idServicio);
-              lastDispatchClaves[disp.idServicio] = disp.clave || '';
-              markPlayedSoundKey(disp.idServicio);
-              Object.entries(disp.unidades || {}).forEach(([uId, uData]) => {
-                lastUnitConductorReq[`${disp.idServicio}_${uId}`] = Number(uData?.solicitudConductorTimestamp || 0);
-                lastUnitPersonalReq[`${disp.idServicio}_${uId}`] = Number(uData?.solicitudPersonalTimestamp || 0);
-              });
-            });
-            lastKnownDispatchId = newest.idServicio;
-
-            // Si al abrir la app hay un despacho activo reciente sin responder y está en 0-9, mostrar la pantalla del despacho en silencio (sin sonar)
-            if (
-              !isAirplane &&
-              !isMeCentral &&
-              !isHonorario &&
-              !isSilentSpecial &&
-              !isPartialSpecial &&
-              is09 &&
-              !isDispatchTooOld(newest) &&
-              !hasUserRespondedToDispatch(newest, currentUser)
-            ) {
-              set({ fullscreenDispatchId: newest.idServicio });
-            }
-          } else {
-            // Procesar cambios en vivo únicamente para actualizar estado UI (los tonos suenan exclusivamente por Push / Servicio Nativo)
-            activeList.forEach((disp) => {
-              const id = disp.idServicio;
-              const clave = String(disp.clave || '10-0').trim();
-
-              // A. Nuevo despacho en vivo: solo mostrar overlay si el usuario está en 0-9 y no en Modo Avión (0-8 Absoluto)
-              if (!notifiedDispatchIds.has(id)) {
-                notifiedDispatchIds.add(id);
-                lastDispatchClaves[id] = clave;
-
-                if (
-                  !isAirplane &&
-                  !isMeCentral &&
-                  !isHonorario &&
-                  !isSilentSpecial &&
-                  !isPartialSpecial &&
-                  is09 &&
-                  !isDispatchTooOld(disp) &&
-                  !hasUserRespondedToDispatch(disp, currentUser)
-                ) {
-                  set({ fullscreenDispatchId: id });
-                }
-              } else {
-                // B. Detectar escalamiento (10-0 -> 10-30, 10-2 -> ALARMA FORESTAL)
-                const oldClave = lastDispatchClaves[id] || '';
-                if (oldClave && oldClave !== clave) {
-                  lastDispatchClaves[id] = clave;
-                  const cUp = clave.toUpperCase();
-                  const isEscalation =
-                    cUp.includes('10-30') ||
-                    cUp.includes('FORESTAL') ||
-                    cUp.includes('9-0') ||
-                    cUp.includes('COMANDANCIA');
-
-                  if (
-                    isEscalation &&
-                    !isAirplane &&
-                    !isMeCentral &&
-                    !isHonorario &&
-                    !isSilentSpecial &&
-                    !isUserAttendingDispatch(disp, currentUser)
-                  ) {
-                    set({
-                      fullscreenDispatchId: id,
-                      urgentBannerMessage: `🔥 CAMBIO DE CLAVE A ${clave}: ¡SE REQUIERE PERSONAL!`
-                    });
-                  }
-                } else {
-                  lastDispatchClaves[id] = clave;
-                }
-              }
-
-              // C. Detectar solicitudes urgentes 12-10 (Conductor) y 6-6 (Personal) por unidad (solo banner UI)
-              if (!isAirplane && !isMeCentral && !isHonorario && !isSilentSpecial && !isUserAttendingDispatch(disp, currentUser)) {
-                Object.entries(disp.unidades || {}).forEach(([uId, uData]) => {
-                  const condTs = Number(uData?.solicitudConductorTimestamp || 0);
-                  const persTs = Number(uData?.solicitudPersonalTimestamp || 0);
-                  const mapKey = `${id}_${uId}`;
-
-                  const prevCondTs = lastUnitConductorReq[mapKey] || 0;
-                  if (condTs > prevCondTs && condTs > 0 && (Date.now() - condTs) < 120000) {
-                    lastUnitConductorReq[mapKey] = condTs;
-                    if (currentUser?.conductor) {
-                      if (is09) set({ fullscreenDispatchId: id });
-                      set({
-                        urgentBannerMessage: `🚨 SOLICITUD 12-10 (${uId}): Se solicita conductor para unidad ${uId}`
-                      });
-                    }
-                  } else if (prevCondTs === 0) {
-                    lastUnitConductorReq[mapKey] = condTs;
-                  }
-
-                  const prevPersTs = lastUnitPersonalReq[mapKey] || 0;
-                  if (persTs > prevPersTs && persTs > 0 && (Date.now() - persTs) < 120000) {
-                    lastUnitPersonalReq[mapKey] = persTs;
-                    if (is09) set({ fullscreenDispatchId: id });
-                    set({
-                      urgentBannerMessage: `🚨 SOLICITUD 6-6 (${uId}): Se solicita personal para unidad ${uId}`
-                    });
-                  } else if (prevPersTs === 0) {
-                    lastUnitPersonalReq[mapKey] = persTs;
-                  }
-                });
-              }
-            });
-
-            lastKnownDispatchId = newest.idServicio;
-          }
-
-          // Si el despacho en pantalla completa ya fue respondido o cerrado, cerrarlo automáticamente
-          const curFsId = get().fullscreenDispatchId;
-          if (curFsId) {
-            const fsDisp = activeList.find((d) => String(d.idServicio) === String(curFsId));
-            if (!fsDisp || hasUserRespondedToDispatch(fsDisp, currentUser)) {
-              set({ fullscreenDispatchId: null });
-            }
-          }
-
-          set({
-            activeDispatch: newest,
-            dispatchesList: activeList,
-            isLoading: false,
-            isLiveConnected: true
+          rawDocs.push({
+            id: d.id,
+            data: d.data() || {},
+            hasPendingWrites: Boolean(d.metadata?.hasPendingWrites)
           });
-        } else {
-          isFirstDispatchesSnapshot = false;
-          set({
-            activeDispatch: null,
-            dispatchesList: [],
-            fullscreenDispatchId: null,
-            isLoading: false,
-            isLiveConnected: true
-          });
-        }
-
-        // Si el bombero tenía `enServicio` asociado a un despacho que ya se cerró, liberar a "0" (Idéntico a SisBomViewModel.kt líneas 977-989)
-        const latestUser = useAuthStore.getState().user;
-        const rawSvc = String(latestUser?.enServicio || '0').trim();
-        if (rawSvc && rawSvc !== '0') {
-          const cleanSvcId = rawSvc.replace(/^-/, '').trim();
-          const stillActive = activeList.some((d) => String(d.idServicio).trim() === cleanSvcId);
-          if (!stillActive && cleanSvcId) {
-            useAuthStore.getState().setEmergencyResponse(cleanSvcId, 'LIBRE');
-          } else if (stillActive && !rawSvc.startsWith('-')) {
-            useAuthStore.getState().startLiveTelemetry(cleanSvcId);
-          }
-        } else {
-          const attendingDisp = activeList.find((d) => isUserAttendingDispatch(d, latestUser));
-          if (attendingDisp) {
-            useAuthStore.getState().startLiveTelemetry(attendingDisp.idServicio);
-          } else {
-            useAuthStore.getState().stopLiveTelemetry();
-          }
-        }
+        });
+        get().applyDispatchesRawDocs(rawDocs);
       }, (err) => {
         console.warn('⚠️ [SENTINEL ONE] Error en listener onSnapshot despachos:', err.message);
         set({ isLoading: false });
+        get().hydrateFromFirestoreRest();
       });
 
       // =====================================================================
@@ -1043,64 +1507,16 @@ export const useDispatchStore = create((set, get) => ({
         .catch(() => {});
 
       unsubPersonal = onSnapshot(collection(db, 'personal'), (snap) => {
-        const list = [];
+        lastSnapshotReceivedTs = Date.now();
+        const rawDocs = [];
         snap.forEach((d) => {
-          const data = d.data() || {};
-          const isActiveVal = data.activo === undefined
-            ? true
-            : (data.activo === true || data.activo === 1 || String(data.activo).toUpperCase() === 'SI' || String(data.activo) === '1');
-          const isConductorVal = data.conductor === true || data.conductor === 1 || String(data.conductor) === '1' || String(data.conductor).toUpperCase() === 'SI';
-          const hasPuertaVal =
-            data.puerta === true ||
-            data.Puerta === true ||
-            data.puerta === 1 ||
-            String(data.puerta ?? data.Puerta ?? '').trim().toLowerCase() === 'true' ||
-            String(data.puerta ?? data.Puerta ?? '').trim().toUpperCase() === 'SI' ||
-            String(data.puerta ?? data.Puerta ?? '').trim() === '1';
-
-          list.push({
-            idRegistro: String(d.id || data.idRegistro).trim(),
-            idRadial: String(data.idRadial || '').trim(),
-            nombre: data.nombreBombero || data.nombre || 'BOMBERO',
-            nombreBombero: data.nombreBombero || data.nombre || 'BOMBERO',
-            cargo: data.cargo || 'Voluntario',
-            estado: data.estado || '0-9',
-            conductor: isConductorVal,
-            activo: isActiveVal,
-            puerta: hasPuertaVal,
-            compania: parseInt(String(data.compania || '1').replace(/\D/g, ''), 10) || 1,
-            telefono: data.telefono || '',
-            foto: data.foto || '',
-            enServicio: String(data.enServicio ?? '0'),
-            contrasena: data.contrasena !== undefined ? String(data.contrasena) : '',
-            licenciaMedica: data.licenciaMedica || '',
-            fechaSuspensionFin: data.fechaSuspensionFin || '',
-            permiso: data.permiso ?? 0,
-            cds: data.cds ?? 0
+          rawDocs.push({
+            id: d.id,
+            data: d.data() || {},
+            hasPendingWrites: Boolean(d.metadata?.hasPendingWrites)
           });
         });
-
-        list.sort((a, b) => {
-          const numA = parseInt(String(a.idRadial).replace(/\D/g, ''), 10) || 9999;
-          const numB = parseInt(String(b.idRadial).replace(/\D/g, ''), 10) || 9999;
-          return numA - numB;
-        });
-
-        set({ firefightersList: list });
-        useAuthStore.getState().syncUserFromPersonalList(list);
-        get().recomputeCentralState();
-        const syncedUser = useAuthStore.getState().user;
-        const syncedId = String(syncedUser?.idRegistro || '').trim();
-        if (syncedId && syncedId !== lastSubscribedAttendanceUserId) {
-          get().subscribeAttendanceRealtime();
-        }
-        const syncedSvc = String(syncedUser?.enServicio || '0').trim();
-        if (syncedSvc && syncedSvc !== '0' && !syncedSvc.startsWith('-')) {
-          const activeListNow = get().dispatchesList || [];
-          if (activeListNow.some((d) => String(d.idServicio).trim() === syncedSvc)) {
-            useAuthStore.getState().startLiveTelemetry(syncedSvc);
-          }
-        }
+        get().applyPersonalRawDocs(rawDocs);
       }, (err) => {
         console.warn('⚠️ [SENTINEL ONE] Error en listener onSnapshot personal:', err.message);
       });
@@ -1109,38 +1525,16 @@ export const useDispatchStore = create((set, get) => ({
       // 3. LISTENER EN TIEMPO REAL: FLOTA DE VEHÍCULOS (`vehiculos`)
       // =====================================================================
       unsubVehiculos = onSnapshot(collection(db, 'vehiculos'), (snap) => {
-        const vList = [];
+        lastSnapshotReceivedTs = Date.now();
+        const rawDocs = [];
         snap.forEach((d) => {
-          const data = d.data() || {};
-          const idCarro = String(data.idCarro || d.id).trim().toUpperCase();
-          vList.push({
-            id: idCarro,
-            nombre: idCarro,
-            idCarro,
-            compania: resolveCompanyFromVehicleId(idCarro, data.compania),
-            tipo: String(
-              data.tipo ||
-              (idCarro.startsWith('BF')
-                ? 'FORESTAL'
-                : idCarro.startsWith('BT')
-                  ? 'CISTERNA'
-                  : idCarro.startsWith('RS')
-                    ? 'RESCATE PESADO'
-                    : idCarro.startsWith('R')
-                      ? 'RESCATE'
-                      : idCarro.startsWith('K')
-                        ? 'COMANDANCIA'
-                        : 'BOMBA')
-            ).toUpperCase(),
-            conductor: String(data.conductor || ''),
-            estado: String(data.estado ?? '0-9').trim(),
-            enServicio: String(data.enServicio ?? '0').trim(),
-            patente: String(data.patente || ''),
-            kmActual: Number(data.kmActual || 0)
+          rawDocs.push({
+            id: d.id,
+            data: d.data() || {},
+            hasPendingWrites: Boolean(d.metadata?.hasPendingWrites)
           });
         });
-        vList.sort((a, b) => a.idCarro.localeCompare(b.idCarro));
-        set({ vehiclesList: vList, vehiculosList: vList });
+        get().applyVehiclesRawDocs(rawDocs);
       }, (err) => {
         console.warn('⚠️ [SENTINEL ONE] Error en listener onSnapshot vehiculos:', err.message);
       });
@@ -1160,32 +1554,16 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       isFirstAlertsSnapshot = true;
       unsubAlertas = onSnapshot(collection(db, 'alertas'), (snap) => {
-        const aList = [];
-        let hasNewAlert = false;
-
+        lastSnapshotReceivedTs = Date.now();
+        const rawDocs = [];
         snap.forEach((d) => {
-          const norm = normalizeAlertDoc(d.id, d.data() || {});
-          if (isAlertActiveByDuration(norm)) {
-            aList.push(norm);
-            if (!knownAlertIds.has(norm.idAlerta)) {
-              knownAlertIds.add(norm.idAlerta);
-              if (!isFirstAlertsSnapshot) {
-                hasNewAlert = true;
-              }
-            }
-          }
+          rawDocs.push({
+            id: d.id,
+            data: d.data() || {},
+            hasPendingWrites: Boolean(d.metadata?.hasPendingWrites)
+          });
         });
-
-        isFirstAlertsSnapshot = false;
-
-        aList.sort((a, b) => {
-          const numA = parseInt(String(a.idAlerta).replace(/\D/g, ''), 10) || 0;
-          const numB = parseInt(String(b.idAlerta).replace(/\D/g, ''), 10) || 0;
-          if (numB !== numA) return numB - numA;
-          return String(b.idAlerta).localeCompare(String(a.idAlerta));
-        });
-
-        set(splitAlertsAndOrders(aList, get().activeChatAlert));
+        get().applyAlertsRawDocs(rawDocs);
       }, (err) => {
         console.warn('⚠️ [SENTINEL ONE] Error en listener onSnapshot alertas:', err.message);
       });
@@ -1195,10 +1573,9 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       isFirstCentralSnapshot = true;
       unsubCentral = onSnapshot(doc(db, 'accesos', 'central'), (snap) => {
+        lastSnapshotReceivedTs = Date.now();
         const data = snap.exists() ? (snap.data() || {}) : {};
-        lastCentralRawData = data;
-        get().recomputeCentralState(data);
-        isFirstCentralSnapshot = false;
+        get().applyCentralRawDoc(data);
       }, (err) => {
         console.warn('⚠️ [SENTINEL ONE] Error en listener accesos/central:', err.message);
       });
@@ -1208,9 +1585,19 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       get().subscribeAttendanceRealtime();
 
+      // Respaldo periódico cada 6s por si iOS WKWebView o red móvil pausa el canal de streaming
+      restFallbackIntervalId = setInterval(() => {
+        const isIos = typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.iOSApp || window.__SENTINEL_PLATFORM__ === 'ios');
+        const sinceLastSnap = Date.now() - lastSnapshotReceivedTs;
+        if (isIos || sinceLastSnap > 7000) {
+          get().hydrateFromFirestoreRest();
+        }
+      }, 6000);
+
     } catch (e) {
       console.error('❌ [SENTINEL ONE] Error conectando a Firestore onSnapshot:', e);
       set({ isLoading: false });
+      get().hydrateFromFirestoreRest();
     }
   },
 
@@ -1283,10 +1670,49 @@ export const useDispatchStore = create((set, get) => ({
 
     try {
       await ensureFirebaseAuth();
-      const snap = await getDocs(collection(db, 'asistencia'));
-      const sheets = [];
-      snap.forEach((d) => {
-        sheets.push(normalizeAttendanceSheetDoc(d.id, d.data() || {}));
+      const cachedById = new Map();
+      cachedList.forEach((item) => {
+        if (item?.idLista) cachedById.set(String(item.idLista).trim(), item);
+      });
+
+      let rawSheetDocs = [];
+      try {
+        const snap = await getDocs(collection(db, 'asistencia'));
+        snap.forEach((d) => {
+          rawSheetDocs.push({ id: d.id, data: d.data() || {} });
+        });
+      } catch (_) {}
+
+      // Respaldo por REST si getDocs falla en iOS WKWebView
+      if (rawSheetDocs.length === 0) {
+        try {
+          const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+          const baseUrl = `https://firestore.googleapis.com/v1/projects/${fbConfig.projectId}/databases/(default)/documents`;
+          const res = await fetchFirestoreWithAuth(`${baseUrl}/asistencia?pageSize=200`, fbConfig.apiKey);
+          if (res && res.ok) {
+            const rJson = await res.json();
+            rawSheetDocs = (rJson?.documents || []).map((docItem) => {
+              const fields = docItem?.fields || {};
+              const parsed = {};
+              for (const k of Object.keys(fields)) parsed[k] = parseFirestoreValue(fields[k]);
+              return { id: docItem.name.split('/').pop(), data: parsed };
+            });
+          }
+        } catch (_) {}
+      }
+
+      const sheets = rawSheetDocs.map(({ id, data }) => {
+        const normalized = normalizeAttendanceSheetDoc(id, data);
+        const existingCached = cachedById.get(String(normalized.idLista).trim());
+        // Ley #4: Mayor Timestamp Gana en caché de listas de asistencia
+        if (existingCached && getEntityMaxTimestamp(existingCached) > getEntityMaxTimestamp(normalized)) {
+          return {
+            ...normalized,
+            ...existingCached,
+            _metaTimestamp: Math.max(getEntityMaxTimestamp(existingCached), getEntityMaxTimestamp(normalized))
+          };
+        }
+        return normalized;
       });
 
       sheets.sort((a, b) => {
@@ -1466,10 +1892,14 @@ export const useDispatchStore = create((set, get) => ({
     try {
       const db = getDb();
       await ensureFirebaseAuth();
+      markLocalWrite('solicitudes_puerta', solId, nowTs);
+      markLocalWrite('accesos', 'central', nowTs);
       await addDoc(collection(db, 'solicitudes_puerta'), docData);
       try {
         await setDoc(doc(db, 'accesos', 'central'), {
-          solicitudPuerta: docData
+          solicitudPuerta: docData,
+          _metaTimestamp: nowTs,
+          _fieldTimestamps: { solicitudPuerta: nowTs }
         }, { merge: true });
       } catch (e) {}
       return { success: true };
@@ -1500,9 +1930,12 @@ export const useDispatchStore = create((set, get) => ({
       }
       const db = getDb();
       if (db) {
+        markLocalWrite('accesos', 'central', nowTs);
         await setDoc(doc(db, 'accesos', 'central'), {
           puerta: true,
-          timestampPuerta: nowTs
+          timestampPuerta: nowTs,
+          _metaTimestamp: nowTs,
+          _fieldTimestamps: { puerta: nowTs, timestampPuerta: nowTs }
         }, { merge: true });
       }
       return { success: true };
@@ -1527,14 +1960,17 @@ export const useDispatchStore = create((set, get) => ({
       const sessionId = get().centralSessionId;
 
       if (sessionId) {
+        markLocalWrite('accesos', sessionId, nowTs);
         await setDoc(doc(db, 'accesos', 'central', 'registros', sessionId), {
           estado: 'cerrado',
           timestampCierre: nowTs,
           fechaCierre: dateNow,
-          horaCierre: timeNow
+          horaCierre: timeNow,
+          _metaTimestamp: nowTs
         }, { merge: true }).catch(() => {});
       }
 
+      markLocalWrite('accesos', 'central', nowTs);
       await setDoc(doc(db, 'accesos', 'central'), {
         estado: 'cerrado',
         idInicio: '',
@@ -1542,7 +1978,9 @@ export const useDispatchStore = create((set, get) => ({
         cargo: '',
         nombreBombero: '',
         operador: '',
-        timestampCierre: nowTs
+        timestampCierre: nowTs,
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { estado: nowTs, timestampCierre: nowTs }
       }, { merge: true });
 
       return { success: true };
@@ -1618,20 +2056,25 @@ export const useDispatchStore = create((set, get) => ({
         _metaTimestamp: nowTs
       };
 
+      markLocalWrite('despachos', draftId, nowTs);
       await setDoc(doc(db, 'despachos', draftId), preDispatchData);
 
       // Si se despacha CON SIRENA, accionar también sirena/control y apertura de portón igual que SENTINEL CAD
       if (sirenEnabled) {
         try {
+          markLocalWrite('sirena', 'control', nowTs);
           await setDoc(doc(db, 'sirena', 'control'), {
             estado: 'encendida',
             updatedAt: nowTs,
             ejecutadoPor: String(user?.nombreBombero || get().centralOperatorName || 'OPERADOR CENTRAL'),
-            motivo: `DESPACHO ${key}`
+            motivo: `DESPACHO ${key}`,
+            _metaTimestamp: nowTs
           }, { merge: true });
+          markLocalWrite('accesos', 'central', nowTs);
           await setDoc(doc(db, 'accesos', 'central'), {
             puerta: true,
-            timestampPuerta: nowTs
+            timestampPuerta: nowTs,
+            _metaTimestamp: nowTs
           }, { merge: true });
         } catch (_) {}
       }
@@ -1651,15 +2094,18 @@ export const useDispatchStore = create((set, get) => ({
     if (isBypass || isReadOnly) return;
 
     const user = useAuthStore.getState().user;
+    const nowTs = Date.now();
     try {
       const db = getDb();
       await ensureFirebaseAuth();
+      markLocalWrite('despachos', String(draftId), nowTs);
       await updateDoc(doc(db, 'despachos', String(draftId)), {
         estado: 'cancelado',
-        finalizadoAt: Date.now(),
+        finalizadoAt: nowTs,
         operadorFinal: String(user?.nombreBombero || get().centralOperatorName || 'OPERADOR CENTRAL'),
         visibleMovil: false,
-        _metaTimestamp: Date.now()
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { estado: nowTs, finalizadoAt: nowTs, visibleMovil: nowTs }
       });
     } catch (_) {}
   },
@@ -1763,16 +2209,19 @@ export const useDispatchStore = create((set, get) => ({
         _metaTimestamp: nowTs
       };
 
+      markLocalWrite('despachos', idServicio, nowTs);
       await setDoc(doc(db, 'despachos', idServicio), dispatchPayload, { merge: true });
 
       // Marcar carros en servicio
       await Promise.all(
-        selectedVehicles.map((carroId) =>
-          setDoc(doc(db, 'vehiculos', carroId), {
+        selectedVehicles.map((carroId) => {
+          markLocalWrite('vehiculos', carroId, nowTs);
+          return setDoc(doc(db, 'vehiculos', carroId), {
             enServicio: idServicio,
-            _metaTimestamp: nowTs
-          }, { merge: true }).catch(() => {})
-        )
+            _metaTimestamp: nowTs,
+            _fieldTimestamps: { enServicio: nowTs }
+          }, { merge: true }).catch(() => {});
+        })
       );
 
       return { success: true, idServicio };
@@ -1803,10 +2252,12 @@ export const useDispatchStore = create((set, get) => ({
     if (currentList.includes(myRadial)) return;
     currentList.push(myRadial);
     const newConforme = currentList.join(',');
+    const nowTs = Date.now();
+    markLocalWrite('alertas', targetId, nowTs);
 
     // Optimistic update
     const nextAll = get().allAlertsList.map(a =>
-      (a.idAlerta === targetId || a.id === targetId) ? { ...a, conforme: newConforme } : a
+      (a.idAlerta === targetId || a.id === targetId) ? { ...a, conforme: newConforme, _metaTimestamp: nowTs } : a
     );
     set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
 
@@ -1818,7 +2269,9 @@ export const useDispatchStore = create((set, get) => ({
       const db = getDb();
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetId), {
-        conforme: newConforme
+        conforme: newConforme,
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { conforme: nowTs }
       });
     } catch (e) {}
   },
@@ -1848,9 +2301,11 @@ export const useDispatchStore = create((set, get) => ({
     }
     const newFijar = updatedPins.join(',');
     const newFijada = updatedPins.length > 0;
+    const nowTs = Date.now();
+    markLocalWrite('alertas', targetId, nowTs);
 
     const nextAll = get().allAlertsList.map(a =>
-      (a.idAlerta === targetId || a.id === targetId) ? { ...a, fijar: newFijar, fijada: newFijada } : a
+      (a.idAlerta === targetId || a.id === targetId) ? { ...a, fijar: newFijar, fijada: newFijada, _metaTimestamp: nowTs } : a
     );
     set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
 
@@ -1863,7 +2318,9 @@ export const useDispatchStore = create((set, get) => ({
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetId), {
         fijar: newFijar,
-        fijada: newFijada
+        fijada: newFijada,
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { fijar: nowTs, fijada: nowTs }
       });
     } catch (e) {}
   },
@@ -1909,15 +2366,19 @@ export const useDispatchStore = create((set, get) => ({
       finalChatString = `${existingMsg} | ${formattedEntry}`;
     }
 
+    const nowTs = Date.now();
+    markLocalWrite('alertas', targetAlert.idAlerta, nowTs);
+
     const nextAll = get().allAlertsList.map(a =>
       a.idAlerta === targetAlert.idAlerta
-        ? { ...a, mensajeAlerta: finalChatString, conforme: senderRadial }
+        ? { ...a, mensajeAlerta: finalChatString, conforme: senderRadial, _metaTimestamp: nowTs }
         : a
     );
     set(splitAlertsAndOrders(nextAll, {
       ...targetAlert,
       mensajeAlerta: finalChatString,
-      conforme: senderRadial
+      conforme: senderRadial,
+      _metaTimestamp: nowTs
     }));
 
     const isBypass = useLicenseStore.getState().isBypassMode;
@@ -1929,7 +2390,9 @@ export const useDispatchStore = create((set, get) => ({
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetAlert.idAlerta), {
         mensajeAlerta: finalChatString,
-        conforme: senderRadial
+        conforme: senderRadial,
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { mensajeAlerta: nowTs, conforme: nowTs }
       });
     } catch (e) {
       console.warn('Error enviando mensaje de chat:', e);
@@ -1965,8 +2428,11 @@ export const useDispatchStore = create((set, get) => ({
       fechaOrden: fecha,
       firmaNombre,
       firmaCargo,
-      timestamp: nowTs
+      timestamp: nowTs,
+      _metaTimestamp: nowTs
     });
+
+    markLocalWrite('alertas', idAlerta, nowTs);
 
     const isBypass = useLicenseStore.getState().isBypassMode;
     const isReadOnly = useLicenseStore.getState().isReadOnly;
@@ -2066,13 +2532,17 @@ export const useDispatchStore = create((set, get) => ({
       duracion: isChat || duracion === 'i' ? duracion : `'${duracion}`,
       aQuienAlerta: finalAQuien,
       conforme: isChat ? myRadial : '',
-      fijar: ''
+      fijar: '',
+      _metaTimestamp: nowTs
     };
 
     const newAlert = normalizeAlertDoc(idAlerta, {
       ...firestorePayload,
-      timestamp: nowTs
+      timestamp: nowTs,
+      _metaTimestamp: nowTs
     });
+
+    markLocalWrite('alertas', idAlerta, nowTs);
 
     const isBypass = useLicenseStore.getState().isBypassMode;
     const isReadOnly = useLicenseStore.getState().isReadOnly;
@@ -2096,6 +2566,9 @@ export const useDispatchStore = create((set, get) => ({
   deleteAlert: async (alertId) => {
     if (!alertId) return;
     const targetId = String(alertId);
+    const nowTs = Date.now();
+    markLocalWrite('alertas', targetId, nowTs);
+
     const nextAll = get().allAlertsList.filter(a => a.idAlerta !== targetId && a.id !== targetId);
     set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
 
@@ -2107,7 +2580,9 @@ export const useDispatchStore = create((set, get) => ({
       const db = getDb();
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetId), {
-        duracion: ''
+        duracion: '',
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { duracion: nowTs }
       }).catch(async () => {
         await deleteDoc(doc(db, 'alertas', targetId));
       });
@@ -2119,7 +2594,7 @@ export const useDispatchStore = create((set, get) => ({
 
   // Desconectar listeners al salir o cambiar de vista
   unsubscribeRealtime: () => {
-    [unsubDespachos, unsubPersonal, unsubVehiculos, unsubAlertas, unsubCentral, unsubAsistencia].forEach(unsub => {
+    [unsubDespachos, unsubPersonal, unsubVehiculos, unsubProtocols, unsubAlertas, unsubCentral, unsubAsistencia].forEach(unsub => {
       if (unsub) {
         try { unsub(); } catch (e) {}
       }
@@ -2127,9 +2602,14 @@ export const useDispatchStore = create((set, get) => ({
     unsubDespachos = null;
     unsubPersonal = null;
     unsubVehiculos = null;
+    unsubProtocols = null;
     unsubAlertas = null;
     unsubCentral = null;
     unsubAsistencia = null;
+    if (restFallbackIntervalId) {
+      clearInterval(restFallbackIntervalId);
+      restFallbackIntervalId = null;
+    }
     set({ isLiveConnected: false });
   },
 

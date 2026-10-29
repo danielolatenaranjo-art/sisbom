@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, Image, Linking } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { X, MessageCircle, PhoneCall } from 'lucide-react-native';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc } from 'firebase/firestore';
+import { updateDoc } from '../../config/firestoreMeta';
 import { getDb } from '../../config/firebase';
 import { useAuthStore } from '../../store/useAuthStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
@@ -87,11 +88,19 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
     try {
       const db = getDb();
       if (db && bombero.idRegistro) {
+        const nowTs = Date.now();
         const payload = {
           estado: newEstado,
           permiso: newEstado === 'PERMISO',
           licenciaMedica: newEstado === 'LICENCIA',
-          cds: newEstado === 'CDS'
+          cds: newEstado === 'CDS',
+          _metaTimestamp: nowTs,
+          _fieldTimestamps: {
+            estado: nowTs,
+            permiso: nowTs,
+            licenciaMedica: nowTs,
+            cds: nowTs
+          }
         };
         await updateDoc(doc(db, 'personal', String(bombero.idRegistro)), payload);
       }

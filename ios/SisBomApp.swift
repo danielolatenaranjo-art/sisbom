@@ -313,12 +313,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if FirebaseApp.app() == nil {
             FirebaseApp.configure(options: options)
             currentTenantProjectId = projectId
+            authenticateNativeApp(FirebaseApp.app())
         } else if currentTenantProjectId != projectId {
             let appName = "tenant_\(projectId)"
             if FirebaseApp.app(name: appName) == nil {
                 FirebaseApp.configure(name: appName, options: options)
             }
             currentTenantProjectId = projectId
+            authenticateNativeApp(FirebaseApp.app(name: appName))
+        }
+    }
+
+    static func authenticateNativeApp(_ app: FirebaseApp?) {
+        guard let targetApp = app else { return }
+        let auth = Auth.auth(app: targetApp)
+        if auth.currentUser != nil { return }
+        auth.signIn(withEmail: "137@sisbom.com", password: "ADASME137_secure_sisbom") { result, error in
+            if error != nil || result == nil {
+                auth.signInAnonymously(completion: nil)
+            }
         }
     }
 
@@ -342,6 +355,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
+            Self.authenticateNativeApp(FirebaseApp.app())
         }
 
         Messaging.messaging().delegate = self
@@ -821,6 +835,14 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler {
             IOSSoundPlayer.shared.stop()
         case "vibrate":
             IOSSoundPlayer.shared.vibrateEmergency()
+        case "syncStorageCache":
+            if let key = dict["key"] as? String, !key.isEmpty {
+                if let val = dict["value"] as? String, !val.isEmpty {
+                    defaults.set(val, forKey: "WEBSTORAGE_\(key)")
+                } else {
+                    defaults.removeObject(forKey: "WEBSTORAGE_\(key)")
+                }
+            }
         default:
             break
         }
@@ -840,6 +862,22 @@ final class SentinelLocalAssetSchemeHandler: NSObject, WKURLSchemeHandler {
             ?? Bundle.main.resourceURL?.appendingPathComponent("www", isDirectory: true)
             ?? Bundle.main.bundleURL.appendingPathComponent("www", isDirectory: true)
         var targetFile = wwwUrl.appendingPathComponent(relPath)
+
+        // Si pide /_expo/ o /expo_bundle/, soportar ambos nombres de carpeta de forma transparente
+        if !FileManager.default.fileExists(atPath: targetFile.path) {
+            let swappedPath: String
+            if relPath.hasPrefix("_expo/") {
+                swappedPath = "expo_bundle/" + String(relPath.dropFirst("_expo/".count))
+            } else if relPath.hasPrefix("expo_bundle/") {
+                swappedPath = "_expo/" + String(relPath.dropFirst("expo_bundle/".count))
+            } else {
+                swappedPath = relPath
+            }
+            let swappedCandidate = wwwUrl.appendingPathComponent(swappedPath)
+            if FileManager.default.fileExists(atPath: swappedCandidate.path) {
+                targetFile = swappedCandidate
+            }
+        }
 
         if !FileManager.default.fileExists(atPath: targetFile.path) {
             let altWww = Bundle.main.resourceURL?.appendingPathComponent("www", isDirectory: true)
@@ -912,6 +950,53 @@ struct SentinelWebViewContainer: UIViewRepresentable {
         config.mediaTypesRequiringUserActionForPlayback = []
         config.userContentController.add(bridge, name: "iOSApp")
         config.setURLSchemeHandler(schemeHandler, forURLScheme: "sentinel")
+
+        // Pre-inyectar plataforma iOS y restaurar caché nativo en window.localStorage antes de que arranque React
+        let defaults = UserDefaults.standard
+        let storageKeys = [
+            "@sentinel_one_v3_license_cache",
+            "@sentinel_one_v3_user_session",
+            "@sentinel_one_v3_user_prefs",
+            "@sentinel_one_location_disclosed_v3"
+        ]
+        var storageMap: [String: String] = [:]
+        for k in storageKeys {
+            if let val = defaults.string(forKey: "WEBSTORAGE_\(k)"), !val.isEmpty {
+                storageMap[k] = val
+            }
+        }
+        let storageJson: String
+        if let jsonData = try? JSONSerialization.data(withJSONObject: storageMap),
+           let jsonStr = String(data: jsonData, encoding: .utf8) {
+            storageJson = jsonStr
+        } else {
+            storageJson = "{}"
+        }
+
+        let bootJs = """
+        (function() {
+            try {
+                window.__SENTINEL_PLATFORM__ = 'ios';
+                window.__SENTINEL_IOS_PERMS__ = window.__SENTINEL_IOS_PERMS__ || {
+                    fineLocation: false,
+                    backgroundLocation: false,
+                    overlay: true,
+                    batteryUnrestricted: true,
+                    notifications: true
+                };
+                var restored = \(storageJson);
+                if (window.localStorage && restored) {
+                    Object.keys(restored).forEach(function(k) {
+                        if (!window.localStorage.getItem(k) && restored[k]) {
+                            window.localStorage.setItem(k, restored[k]);
+                        }
+                    });
+                }
+            } catch (e) {}
+        })();
+        """
+        let userScript = WKUserScript(source: bootJs, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        config.userContentController.addUserScript(userScript)
 
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.isOpaque = false

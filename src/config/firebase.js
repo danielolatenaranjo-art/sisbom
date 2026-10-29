@@ -1,6 +1,13 @@
-import { initializeApp, getApps, getApp, deleteApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeFirestore, getFirestore } from 'firebase/firestore';
+import {
+  initializeAuth,
+  getAuth,
+  browserLocalPersistence,
+  inMemoryPersistence,
+  signInWithEmailAndPassword,
+  signInAnonymously
+} from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 
 export const CENTRAL_FIREBASE_CONFIG = {
@@ -27,6 +34,38 @@ let auth = null;
 let rtdb = null;
 let authPromise = null;
 
+function getOrInitFirestore(firebaseApp) {
+  if (!firebaseApp) return null;
+  try {
+    return initializeFirestore(firebaseApp, {
+      experimentalForceLongPolling: true,
+      useFetchStreams: false
+    });
+  } catch {
+    return getFirestore(firebaseApp);
+  }
+}
+
+function getOrInitAuth(firebaseApp) {
+  if (!firebaseApp) return null;
+  try {
+    return initializeAuth(firebaseApp, {
+      persistence: [browserLocalPersistence, inMemoryPersistence]
+    });
+  } catch {
+    return getAuth(firebaseApp);
+  }
+}
+
+function getOrCreateFirebaseApp(config) {
+  const cfg = config || DEFAULT_FIREBASE_CONFIG;
+  const targetProjectId = String(cfg.projectId || DEFAULT_FIREBASE_CONFIG.projectId).trim();
+  const appName = targetProjectId === DEFAULT_FIREBASE_CONFIG.projectId ? '[DEFAULT]' : `tenant_${targetProjectId}`;
+  const existing = getApps().find((a) => a.name === appName || a.options?.projectId === targetProjectId);
+  if (existing) return existing;
+  return initializeApp(cfg, appName);
+}
+
 // Asegurar autenticación de Firebase Auth para permisos de lectura/escritura de Firestore y RTDB
 export async function ensureFirebaseAuth(customAuth = null) {
   const currentAuth = customAuth || auth || getAuthInstance();
@@ -40,19 +79,31 @@ export async function ensureFirebaseAuth(customAuth = null) {
 
   authPromise = (async () => {
     try {
-      const cred = await signInWithEmailAndPassword(
-        currentAuth,
-        '137@sisbom.com',
-        'ADASME137_secure_sisbom'
-      );
-      console.log('🔥 [Firebase Auth] Autenticado exitosamente para Firestore y RTDB.');
-      return cred.user;
+      const cred = await Promise.race([
+        signInWithEmailAndPassword(
+          currentAuth,
+          '137@sisbom.com',
+          'ADASME137_secure_sisbom'
+        ),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 3500))
+      ]);
+      if (cred?.user) {
+        console.log('🔥 [Firebase Auth] Autenticado exitosamente para Firestore y RTDB.');
+        return cred.user;
+      }
     } catch (err) {
-      console.warn('⚠️ [Firebase Auth] Advertencia autenticando usuario maestro:', err.message);
-      return null;
+      try {
+        const anonCred = await Promise.race([
+          signInAnonymously(currentAuth),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Anon auth timeout')), 2500))
+        ]);
+        if (anonCred?.user) return anonCred.user;
+      } catch (_) {}
+      console.warn('⚠️ [Firebase Auth] Advertencia autenticando usuario maestro:', err?.message || err);
     } finally {
       authPromise = null;
     }
+    return null;
   })();
 
   return authPromise;
@@ -62,15 +113,9 @@ export function initFirebase(customConfig = null) {
   const config = customConfig || DEFAULT_FIREBASE_CONFIG;
 
   try {
-    const existingApps = getApps();
-    if (existingApps.length === 0) {
-      app = initializeApp(config);
-    } else {
-      app = getApp();
-    }
-
-    db = getFirestore(app);
-    auth = getAuth(app);
+    app = getOrCreateFirebaseApp(config);
+    db = getOrInitFirestore(app);
+    auth = getOrInitAuth(app);
 
     ensureFirebaseAuth(auth);
 
@@ -84,24 +129,16 @@ export function initFirebase(customConfig = null) {
 export async function reinitFirebaseWithConfig(newConfig) {
   if (!newConfig || !newConfig.projectId) return { app, db, auth, rtdb };
   try {
-    const currentApp = app || (getApps().length ? getApp() : null);
-    if (currentApp && currentApp.options && currentApp.options.projectId === newConfig.projectId) {
-      if (!db) db = getFirestore(currentApp);
-      if (!auth) auth = getAuth(currentApp);
+    if (app && app.options && app.options.projectId === newConfig.projectId) {
+      if (!db) db = getOrInitFirestore(app);
+      if (!auth) auth = getOrInitAuth(app);
       ensureFirebaseAuth(auth);
-      return { app: currentApp, db, auth, rtdb: getRtdb() };
+      return { app, db, auth, rtdb: getRtdb() };
     }
 
-    const existingApps = getApps();
-    for (const a of existingApps) {
-      try {
-        await deleteApp(a);
-      } catch (e) {}
-    }
-
-    app = initializeApp(newConfig);
-    db = getFirestore(app);
-    auth = getAuth(app);
+    app = getOrCreateFirebaseApp(newConfig);
+    db = getOrInitFirestore(app);
+    auth = getOrInitAuth(app);
     rtdb = null;
     ensureFirebaseAuth(auth);
     console.log(`🔥 [Firebase] Inicializado para proyecto: ${newConfig.projectId}`);
