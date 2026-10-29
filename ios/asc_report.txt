@@ -8,7 +8,7 @@
 🔞 Completando AgeRatingDeclaration de la versión (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
 ⚠️ HTTP 404 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/560a8f78-db6a-4284-afd1-3f1245a55675: {
   "errors" : [ {
-    "id" : "dfd1c26e-8494-4557-91ac-a994e24b22d4",
+    "id" : "7634d170-2973-4287-a466-10dd1eb712ef",
     "status" : "404",
     "code" : "NOT_FOUND",
     "title" : "The specified resource does not exist",
@@ -16,12 +16,12 @@
   } ]
 }
    ✅ AgeRatingDeclaration de versión respondido con HTTP 404
-💲 Verificando / Configurando Precio Gratis ($0.00) en App Store Connect...
-   ✅ La app ya tiene su esquema de precios configurado.
+💲 Configurando Precio Gratis ($0.00) en App Store Connect (/v1/appPriceSchedules)...
+   ✅ Precio Gratis ($0.00) configurado (HTTP 201).
 🌐 Configurando URL de Soporte, Textos y Capturas para es-ES (id=c9dc24ad-dc36-4500-b40b-91da8db3e90f)...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
   "errors" : [ {
-    "id" : "bf8172e1-c0f3-45cb-9592-7cfa3e2a7bf4",
+    "id" : "09db4ae7-a1d6-4d3e-a880-53c33c2fff24",
     "status" : "409",
     "code" : "STATE_ERROR",
     "title" : "The request cannot be fulfilled because of the state of another resource.",
@@ -34,7 +34,7 @@
 👤 Configurando datos de contacto y cuenta demo para el Revisor de Apple...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/b1db6376-ff8e-4f01-ad5c-46c9f497b144: {
   "errors" : [ {
-    "id" : "a763e7c1-0e0b-4631-b034-69480c926691",
+    "id" : "16165cec-0080-4264-b951-8a69a4271e1d",
     "status" : "409",
     "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID",
     "title" : "The provided entity includes an attribute with an invalid value",
@@ -48,7 +48,7 @@
 🚀 Enviando versión 3.0.3 a Revisión de App Store...
 ⚠️ HTTP 409 en POST https://api.appstoreconnect.apple.com/v1/reviewSubmissionItems: {
   "errors" : [ {
-    "id" : "69cbc8f0-6a15-4fb1-8aec-9ca041536483",
+    "id" : "3f7bbddb-c351-416c-8eef-86537994db22",
     "status" : "409",
     "code" : "STATE_ERROR.ENTITY_STATE_INVALID",
     "title" : "appStoreVersions with id '560a8f78-db6a-4284-afd1-3f1245a55675' is not in valid state.",
@@ -56,18 +56,11 @@
     "meta" : {
       "associatedErrors" : {
         "/v1/appDataUsages/" : [ {
-          "id" : "df777460-7f3a-494b-93df-48c996290b65",
+          "id" : "1340157d-6e2b-4af5-bd53-40fb15e6ff7f",
           "status" : "409",
           "code" : "STATE_ERROR.APP_DATA_USAGES_REQUIRED",
           "title" : "Answers to what data your app collects and how it's used are needed.",
           "detail" : "You must have published answers to your app's data usages."
-        } ],
-        "/v2/appPrices/" : [ {
-          "id" : "bea61fa2-cb0d-4085-a55d-5823d869d709",
-          "status" : "409",
-          "code" : "STATE_ERROR.APP_PRICING_REQUIRED",
-          "title" : "App is missing required pricing.",
-          "detail" : "App is not eligible for submission until pricing has been set."
         } ]
       }
     }
@@ -75,7 +68,7 @@
 }
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/391829da-b983-43a1-a5f1-4147b9774ea0: {
   "errors" : [ {
-    "id" : "4e69f2d4-9d04-4f30-9b22-f0b9a35436e6",
+    "id" : "e6c37aca-9888-4874-adc7-d780d9843539",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
     "title" : "Relationship is required",
@@ -88,7 +81,7 @@
 ⚠️ Respuesta de envío a revisión: {
   "errors": [
     {
-      "id": "4e69f2d4-9d04-4f30-9b22-f0b9a35436e6",
+      "id": "e6c37aca-9888-4874-adc7-d780d9843539",
       "status": "409",
       "code": "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
       "title": "Relationship is required",
