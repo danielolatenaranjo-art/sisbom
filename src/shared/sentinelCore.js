@@ -42,6 +42,11 @@ export function getLocalDateString(dateObj = new Date()) {
   return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
 }
 
+export function getLocalISODateString(dateObj = new Date()) {
+  const d = dateObj instanceof Date ? dateObj : new Date(dateObj || Date.now());
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function formatEpochToHHMM(val) {
   if (!val) return '';
   if (typeof val === 'string') {
@@ -436,7 +441,9 @@ export function getEntityMaxTimestamp(entity = {}) {
     entity.tiempos?.h60,
     entity.tiempos?.h615,
     entity.solicitudConductorTimestamp,
-    entity.solicitudPersonalTimestamp
+    entity.solicitudPersonalTimestamp,
+    entity.aprobadoAt,
+    entity.queuedAt
   ];
 
   if (entity._fieldTimestamps && typeof entity._fieldTimestamps === 'object') {
@@ -1647,7 +1654,8 @@ export function normalizeAttendanceDoc(docId, raw = {}) {
     observacion,
     obs: observacion,
     isLocalDraft: Boolean(raw.isLocalDraft),
-    firefighters: Array.isArray(raw.firefighters) ? raw.firefighters : null
+    firefighters: Array.isArray(raw.firefighters) ? raw.firefighters : null,
+    _metaTimestamp: Number(raw._metaTimestamp || 0)
   };
 }
 
@@ -1677,7 +1685,8 @@ export function normalizeAttendanceFirefighterDoc(docId, raw = {}) {
     idRegistro: String(raw.idRegistro || docId || '').trim(),
     nombreBombero: String(raw.nombreBombero || raw.nombre || '').trim().toUpperCase(),
     ordenEnLista: Number(raw.ordenEnLista ?? raw.orden ?? 999) || 999,
-    estado
+    estado,
+    _metaTimestamp: Number(raw._metaTimestamp || 0)
   };
 }
 
@@ -2212,7 +2221,8 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     conductor: Boolean(raw.conductor ?? raw.esConductor),
     estado: String(raw.estado || '0-9').trim(),
     enServicio: String(raw.enServicio ?? '0').trim(),
-    contrasena: String(raw.contrasena ?? raw.password ?? '').trim()
+    contrasena: String(raw.contrasena ?? raw.password ?? '').trim(),
+    _metaTimestamp: Number(raw._metaTimestamp || 0)
   };
 }
 
@@ -2252,7 +2262,9 @@ export function normalizeDispatchDoc(docId, raw = {}) {
     horaDespacho: formatEpochToHHMM(ts) || String(raw.horaDespacho || raw.hora || '').trim(),
     obac: raw.obac || '',
     idLista: String(raw.idLista || '').trim(),
-    idListaPrincipal: String(raw.idListaPrincipal || '').trim()
+    idListaPrincipal: String(raw.idListaPrincipal || '').trim(),
+    _metaTimestamp: Number(raw._metaTimestamp || 0),
+    _fieldTimestamps: (raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object') ? raw._fieldTimestamps : {}
   };
 }
 

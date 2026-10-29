@@ -52,15 +52,16 @@ const ANDROID_RAW_SOUNDS = {
   '10-12': 'c10_12',
   '10-15': 'c10_15',
   '10-30': 'c10_30',
-  'ALARMA FORESTAL': 'c10_30',
+  'ALARMA FORESTAL': 'c10_2forestal',
+  '10-2 ALARMA FORESTAL': 'c10_2forestal',
   '9-0': 'c9_0',
-  'alerta': 'alerta',
+  'alerta': 'alertas',
   'alertas': 'alertas',
   'importante': 'importante',
   'despacho': 'despacho',
-  'comandancia': 'llamado_comandancia',
-  'LLAMADO': 'llamado_comandancia',
-  'LLAMADO COMANDANCIA': 'llamado_comandancia'
+  'comandancia': 'c_llamadocomandancia',
+  'LLAMADO': 'c_llamadocomandancia',
+  'LLAMADO COMANDANCIA': 'c_llamadocomandancia'
 };
 
 // Mapeo de archivos de audio locales para entorno Web
@@ -79,15 +80,16 @@ const SOUND_FILES = {
   '10-12': require('../../assets/sounds/c10_12.mp3'),
   '10-15': require('../../assets/sounds/c10_15.mp3'),
   '10-30': require('../../assets/sounds/c10_30.mp3'),
-  'ALARMA FORESTAL': require('../../assets/sounds/c10_30.mp3'),
+  'ALARMA FORESTAL': require('../../assets/sounds/c10_2Forestal.mp3'),
+  '10-2 ALARMA FORESTAL': require('../../assets/sounds/c10_2Forestal.mp3'),
   '9-0': require('../../assets/sounds/c9_0.mp3'),
-  'alerta': require('../../assets/sounds/alerta.mp3'),
+  'alerta': require('../../assets/sounds/alertas.mp3'),
   'alertas': require('../../assets/sounds/alertas.mp3'),
   'importante': require('../../assets/sounds/importante.mp3'),
   'despacho': require('../../assets/sounds/despacho.mp3'),
-  'comandancia': require('../../assets/sounds/llamado_comandancia.mp3'),
-  'LLAMADO': require('../../assets/sounds/llamado_comandancia.mp3'),
-  'LLAMADO COMANDANCIA': require('../../assets/sounds/llamado_comandancia.mp3')
+  'comandancia': require('../../assets/sounds/c_llamadoComandancia.mp3'),
+  'LLAMADO': require('../../assets/sounds/c_llamadoComandancia.mp3'),
+  'LLAMADO COMANDANCIA': require('../../assets/sounds/c_llamadoComandancia.mp3')
 };
 
 const PLAYED_SOUNDS_STORAGE_KEY = '@sentinel_one_v3_played_sounds';
@@ -126,7 +128,8 @@ function markPlayedSoundKey(key) {
 export function resolveSoundKeyForClave(clave) {
   const c = String(clave || '').toUpperCase().trim();
   if (!c) return 'despacho';
-  if (c.includes('10-30') || c.includes('FORESTAL')) return '10-30';
+  if (c.includes('FORESTAL')) return 'ALARMA FORESTAL';
+  if (c.includes('10-30')) return '10-30';
   if (c.includes('9-0')) return '9-0';
   if (c.includes('LLAMADO') || c.includes('COMANDANCIA')) return 'comandancia';
   const baseMatch = c.match(/^10-\d+/);
@@ -809,17 +812,17 @@ export const useDispatchStore = create((set, get) => ({
       if (is1210) {
         const cond = String(uObj.conductor || '').trim();
         if (!cond || cond === 'Sin Conductor') {
-          get().playDispatchSound(resolveSoundKeyForClave(clave || disp.clave), {
-            forceMaxVolume: true,
-            vibratePatternCsv: '0,1200,400,1200,400,1200,400,1200'
+          get().playDispatchSound('importante', {
+            forceMaxVolume: false,
+            vibratePatternCsv: '0,500,250,500'
           });
         }
       } else {
         const numB = Number(uObj.numBomberos || 0);
         if (numB === 0) {
-          get().playDispatchSound(resolveSoundKeyForClave(clave || disp.clave), {
-            forceMaxVolume: true,
-            vibratePatternCsv: '0,1200,400,1200,400,1200,400,1200'
+          get().playDispatchSound('importante', {
+            forceMaxVolume: false,
+            vibratePatternCsv: '0,500,250,500'
           });
         }
       }
@@ -851,8 +854,13 @@ export const useDispatchStore = create((set, get) => ({
       centralOperatorName: opName,
       centralOperatorId: opId,
       centralSessionId: sessionId,
-      isCentralActive: isMeCentral
+      isCentralActive: isMeCentral,
+      ...(isMeCentral ? { fullscreenDispatchId: null } : {})
     });
+
+    if (isMeCentral) {
+      get().stopDispatchSound();
+    }
 
     try {
       if (typeof window !== 'undefined') {
@@ -886,6 +894,13 @@ export const useDispatchStore = create((set, get) => ({
       });
       const handleNativeIntentPayload = (payload) => {
         if (!payload || typeof payload !== 'object') return;
+        if (get().isCentralActive) {
+          try {
+            window.AndroidApp?.clearPendingIntent?.();
+            window.__SENTINEL_PENDING_INTENT__ = null;
+          } catch (_) {}
+          return;
+        }
         const dispId = String(payload.dispatchId || '').trim();
         if (dispId) {
           const user = useAuthStore.getState().user;
@@ -902,6 +917,34 @@ export const useDispatchStore = create((set, get) => ({
       window.addEventListener('sentinelNativeIntent', (ev) => {
         handleNativeIntentPayload(ev?.detail);
       });
+      const handleNativeFirestoreSnapshot = (msg) => {
+        if (!msg || typeof msg !== 'object') return;
+        lastSnapshotReceivedTs = Date.now();
+        const col = String(msg.collection || '').trim();
+        const payload = msg.payload;
+        if (col === 'despachos' && Array.isArray(payload)) {
+          get().applyDispatchesRawDocs(payload);
+        } else if (col === 'central' && payload && typeof payload === 'object') {
+          get().applyCentralRawDoc(payload);
+        } else if (col === 'vehiculos' && Array.isArray(payload)) {
+          get().applyVehiclesRawDocs(payload);
+        } else if (col === 'alertas' && Array.isArray(payload)) {
+          get().applyAlertsRawDocs(payload);
+        } else if (col === 'personal' && Array.isArray(payload)) {
+          get().applyPersonalRawDocs(payload);
+        }
+      };
+      window.addEventListener('sentinelNativeFirestoreSync', (ev) => {
+        handleNativeFirestoreSnapshot(ev?.detail);
+      });
+      try {
+        const cachedSnaps = window.__SENTINEL_NATIVE_SNAPSHOTS__;
+        if (cachedSnaps && typeof cachedSnaps === 'object') {
+          Object.keys(cachedSnaps).forEach((colKey) => {
+            handleNativeFirestoreSnapshot({ collection: colKey, payload: cachedSnaps[colKey] });
+          });
+        }
+      } catch (_) {}
       try {
         if (window.__SENTINEL_PENDING_INTENT__) {
           handleNativeIntentPayload(window.__SENTINEL_PENDING_INTENT__);
@@ -1124,12 +1167,17 @@ export const useDispatchStore = create((set, get) => ({
         lastKnownDispatchId = newest.idServicio;
       }
 
-      // Si el despacho en pantalla completa ya fue respondido o cerrado, cerrarlo automáticamente
+      // Si el usuario es el Operador Central activo o el despacho en pantalla completa ya fue respondido o cerrado, cerrarlo automáticamente
       const curFsId = get().fullscreenDispatchId;
       if (curFsId) {
-        const fsDisp = activeList.find((d) => String(d.idServicio) === String(curFsId));
-        if (!fsDisp || hasUserRespondedToDispatch(fsDisp, currentUser)) {
+        if (isMeCentral) {
           set({ fullscreenDispatchId: null });
+          get().stopDispatchSound();
+        } else {
+          const fsDisp = activeList.find((d) => String(d.idServicio) === String(curFsId));
+          if (!fsDisp || hasUserRespondedToDispatch(fsDisp, currentUser)) {
+            set({ fullscreenDispatchId: null });
+          }
         }
       }
 
@@ -2014,6 +2062,28 @@ export const useDispatchStore = create((set, get) => ({
       });
       const draftId = `${year}-${String(maxCorrelativo + 1).padStart(5, '0')}`;
 
+      // Pre-marcar despacho como notificado/reproducido localmente y en nativo porque somos el Operador Central que despacha
+      notifiedDispatchIds.add(draftId);
+      lastDispatchClaves[draftId] = String(key || '10-0').trim();
+      markPlayedSoundKey(draftId);
+      set({ isCentralActive: true, fullscreenDispatchId: null });
+      get().stopDispatchSound();
+      try {
+        if (typeof window !== 'undefined') {
+          window.AndroidApp?.setCentralOperatorMode?.(true);
+          window.AndroidApp?.acknowledgeDispatch?.(draftId, false);
+          window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
+            action: 'setCentralOperatorMode',
+            active: true
+          });
+          window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
+            action: 'acknowledgeDispatch',
+            dispatchId: draftId,
+            declined: false
+          });
+        }
+      } catch (_) {}
+
       const cuartelLat = useLicenseStore.getState().cuartelLat || -34.637373;
       const cuartelLng = useLicenseStore.getState().cuartelLng || -71.125741;
       const comuna = String(useLicenseStore.getState().comuna || '').toUpperCase();
@@ -2107,6 +2177,37 @@ export const useDispatchStore = create((set, get) => ({
         _metaTimestamp: nowTs,
         _fieldTimestamps: { estado: nowTs, finalizadoAt: nowTs, visibleMovil: nowTs }
       });
+    } catch (_) {}
+  },
+
+  // 4B.2 Actualizar Ubicación y Coordenadas del Pre-Despacho en vivo (Idéntico a setLocation en SENTINEL CAD)
+  updateDraftLocationFromCentral: async (draftId, locationText, coords = null, isAlertanteGeo = false) => {
+    if (!draftId) return;
+    const isBypass = useLicenseStore.getState().isBypassMode;
+    const isReadOnly = useLicenseStore.getState().isReadOnly;
+    if (isBypass || isReadOnly) return;
+
+    const nowTs = Date.now();
+    try {
+      const db = getDb();
+      await ensureFirebaseAuth();
+      const cleanLoc = String(locationText || '').trim().toUpperCase();
+      const updateObj = {
+        direccion: cleanLoc,
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: { direccion: nowTs }
+      };
+      if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number' && !isNaN(coords.lat) && !isNaN(coords.lng)) {
+        updateObj.geo = {
+          lat: Number(coords.lat),
+          lng: Number(coords.lng),
+          accuracy: 10,
+          origen: isAlertanteGeo ? 'GPS_ALERTANTE' : 'MANUAL_CAD'
+        };
+        updateObj._fieldTimestamps.geo = nowTs;
+      }
+      markLocalWrite('despachos', String(draftId), nowTs);
+      await updateDoc(doc(db, 'despachos', String(draftId)), updateObj);
     } catch (_) {}
   },
 
@@ -2210,6 +2311,30 @@ export const useDispatchStore = create((set, get) => ({
       };
 
       markLocalWrite('despachos', idServicio, nowTs);
+
+      // Pre-marcar despacho como notificado/reproducido localmente y en nativo porque somos el Operador Central que despacha
+      notifiedDispatchIds.add(idServicio);
+      lastDispatchClaves[idServicio] = String(clave || '10-0').trim();
+      markPlayedSoundKey(idServicio);
+      markPlayedSoundKey(`${idServicio}_${String(clave || '10-0').trim()}`);
+      set({ isCentralActive: true, fullscreenDispatchId: null });
+      get().stopDispatchSound();
+      try {
+        if (typeof window !== 'undefined') {
+          window.AndroidApp?.setCentralOperatorMode?.(true);
+          window.AndroidApp?.acknowledgeDispatch?.(idServicio, false);
+          window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
+            action: 'setCentralOperatorMode',
+            active: true
+          });
+          window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
+            action: 'acknowledgeDispatch',
+            dispatchId: idServicio,
+            declined: false
+          });
+        }
+      } catch (_) {}
+
       await setDoc(doc(db, 'despachos', idServicio), dispatchPayload, { merge: true });
 
       // Marcar carros en servicio
@@ -2637,7 +2762,7 @@ export const useDispatchStore = create((set, get) => ({
 
   // Reproducción de Sirena de Clave (c10_X.mp3) o Tonos de Alerta (Nativo Android + iOS + Web)
   playDispatchSound: async (clave = '10-0', options = {}) => {
-    if (useAuthStore.getState().isAirplaneMode) return;
+    if (useAuthStore.getState().isAirplaneMode || get().isCentralActive) return;
     const resolvedKey = resolveSoundKeyForClave(clave);
     const rawName = ANDROID_RAW_SOUNDS[resolvedKey] || ANDROID_RAW_SOUNDS[clave] || 'despacho';
     const userEstado = String(useAuthStore.getState().user?.estado || '0-9').trim();

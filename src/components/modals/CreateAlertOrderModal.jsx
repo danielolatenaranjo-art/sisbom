@@ -802,7 +802,10 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10
   },
   headerTitle: {
     fontSize: 13,

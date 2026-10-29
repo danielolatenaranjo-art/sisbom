@@ -27,8 +27,17 @@ import {
   Bookmark,
   Info,
   Trash2,
-  X
+  X,
+  Phone,
+  Send,
+  Copy,
+  Check,
+  Satellite,
+  CheckCircle2
 } from 'lucide-react-native';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { setDoc } from '../config/firestoreMeta';
+import { getDb, ensureFirebaseAuth } from '../config/firebase';
 import { useAuthStore } from '../store/useAuthStore';
 import { useLicenseStore } from '../store/useLicenseStore';
 import {
@@ -37,6 +46,12 @@ import {
   SPECIAL_DISPATCH_KEYS,
   DEFAULT_PROTOCOLS
 } from '../store/useDispatchStore';
+import {
+  getInstitutionCompanies,
+  resolveCompanyFromVehicleId,
+  formatShortPersonName,
+  resolveCoreUnitStatusInfo
+} from '../shared/sentinelCore';
 import { TacticalDispatchMap } from '../components/dispatch/TacticalDispatchMap';
 import { ProfileDrawer } from '../components/modals/ProfileDrawer';
 import { FirefighterModal } from '../components/modals/FirefighterModal';
@@ -231,27 +246,15 @@ function AttendanceCircle({ percentage = 0, size = 66, strokeWidth = 6.5, isDark
   );
 }
 
-// En la tarjeta principal: primera palabra y penúltima palabra (ej: "DANIEL OLATE")
+// En la tarjeta principal y en el Operador CAD: reutiliza formatShortPersonName de SHARED/sentinelCore.js (Regla #11)
 function formatFirefighterName(fullName = '') {
-  const parts = String(fullName).trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 3) {
-    return `${parts[0]} ${parts[parts.length - 2]}`.toUpperCase();
-  }
-  return parts.join(' ').toUpperCase();
+  return formatShortPersonName(fullName);
 }
 
-// En el Operador CAD: primera palabra y penúltima palabra (ej: "NICOLAS PEREZ")
 function formatOperatorCadName(rawName = '') {
   const clean = String(rawName).trim();
   if (!clean || clean.toUpperCase() === 'SIN OPERADOR' || clean === '--') return 'SIN OPERADOR';
-  const withoutTitle = clean
-    .replace(/^(OP\.|OPERADOR|VOL\.|VOLUNTARIO|BOMBERO)\s+/i, '')
-    .trim();
-  const parts = withoutTitle.split(/\s+/).filter(Boolean);
-  if (parts.length >= 3) {
-    return `${parts[0]} ${parts[parts.length - 2]}`.toUpperCase();
-  }
-  return parts.join(' ').toUpperCase();
+  return formatShortPersonName(clean) || 'SIN OPERADOR';
 }
 
 function getPhotoUri(foto) {
@@ -397,6 +400,7 @@ export const MainHomeView = ({ onLogout }) => {
     openDoorIoT,
     confirmInitialKeyFromCentral,
     cancelDraftDispatchFromCentral,
+    updateDraftLocationFromCentral,
     dispatchFromCentral,
     registerConforme,
     toggleAlertPin,
@@ -439,10 +443,21 @@ export const MainHomeView = ({ onLogout }) => {
   const [formAnswers, setFormAnswers] = useState({});
   const [formDetalle, setFormDetalle] = useState('');
   const [cadCoords, setCadCoords] = useState(null);
+  const [cadMapLayer, setCadMapLayer] = useState('streets'); // 'streets' | 'satellite'
   const [isSearchingAddress, setIsSearchingAddress] = useState(false);
-  const [showInterrogationGuide, setShowInterrogationGuide] = useState(false);
+  const [showInterrogationGuide, setShowInterrogationGuide] = useState(true);
   const [selectedUnits, setSelectedUnits] = useState([]);
   const [dispatchingNow, setDispatchingNow] = useState(false);
+  // SENTINEL LINK: Solicitud de Ubicación GPS del Alertante (Idéntico a SentinelLinkGeoModal.jsx de SENTINEL CAD)
+  const [isSentinelLinkModalOpen, setIsSentinelLinkModalOpen] = useState(false);
+  const [sentinelLinkPhoneDigits, setSentinelLinkPhoneDigits] = useState('');
+  const [isSentinelLinkCopied, setIsSentinelLinkCopied] = useState(false);
+  const [waitingSentinelLinkGeo, setWaitingSentinelLinkGeo] = useState(false);
+  const [cadAlertanteGeo, setCadAlertanteGeo] = useState(null);
+  const autoClosedSentinelLinkIdsRef = useRef(new Set());
+  const addressDebounceRef = useRef(null);
+  const cadDraftIdRef = useRef(null);
+  cadDraftIdRef.current = cadDraftId;
 
   // Animación limpia 100% horizontal (translateX + opacity sin scale ni colisión de pestañas)
   const tabFadeAnim = useRef(new Animated.Value(1)).current;
@@ -483,6 +498,159 @@ export const MainHomeView = ({ onLogout }) => {
     }
     return false;
   }, [isCentralActive, user?.idRegistro, user?.idRadial, user?.nombreBombero, user?.nombre, centralOperatorId, centralOperatorName]);
+
+  // Sincronizar modo Operador Central con el puente nativo (iOS + Android) y silenciar cualquier alerta de asistencia
+  useEffect(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        if (window.AndroidApp?.setCentralOperatorMode) {
+          window.AndroidApp.setCentralOperatorMode(Boolean(isMeCentralOperator));
+        }
+        if (window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+          window.webkit.messageHandlers.iOSApp.postMessage({
+            action: 'setCentralOperatorMode',
+            active: Boolean(isMeCentralOperator)
+          });
+        }
+      }
+    } catch (_) {}
+
+    if (isMeCentralOperator) {
+      stopDispatchSound();
+      if (fullscreenDispatchId) {
+        dismissFullscreenDispatch();
+      }
+    }
+  }, [isMeCentralOperator, fullscreenDispatchId]);
+
+  // Escuchar clics o arrastres en el Mapa Táctico de Pre-Despacho (TacticalMapPanoramico de SENTINEL CAD)
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+      return undefined;
+    }
+    const onMessage = async (event) => {
+      try {
+        const raw = event?.data;
+        const msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!msg || typeof msg !== 'object') return;
+        if (msg.type === 'SENTINEL_CAD_MAP_PICK' && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+          const pickedLat = Number(msg.lat);
+          const pickedLng = Number(msg.lng);
+          setCadCoords({ lat: pickedLat, lng: pickedLng });
+          setFormLugar('OBTENIENDO DIRECCIÓN...');
+          let resolvedAddr = '';
+          try {
+            const nomRes = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${pickedLat}&lon=${pickedLng}&zoom=18&addressdetails=1`,
+              { headers: { 'Accept-Language': 'es' } }
+            );
+            if (nomRes.ok) {
+              const data = await nomRes.json();
+              const addr = data?.address || {};
+              const poiName = data?.name || addr.amenity || addr.building || addr.shop || '';
+              const road = addr.road || addr.street || addr.pedestrian || addr.alley || addr.path || '';
+              const house = addr.house_number || '';
+              const neigh = addr.neighbourhood || addr.suburb || addr.hamlet || '';
+              let streetPart = road;
+              if (streetPart && house) streetPart += ` ${house}`;
+              if (poiName && streetPart) {
+                resolvedAddr = poiName.toLowerCase().includes(streetPart.toLowerCase())
+                  ? poiName
+                  : `${poiName}, ${streetPart}`;
+              } else if (streetPart) {
+                resolvedAddr = neigh ? `${streetPart}, ${neigh}` : streetPart;
+              } else if (poiName) {
+                resolvedAddr = neigh ? `${poiName}, ${neigh}` : poiName;
+              }
+            }
+          } catch (_) {}
+          const finalAddr = (resolvedAddr || `COORD: ${pickedLat.toFixed(5)}, ${pickedLng.toFixed(5)}`).toUpperCase();
+          setFormLugar(finalAddr);
+          if (cadDraftIdRef.current) {
+            updateDraftLocationFromCentral(cadDraftIdRef.current, finalAddr, { lat: pickedLat, lng: pickedLng });
+          }
+        }
+      } catch (_) {}
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // Escuchar ubicación GPS del alertante en tiempo real desde `geolocalizaciones_alertantes/{draftId}` (Idéntico a SentinelLinkGeoModal.jsx de SENTINEL CAD)
+  useEffect(() => {
+    const targetDraftId = cadDraftId;
+    if (!targetDraftId) return undefined;
+    const db = getDb();
+    if (!db) return undefined;
+
+    const unsub = onSnapshot(
+      doc(db, 'geolocalizaciones_alertantes', String(targetDraftId)),
+      async (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data && data.lat && data.lng) {
+            const lat = parseFloat(data.lat);
+            const lng = parseFloat(data.lng);
+            if (!isNaN(lat) && !isNaN(lng)) {
+              const acc = data.accuracy || 10;
+              setWaitingSentinelLinkGeo(false);
+
+              let fullStr = `COORD: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+              try {
+                const res = await fetch(
+                  `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+                  { headers: { 'Accept-Language': 'es' } }
+                );
+                if (res.ok) {
+                  const geoJson = await res.json();
+                  const addr = geoJson.address || {};
+                  const street = addr.road || addr.street || addr.neighbourhood || '';
+                  const house = addr.house_number || '';
+                  if (street) {
+                    fullStr = `${street} ${house}`.trim().toUpperCase();
+                  }
+                }
+              } catch (_) {}
+
+              const alertantePayload = {
+                lat,
+                lng,
+                accuracy: acc,
+                address: fullStr,
+                telefono: sentinelLinkPhoneDigits
+                  ? `+569${sentinelLinkPhoneDigits}`
+                  : data.telefono || '',
+                timestamp: Date.now()
+              };
+
+              setCadAlertanteGeo(alertantePayload);
+              if (alertantePayload.telefono && !formCallerPhone) {
+                setFormCallerPhone(alertantePayload.telefono);
+              }
+              try {
+                window.AndroidApp?.showToast?.(
+                  '📍 Ubicación GPS del alertante recibida (Marcador Azul en Mapa)'
+                );
+              } catch (_) {}
+
+              const idKey = String(targetDraftId);
+              if (!autoClosedSentinelLinkIdsRef.current.has(idKey)) {
+                autoClosedSentinelLinkIdsRef.current.add(idKey);
+                setIsSentinelLinkModalOpen(false);
+              }
+            }
+          }
+        }
+      },
+      () => {}
+    );
+
+    return () => {
+      try {
+        unsub();
+      } catch (_) {}
+    };
+  }, [cadDraftId, sentinelLinkPhoneDigits, formCallerPhone]);
 
   // Visibilidad de pestañas idéntica a getVisibleTabs en MainScreen.kt
   const showDisponiblesTab = Boolean(isMeCentralOperator || myRadial === '1');
@@ -552,6 +720,10 @@ export const MainHomeView = ({ onLogout }) => {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onNativeBack = () => {
+      if (isSentinelLinkModalOpen) {
+        setIsSentinelLinkModalOpen(false);
+        return;
+      }
       if (pendingCadKey) {
         setPendingCadKey(null);
         return;
@@ -597,6 +769,7 @@ export const MainHomeView = ({ onLogout }) => {
       window.removeEventListener('sentinelBackButton', onNativeBack);
     };
   }, [
+    isSentinelLinkModalOpen,
     pendingCadKey,
     selectedAttendanceModal,
     selectedOrdenModal,
@@ -624,6 +797,7 @@ export const MainHomeView = ({ onLogout }) => {
     switchTabAnimated,
     anyModalOpen: Boolean(
       fullscreenDispatchId ||
+        isSentinelLinkModalOpen ||
         pendingCadKey ||
         selectedAttendanceModal ||
         selectedOrdenModal ||
@@ -940,81 +1114,70 @@ export const MainHomeView = ({ onLogout }) => {
     }
   };
 
-  // Resolver lista real de compañías de la institución (ej. 1ª y 3ª en pruebas-sisbom, o 1ª, 2ª, 3ª según dotación/carros/licencia)
+  // Resolver lista real de compañías de la institución según la Licencia y Material Mayor (Ley #3 y #7).
+  // NUNCA extrae compañías desde `firefightersList` (personal) para evitar que bomberos de prueba agreguen compañías no registradas en la licencia.
   const institutionCompaniesList = useMemo(() => {
-    const compSet = new Set();
-    // 1. Compañías reales presentes en la dotación de bomberos (personal)
-    (firefightersList || []).forEach((f) => {
-      const cNum = parseInt(String(f.compania || '').replace(/\D/g, ''), 10);
-      if (cNum > 0) compSet.add(String(cNum));
-    });
-    // 2. Compañías reales presentes en el material mayor (último dígito de idCarro o campo compania)
-    (vehiculosList || []).forEach((v) => {
-      const m = String(v.idCarro || v.id || '').match(/(\d+)$/);
-      const cNum = m
-        ? parseInt(m[1], 10)
-        : parseInt(String(v.compania || '').replace(/\D/g, ''), 10);
-      if (cNum > 0) compSet.add(String(cNum));
-    });
-    // 3. Compañías definidas explícitamente en cuarteles/companias de la licencia
-    if (cuarteles && typeof cuarteles === 'object') {
-      Object.keys(cuarteles).forEach((k) => {
-        const cNum = parseInt(String(k).replace(/\D/g, ''), 10);
-        if (cNum > 0) compSet.add(String(cNum));
-      });
+    const licenseKeysCount =
+      cuarteles && typeof cuarteles === 'object' ? Object.keys(cuarteles).length : 0;
+    const isExplicitSingleCompanyLicense =
+      Number(totalCompanias || 1) <= 1 && licenseKeysCount <= 1;
+
+    if (isExplicitSingleCompanyLicense) {
+      const singleList = getInstitutionCompanies(cuarteles, []);
+      const first = singleList[0] || {
+        id: '1',
+        ordinal: 'PRIMERA',
+        name: '1ª COMPAÑÍA',
+        alias: '1ª CÍA',
+        cuartel: 'CUARTEL CENTRAL'
+      };
+      return [
+        {
+          ...first,
+          id: String(first.id || '1'),
+          filterLabel: `${first.id || '1'}° CIA`
+        }
+      ];
     }
-    // 4. Respaldo inicial solo si aún no cargan datos
-    if (compSet.size === 0) {
-      const total = Math.max(1, Number(totalCompanias || 1));
-      for (let i = 1; i <= total; i += 1) compSet.add(String(i));
-    }
-    return Array.from(compSet)
-      .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-      .map((id) => ({
-        id,
-        filterLabel: `${id}° CIA`,
-        alias: `${id}ª CÍA`,
-        name: `${id}ª COMPAÑÍA`
-      }));
-  }, [firefightersList, vehiculosList, cuarteles, totalCompanias]);
+
+    const baseList =
+      licenseKeysCount > 0
+        ? getInstitutionCompanies(cuarteles, [])
+        : getInstitutionCompanies(cuarteles, vehiculosList);
+
+    return baseList.map((c) => ({
+      ...c,
+      id: String(c.id),
+      filterLabel: `${c.id}° CIA`
+    }));
+  }, [vehiculosList, cuarteles, totalCompanias]);
 
   const hasMultipleCadCompanies = institutionCompaniesList.length > 1;
-  const isSingleCompanyInstitution = !hasMultipleCadCompanies && (totalCompanias || 1) <= 1;
+  const isSingleCompanyInstitution = !hasMultipleCadCompanies;
 
-  // Evaluar si un vehículo está disponible (0-9 y sin servicio activo) igual que SENTINEL CAD
+  // Evaluar si un vehículo está disponible (0-9 DISP, 0-8 F/S o EN {CLAVE}) reutilizando resolveCoreUnitStatusInfo de SHARED/sentinelCore.js (Regla #11)
   const getCadVehicleAvailability = (v) => {
-    const unitId = String(v?.idCarro || v?.id || v?.nombre || '').trim().toUpperCase();
-    const est = String(v?.estado ?? '0-9').trim().toUpperCase();
-    const serv = String(v?.enServicio ?? '0').trim();
-    const is08Unit =
-      est === '0-8' ||
-      est === '0' ||
-      est.includes('6-14') ||
-      est.includes('FUERA');
-    const inActiveDispatch = allActiveDispatches.find((d) => {
-      if (cadDraftId && String(d.idServicio) === String(cadDraftId)) return false;
-      const unitsObj = d.unidades || {};
-      const carrosArr = Array.isArray(d.carros) ? d.carros : Object.keys(unitsObj);
-      return carrosArr.some((c) => String(c).trim().toUpperCase() === unitId);
-    });
-    const isBusyByField = serv !== '0' && serv !== '' && serv !== '0-9' && (!cadDraftId || serv !== String(cadDraftId));
-    const isBusy = Boolean(inActiveDispatch || isBusyByField);
-    const isAvailable = !is08Unit && !isBusy;
-    const badgeLabel = is08Unit
-      ? '0-8 F/S'
-      : inActiveDispatch
-        ? `EN ${inActiveDispatch.clave || 'SERV'}`
-        : isBusy
-          ? 'EN SERVICIO'
-          : '0-9 DISP';
-    return { isAvailable, is08Unit, isBusy, badgeLabel };
+    const activeDispatchesExcludingDraft = allActiveDispatches.filter(
+      (d) => !cadDraftId || String(d.idServicio) !== String(cadDraftId)
+    );
+    return resolveCoreUnitStatusInfo(v, activeDispatchesExcludingDraft, vehiculosList);
   };
 
-  // Calcular protocolo sugerido adaptado a las compañías activas y unidades disponibles (igual que CompanyUnitsSelector.jsx en CAD)
+  // Calcular protocolo sugerido adaptado a las compañías activas y unidades disponibles (idéntico a adaptUnitsForCompanies de SENTINEL CAD)
   const getRecommendedUnitsForKey = (key, activeComps = cadActiveCompanies) => {
-    const effComps = !hasMultipleCadCompanies ? ['1'] : (activeComps || ['1']);
+    const effComps = !hasMultipleCadCompanies
+      ? [institutionCompaniesList[0]?.id || '1']
+      : Array.isArray(activeComps)
+        ? activeComps.map(String)
+        : [];
     const defaultProto = DEFAULT_PROTOCOLS[key] || { units: [], label: 'Estándar' };
     const rawProto = (protocols && protocols[key]) || defaultProto;
+    if (effComps.length === 0) {
+      return {
+        label: rawProto.label || defaultProto.label || 'Estándar',
+        units: []
+      };
+    }
     const baseUnits =
       Array.isArray(rawProto.units) && rawProto.units.length > 0
         ? rawProto.units
@@ -1028,7 +1191,14 @@ export const MainHomeView = ({ onLogout }) => {
           .filter(Boolean)
       )
     );
-    const fleet = Array.isArray(vehiculosList) ? vehiculosList : [];
+    const fleet = Array.isArray(vehiculosList) && vehiculosList.length > 0
+      ? vehiculosList
+      : [
+          { id: 'B-1', idCarro: 'B-1', nombre: 'B-1', tipo: 'BOMBA', compania: 1, estado: '0-9' },
+          { id: 'BX-1', idCarro: 'BX-1', nombre: 'BX-1', tipo: 'BOMBA', compania: 1, estado: '0-9' },
+          { id: 'R-1', idCarro: 'R-1', nombre: 'R-1', tipo: 'RESCATE', compania: 1, estado: '0-9' },
+          { id: 'Z-1', idCarro: 'Z-1', nombre: 'Z-1', tipo: 'CISTERNA', compania: 1, estado: '0-9' }
+        ];
     const recommended = [];
 
     effComps.forEach((compId) => {
@@ -1038,10 +1208,14 @@ export const MainHomeView = ({ onLogout }) => {
         const matched = fleet.find(
           (v) => String(v.idCarro || v.id).replace(/-/g, '').trim().toUpperCase() === normU
         );
-        if (matched && String(matched.compania || '1') === String(compId)) {
+        const effectiveId = matched ? (matched.idCarro || matched.id) : uId;
+        const uCompId = !hasMultipleCadCompanies
+          ? String(institutionCompaniesList[0]?.id || '1')
+          : String(resolveCompanyFromVehicleId(effectiveId, matched?.compania));
+        if (matched && uCompId === String(compId)) {
           addedForComp = true;
           if (getCadVehicleAvailability(matched).isAvailable) {
-            recommended.push(matched.idCarro || matched.id);
+            recommended.push(effectiveId);
           }
         }
       });
@@ -1062,6 +1236,56 @@ export const MainHomeView = ({ onLogout }) => {
       label: rawProto.label || defaultProto.label || 'Estándar',
       units: Array.from(new Set(recommended))
     };
+  };
+
+  // Conmutar compañía individual o todas (idéntico a toggleCompany y toggleAllCompanies de SENTINEL CAD)
+  const handleToggleCadCompany = (compId, isInModal = false) => {
+    triggerHaptic('medium');
+    const key = String(compId);
+    const curr = (cadActiveCompanies || []).map(String);
+    const activeKey = pendingCadKey?.key || cadSelectedKey || '10-0';
+    let nextCompanies;
+
+    if (curr.includes(key)) {
+      nextCompanies = curr.filter((c) => c !== key);
+      if (!isInModal) {
+        const remainingUnits = (selectedUnits || []).filter((u) => {
+          const normU = String(u || '').replace(/-/g, '').trim().toUpperCase();
+          const v = (vehiculosList || []).find(
+            (veh) => String(veh.idCarro || veh.id || '').replace(/-/g, '').trim().toUpperCase() === normU
+          );
+          const vComp = String(resolveCompanyFromVehicleId(v?.idCarro || v?.id || u, v?.compania));
+          return vComp !== key;
+        });
+        setSelectedUnits(remainingUnits);
+      }
+    } else {
+      nextCompanies = [...curr, key].sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+      if (!isInModal) {
+        const newRec = getRecommendedUnitsForKey(activeKey, [key]);
+        setSelectedUnits((prev) => Array.from(new Set([...(prev || []), ...newRec.units])));
+      }
+    }
+    setCadActiveCompanies(nextCompanies);
+  };
+
+  const handleToggleAllCadCompanies = (isInModal = false) => {
+    triggerHaptic('medium');
+    const allIds = institutionCompaniesList.map((c) => String(c.id));
+    const curr = (cadActiveCompanies || []).map(String);
+    const activeKey = pendingCadKey?.key || cadSelectedKey || '10-0';
+
+    if (curr.length === allIds.length && allIds.length > 0) {
+      setCadActiveCompanies([]);
+      if (!isInModal) setSelectedUnits([]);
+    } else {
+      const sortedAll = [...allIds].sort((a, b) => parseInt(a, 10) - parseInt(b, 10));
+      setCadActiveCompanies(sortedAll);
+      if (!isInModal) {
+        const allRec = getRecommendedUnitsForKey(activeKey, sortedAll);
+        setSelectedUnits(allRec.units);
+      }
+    }
   };
 
   // Paso 1 CAD: Seleccionar Clave -> Abre Modal ¿DESPACHAR CLAVE? (PreDispatchConfirmModal.jsx)
@@ -1086,9 +1310,7 @@ export const MainHomeView = ({ onLogout }) => {
       const { key, desc } = pendingCadKey;
       const effComps = !hasMultipleCadCompanies
         ? [institutionCompaniesList[0]?.id || '1']
-        : cadActiveCompanies.length > 0
-          ? cadActiveCompanies
-          : ['1'];
+        : cadActiveCompanies;
       const rec = getRecommendedUnitsForKey(key, effComps);
       const res = await confirmInitialKeyFromCentral({
         key,
@@ -1110,6 +1332,10 @@ export const MainHomeView = ({ onLogout }) => {
       setFormAnswers({});
       setFormDetalle('');
       setCadCoords(null);
+      setCadAlertanteGeo(null);
+      setIsSentinelLinkModalOpen(false);
+      setSentinelLinkPhoneDigits('');
+      setWaitingSentinelLinkGeo(false);
       setPendingCadKey(null);
     } finally {
       setConfirmingInitialKey(false);
@@ -1119,6 +1345,10 @@ export const MainHomeView = ({ onLogout }) => {
   // Cancelar configuración de despacho y anular Pre-Despacho en Firestore
   const handleCancelCadDraft = async () => {
     triggerHaptic('medium');
+    if (addressDebounceRef.current) {
+      clearTimeout(addressDebounceRef.current);
+      addressDebounceRef.current = null;
+    }
     const draftToCancel = cadDraftId;
     setCadSelectedKey(null);
     setCadSelectedKeyDesc('');
@@ -1133,9 +1363,128 @@ export const MainHomeView = ({ onLogout }) => {
     setFormAnswers({});
     setFormDetalle('');
     setCadCoords(null);
+    setCadAlertanteGeo(null);
+    setIsSentinelLinkModalOpen(false);
+    setSentinelLinkPhoneDigits('');
+    setWaitingSentinelLinkGeo(false);
     setSelectedUnits([]);
     if (draftToCancel) {
       await cancelDraftDispatchFromCentral(draftToCancel);
+    }
+  };
+
+  // SENTINEL LINK: Copiar coordenadas GPS del alertante a la dirección del incidente (Idéntico a copyAlertanteToEmergencyLocation en DispatchDetails.jsx de SENTINEL CAD)
+  const handleCopyAlertanteToEmergencyLocation = () => {
+    if (!cadAlertanteGeo || isNaN(Number(cadAlertanteGeo.lat)) || isNaN(Number(cadAlertanteGeo.lng))) {
+      return;
+    }
+    triggerHaptic('success');
+    const addr = String(
+      cadAlertanteGeo.address ||
+        `COORD: ${Number(cadAlertanteGeo.lat).toFixed(5)}, ${Number(cadAlertanteGeo.lng).toFixed(5)}`
+    ).toUpperCase();
+    const coords = {
+      lat: Number(cadAlertanteGeo.lat),
+      lng: Number(cadAlertanteGeo.lng)
+    };
+    setFormLugar(addr);
+    setCadCoords(coords);
+    if (cadDraftIdRef.current) {
+      updateDraftLocationFromCentral(cadDraftIdRef.current, addr, coords);
+    }
+    setIsSentinelLinkModalOpen(false);
+    try {
+      window.AndroidApp?.showToast?.(`📍 Dirección de la emergencia fijada en: ${addr}`);
+    } catch (_) {}
+  };
+
+  // SENTINEL LINK: Copiar enlace web al portapapeles (Idéntico a handleCopy en SentinelLinkGeoModal.jsx)
+  const handleCopySentinelLinkUrl = () => {
+    const currentId = cadDraftId || 'draft-session';
+    const cleanPhone = sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8);
+    const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone || 'alertante'}`;
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(generatedLink);
+      }
+      setIsSentinelLinkCopied(true);
+      window.AndroidApp?.showToast?.('Enlace copiado al portapapeles');
+      setTimeout(() => setIsSentinelLinkCopied(false), 2000);
+    } catch (_) {}
+  };
+
+  // SENTINEL LINK: Enviar por WhatsApp (Idéntico a handleSendWhatsApp en SentinelLinkGeoModal.jsx)
+  const handleSendSentinelLinkWhatsApp = () => {
+    const cleanPhone = sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8);
+    if (cleanPhone.length < 8) {
+      try {
+        window.AndroidApp?.showToast?.('Ingrese los 8 dígitos del celular (+56 9 XXXXXXXX)');
+      } catch (_) {}
+      return;
+    }
+    triggerHaptic('medium');
+    setWaitingSentinelLinkGeo(true);
+    const currentId = cadDraftId || 'draft-session';
+    const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone}`;
+    const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${generatedLink}`;
+    const waUrl = `https://api.whatsapp.com/send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
+    try {
+      if (typeof window !== 'undefined' && window.open) {
+        window.open(waUrl, '_blank');
+      }
+    } catch (_) {}
+  };
+
+  // SENTINEL LINK: Encolar SMS en `sms_queue` (Idéntico a handleSendSms en SentinelLinkGeoModal.jsx)
+  const handleSendSentinelLinkSms = async () => {
+    const cleanPhone = sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8);
+    if (cleanPhone.length < 8) {
+      try {
+        window.AndroidApp?.showToast?.('Ingrese los 8 dígitos del celular (+56 9 XXXXXXXX)');
+      } catch (_) {}
+      return;
+    }
+    triggerHaptic('medium');
+    setWaitingSentinelLinkGeo(true);
+    const currentId = cadDraftId || `draft-${Date.now()}`;
+    const fullPhone = `+569${cleanPhone}`;
+    const queueId = `${Date.now()}_${cleanPhone}`;
+    const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone}`;
+    const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${generatedLink}`;
+    setFormCallerPhone(fullPhone);
+
+    try {
+      const db = getDb();
+      if (db) {
+        await ensureFirebaseAuth();
+        await setDoc(doc(db, 'sms_queue', queueId), {
+          idSms: queueId,
+          idDespacho: String(currentId),
+          telefono: fullPhone,
+          mensaje: msgText,
+          enlace: generatedLink,
+          estado: 'PENDIENTE',
+          timestamp: Date.now()
+        });
+        if (cadDraftId) {
+          await setDoc(
+            doc(db, 'despachos', String(cadDraftId)),
+            {
+              alertante: {
+                telefono: fullPhone
+              }
+            },
+            { merge: true }
+          );
+        }
+      }
+      try {
+        window.AndroidApp?.showToast?.(`SMS encolado para despacho a ${fullPhone}`);
+      } catch (_) {}
+    } catch (_) {
+      try {
+        window.AndroidApp?.showToast?.('SMS registrado localmente.');
+      } catch (_) {}
     }
   };
 
@@ -1155,36 +1504,54 @@ export const MainHomeView = ({ onLogout }) => {
     setFormDetalle(lines.join('\n'));
   };
 
-  // Georreferenciación de dirección en el mapa igual que SENTINEL CAD
-  const handleSearchCadAddress = async () => {
-    const clean = String(formLugar || '').trim();
-    if (!clean || clean.length < 3 || isSearchingAddress) return;
-    triggerHaptic('medium');
+  // Georreferenciación inteligente (Photon Komoot con sesgo comunal + Nominatim) idéntica a geoSearch.js de SENTINEL CAD
+  const handleSearchCadAddress = async (overrideText = null) => {
+    const rawText = typeof overrideText === 'string' ? overrideText : formLugar;
+    const clean = String(rawText || '').trim();
+    if (!clean || clean.length < 3 || clean.startsWith('COORD:') || clean === 'OBTENIENDO DIRECCIÓN...') return;
     setIsSearchingAddress(true);
     try {
-      const qParts = [clean];
-      if (comuna) qParts.push(comuna);
-      if (region) qParts.push(region);
-      qParts.push('Chile');
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(
-        qParts.join(', ')
-      )}`;
-      const res = await fetch(url, {
-        headers: { Accept: 'application/json' }
-      });
-      const data = await res.json();
-      if (Array.isArray(data) && data[0]?.lat && data[0]?.lon) {
-        setCadCoords({
-          lat: parseFloat(data[0].lat),
-          lng: parseFloat(data[0].lon)
-        });
-        try {
-          window.AndroidApp?.showToast?.('📍 Punto localizado en el mapa táctico');
-        } catch (_) {}
-      } else {
-        try {
-          window.AndroidApp?.showToast?.('Dirección registrada (coordenadas de cuartel por defecto)');
-        } catch (_) {}
+      let foundCoords = null;
+      // 1. Photon Geocoder con sesgo de coordenadas comunales
+      try {
+        const pQuery = `${clean} ${comuna || ''} Chile`.replace(/\s+/g, ' ').trim();
+        const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(pQuery)}&lat=${cuartelLat || -34.637373}&lon=${cuartelLng || -71.125741}&limit=3`;
+        const pRes = await fetch(photonUrl);
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          const coords = pData?.features?.[0]?.geometry?.coordinates;
+          if (Array.isArray(coords) && coords.length >= 2) {
+            foundCoords = { lat: parseFloat(coords[1]), lng: parseFloat(coords[0]) };
+          }
+        }
+      } catch (_) {}
+
+      // 2. Respaldo OpenStreetMap Nominatim
+      if (!foundCoords) {
+        const qParts = [clean];
+        if (comuna) qParts.push(comuna);
+        if (region) qParts.push(region);
+        qParts.push('Chile');
+        const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=cl&q=${encodeURIComponent(
+          qParts.join(', ')
+        )}`;
+        const res = await fetch(url, { headers: { Accept: 'application/json' } });
+        const data = await res.json();
+        if (Array.isArray(data) && data[0]?.lat && data[0]?.lon) {
+          foundCoords = {
+            lat: parseFloat(data[0].lat),
+            lng: parseFloat(data[0].lon)
+          };
+        }
+      }
+
+      if (foundCoords && !isNaN(foundCoords.lat) && !isNaN(foundCoords.lng)) {
+        setCadCoords(foundCoords);
+        if (cadDraftIdRef.current) {
+          updateDraftLocationFromCentral(cadDraftIdRef.current, clean, foundCoords);
+        }
+      } else if (cadDraftIdRef.current) {
+        updateDraftLocationFromCentral(cadDraftIdRef.current, clean, null);
       }
     } catch (_) {
     } finally {
@@ -1192,11 +1559,59 @@ export const MainHomeView = ({ onLogout }) => {
     }
   };
 
-  // Paso 3 CAD: Confirmar y Emitir Despacho Táctico Definitivo
+  // Handler con debounce automático de 750ms idéntico a handleLocationChange en DispatchDetails.jsx de SENTINEL CAD
+  const handleCadLocationTextChange = (text) => {
+    const newVal = String(text || '').toUpperCase();
+    setFormLugar(newVal);
+    if (addressDebounceRef.current) {
+      clearTimeout(addressDebounceRef.current);
+      addressDebounceRef.current = null;
+    }
+    if (!newVal.trim()) {
+      setCadCoords(null);
+      if (cadDraftIdRef.current) {
+        updateDraftLocationFromCentral(cadDraftIdRef.current, '', null);
+      }
+      return;
+    }
+    if (cadDraftIdRef.current) {
+      updateDraftLocationFromCentral(cadDraftIdRef.current, newVal, cadCoords);
+    }
+    if (newVal.trim().length >= 4) {
+      addressDebounceRef.current = setTimeout(() => {
+        handleSearchCadAddress(newVal);
+      }, 750);
+    }
+  };
+
+  // Paso 3 CAD: Confirmar Salida y Emitir Despacho Táctico Definitivo (idéntico a handleConfirmDispatch en DispatchDetails.jsx)
   const handleDispatchFromCentral = async () => {
     const activeKey = cadSelectedKey || formClave || '10-0';
-    const requiresUnits = activeKey !== '9-0' && activeKey !== 'LLAMADO';
-    if ((requiresUnits && selectedUnits.length === 0) || dispatchingNow) return;
+    const isInternalCall = activeKey === '9-0' || activeKey === 'LLAMADO';
+    const cleanLoc = String(formLugar || '').trim().toUpperCase();
+    if (
+      !isInternalCall &&
+      (!cleanLoc ||
+        cleanLoc === 'DIRECCIÓN PENDIENTE' ||
+        cleanLoc === 'DIRECCION PENDIENTE' ||
+        cleanLoc === 'OBTENIENDO DIRECCIÓN...')
+    ) {
+      try {
+        window.AndroidApp?.showToast?.(
+          'Debe ingresar la dirección o marcar la ubicación del incidente en el mapa antes de despachar.'
+        );
+      } catch (_) {}
+      return;
+    }
+    if (!isInternalCall && selectedUnits.length === 0) {
+      try {
+        window.AndroidApp?.showToast?.(
+          'Debe seleccionar al menos un carro / unidad para despachar.'
+        );
+      } catch (_) {}
+      return;
+    }
+    if (dispatchingNow) return;
     triggerHaptic('heavy');
     setDispatchingNow(true);
     try {
@@ -1204,11 +1619,11 @@ export const MainHomeView = ({ onLogout }) => {
         ? [institutionCompaniesList[0]?.id || '1']
         : cadActiveCompanies.length > 0
           ? cadActiveCompanies
-          : ['1'];
+          : institutionCompaniesList.map((c) => String(c.id));
       const res = await dispatchFromCentral({
         draftId: cadDraftId,
         clave: activeKey,
-        lugar: formLugar.trim() || 'DIRECCIÓN PENDIENTE',
+        lugar: cleanLoc || 'CUARTEL GENERAL',
         referencia: formReferencia.trim(),
         comuna: formSupportCommune.trim() || comuna || '',
         claveApoyo: formSupportKey.trim(),
@@ -1222,7 +1637,7 @@ export const MainHomeView = ({ onLogout }) => {
       });
       if (res?.success) {
         try {
-          window.AndroidApp?.showToast?.(`🚨 Despacho ${activeKey} emitido a ${selectedUnits.join(', ')}`);
+          window.AndroidApp?.showToast?.(`🚨 Despacho ${activeKey} confirmado (${selectedUnits.join(', ')})`);
         } catch (_) {}
         setCadSelectedKey(null);
         setCadSelectedKeyDesc('');
@@ -1350,8 +1765,8 @@ export const MainHomeView = ({ onLogout }) => {
       ? [institutionCompaniesList[0]?.id || '1']
       : cadActiveCompanies.length > 0
         ? cadActiveCompanies
-        : ['1'];
-    const filteredFleetForCad = (
+        : [];
+    const baseCadFleet =
       Array.isArray(vehiculosList) && vehiculosList.length > 0
         ? vehiculosList
         : [
@@ -1359,11 +1774,144 @@ export const MainHomeView = ({ onLogout }) => {
             { id: 'BX-1', idCarro: 'BX-1', nombre: 'BX-1', tipo: 'BOMBA', compania: 1, estado: '0-9' },
             { id: 'R-1', idCarro: 'R-1', nombre: 'R-1', tipo: 'RESCATE', compania: 1, estado: '0-9' },
             { id: 'Z-1', idCarro: 'Z-1', nombre: 'Z-1', tipo: 'CISTERNA', compania: 1, estado: '0-9' }
-          ]
-    ).filter((v) => {
-      if (!hasMultipleCadCompanies) return true;
-      return effectiveActiveCompanies.includes(String(v.compania || '1'));
+          ];
+
+    const groupedUnitsByActiveCompany = institutionCompaniesList
+      .filter((comp) => effectiveActiveCompanies.includes(String(comp.id)))
+      .map((comp) => {
+        const compUnits = baseCadFleet.filter((v) => {
+          if (!hasMultipleCadCompanies) return true;
+          const vComp = String(resolveCompanyFromVehicleId(v.idCarro || v.id, v.compania));
+          return vComp === String(comp.id);
+        });
+        return { comp, units: compUnits };
+      });
+
+    // Mapa táctico interactivo pre-despacho (idéntico a TacticalMapPanoramico.jsx de SENTINEL CAD)
+    const mapCenterLat = Number(cadCoords?.lat || cuartelLat || -34.637373);
+    const mapCenterLng = Number(cadCoords?.lng || cuartelLng || -71.125741);
+    const hasIncidentPin = Boolean(
+      cadCoords && !isNaN(Number(cadCoords.lat)) && !isNaN(Number(cadCoords.lng))
+    );
+    const hasCallerPin = Boolean(
+      cadAlertanteGeo && !isNaN(Number(cadAlertanteGeo.lat)) && !isNaN(Number(cadAlertanteGeo.lng))
+    );
+    const callerLat = Number(cadAlertanteGeo?.lat || 0);
+    const callerLng = Number(cadAlertanteGeo?.lng || 0);
+    const cLat = Number(cuartelLat || -34.637373);
+    const cLng = Number(cuartelLng || -71.125741);
+
+    const cadInteractiveMapHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #0B1120; overflow: hidden; user-select: none; -webkit-user-select: none; }
+    .leaflet-control-attribution { display: none !important; }
+    .hq-pin {
+      width: 24px; height: 24px; border-radius: 50%;
+      background: #2563EB; border: 2px solid #FFFFFF;
+      box-shadow: 0 0 10px rgba(37,99,235,0.85);
+      display: flex; align-items: center; justify-content: center;
+      color: #FFFFFF; font-family: sans-serif; font-size: 11px; font-weight: 900;
+    }
+    .inc-pin {
+      width: 28px; height: 28px; border-radius: 50%;
+      background: #EF4444; border: 2.5px solid #FFFFFF;
+      box-shadow: 0 0 14px rgba(239,68,68,0.95);
+      display: flex; align-items: center; justify-content: center;
+      color: #FFFFFF; font-size: 14px;
+    }
+    .caller-pin {
+      width: 26px; height: 26px; border-radius: 50%;
+      background: #0EA5E9; border: 2.5px solid #FFFFFF;
+      box-shadow: 0 0 14px rgba(14,165,233,0.95);
+      display: flex; align-items: center; justify-content: center;
+      color: #FFFFFF; font-size: 12px; font-weight: 900;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var isSat = ${cadMapLayer === 'satellite' ? 'true' : 'false'};
+    var centerLat = ${mapCenterLat};
+    var centerLng = ${mapCenterLng};
+    var hasPin = ${hasIncidentPin ? 'true' : 'false'};
+    var hasCaller = ${hasCallerPin ? 'true' : 'false'};
+    var callerLat = ${callerLat};
+    var callerLng = ${callerLng};
+    var hqLat = ${cLat};
+    var hqLng = ${cLng};
+
+    var map = L.map('map', {
+      zoomControl: true,
+      attributionControl: false
+    }).setView([centerLat, centerLng], hasPin ? 16 : 14);
+
+    if (isSat) {
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 19 }).addTo(map);
+    } else {
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+    }
+
+    var hqIcon = L.divIcon({
+      className: '',
+      html: '<div class="hq-pin">C</div>',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12]
     });
+    L.marker([hqLat, hqLng], { icon: hqIcon, interactive: false }).addTo(map);
+
+    if (hasCaller) {
+      var callerIcon = L.divIcon({
+        className: '',
+        html: '<div class="caller-pin">📱</div>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13]
+      });
+      L.marker([callerLat, callerLng], { icon: callerIcon, interactive: false }).addTo(map);
+    }
+
+    var incIcon = L.divIcon({
+      className: '',
+      html: '<div class="inc-pin">🔥</div>',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    var incMarker = null;
+    function notifyParent(lat, lng) {
+      try {
+        window.parent.postMessage({ type: 'SENTINEL_CAD_MAP_PICK', lat: lat, lng: lng }, '*');
+      } catch (e) {}
+    }
+
+    function setOrMovePin(lat, lng, emit) {
+      if (!incMarker) {
+        incMarker = L.marker([lat, lng], { icon: incIcon, draggable: true }).addTo(map);
+        incMarker.on('dragend', function(ev) {
+          var pos = ev.target.getLatLng();
+          notifyParent(pos.lat, pos.lng);
+        });
+      } else {
+        incMarker.setLatLng([lat, lng]);
+      }
+      if (emit) notifyParent(lat, lng);
+    }
+
+    if (hasPin) {
+      setOrMovePin(centerLat, centerLng, false);
+    }
+
+    map.on('click', function(e) {
+      setOrMovePin(e.latlng.lat, e.latlng.lng, true);
+    });
+  </script>
+</body>
+</html>`;
 
     return (
       <View style={styles.tabScrollContainer}>
@@ -1491,7 +2039,7 @@ export const MainHomeView = ({ onLogout }) => {
                       letterSpacing: 0.5
                     }}
                   >
-                    {!cadSelectedKey ? '1. SELECCIONAR CLAVE' : '2. CONFIGURACIÓN DE DESPACHO'}
+                    {!cadSelectedKey ? '1. SELECCIONAR CLAVE' : 'DETALLES DE EMERGENCIA'}
                   </Text>
                   <Text style={{ color: '#94A3B8', fontSize: 10, fontWeight: '700' }}>
                     CENTRAL DE ALARMAS Y DESPACHO SENTINEL CAD
@@ -1757,9 +2305,48 @@ export const MainHomeView = ({ onLogout }) => {
                   </View>
                 ) : null}
 
-                {/* Dirección Exacta + Botón Georreferenciar */}
-                <Text style={styles.consoleLabel}>DIRECCIÓN EXACTA DE LA EMERGENCIA</Text>
-                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                {/* 1. Ubicación del Incidente + Solicitar Ubicación (SENTINEL LINK) + Georreferenciación + Mapa Táctico */}
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 6
+                  }}
+                >
+                  <Text style={[styles.consoleLabel, { marginBottom: 0 }]}>
+                    1. UBICACIÓN DEL INCIDENTE
+                  </Text>
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerHaptic('medium');
+                      if (formCallerPhone && !sentinelLinkPhoneDigits) {
+                        const digits = formCallerPhone.replace(/[^0-9]/g, '').slice(-8);
+                        if (digits) setSentinelLinkPhoneDigits(digits);
+                      }
+                      setIsSentinelLinkModalOpen(true);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 5,
+                      backgroundColor: 'rgba(30, 41, 59, 0.90)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(56, 189, 248, 0.40)',
+                      borderRadius: 8,
+                      paddingHorizontal: 9,
+                      paddingVertical: 4
+                    }}
+                    activeOpacity={0.8}
+                  >
+                    <Send size={11} color="#38BDF8" />
+                    <Text style={{ color: '#E2E8F0', fontSize: 9.5, fontWeight: '800' }}>
+                      SOLICITAR UBICACIÓN
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
                   <TextInput
                     style={[
                       styles.consoleInput,
@@ -1771,13 +2358,17 @@ export const MainHomeView = ({ onLogout }) => {
                       }
                     ]}
                     value={formLugar}
-                    onChangeText={(t) => setFormLugar(t.toUpperCase())}
-                    onBlur={handleSearchCadAddress}
-                    placeholder="CALLE Y NÚMERO O INTERSECCIÓN..."
+                    onChangeText={handleCadLocationTextChange}
+                    onBlur={() => handleSearchCadAddress()}
+                    placeholder={
+                      comuna
+                        ? `CALLE, PASAJE O SECTOR EN ${comuna.toUpperCase()}...`
+                        : 'CALLE, PASAJE O SECTOR...'
+                    }
                     placeholderTextColor="#64748B"
                   />
                   <TouchableOpacity
-                    onPress={handleSearchCadAddress}
+                    onPress={() => handleSearchCadAddress()}
                     disabled={isSearchingAddress}
                     style={{
                       backgroundColor: cadCoords
@@ -1799,13 +2390,195 @@ export const MainHomeView = ({ onLogout }) => {
                         fontWeight: '900'
                       }}
                     >
-                      {isSearchingAddress ? '...' : cadCoords ? '✓ GEO' : '📍 MAPA'}
+                      {isSearchingAddress ? '...' : cadCoords ? '✓ GEO' : '📍 BUSCAR'}
                     </Text>
                   </TouchableOpacity>
                 </View>
 
-                {/* Referencia y Datos del Alertante */}
-                <Text style={styles.consoleLabel}>REFERENCIA / ESQUINA / SECTOR</Text>
+                {/* Tarjeta de Ubicación GPS del Alertante (Idéntica a DispatchDetails.jsx de SENTINEL CAD) */}
+                {cadAlertanteGeo ? (
+                  <View
+                    style={{
+                      marginBottom: 10,
+                      padding: 10,
+                      borderRadius: 12,
+                      backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                      borderWidth: 1,
+                      borderColor: 'rgba(56, 189, 248, 0.45)',
+                      gap: 6
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                        <Satellite size={12} color="#38BDF8" />
+                        <Text style={{ color: '#CBD5E1', fontSize: 9.5, fontWeight: '900' }}>
+                          UBICACIÓN GPS DEL ALERTANTE
+                        </Text>
+                      </View>
+                      <Text style={{ color: '#38BDF8', fontSize: 9.5, fontWeight: '800' }}>
+                        ±{Math.round(cadAlertanteGeo.accuracy || 10)}m
+                      </Text>
+                    </View>
+                    <Text
+                      style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}
+                      numberOfLines={1}
+                    >
+                      {cadAlertanteGeo.address ||
+                        `COORD: ${Number(cadAlertanteGeo.lat).toFixed(5)}, ${Number(
+                          cadAlertanteGeo.lng
+                        ).toFixed(5)}`}
+                    </Text>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        paddingTop: 6,
+                        borderTopWidth: 1,
+                        borderTopColor: 'rgba(255,255,255,0.08)'
+                      }}
+                    >
+                      <Text style={{ color: '#94A3B8', fontSize: 9, fontWeight: '700' }}>
+                        Posición del llamante (Marcador Azul)
+                      </Text>
+                      <TouchableOpacity
+                        onPress={handleCopyAlertanteToEmergencyLocation}
+                        style={{
+                          backgroundColor: '#1E293B',
+                          borderWidth: 1,
+                          borderColor: '#475569',
+                          borderRadius: 6,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4
+                        }}
+                        activeOpacity={0.8}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '900' }}>
+                          COPIAR A EMERGENCIA
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Mapa Táctico Interactivo (Permite tocar o arrastrar el pin igual que TacticalMapPanoramico en SENTINEL CAD) */}
+                {cadSelectedKey !== '9-0' && cadSelectedKey !== 'LLAMADO' ? (
+                  <View
+                    style={{
+                      height: 195,
+                      borderRadius: 12,
+                      overflow: 'hidden',
+                      borderWidth: 1,
+                      borderColor: hasIncidentPin
+                        ? 'rgba(16, 185, 129, 0.45)'
+                        : 'rgba(148, 163, 184, 0.22)',
+                      marginBottom: 10,
+                      position: 'relative',
+                      backgroundColor: '#0B1120'
+                    }}
+                    onTouchStart={(e) => e.stopPropagation?.()}
+                    onTouchMove={(e) => e.stopPropagation?.()}
+                    onTouchEnd={(e) => e.stopPropagation?.()}
+                  >
+                    {Platform.OS === 'web' ? (
+                      <iframe
+                        key={`cad-map-${cadMapLayer}-${hasIncidentPin ? `${mapCenterLat.toFixed(5)}-${mapCenterLng.toFixed(5)}` : 'init'}`}
+                        title="CAD Pre-Dispatch Tactical Map"
+                        srcDoc={cadInteractiveMapHtml}
+                        style={{ width: '100%', height: '100%', border: 'none' }}
+                      />
+                    ) : null}
+
+                    {/* Selector de Capas: Calles / Satelital */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        top: 8,
+                        right: 8,
+                        flexDirection: 'row',
+                        backgroundColor: 'rgba(15, 23, 42, 0.90)',
+                        borderRadius: 8,
+                        borderWidth: 1,
+                        borderColor: 'rgba(148, 163, 184, 0.25)',
+                        padding: 2,
+                        gap: 2
+                      }}
+                    >
+                      <TouchableOpacity
+                        onPress={() => setCadMapLayer('streets')}
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                          backgroundColor:
+                            cadMapLayer === 'streets' ? '#2563EB' : 'transparent'
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: cadMapLayer === 'streets' ? '#FFFFFF' : '#94A3B8',
+                            fontSize: 9,
+                            fontWeight: '900'
+                          }}
+                        >
+                          CALLES
+                        </Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        onPress={() => setCadMapLayer('satellite')}
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                          backgroundColor:
+                            cadMapLayer === 'satellite' ? '#2563EB' : 'transparent'
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: cadMapLayer === 'satellite' ? '#FFFFFF' : '#94A3B8',
+                            fontSize: 9,
+                            fontWeight: '900'
+                          }}
+                        >
+                          SATELITAL
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Pie informativo de interacción en mapa */}
+                    <View
+                      style={{
+                        position: 'absolute',
+                        bottom: 6,
+                        left: 8,
+                        right: 8,
+                        backgroundColor: 'rgba(15, 23, 42, 0.86)',
+                        borderRadius: 6,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Text style={{ color: '#CBD5E1', fontSize: 9, fontWeight: '700' }}>
+                        {hasIncidentPin
+                          ? `📍 PIN FIJADO (${mapCenterLat.toFixed(4)}, ${mapCenterLng.toFixed(4)})`
+                          : '👆 Toque el mapa para fijar el punto exacto de la emergencia'}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Referencia y Datos del Alertante (Idéntico a DispatchDetails.jsx de SENTINEL CAD) */}
+                <Text style={styles.consoleLabel}>¿ALGUNA REFERENCIA?</Text>
                 <TextInput
                   style={[
                     styles.consoleInput,
@@ -1821,13 +2594,13 @@ export const MainHomeView = ({ onLogout }) => {
                     setFormReferencia(up);
                     rebuildCadPreReport(up, formCallerName, formCallerLoc, formAnswers);
                   }}
-                  placeholder="FRENTE A PLAZA / VILLA / KM..."
+                  placeholder="FRENTE A... / ESQUINA..."
                   placeholderTextColor="#64748B"
                 />
 
                 <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.consoleLabel}>QUIÉN LLAMA</Text>
+                    <Text style={styles.consoleLabel}>NOMBRE ALERTANTE</Text>
                     <TextInput
                       style={[
                         styles.consoleInput,
@@ -1843,31 +2616,80 @@ export const MainHomeView = ({ onLogout }) => {
                         setFormCallerName(up);
                         rebuildCadPreReport(formReferencia, up, formCallerLoc, formAnswers);
                       }}
-                      placeholder="NOMBRE ALERTANTE"
+                      placeholder="QUIÉN LLAMA"
                       placeholderTextColor="#64748B"
                     />
                   </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.consoleLabel}>TELÉFONO</Text>
-                    <TextInput
-                      style={[
-                        styles.consoleInput,
-                        {
-                          marginBottom: 0,
-                          color: isDarkMode ? '#FFFFFF' : '#0F172A',
-                          backgroundColor: isDarkMode ? 'rgba(0,0,0,0.35)' : '#F8FAFC'
-                        }
-                      ]}
-                      value={formCallerPhone}
-                      onChangeText={setFormCallerPhone}
-                      keyboardType="phone-pad"
-                      placeholder="+56 9..."
-                      placeholderTextColor="#64748B"
-                    />
+
+                  <View style={{ width: 112 }}>
+                    <Text style={styles.consoleLabel}>¿EN EL LUGAR?</Text>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        height: 38,
+                        borderRadius: 10,
+                        overflow: 'hidden',
+                        borderWidth: 1,
+                        borderColor: isDarkMode ? 'rgba(148, 163, 184, 0.25)' : '#CBD5E1'
+                      }}
+                    >
+                      {['SÍ', 'NO'].map((opt) => {
+                        const activeOpt = formCallerLoc === opt;
+                        return (
+                          <TouchableOpacity
+                            key={opt}
+                            onPress={() => {
+                              const nextVal = activeOpt ? '' : opt;
+                              setFormCallerLoc(nextVal);
+                              rebuildCadPreReport(formReferencia, formCallerName, nextVal, formAnswers);
+                            }}
+                            style={{
+                              flex: 1,
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              backgroundColor: activeOpt
+                                ? opt === 'SÍ'
+                                  ? '#16A34A'
+                                  : '#DC2626'
+                                : isDarkMode
+                                  ? 'rgba(15, 23, 42, 0.7)'
+                                  : '#F8FAFC'
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: activeOpt ? '#FFFFFF' : '#94A3B8',
+                                fontSize: 10.5,
+                                fontWeight: '900'
+                              }}
+                            >
+                              {opt}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
                   </View>
                 </View>
 
-                {/* Guía de Interrogación Rápida por Clave */}
+                <Text style={styles.consoleLabel}>TELÉFONO ALERTANTE</Text>
+                <TextInput
+                  style={[
+                    styles.consoleInput,
+                    {
+                      marginBottom: 10,
+                      color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                      backgroundColor: isDarkMode ? 'rgba(0,0,0,0.35)' : '#F8FAFC'
+                    }
+                  ]}
+                  value={formCallerPhone}
+                  onChangeText={setFormCallerPhone}
+                  keyboardType="phone-pad"
+                  placeholder="+56 9..."
+                  placeholderTextColor="#64748B"
+                />
+
+                {/* Guía Operador por Clave (Idéntica a DispatchDetails.jsx de SENTINEL CAD) */}
                 {activeGuideQuestions.length > 0 ? (
                   <View style={{ marginBottom: 12 }}>
                     <TouchableOpacity
@@ -1876,20 +2698,25 @@ export const MainHomeView = ({ onLogout }) => {
                         flexDirection: 'row',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+                        backgroundColor: 'rgba(59, 130, 246, 0.14)',
                         borderWidth: 1,
-                        borderColor: 'rgba(59, 130, 246, 0.30)',
+                        borderColor: 'rgba(59, 130, 246, 0.35)',
                         borderRadius: 10,
                         paddingHorizontal: 12,
                         paddingVertical: 8
                       }}
                       activeOpacity={0.8}
                     >
-                      <Text style={{ color: '#93C5FD', fontSize: 10.5, fontWeight: '900' }}>
-                        💬 GUÍA DE INTERROGACIÓN TÁCTICA ({cadSelectedKey})
-                      </Text>
-                      <Text style={{ color: '#60A5FA', fontSize: 10.5, fontWeight: '900' }}>
-                        {showInterrogationGuide ? 'OCULTAR ▲' : 'ABRIR ▼'}
+                      <View>
+                        <Text style={{ color: '#93C5FD', fontSize: 10.5, fontWeight: '900' }}>
+                          💬 GUÍA OPERADOR ({cadSelectedKey})
+                        </Text>
+                        <Text style={{ color: '#64748B', fontSize: 9, fontWeight: '700' }}>
+                          "Bomberos va al lugar, por favor responda:"
+                        </Text>
+                      </View>
+                      <Text style={{ color: '#60A5FA', fontSize: 10, fontWeight: '900' }}>
+                        {showInterrogationGuide ? 'OCULTAR ▲' : 'MOSTRAR ▼'}
                       </Text>
                     </TouchableOpacity>
 
@@ -1905,7 +2732,7 @@ export const MainHomeView = ({ onLogout }) => {
                           gap: 8
                         }}
                       >
-                        {activeGuideQuestions.map((item) => (
+                        {activeGuideQuestions.map((item, qIdx) => (
                           <View key={item.k}>
                             <Text
                               style={{
@@ -1915,7 +2742,7 @@ export const MainHomeView = ({ onLogout }) => {
                                 marginBottom: 4
                               }}
                             >
-                              {item.q}
+                              {qIdx + 1}. {item.q}
                             </Text>
                             <TextInput
                               style={[
@@ -1938,7 +2765,7 @@ export const MainHomeView = ({ onLogout }) => {
                                   nextAns
                                 );
                               }}
-                              placeholder={item.k}
+                              placeholder="RESPUESTA..."
                               placeholderTextColor="#64748B"
                             />
                           </View>
@@ -1948,13 +2775,13 @@ export const MainHomeView = ({ onLogout }) => {
                   </View>
                 ) : null}
 
-                {/* Pre-Informe Inicial */}
-                <Text style={styles.consoleLabel}>PRE-INFORME INICIAL / OBSERVACIONES</Text>
+                {/* Pre-Informe (Automático) */}
+                <Text style={styles.consoleLabel}>PRE-INFORME (AUTOMÁTICO)</Text>
                 <TextInput
                   style={[
                     styles.consoleInput,
                     {
-                      minHeight: 54,
+                      minHeight: 58,
                       textAlignVertical: 'top',
                       color: isDarkMode ? '#FFFFFF' : '#0F172A',
                       backgroundColor: isDarkMode ? 'rgba(0,0,0,0.35)' : '#F8FAFC',
@@ -1964,63 +2791,22 @@ export const MainHomeView = ({ onLogout }) => {
                   multiline
                   value={formDetalle}
                   onChangeText={setFormDetalle}
-                  placeholder="PRE-INFORME PARA LAS UNIDADES..."
+                  placeholder="SE GENERA AUTOMÁTICAMENTE AL RESPONDER LA GUÍA..."
                   placeholderTextColor="#64748B"
                 />
 
-                {/* Selector de Compañías Activas (SOLO si la institución tiene > 1 compañía, Ley #3) */}
+                {/* Panel de Activación de Compañías (CompanyActivationPanel.jsx de SENTINEL CAD, SOLO si > 1 compañía) */}
                 {hasMultipleCadCompanies ? (
-                  <View style={{ marginBottom: 12 }}>
-                    <Text style={styles.consoleLabel}>COMPAÑÍAS A DESPACHAR</Text>
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      {institutionCompaniesList.map((comp) => {
-                        const isCompActive = effectiveActiveCompanies.includes(comp.id);
-                        return (
-                          <TouchableOpacity
-                            key={comp.id}
-                            onPress={() => {
-                              triggerHaptic('medium');
-                              const nextComps = isCompActive
-                                ? effectiveActiveCompanies.length > 1
-                                  ? effectiveActiveCompanies.filter((c) => c !== comp.id)
-                                  : effectiveActiveCompanies
-                                : [...effectiveActiveCompanies, comp.id];
-                              setCadActiveCompanies(nextComps);
-                              const nextRec = getRecommendedUnitsForKey(cadSelectedKey, nextComps);
-                              setSelectedUnits(nextRec.units);
-                            }}
-                            style={{
-                              paddingHorizontal: 12,
-                              paddingVertical: 8,
-                              borderRadius: 10,
-                              borderWidth: 1,
-                              backgroundColor: isCompActive
-                                ? 'rgba(239, 68, 68, 0.22)'
-                                : isDarkMode
-                                  ? 'rgba(30, 41, 59, 0.6)'
-                                  : '#F1F5F9',
-                              borderColor: isCompActive ? '#EF4444' : '#475569'
-                            }}
-                          >
-                            <Text
-                              style={{
-                                color: isCompActive ? '#FFFFFF' : '#94A3B8',
-                                fontSize: 11,
-                                fontWeight: '900'
-                              }}
-                            >
-                              {comp.alias}
-                            </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  </View>
-                ) : null}
-
-                {/* Protocolo Sugerido + Grilla de Material Mayor (CompanyUnitsSelector.jsx) */}
-                {cadSelectedKey !== '9-0' && cadSelectedKey !== 'LLAMADO' ? (
-                  <View style={{ marginBottom: 12 }}>
+                  <View
+                    style={{
+                      marginBottom: 12,
+                      padding: 10,
+                      borderRadius: 12,
+                      backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.75)' : '#F8FAFC',
+                      borderWidth: 1,
+                      borderColor: isDarkMode ? 'rgba(148, 163, 184, 0.18)' : '#CBD5E1'
+                    }}
+                  >
                     <View
                       style={{
                         flexDirection: 'row',
@@ -2029,15 +2815,157 @@ export const MainHomeView = ({ onLogout }) => {
                         marginBottom: 8
                       }}
                     >
-                      <View style={{ flex: 1, paddingRight: 8 }}>
-                        <Text style={[styles.consoleLabel, { marginBottom: 2 }]}>
-                          MATERIAL MAYOR A DESPACHAR
+                      <Text style={[styles.consoleLabel, { marginBottom: 0 }]}>
+                        ACTIVACIÓN DE COMPAÑÍAS
+                      </Text>
+                      <TouchableOpacity
+                        onPress={() => handleToggleAllCadCompanies(false)}
+                        style={{
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(239, 68, 68, 0.35)'
+                        }}
+                      >
+                        <Text style={{ color: '#FCA5A5', fontSize: 9, fontWeight: '900' }}>
+                          {effectiveActiveCompanies.length === institutionCompaniesList.length
+                            ? 'DESMARCAR TODAS'
+                            : 'ACTIVAR TODAS'}
                         </Text>
-                        <Text style={{ color: '#60A5FA', fontSize: 10, fontWeight: '800' }}>
-                          Sugerido ({activeProtocolRec.label}):{' '}
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                      {institutionCompaniesList.map((comp) => {
+                        const isCompActive = effectiveActiveCompanies.includes(String(comp.id));
+                        const compUnits = baseCadFleet.filter(
+                          (v) =>
+                            String(resolveCompanyFromVehicleId(v.idCarro || v.id, v.compania)) ===
+                            String(comp.id)
+                        );
+                        const availCount = compUnits.filter(
+                          (v) => getCadVehicleAvailability(v).isAvailable
+                        ).length;
+                        const selCount = compUnits.filter((v) =>
+                          selectedUnits.includes(
+                            String(v.idCarro || v.nombre || v.id).trim().toUpperCase()
+                          )
+                        ).length;
+
+                        return (
+                          <TouchableOpacity
+                            key={comp.id}
+                            onPress={() => handleToggleCadCompany(comp.id, false)}
+                            style={{
+                              flex: 1,
+                              minWidth: '46%',
+                              paddingHorizontal: 10,
+                              paddingVertical: 8,
+                              borderRadius: 10,
+                              borderWidth: 1.5,
+                              backgroundColor: isCompActive
+                                ? 'rgba(220, 38, 38, 0.18)'
+                                : isDarkMode
+                                  ? 'rgba(30, 41, 59, 0.6)'
+                                  : '#FFFFFF',
+                              borderColor: isCompActive ? '#EF4444' : '#334155'
+                            }}
+                            activeOpacity={0.8}
+                          >
+                            <View
+                              style={{
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                alignItems: 'center'
+                              }}
+                            >
+                              <Text
+                                style={{
+                                  color: isCompActive ? '#FFFFFF' : '#94A3B8',
+                                  fontSize: 11,
+                                  fontWeight: '900'
+                                }}
+                              >
+                                {comp.ordinal || comp.name}
+                              </Text>
+                              <View
+                                style={{
+                                  width: 8,
+                                  height: 8,
+                                  borderRadius: 4,
+                                  backgroundColor: isCompActive ? '#EF4444' : '#475569'
+                                }}
+                              />
+                            </View>
+                            <Text
+                              style={{
+                                color: isCompActive ? '#FCA5A5' : '#64748B',
+                                fontSize: 9,
+                                fontWeight: '700',
+                                marginTop: 2
+                              }}
+                              numberOfLines={1}
+                            >
+                              {comp.alias} • {comp.cuartel || 'CUARTEL'}
+                            </Text>
+                            <Text
+                              style={{
+                                color: isCompActive ? '#E2E8F0' : '#64748B',
+                                fontSize: 8.5,
+                                fontWeight: '900',
+                                marginTop: 4
+                              }}
+                            >
+                              {selCount} SEL • {availCount}/{compUnits.length} DISP
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ) : null}
+
+                {/* Protocolo Sugerido + Grilla de Material Mayor por Compañía (CompanyUnitsSelector.jsx de SENTINEL CAD) */}
+                {cadSelectedKey !== '9-0' && cadSelectedKey !== 'LLAMADO' ? (
+                  <View style={{ marginBottom: 12 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        backgroundColor: 'rgba(30, 41, 59, 0.7)',
+                        borderWidth: 1,
+                        borderColor: 'rgba(59, 130, 246, 0.30)',
+                        borderRadius: 10,
+                        paddingHorizontal: 10,
+                        paddingVertical: 8,
+                        marginBottom: 10
+                      }}
+                    >
+                      <View style={{ flex: 1, paddingRight: 8 }}>
+                        <Text
+                          style={{
+                            color: '#93C5FD',
+                            fontSize: 9.5,
+                            fontWeight: '900',
+                            letterSpacing: 0.4
+                          }}
+                        >
+                          PROTOCOLO SUGERIDO PARA {cadSelectedKey} ({activeProtocolRec.label})
+                        </Text>
+                        <Text
+                          style={{
+                            color: '#FFFFFF',
+                            fontSize: 11,
+                            fontWeight: '900',
+                            marginTop: 2
+                          }}
+                        >
                           {activeProtocolRec.units.length > 0
-                            ? activeProtocolRec.units.join(', ')
-                            : 'Selección manual'}
+                            ? activeProtocolRec.units.join(' • ')
+                            : 'Selección manual de carros'}
                         </Text>
                       </View>
                       {activeProtocolRec.units.length > 0 ? (
@@ -2047,78 +2975,154 @@ export const MainHomeView = ({ onLogout }) => {
                             setSelectedUnits(activeProtocolRec.units);
                           }}
                           style={{
-                            backgroundColor: 'rgba(59, 130, 246, 0.2)',
-                            borderWidth: 1,
-                            borderColor: '#3B82F6',
+                            backgroundColor: '#2563EB',
                             borderRadius: 8,
                             paddingHorizontal: 10,
                             paddingVertical: 6
                           }}
                         >
-                          <Text style={{ color: '#93C5FD', fontSize: 10, fontWeight: '900' }}>
+                          <Text style={{ color: '#FFFFFF', fontSize: 9.5, fontWeight: '900' }}>
                             ⚡ CARGAR TREN
                           </Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
 
-                    <View style={styles.unitsGrid}>
-                      {filteredFleetForCad.map((v) => {
-                        const unitName = String(v.idCarro || v.nombre || v.id).trim().toUpperCase();
-                        const avail = getCadVehicleAvailability(v);
-                        const isSelected = selectedUnits.includes(unitName);
-                        return (
-                          <TouchableOpacity
-                            key={unitName}
-                            style={[
-                              styles.unitSelectChip,
-                              {
-                                minWidth: 92,
-                                paddingVertical: 10,
-                                paddingHorizontal: 10,
-                                alignItems: 'center'
-                              },
-                              isSelected && styles.unitSelectChipActive,
-                              !avail.isAvailable && styles.unitSelectChipDisabled
-                            ]}
-                            disabled={!avail.isAvailable}
-                            onPress={() => toggleVehicleUnit(unitName)}
-                            activeOpacity={0.8}
-                          >
-                            <Text
-                              style={[
-                                styles.unitSelectText,
-                                { fontSize: 14, fontWeight: '900' },
-                                isSelected && { color: '#FFFFFF' },
-                                !avail.isAvailable && { color: '#64748B' }
-                              ]}
-                            >
-                              {unitName}
-                            </Text>
-                            <Text
+                    {groupedUnitsByActiveCompany.length === 0 ? (
+                      <View
+                        style={{
+                          padding: 14,
+                          borderRadius: 10,
+                          borderWidth: 1,
+                          borderColor: 'rgba(239, 68, 68, 0.3)',
+                          backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <Text style={{ color: '#FCA5A5', fontSize: 11, fontWeight: '800' }}>
+                          Active al menos una compañía para seleccionar carros.
+                        </Text>
+                      </View>
+                    ) : (
+                      groupedUnitsByActiveCompany.map(({ comp, units }) => (
+                        <View key={comp.id} style={{ marginBottom: 10 }}>
+                          {hasMultipleCadCompanies ? (
+                            <View
                               style={{
-                                fontSize: 8.5,
-                                fontWeight: '900',
-                                marginTop: 2,
-                                color: isSelected
-                                  ? '#FECACA'
-                                  : avail.is08Unit
-                                    ? '#F87171'
-                                    : avail.isBusy
-                                      ? '#FBBF24'
-                                      : '#4ADE80'
+                                flexDirection: 'row',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                marginBottom: 6
                               }}
                             >
-                              {avail.badgeLabel}
+                              <Text
+                                style={{
+                                  color: '#CBD5E1',
+                                  fontSize: 10,
+                                  fontWeight: '900',
+                                  letterSpacing: 0.6
+                                }}
+                              >
+                                🚒 UNIDADES {comp.name} ({comp.cuartel || 'CUARTEL'})
+                              </Text>
+                            </View>
+                          ) : (
+                            <Text style={[styles.consoleLabel, { marginBottom: 6 }]}>
+                              2. SELECCIONAR CARROS A DESPACHAR
                             </Text>
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                          )}
+
+                          <View style={styles.unitsGrid}>
+                            {units.map((v) => {
+                              const unitName = String(v.idCarro || v.nombre || v.id)
+                                .trim()
+                                .toUpperCase();
+                              const avail = getCadVehicleAvailability(v);
+                              const isSelected = selectedUnits.includes(unitName);
+                              const unitDriver = String(
+                                v.conductor || v.maquinista || ''
+                              ).trim();
+                              return (
+                                <TouchableOpacity
+                                  key={unitName}
+                                  style={[
+                                    styles.unitSelectChip,
+                                    {
+                                      minWidth: 96,
+                                      paddingVertical: 10,
+                                      paddingHorizontal: 10,
+                                      alignItems: 'center'
+                                    },
+                                    isSelected && styles.unitSelectChipActive,
+                                    !avail.isAvailable && styles.unitSelectChipDisabled
+                                  ]}
+                                  disabled={!avail.isAvailable}
+                                  onPress={() => toggleVehicleUnit(unitName)}
+                                  activeOpacity={0.8}
+                                >
+                                  <Text
+                                    style={[
+                                      styles.unitSelectText,
+                                      { fontSize: 15, fontWeight: '900' },
+                                      isSelected && { color: '#FFFFFF' },
+                                      !avail.isAvailable && { color: '#64748B' }
+                                    ]}
+                                  >
+                                    {unitName}
+                                  </Text>
+                                  {v.tipo ? (
+                                    <Text
+                                      style={{
+                                        fontSize: 8,
+                                        fontWeight: '800',
+                                        color: isSelected ? '#E2E8F0' : '#94A3B8',
+                                        marginTop: 1
+                                      }}
+                                      numberOfLines={1}
+                                    >
+                                      {String(v.tipo).toUpperCase()}
+                                    </Text>
+                                  ) : null}
+                                  <Text
+                                    style={{
+                                      fontSize: 8.5,
+                                      fontWeight: '900',
+                                      marginTop: 3,
+                                      color: isSelected
+                                        ? '#FECACA'
+                                        : avail.is08Unit
+                                          ? '#F87171'
+                                          : avail.isBusy
+                                            ? '#FBBF24'
+                                            : '#4ADE80'
+                                    }}
+                                  >
+                                    {avail.badgeLabel}
+                                  </Text>
+                                  {unitDriver ? (
+                                    <Text
+                                      style={{
+                                        fontSize: 7.5,
+                                        fontWeight: '700',
+                                        color: isSelected ? '#FDE68A' : '#64748B',
+                                        marginTop: 2
+                                      }}
+                                      numberOfLines={1}
+                                    >
+                                      🛞 {unitDriver}
+                                    </Text>
+                                  ) : null}
+                                </TouchableOpacity>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      ))
+                    )}
                   </View>
                 ) : null}
 
-                {/* Botón Final de Despacho Táctico */}
+                {/* Botón Final de Despacho Táctico (Idéntico a DispatchDetails.jsx de SENTINEL CAD) */}
                 <TouchableOpacity
                   style={[
                     styles.btnDespacharCentral,
@@ -2143,7 +3147,9 @@ export const MainHomeView = ({ onLogout }) => {
                       ? 'EMITIENDO DESPACHO...'
                       : cadSelectedKey === '9-0' || cadSelectedKey === 'LLAMADO'
                         ? `🚨 CONFIRMAR Y EMITIR ${cadSelectedKey}`
-                        : `🚨 CONFIRMAR Y DESPACHAR (${selectedUnits.length})`}
+                        : `🚨 CONFIRMAR SALIDA (${selectedUnits.length} ${
+                            selectedUnits.length === 1 ? 'CARRO' : 'CARROS'
+                          })`}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2163,7 +3169,7 @@ export const MainHomeView = ({ onLogout }) => {
           <View
             style={{
               flex: 1,
-              backgroundColor: 'rgba(2, 6, 23, 0.84)',
+              backgroundColor: 'rgba(2, 6, 23, 0.86)',
               justifyContent: 'center',
               alignItems: 'center',
               padding: 18
@@ -2172,72 +3178,58 @@ export const MainHomeView = ({ onLogout }) => {
             <View
               style={{
                 width: '100%',
-                maxWidth: 400,
+                maxWidth: 410,
                 backgroundColor: '#0F172A',
                 borderRadius: 22,
                 borderWidth: 1,
-                borderColor: 'rgba(239, 68, 68, 0.35)',
+                borderColor: 'rgba(239, 68, 68, 0.40)',
                 padding: 20
               }}
             >
               <View style={{ alignItems: 'center', marginBottom: 14 }}>
-                <View
+                <Text
                   style={{
-                    width: 54,
-                    height: 54,
-                    borderRadius: 27,
-                    backgroundColor: 'rgba(239, 68, 68, 0.16)',
-                    borderWidth: 1,
-                    borderColor: 'rgba(239, 68, 68, 0.45)',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    marginBottom: 10
+                    color: '#F87171',
+                    fontSize: 10,
+                    fontWeight: '900',
+                    letterSpacing: 1.2,
+                    marginBottom: 4
                   }}
                 >
-                  <Flame size={28} color="#EF4444" />
-                </View>
+                  CONFIRMACIÓN DE SALIDA
+                </Text>
                 <Text
                   style={{
                     color: '#FFFFFF',
-                    fontSize: 18,
+                    fontSize: 20,
                     fontWeight: '900',
                     letterSpacing: 0.6
                   }}
                 >
                   ¿DESPACHAR CLAVE?
                 </Text>
-                <Text
-                  style={{
-                    color: '#94A3B8',
-                    fontSize: 11,
-                    marginTop: 4,
-                    textAlign: 'center'
-                  }}
-                >
-                  Se activará el pre-despacho en las pantallas y teléfonos institucionales.
-                </Text>
 
                 <View
                   style={{
-                    marginTop: 12,
-                    paddingVertical: 10,
+                    marginTop: 10,
+                    paddingVertical: 12,
                     paddingHorizontal: 18,
                     borderRadius: 14,
-                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.14)',
                     borderWidth: 1,
-                    borderColor: 'rgba(239, 68, 68, 0.30)',
+                    borderColor: 'rgba(239, 68, 68, 0.35)',
                     alignItems: 'center',
                     width: '100%'
                   }}
                 >
-                  <Text style={{ color: '#F87171', fontSize: 22, fontWeight: '900' }}>
+                  <Text style={{ color: '#F87171', fontSize: 24, fontWeight: '900' }}>
                     {pendingCadKey?.key}
                   </Text>
                   <Text
                     style={{
                       color: '#E2E8F0',
-                      fontSize: 11,
-                      fontWeight: '700',
+                      fontSize: 11.5,
+                      fontWeight: '800',
                       marginTop: 2,
                       textAlign: 'center'
                     }}
@@ -2247,43 +3239,76 @@ export const MainHomeView = ({ onLogout }) => {
                 </View>
               </View>
 
-              {/* Selector de Compañía Inicial: Oculto si es Cuerpo de 1 sola Compañía (Ley #3) */}
+              {/* Selector de Compañía Inicial: Oculto si la licencia tiene 1 sola Compañía (Ley #3) */}
               {hasMultipleCadCompanies ? (
                 <View style={{ marginBottom: 14 }}>
-                  <Text
+                  <View
                     style={{
-                      color: '#94A3B8',
-                      fontSize: 10,
-                      fontWeight: '900',
-                      letterSpacing: 0.8,
-                      textAlign: 'center',
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
                       marginBottom: 8
                     }}
                   >
-                    SELECCIONAR COMPAÑÍA INICIAL
-                  </Text>
+                    <Text
+                      style={{
+                        color: '#CBD5E1',
+                        fontSize: 10,
+                        fontWeight: '900',
+                        letterSpacing: 0.6
+                      }}
+                    >
+                      COMPAÑÍA INICIAL:
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View
+                        style={{
+                          paddingHorizontal: 6,
+                          paddingVertical: 2,
+                          borderRadius: 5,
+                          backgroundColor: 'rgba(239, 68, 68, 0.2)'
+                        }}
+                      >
+                        <Text style={{ color: '#FCA5A5', fontSize: 8.5, fontWeight: '900' }}>
+                          {cadActiveCompanies.length === institutionCompaniesList.length
+                            ? 'ALERTA GENERAL / TODAS ACTIVAS'
+                            : `${cadActiveCompanies.length} ACTIVA(S)`}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        onPress={() => handleToggleAllCadCompanies(true)}
+                        style={{
+                          paddingHorizontal: 7,
+                          paddingVertical: 3,
+                          borderRadius: 6,
+                          backgroundColor: '#1E293B',
+                          borderWidth: 1,
+                          borderColor: '#334155'
+                        }}
+                      >
+                        <Text style={{ color: '#93C5FD', fontSize: 8.5, fontWeight: '900' }}>
+                          {cadActiveCompanies.length === institutionCompaniesList.length
+                            ? 'Desmarcar Todas'
+                            : 'Marcar Todas'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
                     {institutionCompaniesList.map((comp) => {
-                      const isSel = cadActiveCompanies.includes(comp.id);
+                      const isSel = cadActiveCompanies.includes(String(comp.id));
                       return (
                         <TouchableOpacity
                           key={comp.id}
-                          onPress={() => {
-                            triggerHaptic('medium');
-                            setCadActiveCompanies((prev) =>
-                              prev.includes(comp.id)
-                                ? prev.length > 1
-                                  ? prev.filter((id) => id !== comp.id)
-                                  : prev
-                                : [...prev, comp.id]
-                            );
-                          }}
+                          onPress={() => handleToggleCadCompany(comp.id, true)}
                           style={{
                             flex: 1,
                             minWidth: '45%',
                             paddingVertical: 10,
+                            paddingHorizontal: 8,
                             borderRadius: 10,
-                            borderWidth: 1,
+                            borderWidth: 1.5,
                             alignItems: 'center',
                             backgroundColor: isSel
                               ? 'rgba(239, 68, 68, 0.25)'
@@ -2300,6 +3325,17 @@ export const MainHomeView = ({ onLogout }) => {
                           >
                             {comp.alias}
                           </Text>
+                          <Text
+                            style={{
+                              color: isSel ? '#FCA5A5' : '#64748B',
+                              fontSize: 8.5,
+                              fontWeight: '700',
+                              marginTop: 1
+                            }}
+                            numberOfLines={1}
+                          >
+                            {comp.cuartel || comp.name}
+                          </Text>
                         </TouchableOpacity>
                       );
                     })}
@@ -2307,19 +3343,18 @@ export const MainHomeView = ({ onLogout }) => {
                 </View>
               ) : null}
 
-              {/* Accionamiento de Sirena (CON SIRENA vs SIN SIRENA) */}
+              {/* Accionamiento de Sirena (CON SIRENA vs SIN SIRENA idéntico a PreDispatchConfirmModal.jsx) */}
               <View style={{ marginBottom: 16 }}>
                 <Text
                   style={{
-                    color: '#94A3B8',
+                    color: '#CBD5E1',
                     fontSize: 10,
                     fontWeight: '900',
-                    letterSpacing: 0.8,
-                    textAlign: 'center',
+                    letterSpacing: 0.6,
                     marginBottom: 8
                   }}
                 >
-                  ACCIONAMIENTO DE SIRENA DE CUARTEL
+                  ACCIONAMIENTO DE SIRENA:
                 </Text>
                 <View style={{ flexDirection: 'row', gap: 10 }}>
                   <TouchableOpacity
@@ -2330,6 +3365,7 @@ export const MainHomeView = ({ onLogout }) => {
                     style={{
                       flex: 1,
                       paddingVertical: 12,
+                      paddingHorizontal: 8,
                       borderRadius: 12,
                       borderWidth: 1.5,
                       alignItems: 'center',
@@ -2349,8 +3385,16 @@ export const MainHomeView = ({ onLogout }) => {
                     >
                       CON SIRENA
                     </Text>
-                    <Text style={{ color: '#64748B', fontSize: 9, fontWeight: '700' }}>
-                      Toque de Cuartel
+                    <Text
+                      style={{
+                        color: cadSirenEnabled ? '#FCA5A5' : '#64748B',
+                        fontSize: 8.5,
+                        fontWeight: '700',
+                        textAlign: 'center',
+                        marginTop: 2
+                      }}
+                    >
+                      Toque de Sirena + Alerta App
                     </Text>
                   </TouchableOpacity>
 
@@ -2362,6 +3406,7 @@ export const MainHomeView = ({ onLogout }) => {
                     style={{
                       flex: 1,
                       paddingVertical: 12,
+                      paddingHorizontal: 8,
                       borderRadius: 12,
                       borderWidth: 1.5,
                       alignItems: 'center',
@@ -2381,8 +3426,16 @@ export const MainHomeView = ({ onLogout }) => {
                     >
                       SIN SIRENA
                     </Text>
-                    <Text style={{ color: '#64748B', fontSize: 9, fontWeight: '700' }}>
-                      Silencioso / Radial
+                    <Text
+                      style={{
+                        color: !cadSirenEnabled ? '#93C5FD' : '#64748B',
+                        fontSize: 8.5,
+                        fontWeight: '700',
+                        textAlign: 'center',
+                        marginTop: 2
+                      }}
+                    >
+                      Solo Alerta App y Radial
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -2406,13 +3459,16 @@ export const MainHomeView = ({ onLogout }) => {
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                  disabled={confirmingInitialKey}
+                  disabled={confirmingInitialKey || (hasMultipleCadCompanies && cadActiveCompanies.length === 0)}
                   onPress={handleConfirmInitialCadKey}
                   style={{
                     flex: 1.5,
                     paddingVertical: 13,
                     borderRadius: 12,
-                    backgroundColor: '#DC2626',
+                    backgroundColor:
+                      confirmingInitialKey || (hasMultipleCadCompanies && cadActiveCompanies.length === 0)
+                        ? '#334155'
+                        : '#DC2626',
                     alignItems: 'center'
                   }}
                 >
@@ -2426,83 +3482,441 @@ export const MainHomeView = ({ onLogout }) => {
         </Modal>
 
         {/* =================================================================== */}
-        {/* LISTA COMPLETA DE TODOS LOS DESPACHOS ACTIVOS (allActiveDispatches) */}
+        {/* MODAL SENTINEL LINK: SOLICITAR UBICACIÓN GPS (SentinelLinkGeoModal.jsx) */}
         {/* =================================================================== */}
-        {allActiveDispatches.length > 0 ? (
-          <View style={{ gap: 14 }}>
-            {allActiveDispatches.length > 1 ? (
+        <Modal
+          visible={isSentinelLinkModalOpen}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setIsSentinelLinkModalOpen(false)}
+        >
+          <View
+            style={{
+              flex: 1,
+              backgroundColor: 'rgba(2, 6, 23, 0.86)',
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: 18
+            }}
+          >
+            <View
+              style={{
+                width: '100%',
+                maxWidth: 410,
+                backgroundColor: '#0F172A',
+                borderRadius: 24,
+                borderWidth: 1,
+                borderColor: 'rgba(14, 165, 233, 0.45)',
+                padding: 20,
+                gap: 12,
+                position: 'relative'
+              }}
+            >
+              {/* Botón Cerrar */}
+              <TouchableOpacity
+                onPress={() => setIsSentinelLinkModalOpen(false)}
+                style={{
+                  position: 'absolute',
+                  top: 14,
+                  right: 14,
+                  width: 32,
+                  height: 32,
+                  borderRadius: 16,
+                  backgroundColor: 'rgba(30, 41, 59, 0.85)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.12)',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 10
+                }}
+              >
+                <X size={16} color="#94A3B8" />
+              </TouchableOpacity>
+
+              {/* Header con Ícono Satelital */}
+              <View style={{ alignItems: 'center' }}>
+                <View
+                  style={{
+                    width: 52,
+                    height: 52,
+                    borderRadius: 16,
+                    backgroundColor: 'rgba(14, 165, 233, 0.16)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(14, 165, 233, 0.35)',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginBottom: 8
+                  }}
+                >
+                  <Satellite size={26} color="#38BDF8" />
+                </View>
+                <Text
+                  style={{
+                    color: '#38BDF8',
+                    fontSize: 9.5,
+                    fontWeight: '900',
+                    letterSpacing: 1.1,
+                    marginBottom: 2
+                  }}
+                >
+                  MÓDULO DE TELECOMUNICACIONES
+                </Text>
+                <Text
+                  style={{
+                    color: '#FFFFFF',
+                    fontSize: 18,
+                    fontWeight: '900',
+                    letterSpacing: 0.4
+                  }}
+                >
+                  SOLICITAR UBICACIÓN GPS
+                </Text>
+                <Text
+                  style={{
+                    color: '#94A3B8',
+                    fontSize: 10.5,
+                    fontWeight: '600',
+                    textAlign: 'center',
+                    marginTop: 2
+                  }}
+                >
+                  Envíe un enlace web al alertante para capturar sus coordenadas exactas en vivo.
+                </Text>
+              </View>
+
+              {/* Input Número Celular + Enlace Generado */}
               <View
                 style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  paddingHorizontal: 4
+                  backgroundColor: 'rgba(2, 6, 23, 0.80)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(255,255,255,0.10)',
+                  borderRadius: 16,
+                  padding: 12,
+                  gap: 8
                 }}
               >
                 <Text
                   style={{
-                    color: '#F87171',
-                    fontSize: 11,
+                    color: '#CBD5E1',
+                    fontSize: 9.5,
                     fontWeight: '900',
-                    letterSpacing: 0.8
+                    letterSpacing: 0.6
                   }}
                 >
-                  🚨 EMERGENCIAS EN CURSO ({allActiveDispatches.length})
+                  NÚMERO CELULAR DEL ALERTANTE
                 </Text>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 5,
+                      paddingHorizontal: 10,
+                      paddingVertical: 10,
+                      backgroundColor: 'rgba(30, 41, 59, 0.85)',
+                      borderWidth: 1,
+                      borderColor: '#334155',
+                      borderRadius: 10
+                    }}
+                  >
+                    <Phone size={12} color="#38BDF8" />
+                    <Text style={{ color: '#38BDF8', fontSize: 12, fontWeight: '900' }}>+56 9</Text>
+                  </View>
+
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      backgroundColor: '#0F172A',
+                      borderWidth: 1,
+                      borderColor: 'rgba(255,255,255,0.12)',
+                      borderRadius: 10,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                      color: '#FFFFFF',
+                      fontSize: 15,
+                      fontWeight: '900',
+                      letterSpacing: 1.5
+                    }}
+                    keyboardType="phone-pad"
+                    maxLength={8}
+                    value={sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8)}
+                    onChangeText={(t) =>
+                      setSentinelLinkPhoneDigits(t.replace(/[^0-9]/g, '').slice(0, 8))
+                    }
+                    placeholder="12345678"
+                    placeholderTextColor="#475569"
+                  />
+                </View>
+
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginTop: 2
+                  }}
+                >
+                  <Text style={{ color: '#94A3B8', fontSize: 9, fontWeight: '800' }}>
+                    ENLACE DE GEOLOCALIZACIÓN
+                  </Text>
+                  <TouchableOpacity
+                    onPress={handleCopySentinelLinkUrl}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                  >
+                    {isSentinelLinkCopied ? (
+                      <Check size={12} color="#34D399" />
+                    ) : (
+                      <Copy size={12} color="#38BDF8" />
+                    )}
+                    <Text
+                      style={{
+                        color: isSentinelLinkCopied ? '#34D399' : '#38BDF8',
+                        fontSize: 9.5,
+                        fontWeight: '900'
+                      }}
+                    >
+                      {isSentinelLinkCopied ? '¡COPIADO!' : 'COPIAR'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View
+                  style={{
+                    padding: 8,
+                    borderRadius: 10,
+                    backgroundColor: 'rgba(15, 23, 42, 0.90)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(255,255,255,0.06)'
+                  }}
+                >
+                  <Text style={{ color: '#7DD3FC', fontSize: 10, fontWeight: '700' }}>
+                    {`https://sentinellink-app.web.app/geo.html?id=${
+                      cadDraftId || 'draft-session'
+                    }&t=${sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8) || 'alertante'}`}
+                  </Text>
+                </View>
               </View>
-            ) : null}
 
-            {allActiveDispatches.map((disp, idx) => {
-              const dispId = String(disp.idServicio || disp.id || idx);
-              const myAssistedThis = Boolean(
-                myResponse && String(myResponse).trim() === dispId
-              );
-              const myDeclinedThis = Boolean(
-                myResponse && String(myResponse).trim() === `-${dispId}`
-              );
+              {/* Estado esperando o recibido */}
+              {waitingSentinelLinkGeo && !cadAlertanteGeo ? (
+                <View
+                  style={{
+                    padding: 10,
+                    borderRadius: 12,
+                    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(245, 158, 11, 0.35)',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8
+                  }}
+                >
+                  <Satellite size={15} color="#FBBF24" />
+                  <Text style={{ color: '#FDE68A', fontSize: 10, fontWeight: '900' }}>
+                    ESPERANDO QUE EL ALERTANTE ABRA EL ENLACE...
+                  </Text>
+                </View>
+              ) : null}
 
-              return (
-                <TacticalDispatchMap
-                  key={dispId}
-                  dispatch={disp}
-                  hasAssisted={myAssistedThis}
-                  hasDeclined={myDeclinedThis}
-                  is08={is08 || isRestrictedStatus}
-                  onAsistir={() =>
-                    handleResponseForDispatch(dispId, myAssistedThis ? 'LIBRE' : 'ASISTO')
-                  }
-                  onNoAsistir={() => handleResponseForDispatch(dispId, 'NO_ASISTO')}
-                  onCancelarAsistencia={() => handleResponseForDispatch(dispId, 'LIBRE')}
-                />
-              );
-            })}
+              {cadAlertanteGeo ? (
+                <View
+                  style={{
+                    padding: 12,
+                    borderRadius: 14,
+                    backgroundColor: 'rgba(8, 47, 73, 0.65)',
+                    borderWidth: 1,
+                    borderColor: 'rgba(14, 165, 233, 0.45)',
+                    gap: 8
+                  }}
+                >
+                  <View
+                    style={{
+                      flexDirection: 'row',
+                      justifyContent: 'space-between',
+                      alignItems: 'center'
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+                      <CheckCircle2 size={13} color="#34D399" />
+                      <Text style={{ color: '#38BDF8', fontSize: 9.5, fontWeight: '900' }}>
+                        UBICACIÓN GPS DEL ALERTANTE
+                      </Text>
+                    </View>
+                    <Text style={{ color: '#34D399', fontSize: 9.5, fontWeight: '800' }}>
+                      ±{Math.round(cadAlertanteGeo.accuracy || 10)}m
+                    </Text>
+                  </View>
+
+                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>
+                    {cadAlertanteGeo.address ||
+                      `COORD: ${Number(cadAlertanteGeo.lat).toFixed(5)}, ${Number(
+                        cadAlertanteGeo.lng
+                      ).toFixed(5)}`}
+                  </Text>
+
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TouchableOpacity
+                      onPress={() => setIsSentinelLinkModalOpen(false)}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: 10,
+                        backgroundColor: '#1E293B',
+                        borderWidth: 1,
+                        borderColor: 'rgba(255,255,255,0.12)',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 9.5, fontWeight: '900' }}>
+                        VER EN MAPA
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={handleCopyAlertanteToEmergencyLocation}
+                      style={{
+                        flex: 1,
+                        paddingVertical: 8,
+                        borderRadius: 10,
+                        backgroundColor: '#059669',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 9.5, fontWeight: '900' }}>
+                        COPIAR A EMERGENCIA
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+
+              {/* Botones WhatsApp y Enviar SMS */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <TouchableOpacity
+                  onPress={handleSendSentinelLinkWhatsApp}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor: '#059669',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <MessageSquare size={15} color="#FFFFFF" />
+                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
+                    WHATSAPP
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleSendSentinelLinkSms}
+                  style={{
+                    flex: 1,
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor: '#0284C7',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 6
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Send size={14} color="#FFFFFF" />
+                  <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
+                    ENVIAR SMS
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           </View>
-        ) : (
-          <View
-            style={[
-              styles.glassCard,
-              {
-                backgroundColor: isDarkMode ? '#120A0A' : '#FFFFFF',
-                borderColor: isDarkMode ? 'rgba(239, 68, 68, 0.10)' : 'rgba(15, 23, 42, 0.12)',
-                paddingVertical: 32,
-                paddingHorizontal: 20,
-                alignItems: 'center'
-              }
-            ]}
-          >
-            <Text style={{ fontSize: 32, marginBottom: 8 }}>🚒</Text>
-            <Text
-              style={{
-                color: '#94A3B8',
-                fontSize: 13,
-                fontWeight: '500',
-                textAlign: 'center'
-              }}
+        </Modal>
+
+        {/* =================================================================== */}
+        {/* LISTA DE DESPACHOS ACTIVOS PARA BOMBEROS (OCULTA SI ES OPERADOR CAD) */}
+        {/* =================================================================== */}
+        {!showCadDispatchPanel ? (
+          allActiveDispatches.length > 0 ? (
+            <View style={{ gap: 14 }}>
+              {allActiveDispatches.length > 1 ? (
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingHorizontal: 4
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: '#F87171',
+                      fontSize: 11,
+                      fontWeight: '900',
+                      letterSpacing: 0.8
+                    }}
+                  >
+                    🚨 EMERGENCIAS EN CURSO ({allActiveDispatches.length})
+                  </Text>
+                </View>
+              ) : null}
+
+              {allActiveDispatches.map((disp, idx) => {
+                const dispId = String(disp.idServicio || disp.id || idx);
+                const myAssistedThis = Boolean(
+                  myResponse && String(myResponse).trim() === dispId
+                );
+                const myDeclinedThis = Boolean(
+                  myResponse && String(myResponse).trim() === `-${dispId}`
+                );
+
+                return (
+                  <TacticalDispatchMap
+                    key={dispId}
+                    dispatch={disp}
+                    hasAssisted={myAssistedThis}
+                    hasDeclined={myDeclinedThis}
+                    is08={is08 || isRestrictedStatus}
+                    onAsistir={() =>
+                      handleResponseForDispatch(dispId, myAssistedThis ? 'LIBRE' : 'ASISTO')
+                    }
+                    onNoAsistir={() => handleResponseForDispatch(dispId, 'NO_ASISTO')}
+                    onCancelarAsistencia={() => handleResponseForDispatch(dispId, 'LIBRE')}
+                  />
+                );
+              })}
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.glassCard,
+                {
+                  backgroundColor: isDarkMode ? '#120A0A' : '#FFFFFF',
+                  borderColor: isDarkMode ? 'rgba(239, 68, 68, 0.10)' : 'rgba(15, 23, 42, 0.12)',
+                  paddingVertical: 32,
+                  paddingHorizontal: 20,
+                  alignItems: 'center'
+                }
+              ]}
             >
-              Sin Despachos Activos
-            </Text>
-          </View>
-        )}
+              <Text style={{ fontSize: 32, marginBottom: 8 }}>🚒</Text>
+              <Text
+                style={{
+                  color: '#94A3B8',
+                  fontSize: 13,
+                  fontWeight: '500',
+                  textAlign: 'center'
+                }}
+              >
+                Sin Despachos Activos
+              </Text>
+            </View>
+          )
+        ) : null}
       </View>
     );
   };
@@ -3672,6 +5086,7 @@ export const MainHomeView = ({ onLogout }) => {
                 activeOpacity={0.8}
               >
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.historyFilterBtnText,
                     {
@@ -3700,6 +5115,7 @@ export const MainHomeView = ({ onLogout }) => {
                 activeOpacity={0.8}
               >
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.historyFilterBtnText,
                     {
@@ -3728,8 +5144,8 @@ export const MainHomeView = ({ onLogout }) => {
             disabled={isAttendanceLoading}
             activeOpacity={0.7}
           >
-            <RefreshCw size={14} color="#EF4444" style={{ marginRight: 4 }} />
-            <Text style={styles.sincronizarText}>
+            <RefreshCw size={12.5} color="#EF4444" style={{ marginRight: 4 }} />
+            <Text style={styles.sincronizarText} numberOfLines={1}>
               {isAttendanceLoading ? 'Sincronizando...' : 'Sincronizar'}
             </Text>
           </TouchableOpacity>
@@ -5233,19 +6649,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
-    paddingHorizontal: 2
+    paddingHorizontal: 2,
+    gap: 6
   },
   historialLeftGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexShrink: 1
+    gap: 6,
+    flex: 1,
+    minWidth: 0
   },
   historialTitle: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '900',
     color: '#94A3B8',
-    letterSpacing: 0.8
+    letterSpacing: 0.5,
+    flexShrink: 0
   },
   historyFilterPillGroup: {
     flexDirection: 'row',
@@ -5253,10 +6672,11 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     padding: 2,
-    gap: 2
+    gap: 2,
+    flexShrink: 1
   },
   historyFilterBtn: {
-    paddingHorizontal: 9,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
     alignItems: 'center',
@@ -5269,18 +6689,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#F59E0B'
   },
   historyFilterBtnText: {
-    fontSize: 10,
+    fontSize: 9.5,
     fontWeight: '800',
-    letterSpacing: 0.2
+    letterSpacing: 0.1
   },
   sincronizarBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 4,
-    paddingHorizontal: 4
+    paddingLeft: 6,
+    paddingRight: 2,
+    flexShrink: 0
   },
   sincronizarText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '700',
     color: '#EF4444'
   },

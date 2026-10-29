@@ -181,9 +181,10 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     func resolveSoundFileName(for claveOrName: String) -> String {
         let c = claveOrName.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ".MP3", with: "")
-        if c.contains("10-30") || c.contains("FORESTAL") || c == "C10_30" { return "c10_30" }
+        if c.contains("FORESTAL") || c == "C10_2FORESTAL" { return "c10_2Forestal" }
+        if c.contains("10-30") || c == "C10_30" { return "c10_30" }
         if c.contains("9-0") || c == "C9_0" { return "c9_0" }
-        if c.contains("LLAMADO") || c.contains("COMANDANCIA") { return "llamado_comandancia" }
+        if c.contains("LLAMADO") || c.contains("COMANDANCIA") || c == "C_LLAMADOCOMANDANCIA" { return "c_llamadoComandancia" }
         if c.hasPrefix("10-10") || c == "C10_10" { return "c10_10" }
         if c.hasPrefix("10-12") || c == "C10_12" { return "c10_12" }
         if c.hasPrefix("10-15") || c == "C10_15" { return "c10_15" }
@@ -197,13 +198,21 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         if c.hasPrefix("10-7") || c == "C10_7" { return "c10_7" }
         if c.hasPrefix("10-8") || c == "C10_8" { return "c10_8" }
         if c.hasPrefix("10-9") || c == "C10_9" { return "c10_9" }
-        if c == "ALERTA" || c == "ALERTAS" { return "alerta" }
+        if c == "ALERTA" || c == "ALERTAS" { return "alertas" }
         if c == "IMPORTANTE" { return "importante" }
         return "despacho"
     }
 
     func play(nameOrClave: String, forceMaxVolume: Bool = true) {
         stop()
+        let defaults = UserDefaults.standard
+        let upper = nameOrClave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if defaults.bool(forKey: "MODO_AVION") {
+            return
+        }
+        if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && upper != "ALERTA" && upper != "ALERTAS" && upper != "IMPORTANTE" {
+            return
+        }
         let fileName = resolveSoundFileName(for: nameOrClave)
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: "despacho", withExtension: "mp3")
@@ -278,32 +287,379 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 }
 
 // ============================================================================
+// 2.5. SERVICIO NATIVO DE TIEMPO REAL EN iOS (DESPACHOS, CENTRAL Y ALERTAS)
+// ============================================================================
+final class IOSRealtimeService {
+    static let shared = IOSRealtimeService()
+    private var despachosListener: ListenerRegistration?
+    private var centralListener: ListenerRegistration?
+    private var vehiculosListener: ListenerRegistration?
+    private var alertasListener: ListenerRegistration?
+    private var isFirstDispatchSnapshot = true
+    private var knownDispatchIds = Set<String>()
+    private var lastDispatchClaves: [String: String] = [:]
+    private var lastUnitConductorReq: [String: Int64] = [:]
+    private var lastUnitPersonalReq: [String: Int64] = [:]
+
+    private init() {}
+
+    func sanitizeFirestoreValue(_ val: Any?) -> Any {
+        guard let v = val else { return NSNull() }
+        if let ts = v as? Timestamp {
+            return Int64(ts.dateValue().timeIntervalSince1970 * 1000)
+        }
+        if let dt = v as? Date {
+            return Int64(dt.timeIntervalSince1970 * 1000)
+        }
+        if let gp = v as? GeoPoint {
+            return ["lat": gp.latitude, "lng": gp.longitude]
+        }
+        if let ref = v as? DocumentReference {
+            return ref.path
+        }
+        if let dict = v as? [String: Any] {
+            var out: [String: Any] = [:]
+            for (k, subVal) in dict {
+                out[k] = sanitizeFirestoreValue(subVal)
+            }
+            return out
+        }
+        if let arr = v as? [Any] {
+            return arr.map { sanitizeFirestoreValue($0) }
+        }
+        if v is String || v is NSNumber || v is Bool || v is Int || v is Int64 || v is Double {
+            return v
+        }
+        return "\(v)"
+    }
+
+    func sanitizeDoc(_ dict: [String: Any]) -> [String: Any] {
+        var out: [String: Any] = [:]
+        for (k, v) in dict {
+            out[k] = sanitizeFirestoreValue(v)
+        }
+        return out
+    }
+
+    func stopAll() {
+        despachosListener?.remove()
+        despachosListener = nil
+        centralListener?.remove()
+        centralListener = nil
+        vehiculosListener?.remove()
+        vehiculosListener = nil
+        alertasListener?.remove()
+        alertasListener = nil
+    }
+
+    func startListeners() {
+        stopAll()
+        isFirstDispatchSnapshot = true
+        let db = AppDelegate.activeFirestore()
+
+        // 1. Listener nativo de accesos/central
+        centralListener = db.collection("accesos").document("central").addSnapshotListener { [weak self] snap, error in
+            guard let self = self, error == nil else { return }
+            let raw = snap?.data() ?? [:]
+            let clean = self.sanitizeDoc(raw)
+
+            let estadoCentral = ((clean["estado"] as? String) ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let isClosed = estadoCentral.isEmpty || estadoCentral == "cerrado" || estadoCentral == "inactivo"
+            let opId = isClosed ? "" : ((clean["idRegistro"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let opName = isClosed ? "" : ((clean["operador"] as? String) ?? (clean["nombreBombero"] as? String) ?? "").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let defaults = UserDefaults.standard
+            let myId = (defaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let myName = (defaults.string(forKey: "USER_NOMBRE") ?? "").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let isMeCentral = !isClosed && (
+                (!opId.isEmpty && !myId.isEmpty && opId == myId) ||
+                (!opName.isEmpty && !myName.isEmpty && opName == myName)
+            )
+            defaults.set(isMeCentral, forKey: "IS_CENTRAL_ACTIVE")
+            if isMeCentral {
+                IOSSoundPlayer.shared.stop()
+            }
+
+            self.pushSnapshotToWebView(collection: "central", payload: clean)
+        }
+
+        // 2. Listener nativo de despachos activos
+        despachosListener = db.collection("despachos").addSnapshotListener { [weak self] snap, error in
+            guard let self = self, let documents = snap?.documents, error == nil else { return }
+            var rawDocsArray: [[String: Any]] = []
+            let defaults = UserDefaults.standard
+            let isAirplane = defaults.bool(forKey: "MODO_AVION")
+            let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
+            let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let is09 = (userEstado == "0-9")
+            let isConductor = defaults.bool(forKey: "USER_CONDUCTOR")
+            let attendedIds = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
+            let declinedIds = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
+            let userEnServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            for doc in documents {
+                let docId = doc.documentID
+                let cleanData = self.sanitizeDoc(doc.data())
+                rawDocsArray.append([
+                    "id": docId,
+                    "data": cleanData,
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ])
+
+                let estado = ((cleanData["estado"] as? String) ?? "activa").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let opFinal = ((cleanData["operadorFinal"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let cerrado = (cleanData["cerrado"] as? Bool) ?? false
+                let isClosed = cerrado || !opFinal.isEmpty || ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "terminado", "terminada"].contains(estado)
+                if isClosed {
+                    IOSSoundPlayer.shared.cancelRepeat(for: docId)
+                    continue
+                }
+
+                let clave = ((cleanData["clave"] as? String) ?? "10-0").trimmingCharacters(in: .whitespacesAndNewlines)
+                let direccion = ((cleanData["direccion"] as? String) ?? "Ubicación en curso").trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if self.isFirstDispatchSnapshot {
+                    self.knownDispatchIds.insert(docId)
+                    self.lastDispatchClaves[docId] = clave
+                    if let unidades = (cleanData["unidades"] as? [String: Any]) ?? (cleanData["unidadesEnServicio"] as? [String: Any]) {
+                        for (uName, uVal) in unidades {
+                            if let uMap = uVal as? [String: Any] {
+                                let cTs = (uMap["solicitudConductorTimestamp"] as? NSNumber)?.int64Value ?? 0
+                                let pTs = (uMap["solicitudPersonalTimestamp"] as? NSNumber)?.int64Value ?? 0
+                                self.lastUnitConductorReq["\(docId)_\(uName)"] = cTs
+                                self.lastUnitPersonalReq["\(docId)_\(uName)"] = pTs
+                            }
+                        }
+                    }
+                    continue
+                }
+
+                if isAirplane || isCentral {
+                    self.knownDispatchIds.insert(docId)
+                    self.lastDispatchClaves[docId] = clave
+                    continue
+                }
+
+                let isAttending = attendedIds.contains(docId) || userEnServicio == docId
+                let hasDeclined = declinedIds.contains(docId) || userEnServicio == "-\(docId)"
+
+                // A. Nuevo despacho en vivo
+                if !self.knownDispatchIds.contains(docId) {
+                    self.knownDispatchIds.insert(docId)
+                    self.lastDispatchClaves[docId] = clave
+                    if !isAttending && !hasDeclined {
+                        if is09 {
+                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                            AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                        } else {
+                            IOSSoundPlayer.shared.vibrateEmergency()
+                        }
+                        self.postLocalBanner(
+                            id: "disp_\(docId)",
+                            title: "🚨 DESPACHO \(clave)",
+                            body: direccion,
+                            soundName: is09 ? "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3" : nil,
+                            userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                        )
+                    }
+                } else {
+                    // B. Escalamiento (10-30 / FORESTAL / 9-0)
+                    let prevClave = self.lastDispatchClaves[docId] ?? ""
+                    if !prevClave.isEmpty && prevClave != clave {
+                        self.lastDispatchClaves[docId] = clave
+                        let cUp = clave.uppercased()
+                        let isEscalation = cUp.contains("10-30") || cUp.contains("FORESTAL") || cUp.contains("9-0") || cUp.contains("COMANDANCIA")
+                        if isEscalation && !isAttending {
+                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                            AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            self.postLocalBanner(
+                                id: "esc_\(docId)_\(clave)",
+                                title: "🔥 CAMBIO DE CLAVE A \(clave)",
+                                body: "\(direccion) - ¡SE REQUIERE PERSONAL!",
+                                soundName: "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3",
+                                userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
+                            )
+                        }
+                    } else {
+                        self.lastDispatchClaves[docId] = clave
+                    }
+                }
+
+                // C. Solicitudes 12-10 (Conductor) y 6-6 (Personal): tono importante.mp3 SIN subir volumen al 100%
+                if let unidades = (cleanData["unidades"] as? [String: Any]) ?? (cleanData["unidadesEnServicio"] as? [String: Any]) {
+                    for (uName, uVal) in unidades {
+                        guard let uMap = uVal as? [String: Any] else { continue }
+                        let cTs = (uMap["solicitudConductorTimestamp"] as? NSNumber)?.int64Value ?? 0
+                        let pTs = (uMap["solicitudPersonalTimestamp"] as? NSNumber)?.int64Value ?? 0
+                        let key = "\(docId)_\(uName)"
+
+                        let prevCTs = self.lastUnitConductorReq[key] ?? 0
+                        if cTs > prevCTs && cTs > 0 {
+                            self.lastUnitConductorReq[key] = cTs
+                            if isConductor && !isAttending && !hasDeclined {
+                                if is09 {
+                                    IOSSoundPlayer.shared.play(nameOrClave: "importante", forceMaxVolume: false)
+                                } else {
+                                    IOSSoundPlayer.shared.vibrateEmergency()
+                                }
+                                self.postLocalBanner(
+                                    id: "req1210_\(key)_\(cTs)",
+                                    title: "🚨 SOLICITUD 12-10 (\(uName))",
+                                    body: "Se solicita conductor para unidad \(uName) en \(direccion)",
+                                    soundName: is09 ? "importante.mp3" : nil,
+                                    userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
+                                )
+                            }
+                        } else if prevCTs == 0 {
+                            self.lastUnitConductorReq[key] = cTs
+                        }
+
+                        let prevPTs = self.lastUnitPersonalReq[key] ?? 0
+                        if pTs > prevPTs && pTs > 0 {
+                            self.lastUnitPersonalReq[key] = pTs
+                            if !isAttending && !hasDeclined {
+                                if is09 {
+                                    IOSSoundPlayer.shared.play(nameOrClave: "importante", forceMaxVolume: false)
+                                } else {
+                                    IOSSoundPlayer.shared.vibrateEmergency()
+                                }
+                                self.postLocalBanner(
+                                    id: "req66_\(key)_\(pTs)",
+                                    title: "🚨 SOLICITUD 6-6 (\(uName))",
+                                    body: "Se solicita personal para unidad \(uName) en \(direccion)",
+                                    soundName: is09 ? "importante.mp3" : nil,
+                                    userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
+                                )
+                            }
+                        } else if prevPTs == 0 {
+                            self.lastUnitPersonalReq[key] = pTs
+                        }
+                    }
+                }
+            }
+
+            self.isFirstDispatchSnapshot = false
+            self.pushSnapshotToWebView(collection: "despachos", payload: rawDocsArray)
+        }
+
+        // 3. Listener nativo de vehículos
+        vehiculosListener = db.collection("vehiculos").addSnapshotListener { [weak self] snap, error in
+            guard let self = self, let documents = snap?.documents, error == nil else { return }
+            let rawDocsArray: [[String: Any]] = documents.map { doc in
+                [
+                    "id": doc.documentID,
+                    "data": self.sanitizeDoc(doc.data()),
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ]
+            }
+            self.pushSnapshotToWebView(collection: "vehiculos", payload: rawDocsArray)
+        }
+
+        // 4. Listener nativo de alertas / órdenes del día
+        alertasListener = db.collection("alertas").addSnapshotListener { [weak self] snap, error in
+            guard let self = self, let documents = snap?.documents, error == nil else { return }
+            let rawDocsArray: [[String: Any]] = documents.map { doc in
+                [
+                    "id": doc.documentID,
+                    "data": self.sanitizeDoc(doc.data()),
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ]
+            }
+            self.pushSnapshotToWebView(collection: "alertas", payload: rawDocsArray)
+        }
+    }
+
+    private func postLocalBanner(id: String, title: String, body: String, soundName: String?, userInfo: [String: Any]) {
+        guard UIApplication.shared.applicationState != .active else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.userInfo = userInfo
+        content.categoryIdentifier = "EMERGENCY_DISPATCH"
+        if let sName = soundName, !sName.isEmpty {
+            content.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: sName))
+        }
+        let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    func pushSnapshotToWebView(collection: String, payload: Any) {
+        let envelope: [String: Any] = [
+            "collection": collection,
+            "payload": payload,
+            "timestamp": Int64(Date().timeIntervalSince1970 * 1000)
+        ]
+        guard JSONSerialization.isValidJSONObject(envelope),
+              let data = try? JSONSerialization.data(withJSONObject: envelope),
+              let jsonStr = String(data: data, encoding: .utf8) else { return }
+
+        DispatchQueue.main.async {
+            guard let wv = AppDelegate.sharedWebView else { return }
+            let js = """
+            (function() {
+                try {
+                    var msg = \(jsonStr);
+                    window.__SENTINEL_NATIVE_SNAPSHOTS__ = window.__SENTINEL_NATIVE_SNAPSHOTS__ || {};
+                    window.__SENTINEL_NATIVE_SNAPSHOTS__[msg.collection] = msg.payload;
+                    window.dispatchEvent(new CustomEvent('sentinelNativeFirestoreSync', { detail: msg }));
+                } catch (e) {}
+            })();
+            """
+            wv.evaluateJavaScript(js, completionHandler: nil)
+        }
+    }
+}
+
+// ============================================================================
 // 3. APP DELEGATE: FIREBASE DINÁMICO, RECORDATORIOS DIARIOS Y NOTIFICACIONES PUSH
 // ============================================================================
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
     static var sharedWebView: WKWebView?
     static var currentTenantProjectId: String?
 
+    private static let knownIosAppIdsByProject: [String: String] = [
+        "pruebas-sisbom": "1:306101642399:ios:a7ba95a2a0a0130c91aeaa",
+        "sisbom-de5f8": "1:39449538456:ios:784ffe39d1b3b8857485ed",
+        "sisbom-central": "1:432594591351:ios:a2be8d98704f46d5beb072"
+    ]
+
+    static func resolveValidIosAppId(projectId: String, configDict: [String: Any]) -> String {
+        if let explicitIos = configDict["iosAppId"] as? String, explicitIos.contains(":ios:") {
+            return explicitIos
+        }
+        if let mapped = knownIosAppIdsByProject[projectId] {
+            return mapped
+        }
+        if let rawAppId = configDict["appId"] as? String, rawAppId.contains(":ios:") {
+            return rawAppId
+        }
+        return "1:306101642399:ios:a7ba95a2a0a0130c91aeaa"
+    }
+
     static func configureDynamicFirebase(configDict: [String: Any]) {
         guard let apiKey = configDict["apiKey"] as? String, !apiKey.isEmpty,
               let projectId = configDict["projectId"] as? String, !projectId.isEmpty else {
             return
         }
-        let rawAppId = (configDict["appId"] as? String) ?? "1:432594591351:ios:99a442ea6ae05276beb072"
-        let formattedAppId = rawAppId.replacingOccurrences(of: ":web:", with: ":ios:").replacingOccurrences(of: ":android:", with: ":ios:")
-        let senderId = (configDict["messagingSenderId"] as? String) ?? "432594591351"
-        let storageBucket = (configDict["storageBucket"] as? String) ?? "\(projectId).appspot.com"
+        let iosAppId = resolveValidIosAppId(projectId: projectId, configDict: configDict)
+        let senderId = (configDict["messagingSenderId"] as? String) ?? "306101642399"
+        let storageBucket = (configDict["storageBucket"] as? String) ?? "\(projectId).firebasestorage.app"
         let dbUrl = (configDict["databaseURL"] as? String) ?? "https://\(projectId)-default-rtdb.firebaseio.com"
         let bundleId = Bundle.main.bundleIdentifier ?? "com.misisbom.sisbom.NFR3L3CC3L"
 
+        var enrichedConfig = configDict
+        enrichedConfig["iosAppId"] = iosAppId
+
         UserDefaults.standard.set(projectId, forKey: "saas_project_id")
         UserDefaults.standard.set(dbUrl, forKey: "saas_database_url")
-        if let jsonData = try? JSONSerialization.data(withJSONObject: configDict),
+        if let jsonData = try? JSONSerialization.data(withJSONObject: enrichedConfig),
            let jsonStr = String(data: jsonData, encoding: .utf8) {
             UserDefaults.standard.set(jsonStr, forKey: "saas_firebase_config")
         }
 
-        let options = FirebaseOptions(googleAppID: formattedAppId, gcmSenderID: senderId)
+        let options = FirebaseOptions(googleAppID: iosAppId, gcmSenderID: senderId)
         options.apiKey = apiKey
         options.projectID = projectId
         options.storageBucket = storageBucket
@@ -313,24 +669,49 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if FirebaseApp.app() == nil {
             FirebaseApp.configure(options: options)
             currentTenantProjectId = projectId
-            authenticateNativeApp(FirebaseApp.app())
+            authenticateNativeApp(FirebaseApp.app()) {
+                IOSRealtimeService.shared.startListeners()
+            }
         } else if currentTenantProjectId != projectId {
             let appName = "tenant_\(projectId)"
             if FirebaseApp.app(name: appName) == nil {
                 FirebaseApp.configure(name: appName, options: options)
             }
             currentTenantProjectId = projectId
-            authenticateNativeApp(FirebaseApp.app(name: appName))
+            authenticateNativeApp(FirebaseApp.app(name: appName)) {
+                IOSRealtimeService.shared.startListeners()
+            }
+        } else {
+            authenticateNativeApp(activeFirebaseApp()) {
+                IOSRealtimeService.shared.startListeners()
+            }
         }
     }
 
-    static func authenticateNativeApp(_ app: FirebaseApp?) {
-        guard let targetApp = app else { return }
+    static func activeFirebaseApp() -> FirebaseApp? {
+        if let pid = currentTenantProjectId, let namedApp = FirebaseApp.app(name: "tenant_\(pid)") {
+            return namedApp
+        }
+        return FirebaseApp.app()
+    }
+
+    static func authenticateNativeApp(_ app: FirebaseApp?, completion: (() -> Void)? = nil) {
+        guard let targetApp = app else {
+            completion?()
+            return
+        }
         let auth = Auth.auth(app: targetApp)
-        if auth.currentUser != nil { return }
+        if auth.currentUser != nil {
+            completion?()
+            return
+        }
         auth.signIn(withEmail: "137@sisbom.com", password: "ADASME137_secure_sisbom") { result, error in
             if error != nil || result == nil {
-                auth.signInAnonymously(completion: nil)
+                auth.signInAnonymously { _, _ in
+                    completion?()
+                }
+            } else {
+                completion?()
             }
         }
     }
@@ -355,7 +736,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
-            Self.authenticateNativeApp(FirebaseApp.app())
+            Self.authenticateNativeApp(FirebaseApp.app()) {
+                IOSRealtimeService.shared.startListeners()
+            }
         }
 
         Messaging.messaging().delegate = self
@@ -368,9 +751,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Al abrir o volver a la app manualmente, silenciar la alarma y actualizar permisos en el WebView
+        // Al abrir o volver a la app manualmente, silenciar la alarma y actualizar permisos + listeners en vivo en el WebView
         IOSSoundPlayer.shared.stop()
         IOSLocationService.shared.syncPermissionsToWebView()
+        IOSRealtimeService.shared.startListeners()
     }
 
     static func scheduleDailyReminders() {
@@ -585,6 +969,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let type = (userInfo["type"] as? String) ?? ""
         let payloadId = (userInfo["payloadId"] as? String) ?? (userInfo["dispatchId"] as? String) ?? ""
         let clave = (userInfo["clave"] as? String) ?? ""
+        let title = (userInfo["title"] as? String) ?? ""
+        let body = (userInfo["body"] as? String) ?? ""
+        let is1210or66 = title.contains("12-10") || title.contains("6-6") || body.contains("12-10") || body.contains("6-6")
+
+        // Si el usuario es el Operador Central activo, NO hacer sonar el teléfono ni levantar alerta de asistencia en despachos
+        if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && (type == "DISPATCH" || type == "DISPATCH_UPDATE" || type.isEmpty) {
+            if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+            }
+            completionHandler(.noData)
+            return
+        }
         let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased()
         let is09 = (userEstado == "0-9")
         let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL"))
@@ -599,7 +995,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             completionHandler(.noData)
             return
         }
-        if type == "DISPATCH_UPDATE" && !isEscalation {
+        if type == "DISPATCH_UPDATE" && !isEscalation && !is1210or66 {
             completionHandler(.noData)
             return
         }
@@ -608,7 +1004,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
 
-        if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
+        if is1210or66 {
+            if is09 && application.applicationState != .active {
+                IOSSoundPlayer.shared.play(nameOrClave: "importante", forceMaxVolume: false)
+            }
+            if is09 && !payloadId.isEmpty {
+                Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
+            }
+        } else if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
             if application.applicationState != .active {
                 IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
                 if !payloadId.isEmpty {
@@ -635,6 +1038,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let defaults = UserDefaults.standard
 
         if defaults.bool(forKey: "MODO_AVION") {
+            completionHandler([])
+            return
+        }
+
+        if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
+            if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+            }
             completionHandler([])
             return
         }
@@ -798,6 +1209,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler {
             let active = (dict["active"] as? Bool) ?? false
             defaults.set(active, forKey: "IS_CENTRAL_ACTIVE")
             if active {
+                IOSSoundPlayer.shared.stop()
                 Messaging.messaging().subscribe(toTopic: "central_operador")
             } else {
                 Messaging.messaging().unsubscribe(fromTopic: "central_operador")
@@ -842,6 +1254,33 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler {
                 } else {
                     defaults.removeObject(forKey: "WEBSTORAGE_\(key)")
                 }
+            }
+        case "cacheInstitutionLogo":
+            if let rawUrl = dict["url"] as? String,
+               let url = URL(string: rawUrl.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                URLSession.shared.dataTask(with: url) { data, response, error in
+                    guard let data = data, !data.isEmpty, error == nil else { return }
+                    let mime = response?.mimeType ?? "image/png"
+                    let b64 = data.base64EncodedString()
+                    let dataUri = "data:\(mime);base64,\(b64)"
+                    UserDefaults.standard.set(dataUri, forKey: "WEBSTORAGE_@sentinel_one_v3_logo_data_uri")
+                    DispatchQueue.main.async {
+                        guard let wv = AppDelegate.sharedWebView else { return }
+                        let escaped = dataUri.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                        let js = """
+                        (function() {
+                            try {
+                                var uri = "\(escaped)";
+                                if (window.localStorage) {
+                                    window.localStorage.setItem('@sentinel_one_v3_logo_data_uri', uri);
+                                }
+                                window.dispatchEvent(new CustomEvent('sentinelNativeLogoCached', { detail: { dataUri: uri } }));
+                            } catch (e) {}
+                        })();
+                        """
+                        wv.evaluateJavaScript(js, completionHandler: nil)
+                    }
+                }.resume()
             }
         default:
             break
@@ -955,6 +1394,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
         let defaults = UserDefaults.standard
         let storageKeys = [
             "@sentinel_one_v3_license_cache",
+            "@sentinel_one_v3_logo_data_uri",
             "@sentinel_one_v3_user_session",
             "@sentinel_one_v3_user_prefs",
             "@sentinel_one_location_disclosed_v3"

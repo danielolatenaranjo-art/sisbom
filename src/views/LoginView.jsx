@@ -15,6 +15,7 @@ import { User, Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react-native
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../store/useAuthStore';
 import { useLicenseStore } from '../store/useLicenseStore';
+import { formatCanonicalInstitutionTitle } from '../shared/sentinelCore';
 
 const FloatingLabelInput = ({
   label,
@@ -132,13 +133,9 @@ export const LoginView = ({ onLoginSuccess }) => {
     }
   };
 
-  const rawInstitution = (comuna || nombreMostrar || clientName || '')
-    .replace(/^cuerpo\s+de\s+bomberos\s+de\s+/i, '')
-    .trim()
-    .toUpperCase();
-  const institutionTitle = rawInstitution
-    ? `CUERPO DE BOMBEROS DE ${rawInstitution}`
-    : 'CUERPO DE BOMBEROS';
+  const institutionTitle = formatCanonicalInstitutionTitle(
+    comuna || nombreMostrar || clientName || ''
+  );
 
   const displayError = localError || error;
 

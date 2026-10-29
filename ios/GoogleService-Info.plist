@@ -3,17 +3,17 @@
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyBjjSBwmUevGC0vT0GdxtQUw-yvawdrH44</string>
+	<string>AIzaSyDyQc_gHlHocYJ5x8Wj0EZdSGSvbt8d9og</string>
 	<key>GCM_SENDER_ID</key>
-	<string>432594591351</string>
+	<string>306101642399</string>
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
 	<string>com.misisbom.sisbom.NFR3L3CC3L</string>
 	<key>PROJECT_ID</key>
-	<string>sisbom-central</string>
+	<string>pruebas-sisbom</string>
 	<key>STORAGE_BUCKET</key>
-	<string>sisbom-central.firebasestorage.app</string>
+	<string>pruebas-sisbom.firebasestorage.app</string>
 	<key>IS_ADS_ENABLED</key>
 	<false/>
 	<key>IS_ANALYTICS_ENABLED</key>
@@ -25,6 +25,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true/>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:432594591351:ios:99a442ea6ae05276beb072</string>
+	<string>1:306101642399:ios:a7ba95a2a0a0130c91aeaa</string>
 </dict>
 </plist>

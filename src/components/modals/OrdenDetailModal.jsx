@@ -32,16 +32,23 @@ export const OrdenDetailModal = ({ visible, orden, onClose }) => {
             <View style={styles.docIconWrapper}>
               <FileText size={18} color="#ffffff" />
             </View>
-            <View>
-              <Text style={styles.topBarTitle}>
+            <View style={styles.topBarTextCol}>
+              <Text style={styles.topBarTitle} numberOfLines={1} ellipsizeMode="tail">
                 {isAlerta ? 'COMUNICADO OFICIAL' : `ORDEN DEL DÍA N° ${ordenNum}`}
               </Text>
-              <Text style={styles.topBarSub}>CUERPO DE BOMBEROS DE {instUpper}, {fechaDoc}</Text>
+              <Text style={styles.topBarSub} numberOfLines={1} ellipsizeMode="tail">
+                CUERPO DE BOMBEROS DE {instUpper}, {fechaDoc}
+              </Text>
             </View>
           </View>
 
-          <TouchableOpacity onPress={onClose} style={styles.roundCloseBtn} activeOpacity={0.75}>
-            <X size={18} color="#ffffff" />
+          <TouchableOpacity
+            onPress={onClose}
+            style={styles.roundCloseBtn}
+            activeOpacity={0.75}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <X size={20} color="#ffffff" />
           </TouchableOpacity>
         </View>
 
@@ -180,7 +187,14 @@ const styles = StyleSheet.create({
   topBarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10
+  },
+  topBarTextCol: {
+    flex: 1,
+    minWidth: 0
   },
   docIconWrapper: {
     width: 32,
@@ -188,7 +202,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: '#1e293b',
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    flexShrink: 0
   },
   topBarTitle: {
     fontSize: 13,
@@ -207,8 +222,11 @@ const styles = StyleSheet.create({
     height: 38,
     borderRadius: 19,
     backgroundColor: '#242b3d',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.14)',
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    flexShrink: 0
   },
   scrollArea: {
     flex: 1

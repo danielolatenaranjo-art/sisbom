@@ -1,21 +1,38 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CENTRAL_FIREBASE_CONFIG, DEFAULT_FIREBASE_CONFIG, parseFirestoreValue } from '../config/firebase';
+import { normalizeSaasClientDoc } from '../shared/sentinelCore';
 
 const CACHE_KEY = '@sentinel_one_v3_license_cache';
+const LOGO_DATA_URI_KEY = '@sentinel_one_v3_logo_data_uri';
 
 async function resolveLocalLogoDataUri(rawUrl) {
   const clean = String(rawUrl || '').trim();
   if (!clean) return '';
   if (clean.startsWith('data:')) return clean;
+
+  // 1. Verificar si ya está guardado en caché local permanente
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const cachedUri = window.localStorage.getItem(LOGO_DATA_URI_KEY);
+      if (cachedUri && cachedUri.startsWith('data:')) {
+        return cachedUri;
+      }
+    }
+  } catch (_) {}
+
+  // 2. Verificar puente nativo Android
   try {
     if (typeof window !== 'undefined' && window.AndroidApp?.downloadAndCacheLogoDataUri) {
       const nativeDataUri = window.AndroidApp.downloadAndCacheLogoDataUri(clean);
       if (nativeDataUri && String(nativeDataUri).startsWith('data:')) {
+        syncNativeStorageKey(LOGO_DATA_URI_KEY, String(nativeDataUri));
         return String(nativeDataUri);
       }
     }
   } catch (e) {}
+
+  // 3. Descargar vía fetch directo
   try {
     const res = await fetch(clean);
     if (res.ok) {
@@ -27,10 +44,62 @@ async function resolveLocalLogoDataUri(rawUrl) {
         reader.readAsDataURL(blob);
       });
       if (dataUri && dataUri.startsWith('data:')) {
+        syncNativeStorageKey(LOGO_DATA_URI_KEY, dataUri);
+        try {
+          await AsyncStorage.setItem(LOGO_DATA_URI_KEY, dataUri);
+        } catch (_) {}
         return dataUri;
       }
     }
   } catch (e) {}
+
+  // 4. Fallback con Image + Canvas (sortea bloqueos de fetch en WKWebView de iOS)
+  try {
+    if (typeof window !== 'undefined' && typeof document !== 'undefined' && typeof window.Image !== 'undefined') {
+      const canvasDataUri = await new Promise((resolve) => {
+        const img = new window.Image();
+        img.crossOrigin = 'anonymous';
+        const timer = setTimeout(() => resolve(''), 6000);
+        img.onload = () => {
+          clearTimeout(timer);
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.naturalWidth || img.width || 256;
+            canvas.height = img.naturalHeight || img.height || 256;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const out = canvas.toDataURL('image/png');
+            resolve(out && out.startsWith('data:') ? out : '');
+          } catch (_) {
+            resolve('');
+          }
+        };
+        img.onerror = () => {
+          clearTimeout(timer);
+          resolve('');
+        };
+        img.src = clean;
+      });
+      if (canvasDataUri && canvasDataUri.startsWith('data:')) {
+        syncNativeStorageKey(LOGO_DATA_URI_KEY, canvasDataUri);
+        try {
+          await AsyncStorage.setItem(LOGO_DATA_URI_KEY, canvasDataUri);
+        } catch (_) {}
+        return canvasDataUri;
+      }
+    }
+  } catch (_) {}
+
+  // 5. Solicitar al puente nativo iOS que descargue y guarde en disco/UserDefaults sin restricción CORS
+  try {
+    if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+      window.webkit.messageHandlers.iOSApp.postMessage({
+        action: 'cacheInstitutionLogo',
+        url: clean
+      });
+    }
+  } catch (_) {}
+
   return clean;
 }
 
@@ -38,10 +107,15 @@ function getInitialCachedLicense() {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       const raw = window.localStorage.getItem(CACHE_KEY);
+      const cachedDedicatedLogo = window.localStorage.getItem(LOGO_DATA_URI_KEY) || '';
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.authorized && parsed.licenseKey) {
-          let effectiveLogo = parsed.logoDataUri || parsed.logoUrl || '';
+          let effectiveLogo =
+            (cachedDedicatedLogo && cachedDedicatedLogo.startsWith('data:') ? cachedDedicatedLogo : '') ||
+            parsed.logoDataUri ||
+            parsed.logoUrl ||
+            '';
           if (
             effectiveLogo &&
             !effectiveLogo.startsWith('data:') &&
@@ -122,6 +196,17 @@ if (initialCached?.firebaseConfig) {
   syncNativeFirebaseConfig(initialCached.firebaseConfig);
 }
 
+// Listener para recibir el logo descargado de forma nativa en iOS (sin CORS) y actualizar toda la app de inmediato
+if (typeof window !== 'undefined') {
+  window.addEventListener('sentinelNativeLogoCached', (ev) => {
+    const dataUri = ev?.detail?.dataUri;
+    if (dataUri && String(dataUri).startsWith('data:')) {
+      useLicenseStore.setState({ logoUrl: String(dataUri) });
+      AsyncStorage.setItem(LOGO_DATA_URI_KEY, String(dataUri)).catch(() => {});
+    }
+  });
+}
+
 export const useLicenseStore = create((set, get) => ({
   licenseKey: initialCached?.licenseKey || '',
   clientName: initialCached?.clientName || '',
@@ -143,30 +228,35 @@ export const useLicenseStore = create((set, get) => ({
 
   init: async () => {
     try {
-      const cached = await AsyncStorage.getItem(CACHE_KEY);
-      if (cached) {
-        const parsed = JSON.parse(cached);
+      const [cached, storedLogoUri] = await Promise.all([
+        AsyncStorage.getItem(CACHE_KEY),
+        AsyncStorage.getItem(LOGO_DATA_URI_KEY)
+      ]);
+      const syncDedicatedLogo =
+        (typeof window !== 'undefined' && window.localStorage
+          ? window.localStorage.getItem(LOGO_DATA_URI_KEY)
+          : '') ||
+        storedLogoUri ||
+        '';
+
+      const fallbackRaw =
+        cached ||
+        (typeof window !== 'undefined' && window.localStorage
+          ? window.localStorage.getItem(CACHE_KEY)
+          : null);
+
+      if (fallbackRaw) {
+        const parsed = JSON.parse(fallbackRaw);
         if (parsed.authorized && parsed.licenseKey) {
-          let effectiveLogo = parsed.logoDataUri || parsed.logoUrl || '';
+          let effectiveLogo =
+            (syncDedicatedLogo && syncDedicatedLogo.startsWith('data:') ? syncDedicatedLogo : '') ||
+            parsed.logoDataUri ||
+            parsed.logoUrl ||
+            '';
           const remoteLogoUrl = parsed.rawLogoUrl || parsed.logoUrl || '';
 
-          if (effectiveLogo && !effectiveLogo.startsWith('data:')) {
-            const downloaded = await resolveLocalLogoDataUri(remoteLogoUrl);
-            if (downloaded && downloaded.startsWith('data:')) {
-              effectiveLogo = downloaded;
-              parsed.logoDataUri = downloaded;
-              parsed.rawLogoUrl = remoteLogoUrl;
-              try {
-                const serializedParsed = JSON.stringify(parsed);
-                syncNativeStorageKey(CACHE_KEY, serializedParsed);
-                await AsyncStorage.setItem(CACHE_KEY, serializedParsed);
-              } catch (_) {}
-            }
-          }
-
+          // Hidratar inmediatamente con lo que ya tengamos para que el Loader muestre el escudo al instante (0ms)
           syncNativeFirebaseConfig(parsed.firebaseConfig);
-          syncNativeStorageKey(CACHE_KEY, JSON.stringify(parsed));
-
           set({
             licenseKey: parsed.licenseKey,
             clientName: parsed.clientName || '',
@@ -184,6 +274,28 @@ export const useLicenseStore = create((set, get) => ({
             status: 'activo',
             isBypassMode: Boolean(parsed.isBypassMode)
           });
+
+          // Si aún no está convertido a base64 local permanente, descargarlo y persistirlo para siempre
+          if (effectiveLogo && !effectiveLogo.startsWith('data:')) {
+            resolveLocalLogoDataUri(remoteLogoUrl).then(async (downloaded) => {
+              if (downloaded && downloaded.startsWith('data:')) {
+                parsed.logoDataUri = downloaded;
+                parsed.rawLogoUrl = remoteLogoUrl;
+                set({ logoUrl: downloaded });
+                try {
+                  const serializedParsed = JSON.stringify(parsed);
+                  syncNativeStorageKey(LOGO_DATA_URI_KEY, downloaded);
+                  syncNativeStorageKey(CACHE_KEY, serializedParsed);
+                  await AsyncStorage.setItem(LOGO_DATA_URI_KEY, downloaded);
+                  await AsyncStorage.setItem(CACHE_KEY, serializedParsed);
+                } catch (_) {}
+              }
+            }).catch(() => {});
+          } else if (effectiveLogo && effectiveLogo.startsWith('data:')) {
+            syncNativeStorageKey(LOGO_DATA_URI_KEY, effectiveLogo);
+            syncNativeStorageKey(CACHE_KEY, JSON.stringify(parsed));
+          }
+
           return true;
         }
       }
@@ -230,7 +342,8 @@ export const useLicenseStore = create((set, get) => ({
         parsedFields[k] = parseFirestoreValue(fields[k]);
       }
 
-      const subStatus = String(parsedFields.estadoSuscripcion || parsedFields.estado || 'activo').toLowerCase();
+      const normalizedClient = normalizeSaasClientDoc(key, parsedFields);
+      const subStatus = normalizedClient.estadoSuscripcion;
       if (subStatus === 'bloqueado' || subStatus === 'suspendido') {
         set({
           authorized: false,
@@ -241,27 +354,27 @@ export const useLicenseStore = create((set, get) => ({
         return false;
       }
 
-      const isReadOnly = subStatus === 'lectura' || subStatus === 'readonly' || parsedFields.soloLectura === true;
-      const clientFbConfig = parsedFields.firebaseConfig || DEFAULT_FIREBASE_CONFIG;
-      const cuartelesObj = parsedFields.companias || parsedFields.cuarteles || null;
-      const cg = parsedFields.cuartelGeneral || {};
+      const isReadOnly = normalizedClient.soloLectura || subStatus === 'lectura' || subStatus === 'readonly';
+      const clientFbConfig = normalizedClient.firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const cuartelesObj = normalizedClient.companias || normalizedClient.cuarteles || null;
+      const cg = normalizedClient.cuartelGeneral || parsedFields.cuartelGeneral || {};
       const cLat = Number(cg.lat ?? parsedFields.latCuartel ?? -34.637373) || -34.637373;
       const cLng = Number(cg.lng ?? parsedFields.lngCuartel ?? -71.125741) || -71.125741;
 
-      const rawRemoteLogo = parsedFields.logoUrl || '';
+      const rawRemoteLogo = normalizedClient.logoUrl || '';
       const localLogoDataUri = rawRemoteLogo ? await resolveLocalLogoDataUri(rawRemoteLogo) : '';
 
       const licenseData = {
         licenseKey: key,
-        clientName: parsedFields.nombreCliente || parsedFields.nombreMostrar || key,
-        nombreMostrar: parsedFields.nombreMostrar || parsedFields.nombreCliente || key,
+        clientName: normalizedClient.nombreCliente || normalizedClient.nombreMostrar || key,
+        nombreMostrar: normalizedClient.nombreMostrar || normalizedClient.nombreCliente || key,
         logoUrl: localLogoDataUri || rawRemoteLogo,
         rawLogoUrl: rawRemoteLogo,
         logoDataUri: localLogoDataUri && localLogoDataUri.startsWith('data:') ? localLogoDataUri : '',
-        comuna: parsedFields.comuna || '',
-        region: parsedFields.region || '',
+        comuna: normalizedClient.comuna || '',
+        region: normalizedClient.region || '',
         cuarteles: cuartelesObj,
-        totalCompanias: Number(parsedFields.totalCompanias || (cuartelesObj ? Object.keys(cuartelesObj).length : 1)) || 1,
+        totalCompanias: Number(normalizedClient.totalCompanias || (cuartelesObj ? Object.keys(cuartelesObj).length : 1)) || 1,
         cuartelLat: cLat,
         cuartelLng: cLng,
         isReadOnly,
@@ -273,6 +386,10 @@ export const useLicenseStore = create((set, get) => ({
       };
 
       try {
+        if (licenseData.logoDataUri) {
+          syncNativeStorageKey(LOGO_DATA_URI_KEY, licenseData.logoDataUri);
+          await AsyncStorage.setItem(LOGO_DATA_URI_KEY, licenseData.logoDataUri);
+        }
         const serializedLicense = JSON.stringify(licenseData);
         syncNativeStorageKey(CACHE_KEY, serializedLicense);
         await AsyncStorage.setItem(CACHE_KEY, serializedLicense);

@@ -200,7 +200,10 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12
+    gap: 12,
+    flex: 1,
+    minWidth: 0,
+    marginRight: 10
   },
   claveBadge: {
     paddingHorizontal: 10,

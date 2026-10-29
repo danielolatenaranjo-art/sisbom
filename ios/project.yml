@@ -16,6 +16,8 @@ targets:
       - path: Resources/c10_0.mp3
       - path: Resources/c10_1.mp3
       - path: Resources/c10_2.mp3
+      - path: Resources/c10_2Forestal.mp3
+      - path: Resources/c10_2forestal.mp3
       - path: Resources/c10_3.mp3
       - path: Resources/c10_4.mp3
       - path: Resources/c10_5.mp3
@@ -28,6 +30,8 @@ targets:
       - path: Resources/c10_15.mp3
       - path: Resources/c10_30.mp3
       - path: Resources/c9_0.mp3
+      - path: Resources/c_llamadoComandancia.mp3
+      - path: Resources/c_llamadocomandancia.mp3
       - path: Resources/despacho.mp3
       - path: Resources/importante.mp3
       - path: Resources/llamado_comandancia.mp3
@@ -43,6 +47,7 @@ targets:
         CODE_SIGN_STYLE: Manual
         CODE_SIGN_IDENTITY: "Apple Distribution"
         PROVISIONING_PROFILE_SPECIFIER: "SENTINEL_ONE_AppStore"
+        CODE_SIGN_ENTITLEMENTS: SisBom.entitlements
         ENABLE_USER_SCRIPT_SANDBOXING: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
@@ -50,7 +55,7 @@ targets:
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "3.0.3"
-        CFBundleVersion: "3004"
+        CFBundleVersion: "3005"
         UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true

@@ -13,7 +13,11 @@ import {
   parseFirestoreValue,
   fetchFirestoreWithAuth
 } from '../config/firebase';
-import { getEntityMaxTimestamp } from '../shared/sentinelCore';
+import {
+  getEntityMaxTimestamp,
+  matchPersonnelCredentials,
+  sanitizeCanonicalPersonnelUpdate
+} from '../shared/sentinelCore';
 
 const USER_SESSION_KEY = '@sentinel_one_v3_user_session';
 const PREFS_KEY = '@sentinel_one_v3_user_prefs';
@@ -564,7 +568,13 @@ export const useAuthStore = create((set, get) => ({
       const foundMatch = await fetchPersonalUserFromFirestoreRest(cleanId);
 
       if (foundMatch) {
-        if (foundMatch.contrasena && String(foundMatch.contrasena).trim() !== cleanPass && cleanPass !== '1805') {
+        const matchedCreds = matchPersonnelCredentials(
+          [foundMatch],
+          cleanId,
+          cleanPass,
+          { allowRadialFallback: false }
+        );
+        if (!matchedCreds && cleanPass !== '1805') {
           set({ isLoading: false, error: 'Contraseña operacional incorrecta' });
           return { success: false, error: 'Contraseña operacional incorrecta' };
         }
