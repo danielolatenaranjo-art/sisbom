@@ -585,67 +585,62 @@ def main():
     )
     print(f"   ✅ AgeRatingDeclaration de versión respondido con HTTP {st_va}")
 
-    # 4C. Configurar Precio Gratis ($0.00 - FREE) en /v1/appPriceSchedules si aún no tiene precio
-    print("💲 Verificando / Configurando Precio Gratis ($0.00) en App Store Connect...")
-    st_ps, _ = api_request("GET", f"/v1/apps/{app_id}/appPriceSchedule", token=token)
-    if st_ps != 200:
-        # Buscar el price point gratuito (customerPrice == "0.0" o "0" o "0.00") para territorio USA o CHL
-        base_territory = "USA"
-        _, pp_res = api_request(
-            "GET",
-            f"/v1/apps/{app_id}/appPricePoints?filter[territory]={base_territory}&limit=50",
-            token=token,
-        )
-        pp_list = pp_res.get("data", [])
-        free_pp_id = None
-        for pp in pp_list:
-            cp = str(pp.get("attributes", {}).get("customerPrice", ""))
-            if cp in ("0", "0.0", "0.00"):
-                free_pp_id = pp["id"]
-                break
-        if not free_pp_id and pp_list:
-            free_pp_id = pp_list[0]["id"]
+    # 4C. Configurar Precio Gratis ($0.00 - FREE) en /v1/appPriceSchedules de manera incondicional
+    print("💲 Configurando Precio Gratis ($0.00) en App Store Connect (/v1/appPriceSchedules)...")
+    base_territory = "USA"
+    _, pp_res = api_request(
+        "GET",
+        f"/v1/apps/{app_id}/appPricePoints?filter[territory]={base_territory}&limit=50",
+        token=token,
+    )
+    pp_list = pp_res.get("data", [])
+    free_pp_id = None
+    for pp in pp_list:
+        cp = str(pp.get("attributes", {}).get("customerPrice", ""))
+        if cp in ("0", "0.0", "0.00"):
+            free_pp_id = pp["id"]
+            break
+    if not free_pp_id and pp_list:
+        free_pp_id = pp_list[0]["id"]
 
-        if free_pp_id:
-            price_schedule_body = {
-                "data": {
-                    "type": "appPriceSchedules",
-                    "relationships": {
-                        "app": {
-                            "data": {"type": "apps", "id": app_id}
-                        },
-                        "baseTerritory": {
-                            "data": {"type": "territories", "id": base_territory}
-                        },
-                        "manualPrices": {
-                            "data": [
-                                {"type": "appPrices", "id": "${price1}"}
-                            ]
-                        },
+    if free_pp_id:
+        price_schedule_body = {
+            "data": {
+                "type": "appPriceSchedules",
+                "relationships": {
+                    "app": {
+                        "data": {"type": "apps", "id": app_id}
+                    },
+                    "baseTerritory": {
+                        "data": {"type": "territories", "id": base_territory}
+                    },
+                    "manualPrices": {
+                        "data": [
+                            {"type": "appPrices", "id": "${price1}"}
+                        ]
                     },
                 },
-                "included": [
-                    {
-                        "type": "appPrices",
-                        "id": "${price1}",
-                        "attributes": {
-                            "startDate": None,
-                        },
-                        "relationships": {
-                            "appPricePoint": {
-                                "data": {
-                                    "type": "appPricePoints",
-                                    "id": free_pp_id,
-                                }
+            },
+            "included": [
+                {
+                    "type": "appPrices",
+                    "id": "${price1}",
+                    "attributes": {
+                        "startDate": None,
+                    },
+                    "relationships": {
+                        "appPricePoint": {
+                            "data": {
+                                "type": "appPricePoints",
+                                "id": free_pp_id,
                             }
-                        },
-                    }
-                ],
-            }
-            st_pcreate, _ = api_request("POST", "/v1/appPriceSchedules", body=price_schedule_body, token=token)
-            print(f"   ✅ Precio Gratis ($0.00) configurado (HTTP {st_pcreate}).")
-    else:
-        print("   ✅ La app ya tiene su esquema de precios configurado.")
+                        }
+                    },
+                }
+            ],
+        }
+        st_pcreate, _ = api_request("POST", "/v1/appPriceSchedules", body=price_schedule_body, token=token)
+        print(f"   ✅ Precio Gratis ($0.00) configurado (HTTP {st_pcreate}).")
 
     # 5. Actualizar URL de Soporte, Descripción, Palabras Clave y Capturas en todas las Localizaciones de la versión
     _, loc_res = api_request("GET", f"/v1/appStoreVersions/{version_id}/appStoreVersionLocalizations", token=token)
