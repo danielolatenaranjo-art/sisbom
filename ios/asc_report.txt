@@ -3,45 +3,25 @@
 📄 Configurando Derechos sobre el Contenido (DOES_NOT_USE_THIRD_PARTY_CONTENT)...
 🏷️ Configurando Categoría Principal (UTILITIES) en AppInfo id=1bfd17e3-b54c-4177-9003-c861c0e936cc (state=PREPARE_FOR_SUBMISSION)...
 🔞 Completando Clasificación por Edades (AgeRatingDeclaration id=1bfd17e3-b54c-4177-9003-c861c0e936cc)...
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/1bfd17e3-b54c-4177-9003-c861c0e936cc: {
-  "errors" : [ {
-    "id" : "92a255dc-540e-4fcc-9a33-41a37fb59b09",
-    "status" : "409",
-    "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-    "title" : "The provided entity is missing a required attribute",
-    "detail" : "You must provide a value for the attribute 'socialMedia' with this request",
-    "source" : {
-      "pointer" : "/data/attributes/socialMedia"
-    }
-  } ]
-}
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/1bfd17e3-b54c-4177-9003-c861c0e936cc: {
-  "errors" : [ {
-    "id" : "505235d0-1d72-4e7d-8cac-20b1f2ab0676",
-    "status" : "409",
-    "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-    "title" : "The provided entity is missing a required attribute",
-    "detail" : "You must provide a value for the attribute 'socialMedia' with this request",
-    "source" : {
-      "pointer" : "/data/attributes/socialMedia"
-    }
-  } ]
-}
-   ✅ AgeRatingDeclaration actualizado (HTTP 409).
+   ✅ AgeRatingDeclaration actualizado al 100%.
 📝 Actualizando Copyright y ReleaseType en versión 3.0.3 (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
-⚠️ HTTP 404 en GET https://api.appstoreconnect.apple.com/v1/appStoreVersions/560a8f78-db6a-4284-afd1-3f1245a55675/ageRatingDeclaration: {
+🔞 Completando AgeRatingDeclaration de la versión (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
+⚠️ HTTP 404 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/560a8f78-db6a-4284-afd1-3f1245a55675: {
   "errors" : [ {
-    "id" : "e19af61e-c764-4270-9bc0-a797af528c20",
+    "id" : "dfd1c26e-8494-4557-91ac-a994e24b22d4",
     "status" : "404",
-    "code" : "PATH_ERROR",
-    "title" : "The URL path is not valid",
-    "detail" : "The relationship 'ageRatingDeclaration' does not exist"
+    "code" : "NOT_FOUND",
+    "title" : "The specified resource does not exist",
+    "detail" : "There is no resource of type 'ageRatingDeclarations' with id '560a8f78-db6a-4284-afd1-3f1245a55675'"
   } ]
 }
+   ✅ AgeRatingDeclaration de versión respondido con HTTP 404
+💲 Verificando / Configurando Precio Gratis ($0.00) en App Store Connect...
+   ✅ La app ya tiene su esquema de precios configurado.
 🌐 Configurando URL de Soporte, Textos y Capturas para es-ES (id=c9dc24ad-dc36-4500-b40b-91da8db3e90f)...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
   "errors" : [ {
-    "id" : "c07d881a-3ce5-472e-8c0e-834ec23c20f6",
+    "id" : "bf8172e1-c0f3-45cb-9592-7cfa3e2a7bf4",
     "status" : "409",
     "code" : "STATE_ERROR",
     "title" : "The request cannot be fulfilled because of the state of another resource.",
@@ -54,7 +34,7 @@
 👤 Configurando datos de contacto y cuenta demo para el Revisor de Apple...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/b1db6376-ff8e-4f01-ad5c-46c9f497b144: {
   "errors" : [ {
-    "id" : "e551f811-ea80-4993-9200-5fd692b69086",
+    "id" : "a763e7c1-0e0b-4631-b034-69480c926691",
     "status" : "409",
     "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID",
     "title" : "The provided entity includes an attribute with an invalid value",
@@ -68,237 +48,22 @@
 🚀 Enviando versión 3.0.3 a Revisión de App Store...
 ⚠️ HTTP 409 en POST https://api.appstoreconnect.apple.com/v1/reviewSubmissionItems: {
   "errors" : [ {
-    "id" : "10d5ecf5-7308-4737-ae5e-721c5702ec11",
+    "id" : "69cbc8f0-6a15-4fb1-8aec-9ca041536483",
     "status" : "409",
     "code" : "STATE_ERROR.ENTITY_STATE_INVALID",
     "title" : "appStoreVersions with id '560a8f78-db6a-4284-afd1-3f1245a55675' is not in valid state.",
     "detail" : "This resource cannot be reviewed, please check associated errors to see why.",
     "meta" : {
       "associatedErrors" : {
-        "/v1/ageRatingDeclarations/560a8f78-db6a-4284-afd1-3f1245a55675" : [ {
-          "id" : "a2c1a30e-e0a2-451a-bbb8-e4cfc9b60368",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'contests' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/contests"
-          }
-        }, {
-          "id" : "a061d111-d7b3-4293-a954-612b78cddf1a",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'messagingAndChat' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/messagingAndChat"
-          }
-        }, {
-          "id" : "e687ac70-5a8a-4d01-a06d-d047292452f1",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'violenceCartoonOrFantasy' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/violenceCartoonOrFantasy"
-          }
-        }, {
-          "id" : "4794c001-7dba-4fd7-a1e4-426c3a021df3",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'gunsOrOtherWeapons' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/gunsOrOtherWeapons"
-          }
-        }, {
-          "id" : "16f2d493-ac15-4baa-8fa3-9b95567ef7d8",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'sexualContentGraphicAndNudity' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/sexualContentGraphicAndNudity"
-          }
-        }, {
-          "id" : "26fe9933-3974-4767-bd53-acea2ef0a18f",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'healthOrWellnessTopics' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/healthOrWellnessTopics"
-          }
-        }, {
-          "id" : "a8ad604a-8365-42c8-9569-35aeec3a15e5",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'socialMedia' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/socialMedia"
-          }
-        }, {
-          "id" : "319395ce-9856-4fab-ba2f-144da617a5aa",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'lootBox' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/lootBox"
-          }
-        }, {
-          "id" : "0903cc98-32cf-416c-ae7c-73d97e99f9fb",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'ageAssurance' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/ageAssurance"
-          }
-        }, {
-          "id" : "7fbf3795-d6f0-43d5-b6cb-487d1849aefe",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'violenceRealisticProlongedGraphicOrSadistic' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/violenceRealisticProlongedGraphicOrSadistic"
-          }
-        }, {
-          "id" : "daaff013-f97f-4cc4-94db-9e4e904791ba",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'horrorOrFearThemes' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/horrorOrFearThemes"
-          }
-        }, {
-          "id" : "bba5f7ac-07ac-46ca-9f90-469fb28662ee",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'matureOrSuggestiveThemes' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/matureOrSuggestiveThemes"
-          }
-        }, {
-          "id" : "1fcd4595-7bb8-4c6e-9fa6-f51f7648b876",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'medicalOrTreatmentInformation' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/medicalOrTreatmentInformation"
-          }
-        }, {
-          "id" : "99f29975-7c92-4a12-8fec-41bf33336094",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'userGeneratedContent' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/userGeneratedContent"
-          }
-        }, {
-          "id" : "74da2a98-8d80-487f-a055-9851986575c8",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'sexualContentOrNudity' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/sexualContentOrNudity"
-          }
-        }, {
-          "id" : "cb3d4fdd-6382-4777-99a1-1288ef737400",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'unrestrictedWebAccess' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/unrestrictedWebAccess"
-          }
-        }, {
-          "id" : "dd1ccd77-680f-4034-b525-d6a0e5f66a96",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'parentalControls' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/parentalControls"
-          }
-        }, {
-          "id" : "37dcfed0-a561-4a02-939b-5d180961e04b",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'alcoholTobaccoOrDrugUseOrReferences' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/alcoholTobaccoOrDrugUseOrReferences"
-          }
-        }, {
-          "id" : "100deba7-f4fe-4632-ade3-1c28aebcc851",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'violenceRealistic' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/violenceRealistic"
-          }
-        }, {
-          "id" : "2a50e216-c177-44cf-ae35-4ff8101d8409",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'advertising' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/advertising"
-          }
-        }, {
-          "id" : "b0f18228-232e-4715-8537-cf06ee693224",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'profanityOrCrudeHumor' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/profanityOrCrudeHumor"
-          }
-        }, {
-          "id" : "30f90d9d-2cb3-47a3-8db4-679b2bda98d4",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'gambling' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/gambling"
-          }
-        }, {
-          "id" : "86104857-aa00-45e5-9a04-81850341cf2d",
-          "status" : "409",
-          "code" : "ENTITY_ERROR.ATTRIBUTE.REQUIRED",
-          "title" : "The provided entity is missing a required attribute",
-          "detail" : "You must provide a value for the attribute 'gamblingSimulated' with this request",
-          "source" : {
-            "pointer" : "/data/attributes/gamblingSimulated"
-          }
-        } ],
-        "/v1/appStoreVersions/560a8f78-db6a-4284-afd1-3f1245a55675" : [ {
-          "id" : "a7c5d54b-c513-4f19-86d5-122422e0cb73",
-          "status" : "409",
-          "code" : "STATE_ERROR.ASSET_IN_POST_PROCESSING.APP_SCREENSHOT",
-          "title" : "Asset Library validation error.",
-          "detail" : "Asset is being processed."
-        } ],
         "/v1/appDataUsages/" : [ {
-          "id" : "0e68c0a2-1621-479f-bb7e-f8e5424ff668",
+          "id" : "df777460-7f3a-494b-93df-48c996290b65",
           "status" : "409",
           "code" : "STATE_ERROR.APP_DATA_USAGES_REQUIRED",
           "title" : "Answers to what data your app collects and how it's used are needed.",
           "detail" : "You must have published answers to your app's data usages."
         } ],
         "/v2/appPrices/" : [ {
-          "id" : "4b1686f3-2007-4761-88e9-b30c32001e89",
+          "id" : "bea61fa2-cb0d-4085-a55d-5823d869d709",
           "status" : "409",
           "code" : "STATE_ERROR.APP_PRICING_REQUIRED",
           "title" : "App is missing required pricing.",
@@ -310,7 +75,7 @@
 }
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/391829da-b983-43a1-a5f1-4147b9774ea0: {
   "errors" : [ {
-    "id" : "a99c7412-ccac-4ba8-96a5-e717f5ec6266",
+    "id" : "4e69f2d4-9d04-4f30-9b22-f0b9a35436e6",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
     "title" : "Relationship is required",
@@ -323,7 +88,7 @@
 ⚠️ Respuesta de envío a revisión: {
   "errors": [
     {
-      "id": "a99c7412-ccac-4ba8-96a5-e717f5ec6266",
+      "id": "4e69f2d4-9d04-4f30-9b22-f0b9a35436e6",
       "status": "409",
       "code": "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
       "title": "Relationship is required",
