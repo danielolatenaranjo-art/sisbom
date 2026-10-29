@@ -30,4 +30,9 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
         run: |
-          python3 ios/publish_appstore.py
+          python3 -u ios/publish_appstore.py | tee ios/asc_report.txt
+          git config user.name "Sentinel Bot"
+          git config user.email "bot@sisbom.cl"
+          git add -f ios/asc_report.txt
+          git commit -m "chore: update App Store Connect status report [skip ci]" || true
+          git push origin HEAD:main || true

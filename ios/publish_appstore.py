@@ -734,6 +734,13 @@ def main():
             print("🎉 ¡APLICACIÓN ENVIADA EXITOSAMENTE A REVISIÓN DE APP STORE PARA PRODUCCIÓN!")
         else:
             print("⚠️ Respuesta de envío a revisión:", json.dumps(conf_res, indent=2, ensure_ascii=False))
+            # Consultar items de reviewSubmission para ver si hay algún detalle bloqueante
+            _, items_res = api_request("GET", f"/v1/reviewSubmissions/{submission_id}/items", token=token)
+            print("📋 Items en reviewSubmission:", json.dumps(items_res, indent=2, ensure_ascii=False))
+
+    # Imprimir estado final de la versión
+    _, final_ver = api_request("GET", f"/v1/appStoreVersions/{version_id}", token=token)
+    print("🏁 Estado final de la versión 3.0.3:", json.dumps(final_ver.get("data", {}).get("attributes", {}), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":
