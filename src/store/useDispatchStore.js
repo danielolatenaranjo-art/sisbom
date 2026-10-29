@@ -694,6 +694,46 @@ function splitAlertsAndOrders(allList = [], currentChat = null) {
 }
 
 // Helper para lectura síncrona inicial de caché local (0ms al abrir la app)
+const ACTIVE_DISPATCHES_CACHE_KEY = '@sentinel_one_v3_active_dispatches_cache';
+
+function readInitialActiveDispatchesFromLocalStorage() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(ACTIVE_DISPATCHES_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((d) => {
+            if (!d || typeof d !== 'object') return false;
+            const st = String(d.estado || '').toLowerCase().trim();
+            const isClosed =
+              st === 'cancelada' ||
+              st === 'cancelado' ||
+              st === 'finalizada' ||
+              st === 'finalizado' ||
+              st === 'cerrada' ||
+              st === 'cerrado' ||
+              st === 'terminada' ||
+              st === 'terminado' ||
+              Boolean(d.operadorFinal) ||
+              Boolean(d.finalizadoAt);
+            return !isClosed && d.visibleMovil !== false;
+          });
+        }
+      }
+    }
+  } catch (_) {}
+  return [];
+}
+
+function persistActiveDispatchesToLocalStorage(list = []) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(ACTIVE_DISPATCHES_CACHE_KEY, JSON.stringify(Array.isArray(list) ? list : []));
+    }
+  } catch (_) {}
+}
+
 function readInitialAttendanceFromLocalStorage() {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -714,9 +754,11 @@ function readInitialAttendanceFromLocalStorage() {
   return [];
 }
 
+const initialCachedDispatches = readInitialActiveDispatchesFromLocalStorage();
+
 export const useDispatchStore = create((set, get) => ({
-  activeDispatch: null,
-  dispatchesList: [],
+  activeDispatch: initialCachedDispatches[0] || null,
+  dispatchesList: initialCachedDispatches,
   fullscreenDispatchId: null,
   urgentBannerMessage: null,
   firefightersList: [],
@@ -1181,6 +1223,8 @@ export const useDispatchStore = create((set, get) => ({
         }
       }
 
+      persistActiveDispatchesToLocalStorage(activeList);
+
       set({
         activeDispatch: newest,
         dispatchesList: activeList,
@@ -1189,6 +1233,7 @@ export const useDispatchStore = create((set, get) => ({
       });
     } else {
       isFirstDispatchesSnapshot = false;
+      persistActiveDispatchesToLocalStorage([]);
       set({
         activeDispatch: null,
         dispatchesList: [],
@@ -1410,10 +1455,10 @@ export const useDispatchStore = create((set, get) => ({
   // Hidratación inmediata y respaldo en vivo por Firestore REST (garantiza 100% conexión en iOS WKWebView y redes restringidas)
   hydrateFromFirestoreRest: async () => {
     try {
-      const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const fbConfig = useLicenseStore.getState().firebaseConfig;
+      if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      if (!projId || !apiKey) return;
 
       const baseUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents`;
 
@@ -1426,9 +1471,51 @@ export const useDispatchStore = create((set, get) => ({
         return parsed;
       };
 
-      const [centralRes, despRes, vehRes, alertRes] = await Promise.all([
+      const fetchDespachosViaStructuredQuery = async () => {
+        try {
+          const queryRes = await fetchFirestoreWithAuth(`${baseUrl}:runQuery`, apiKey, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              structuredQuery: {
+                from: [{ collectionId: 'despachos' }],
+                orderBy: [{ field: { fieldPath: '__name__' }, direction: 'DESCENDING' }],
+                limit: 150
+              }
+            })
+          });
+          if (queryRes && queryRes.ok) {
+            const qJson = await queryRes.json();
+            if (Array.isArray(qJson)) {
+              const docs = [];
+              qJson.forEach((row) => {
+                if (row?.document?.name) {
+                  docs.push({
+                    id: row.document.name.split('/').pop(),
+                    data: parseRestDocFields(row.document),
+                    hasPendingWrites: false
+                  });
+                }
+              });
+              return docs;
+            }
+          }
+        } catch (_) {}
+        const fallbackRes = await fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=300`, apiKey).catch(() => null);
+        if (fallbackRes && fallbackRes.ok) {
+          const dJson = await fallbackRes.json();
+          return (dJson?.documents || []).map((docItem) => ({
+            id: docItem.name.split('/').pop(),
+            data: parseRestDocFields(docItem),
+            hasPendingWrites: false
+          }));
+        }
+        return null;
+      };
+
+      const [centralRes, despDocs, vehRes, alertRes] = await Promise.all([
         fetchFirestoreWithAuth(`${baseUrl}/accesos/central`, apiKey).catch(() => null),
-        fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=100`, apiKey).catch(() => null),
+        fetchDespachosViaStructuredQuery(),
         fetchFirestoreWithAuth(`${baseUrl}/vehiculos?pageSize=100`, apiKey).catch(() => null),
         fetchFirestoreWithAuth(`${baseUrl}/alertas?pageSize=100`, apiKey).catch(() => null)
       ]);
@@ -1440,14 +1527,8 @@ export const useDispatchStore = create((set, get) => ({
         }
       }
 
-      if (despRes && despRes.ok) {
-        const dJson = await despRes.json();
-        const docs = (dJson?.documents || []).map((docItem) => ({
-          id: docItem.name.split('/').pop(),
-          data: parseRestDocFields(docItem),
-          hasPendingWrites: false
-        }));
-        get().applyDispatchesRawDocs(docs);
+      if (Array.isArray(despDocs)) {
+        get().applyDispatchesRawDocs(despDocs);
       }
 
       if (vehRes && vehRes.ok) {
@@ -1505,7 +1586,11 @@ export const useDispatchStore = create((set, get) => ({
     set({ isLoading: true });
 
     try {
-      const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
+      const fbConfig = useLicenseStore.getState().firebaseConfig;
+      if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) {
+        set({ isLoading: false });
+        return;
+      }
       await reinitFirebaseWithConfig(fbConfig);
 
       // Disparar hidratación inmediata vía REST en paralelo (garantiza carga instantánea en iOS y Android)
@@ -1734,17 +1819,19 @@ export const useDispatchStore = create((set, get) => ({
       // Respaldo por REST si getDocs falla en iOS WKWebView
       if (rawSheetDocs.length === 0) {
         try {
-          const fbConfig = useLicenseStore.getState().firebaseConfig || DEFAULT_FIREBASE_CONFIG;
-          const baseUrl = `https://firestore.googleapis.com/v1/projects/${fbConfig.projectId}/databases/(default)/documents`;
-          const res = await fetchFirestoreWithAuth(`${baseUrl}/asistencia?pageSize=200`, fbConfig.apiKey);
-          if (res && res.ok) {
-            const rJson = await res.json();
-            rawSheetDocs = (rJson?.documents || []).map((docItem) => {
-              const fields = docItem?.fields || {};
-              const parsed = {};
-              for (const k of Object.keys(fields)) parsed[k] = parseFirestoreValue(fields[k]);
-              return { id: docItem.name.split('/').pop(), data: parsed };
-            });
+          const fbConfig = useLicenseStore.getState().firebaseConfig;
+          if (fbConfig && fbConfig.projectId && fbConfig.apiKey) {
+            const baseUrl = `https://firestore.googleapis.com/v1/projects/${fbConfig.projectId}/databases/(default)/documents`;
+            const res = await fetchFirestoreWithAuth(`${baseUrl}/asistencia?pageSize=200`, fbConfig.apiKey);
+            if (res && res.ok) {
+              const rJson = await res.json();
+              rawSheetDocs = (rJson?.documents || []).map((docItem) => {
+                const fields = docItem?.fields || {};
+                const parsed = {};
+                for (const k of Object.keys(fields)) parsed[k] = parseFirestoreValue(fields[k]);
+                return { id: docItem.name.split('/').pop(), data: parsed };
+              });
+            }
           }
         } catch (_) {}
       }
@@ -2062,19 +2149,20 @@ export const useDispatchStore = create((set, get) => ({
       });
       const draftId = `${year}-${String(maxCorrelativo + 1).padStart(5, '0')}`;
 
-      // Pre-marcar despacho como notificado/reproducido localmente y en nativo porque somos el Operador Central que despacha
+      // Pre-marcar despacho como notificado/reproducido localmente y en nativo porque somos quien despacha
       notifiedDispatchIds.add(draftId);
       lastDispatchClaves[draftId] = String(key || '10-0').trim();
       markPlayedSoundKey(draftId);
-      set({ isCentralActive: true, fullscreenDispatchId: null });
+      const isActuallyCentralOp = get().recomputeCentralState();
+      set({ fullscreenDispatchId: null });
       get().stopDispatchSound();
       try {
         if (typeof window !== 'undefined') {
-          window.AndroidApp?.setCentralOperatorMode?.(true);
+          window.AndroidApp?.setCentralOperatorMode?.(Boolean(isActuallyCentralOp));
           window.AndroidApp?.acknowledgeDispatch?.(draftId, false);
           window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
             action: 'setCentralOperatorMode',
-            active: true
+            active: Boolean(isActuallyCentralOp)
           });
           window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
             action: 'acknowledgeDispatch',
@@ -2312,20 +2400,21 @@ export const useDispatchStore = create((set, get) => ({
 
       markLocalWrite('despachos', idServicio, nowTs);
 
-      // Pre-marcar despacho como notificado/reproducido localmente y en nativo porque somos el Operador Central que despacha
+      // Pre-marcar despacho como notificado/reproducido localmente y en nativo porque somos quien despacha
       notifiedDispatchIds.add(idServicio);
       lastDispatchClaves[idServicio] = String(clave || '10-0').trim();
       markPlayedSoundKey(idServicio);
       markPlayedSoundKey(`${idServicio}_${String(clave || '10-0').trim()}`);
-      set({ isCentralActive: true, fullscreenDispatchId: null });
+      const isActuallyCentralOp = get().recomputeCentralState();
+      set({ fullscreenDispatchId: null });
       get().stopDispatchSound();
       try {
         if (typeof window !== 'undefined') {
-          window.AndroidApp?.setCentralOperatorMode?.(true);
+          window.AndroidApp?.setCentralOperatorMode?.(Boolean(isActuallyCentralOp));
           window.AndroidApp?.acknowledgeDispatch?.(idServicio, false);
           window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
             action: 'setCentralOperatorMode',
-            active: true
+            active: Boolean(isActuallyCentralOp)
           });
           window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
             action: 'acknowledgeDispatch',

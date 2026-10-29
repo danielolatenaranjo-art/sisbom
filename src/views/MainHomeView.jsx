@@ -1752,9 +1752,7 @@ export const MainHomeView = ({ onLogout }) => {
   // 1. PESTAÑA ACTIVIDAD / DESPACHO (Con Flujo Oficial SENTINEL CAD + Múltiples Despachos)
   // =========================================================================
   const renderActividadTab = () => {
-    const formattedOpName = formatOperatorCadName(
-      centralOperatorName || activeDispatch?.operadorInicial || 'SIN OPERADOR'
-    );
+    const formattedOpName = formatOperatorCadName(centralOperatorName || 'SIN OPERADOR');
     const hasOperator = formattedOpName !== 'SIN OPERADOR';
     const showCadDispatchPanel = Boolean(isMeCentralOperator || showCentralConsole);
     const activeProtocolRec = cadSelectedKey
@@ -3838,9 +3836,9 @@ export const MainHomeView = ({ onLogout }) => {
         </Modal>
 
         {/* =================================================================== */}
-        {/* LISTA DE DESPACHOS ACTIVOS PARA BOMBEROS (OCULTA SI ES OPERADOR CAD) */}
+        {/* LISTA DE DESPACHOS ACTIVOS PARA BOMBEROS (SIEMPRE VISIBLE SALVO QUE EL USUARIO SEA EL OPERADOR ACTIVO EN LA CENTRAL) */}
         {/* =================================================================== */}
-        {!showCadDispatchPanel ? (
+        {!isMeCentralOperator ? (
           allActiveDispatches.length > 0 ? (
             <View style={{ gap: 14 }}>
               {allActiveDispatches.length > 1 ? (
