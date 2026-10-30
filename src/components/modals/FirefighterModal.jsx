@@ -71,6 +71,17 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
     }
 
     const url = `https://wa.me/${cleanNumber}`;
+    try {
+      if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
+        window.AndroidApp.openExternalUrl(url);
+        return;
+      }
+      if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp) {
+        window.webkit.messageHandlers.iOSApp.postMessage({ action: 'openExternalUrl', url });
+        return;
+      }
+    } catch (_) {}
+
     Linking.openURL(url).catch((err) => {
       console.warn('Error abriendo WhatsApp:', err);
     });
@@ -79,7 +90,19 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
   const handleCallPhone = () => {
     const digits = String(bombero.telefono || '').replace(/\D/g, '');
     if (!digits) return;
-    Linking.openURL(`tel:+56${digits.startsWith('56') ? digits.slice(2) : digits}`).catch(() => {});
+    const telUrl = `tel:+56${digits.startsWith('56') ? digits.slice(2) : digits}`;
+    try {
+      if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
+        window.AndroidApp.openExternalUrl(telUrl);
+        return;
+      }
+      if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp) {
+        window.webkit.messageHandlers.iOSApp.postMessage({ action: 'openExternalUrl', url: telUrl });
+        return;
+      }
+    } catch (_) {}
+
+    Linking.openURL(telUrl).catch(() => {});
   };
 
   const handleChangeBomberoStatus = async (newEstado) => {

@@ -89,6 +89,15 @@ jobs:
           cp "$PP_PATH" ~/Library/MobileDevice/Provisioning\ Profiles/"$UUID".mobileprovision
           echo "Perfil instalado con UUID: $UUID"
 
+      - name: Habilitar Push Notifications y Sincronizar Perfil de Aprovisionamiento
+        env:
+          APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
+          APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
+          APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
+        run: |
+          pip3 install PyJWT cryptography --break-system-packages || pip3 install PyJWT cryptography
+          python3 "${{ steps.locate-ios.outputs.ios_path }}/setup_push_profile.py" || true
+
       - name: Generate Xcode Project
         run: |
           cd "${{ steps.locate-ios.outputs.ios_path }}"

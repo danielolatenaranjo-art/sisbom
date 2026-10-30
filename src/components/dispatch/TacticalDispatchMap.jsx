@@ -321,10 +321,24 @@ export const TacticalDispatchMap = ({
     if (!hasValidGps) return;
     const label = cleanLugar ? `${clave} - ${cleanLugar}` : `Emergencia ${clave}`;
     const geoUrl = `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label)})`;
+    const iosMapsUrl = `http://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label)}`;
     const webUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-    Linking.openURL(geoUrl).catch(() => {
-      Linking.openURL(webUrl).catch(() => {});
-    });
+
+    try {
+      if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
+        window.AndroidApp.openExternalUrl(geoUrl);
+        return;
+      }
+      if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp) {
+        window.webkit.messageHandlers.iOSApp.postMessage({
+          action: 'openExternalUrl',
+          url: iosMapsUrl
+        });
+        return;
+      }
+    } catch (_) {}
+
+    Linking.openURL(webUrl).catch(() => {});
   };
 
   // Exact OSMDroid / GoogleMapsRoadmap color filter from IncidentMapPreview in TabScreens.kt

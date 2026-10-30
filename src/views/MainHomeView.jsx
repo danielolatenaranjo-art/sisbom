@@ -1432,6 +1432,14 @@ export const MainHomeView = ({ onLogout }) => {
     const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${generatedLink}`;
     const waUrl = `https://api.whatsapp.com/send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
     try {
+      if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
+        window.AndroidApp.openExternalUrl(waUrl);
+        return;
+      }
+      if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp) {
+        window.webkit.messageHandlers.iOSApp.postMessage({ action: 'openExternalUrl', url: waUrl });
+        return;
+      }
       if (typeof window !== 'undefined' && window.open) {
         window.open(waUrl, '_blank');
       }
