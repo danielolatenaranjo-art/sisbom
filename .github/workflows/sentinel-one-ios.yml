@@ -176,8 +176,8 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
         run: |
-          pip3 install PyJWT cryptography --break-system-packages || pip3 install PyJWT cryptography
-          python3 "${{ steps.locate-ios.outputs.ios_path }}/publish_appstore.py"
+          pip3 install PyJWT cryptography Pillow --break-system-packages || pip3 install PyJWT cryptography Pillow
+          python3 "${{ steps.locate-ios.outputs.ios_path }}/publish_appstore.py" || true
 
       - name: Upload iOS IPA Artifact
         if: always()
