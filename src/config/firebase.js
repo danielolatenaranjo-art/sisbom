@@ -253,6 +253,7 @@ export function getRtdb() {
 // Parser canónico para respuestas de Firestore REST (retrocompatibilidad)
 export function parseFirestoreValue(v) {
   if (!v || typeof v !== 'object') return v;
+  if ('nullValue' in v) return null;
   if ('stringValue' in v) return v.stringValue;
   if ('booleanValue' in v) return v.booleanValue;
   if ('integerValue' in v) return parseInt(v.integerValue, 10);

@@ -6161,6 +6161,22 @@ export const MainHomeView = ({ onLogout }) => {
                   >
                     {lugarLimpio.toUpperCase()}
                   </Text>
+                ) : String(fsDispatch.estado || '').toLowerCase().trim() === 'pre-despacho' ? (
+                  <Text
+                    style={{
+                      fontSize: 14,
+                      fontWeight: '800',
+                      color: '#FBBF24',
+                      textAlign: 'center',
+                      marginTop: 8,
+                      letterSpacing: 0.8,
+                      textShadowColor: isDarkMode ? '#000000' : 'transparent',
+                      textShadowOffset: { width: 0, height: 2 },
+                      textShadowRadius: 8
+                    }}
+                  >
+                    PRE-DESPACHO EN PREPARACIÓN...
+                  </Text>
                 ) : null}
 
                 {carrosLimpios ? (

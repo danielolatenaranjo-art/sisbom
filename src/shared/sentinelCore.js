@@ -699,10 +699,10 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
   const hora68 = formatEpochToHHMM(h68) || String(raw.hora68 || '').replace(/['"]/g, '').trim();
 
   const fecha60 = formatEpochToDDMMYYYY(h60) || String(raw.fecha60 || baseRefDate).trim();
-  const fecha63 = formatEpochToDDMMYYYY(h63) || String(raw.fecha63 || fecha60).trim();
-  const fecha69 = formatEpochToDDMMYYYY(h69) || String(raw.fecha69 || fecha60).trim();
-  const fecha610 = formatEpochToDDMMYYYY(h610) || String(raw.fecha610 || fecha60).trim();
-  const fecha68 = formatEpochToDDMMYYYY(h68) || String(raw.fecha68 || fecha60).trim();
+  const fecha63 = formatEpochToDDMMYYYY(h63) || String(raw.fecha63 || '').trim();
+  const fecha69 = formatEpochToDDMMYYYY(h69) || String(raw.fecha69 || '').trim();
+  const fecha610 = formatEpochToDDMMYYYY(h610) || String(raw.fecha610 || '').trim();
+  const fecha68 = formatEpochToDDMMYYYY(h68) || String(raw.fecha68 || '').trim();
 
   const preinforme = String(raw.preinforme ?? raw.preInforme ?? raw.preinformeUnidad ?? '').trim();
   const informe63 = String(raw.informe63 ?? raw.report ?? '').trim();
@@ -922,7 +922,11 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
   const sourceUnit = isSingleArg ? svc : unit;
 
   const idSalida = String(sourceUnit.idSalida || sourceUnit.bitacoraId || '').trim();
-  const idServicio = String(sourceSvc.idServicio || sourceSvc.id || sourceUnit.idServicio || '').trim();
+  const idServicio = String(
+    isSingleArg
+      ? (sourceUnit.idServicio || '')
+      : (sourceSvc.idServicio || sourceSvc.id || sourceUnit.idServicio || '')
+  ).trim();
   const carro = String(sourceUnit.name || sourceUnit.carro || sourceUnit.idCarro || '').trim().toUpperCase();
 
   const vMatch = (Array.isArray(vehicles) ? vehicles : []).find(
@@ -974,8 +978,8 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
     };
   };
 
-  const conductorObj = resolvePersonObj(sourceUnit.driverRad ?? sourceUnit.conductor ?? sourceUnit.conductorObj);
-  const obacObj = resolvePersonObj(sourceUnit.obacRad ?? sourceUnit.obac ?? sourceUnit.obacObj);
+  const conductorObj = resolvePersonObj(sourceUnit.driverRad ?? sourceUnit.conductorObj ?? sourceUnit.conductor);
+  const obacObj = resolvePersonObj(sourceUnit.obacRad ?? sourceUnit.obacObj ?? sourceUnit.obac);
 
   const rawCount = sourceUnit.count ?? sourceUnit.cuantosBomberos ?? sourceUnit.cantidadTripulantes ?? sourceUnit.tripulantes ?? '';
   const rawCountStr = String(rawCount ?? '').trim().toUpperCase();
@@ -2272,7 +2276,8 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     idRadial,
     nombreBombero,
     foto: String(raw.foto || '').trim(),
-    numeroRadio: String(raw.numeroRadio || '').trim(),
+    numeroRadio: String(raw.numeroRadio ?? raw.radio ?? '').trim(),
+    radio: String(raw.radio ?? raw.numeroRadio ?? '').trim(),
     compania,
     cargo,
     ordenEnLista: Number(raw.ordenEnLista ?? raw.orden ?? 999) || 999,

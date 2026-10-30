@@ -8,8 +8,43 @@ export const AttendanceDetailModal = ({ visible, item, onClose }) => {
 
   const rawSt = String(item.userEstado || item.estado || 'ASISTE').toUpperCase();
   const isPresent = ['A', 'ASISTE', 'CDS'].includes(rawSt);
-  const isAbono = Boolean(item.userAbono) || item.puntos?.includes('ABONO') || Boolean(item.abono);
-  const aprobadoPorClean = String(item.aprobadoPor || '').trim();
+  const checkIsAbono = (abonoVal, clave = '', tipo = '') => {
+    if (typeof abonoVal === 'number') return Math.round(abonoVal) === 1;
+    if (typeof abonoVal === 'boolean') return abonoVal === true;
+    if (typeof abonoVal === 'string') {
+      const s = abonoVal.trim().toUpperCase();
+      if (s === '1' || s === 'SI' || s === 'SÍ' || s === 'TRUE' || s === 'ABONO' || s.includes('ABONO') || s.includes('EXTRA')) {
+        return true;
+      }
+      if (s === '0' || s === 'NO' || s === 'FALSE' || s === 'OBLIGATORIA') {
+        return false;
+      }
+    }
+    const c = String(clave || '').trim().toUpperCase();
+    const t = String(tipo || '').trim().toUpperCase();
+    return c.includes('ABONO') || c.includes('EXTRA') || t.includes('ABONO') || t.includes('EXTRA');
+  };
+  const isAbono = checkIsAbono(item.userAbono ?? item.abono, item.clave, item.tipo);
+  const formatPersonDisplay = (val, fallback = '') => {
+    if (!val) return fallback;
+    if (typeof val === 'object') {
+      const rad = String(val.idRadial || val.codigoRadial || val.id || '').trim();
+      const nom = String(val.nombre || val.nombreBombero || '').trim();
+      if (rad && nom) return `${rad} - ${nom}`;
+      return nom || rad || fallback;
+    }
+    const str = String(val).trim();
+    if (!str || str === '[object Object]') return fallback;
+    const bracketMatch = str.match(/^\[([^\]]+)\]\s*(.+)$/);
+    if (bracketMatch) {
+      return `${bracketMatch[1].trim()} - ${bracketMatch[2].trim()}`;
+    }
+    return str;
+  };
+
+  const obacDisplay = formatPersonDisplay(item.obac, 'NO ESPECIFICADO');
+  const listaPorDisplay = formatPersonDisplay(item.listaPasadaPor || item.listaPor, 'AYUDANTE');
+  const aprobadoPorClean = formatPersonDisplay(item.aprobadoPor, '');
   const isApproved = aprobadoPorClean.length > 0;
 
   const statusText = (() => {
@@ -112,7 +147,7 @@ export const AttendanceDetailModal = ({ visible, item, onClose }) => {
                 <Text style={styles.infoLabel}>MODALIDAD:</Text>
                 <View style={[styles.abonoBadge, isAbono ? styles.abonoYes : styles.abonoNo]}>
                   <Text style={[styles.abonoText, isAbono ? styles.abonoTextYes : styles.abonoTextNo]}>
-                    {isAbono ? 'ABONO (+1)' : 'OBLIGATORIA'}
+                    {isAbono ? 'ABONO' : 'OBLIGATORIA'}
                   </Text>
                 </View>
               </View>
@@ -121,7 +156,7 @@ export const AttendanceDetailModal = ({ visible, item, onClose }) => {
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>OBAC:</Text>
                 <Text style={styles.infoValue}>
-                  {item.obac || 'NO ESPECIFICADO'}
+                  {obacDisplay}
                 </Text>
               </View>
 
@@ -129,7 +164,7 @@ export const AttendanceDetailModal = ({ visible, item, onClose }) => {
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>LISTA POR:</Text>
                 <Text style={styles.infoValue}>
-                  {item.listaPasadaPor || item.listaPor || 'AYUDANTE'}
+                  {listaPorDisplay}
                 </Text>
               </View>
 

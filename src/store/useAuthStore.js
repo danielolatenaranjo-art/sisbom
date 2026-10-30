@@ -649,11 +649,7 @@ export const useAuthStore = create((set, get) => ({
       const updatedUser = {
         ...currentUser,
         estado: newStatus,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: {
-          ...(currentUser._fieldTimestamps || {}),
-          estado: nowTs
-        }
+        _metaTimestamp: nowTs
       };
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
@@ -674,20 +670,8 @@ export const useAuthStore = create((set, get) => ({
         await ensureFirebaseAuth();
         await updateDoc(doc(db, 'personal', String(docId)), {
           estado: newStatus,
-          _metaTimestamp: nowTs,
-          _fieldTimestamps: {
-            estado: nowTs
-          }
+          _metaTimestamp: nowTs
         });
-        try {
-          await addDoc(collection(db, 'personal', String(docId), 'estados'), {
-            estado: newStatus,
-            timestamp: nowTs,
-            origen: 'SENTINEL_ONE',
-            autorizadoPor: currentUser.nombreBombero || currentUser.idRadial || '',
-            _metaTimestamp: nowTs
-          });
-        } catch (e) {}
         console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${newStatus}`);
       }
     } catch (dbErr) {
@@ -775,11 +759,7 @@ export const useAuthStore = create((set, get) => ({
     const updatedUser = {
       ...currentUser,
       enServicio: newEnServicio,
-      _metaTimestamp: nowTs,
-      _fieldTimestamps: {
-        ...(currentUser._fieldTimestamps || {}),
-        enServicio: nowTs
-      }
+      _metaTimestamp: nowTs
     };
 
     set({ user: updatedUser });
@@ -830,31 +810,15 @@ export const useAuthStore = create((set, get) => ({
     const docId = String(currentUser.idRegistro || currentUser.idRadial).trim();
     if (!docId) return;
 
-    // 1. Actualizar inmediatamente `enServicio` en `personal/{idRegistro}` sin esperar al GPS
+    // 1. Actualizar inmediatamente `enServicio` en `personal/{idRegistro}` sin esperar al GPS (Escritura 100% Canónica)
     try {
       const db = getDb();
       if (db) {
         await ensureFirebaseAuth();
-        if (responseType === 'NO_ASISTO') {
-          const restoreAt = nowTs + 5 * 60 * 1000;
-          await updateDoc(doc(db, 'personal', docId), {
-            enServicio: newEnServicio,
-            previousEstado: currentUser.estado || '0-9',
-            restoreEstadoAt: restoreAt,
-            _metaTimestamp: nowTs,
-            _fieldTimestamps: {
-              enServicio: nowTs
-            }
-          });
-        } else {
-          await updateDoc(doc(db, 'personal', docId), {
-            enServicio: newEnServicio,
-            _metaTimestamp: nowTs,
-            _fieldTimestamps: {
-              enServicio: nowTs
-            }
-          });
-        }
+        await updateDoc(doc(db, 'personal', docId), {
+          enServicio: newEnServicio,
+          _metaTimestamp: nowTs
+        });
       }
     } catch (dbErr) {
       const fbConfig = useLicenseStore.getState().firebaseConfig;
@@ -875,58 +839,8 @@ export const useAuthStore = create((set, get) => ({
       }).catch(() => {});
     }
 
-    // 2. Si cancela ('LIBRE') o no asiste ('NO_ASISTO'), limpiar telemetría y registrar baja inmediata
+    // 2. Si cancela ('LIBRE') o no asiste ('NO_ASISTO'), limpiar telemetría
     if (responseType !== 'ASISTO') {
-      try {
-        const db = getDb();
-        if (db) {
-          await setDoc(doc(db, 'despachos', String(idServicio), 'asistencias', docId), {
-            id: docId,
-            idRadial: String(currentUser.idRadial || docId),
-            nombre: String(currentUser.nombreBombero || 'BOMBERO'),
-            compania: String(currentUser.compania || 1),
-            asistira: false,
-            timestamp: nowTs
-          }, { merge: true });
-
-          try {
-            const dispRef = doc(db, 'despachos', String(idServicio));
-            const dispSnap = await getDoc(dispRef);
-            if (dispSnap.exists()) {
-              const dData = dispSnap.data() || {};
-              const curAsis = Array.isArray(dData.asistentes) ? dData.asistentes : [];
-              const curNoAsis = Array.isArray(dData.noAsistentes) ? dData.noAsistentes : [];
-              const matchId = (item) => {
-                if (typeof item === 'string') return item === docId;
-                if (item && typeof item === 'object') {
-                  return String(item.id || item.idRegistro || item.bomberoId || '') === docId;
-                }
-                return false;
-              };
-              const nextAsis = curAsis.filter((item) => !matchId(item));
-              const nextNoAsis = curNoAsis.filter((item) => !matchId(item));
-              if (responseType === 'NO_ASISTO') {
-                nextNoAsis.push({
-                  id: docId,
-                  idRegistro: docId,
-                  idRadial: String(currentUser.idRadial || docId),
-                  nombre: String(currentUser.nombreBombero || 'BOMBERO'),
-                  rango: String(currentUser.cargo || 'Voluntario'),
-                  compania: Number(currentUser.compania || 1),
-                  horaConfirmacion: nowTs,
-                  timestamp: nowTs
-                });
-              }
-              await updateDoc(dispRef, {
-                asistentes: nextAsis,
-                noAsistentes: nextNoAsis,
-                _metaTimestamp: nowTs
-              });
-            }
-          } catch (_) {}
-        }
-      } catch (e) {}
-
       try {
         const rtdb = getRtdb();
         if (rtdb) {
@@ -987,64 +901,6 @@ export const useAuthStore = create((set, get) => ({
     }
 
     try {
-      const db = getDb();
-      if (db) {
-        const asisDoc = {
-          id: docId,
-          idRegistro: docId,
-          idRadial: String(currentUser.idRadial || docId),
-          nombre: String(currentUser.nombreBombero || 'BOMBERO'),
-          compania: String(currentUser.compania || 1),
-          asistira: true,
-          timestamp: nowTs
-        };
-        if (userLat !== null && userLng !== null) {
-          asisDoc.lat = userLat;
-          asisDoc.lng = userLng;
-        }
-        await setDoc(doc(db, 'despachos', String(idServicio), 'asistencias', docId), asisDoc, { merge: true });
-
-        try {
-          const dispRef = doc(db, 'despachos', String(idServicio));
-          const dispSnap = await getDoc(dispRef);
-          if (dispSnap.exists()) {
-            const dData = dispSnap.data() || {};
-            const curAsis = Array.isArray(dData.asistentes) ? dData.asistentes : [];
-            const curNoAsis = Array.isArray(dData.noAsistentes) ? dData.noAsistentes : [];
-            const matchId = (item) => {
-              if (typeof item === 'string') return item === docId;
-              if (item && typeof item === 'object') {
-                return String(item.id || item.idRegistro || item.bomberoId || '') === docId;
-              }
-              return false;
-            };
-            const nextNoAsis = curNoAsis.filter((item) => !matchId(item));
-            const nextAsis = curAsis.filter((item) => !matchId(item));
-            const attendeeEntry = {
-              id: docId,
-              idRegistro: docId,
-              idRadial: String(currentUser.idRadial || docId),
-              nombre: String(currentUser.nombreBombero || 'BOMBERO'),
-              rango: String(currentUser.cargo || 'Voluntario'),
-              compania: Number(currentUser.compania || 1),
-              conductor: Boolean(currentUser.conductor),
-              horaConfirmacion: nowTs,
-              timestamp: nowTs
-            };
-            if (userLat !== null && userLng !== null) {
-              attendeeEntry.lat = userLat;
-              attendeeEntry.lng = userLng;
-            }
-            nextAsis.push(attendeeEntry);
-            await updateDoc(dispRef, {
-              asistentes: nextAsis,
-              noAsistentes: nextNoAsis,
-              _metaTimestamp: nowTs
-            });
-          }
-        } catch (_) {}
-      }
-
       const rtdb = getRtdb();
       if (rtdb && userLat !== null && userLng !== null) {
         await rtdbSet(ref(rtdb, `telemetria/bomberos/${docId}`), {

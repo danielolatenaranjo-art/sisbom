@@ -91,17 +91,13 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
         const nowTs = Date.now();
         const payload = {
           estado: newEstado,
-          permiso: newEstado === 'PERMISO',
-          licenciaMedica: newEstado === 'LICENCIA',
-          cds: newEstado === 'CDS',
-          _metaTimestamp: nowTs,
-          _fieldTimestamps: {
-            estado: nowTs,
-            permiso: nowTs,
-            licenciaMedica: nowTs,
-            cds: nowTs
-          }
+          _metaTimestamp: nowTs
         };
+        if (newEstado === 'LICENCIA') {
+          payload.licenciaMedica = 'LICENCIA';
+        } else if (bombero.licenciaMedica) {
+          payload.licenciaMedica = '';
+        }
         await updateDoc(doc(db, 'personal', String(bombero.idRegistro)), payload);
       }
       onClose();

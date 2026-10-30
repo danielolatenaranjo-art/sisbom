@@ -465,11 +465,15 @@ export const TacticalDispatchMap = ({
     );
   }
 
+  const isPreDespacho = String(dispatch?.estado || '').toLowerCase().trim() === 'pre-despacho';
+
   const cardBorderColor = hasAssisted
     ? '#10B981'
-    : isDark
-      ? '#7F1D1D'
-      : 'rgba(239, 68, 68, 0.5)';
+    : isPreDespacho
+      ? '#F59E0B'
+      : isDark
+        ? '#7F1D1D'
+        : 'rgba(239, 68, 68, 0.5)';
 
   return (
     <View
@@ -499,10 +503,22 @@ export const TacticalDispatchMap = ({
             <Text
               style={[
                 styles.statusAlertTitle,
-                { color: hasAssisted ? '#10B981' : isDark ? '#EF4444' : '#DC2626' }
+                {
+                  color: hasAssisted
+                    ? '#10B981'
+                    : isPreDespacho
+                      ? '#F59E0B'
+                      : isDark
+                        ? '#EF4444'
+                        : '#DC2626'
+                }
               ]}
             >
-              {hasAssisted ? 'SALIENDO A SERVICIO' : '¡DESPACHO ACTIVO!'}
+              {hasAssisted
+                ? 'SALIENDO A SERVICIO'
+                : isPreDespacho
+                  ? '🚨 PRE-DESPACHO EN PREPARACIÓN'
+                  : '¡DESPACHO ACTIVO!'}
             </Text>
             <Text style={[styles.horaText, { color: isDark ? '#CBD5E1' : '#64748B' }]}>
               {horaStr}
@@ -517,7 +533,11 @@ export const TacticalDispatchMap = ({
             style={[styles.direccionText, { color: isDark ? '#E2E8F0' : '#334155' }]}
             numberOfLines={2}
           >
-            {cleanLugar ? cleanLugar.toUpperCase() : 'UBICACIÓN EN PROCESO DE GEORREFERENCIACIÓN'}
+            {cleanLugar
+              ? cleanLugar.toUpperCase()
+              : isPreDespacho
+                ? 'CONFIGURANDO UBICACIÓN Y UNIDADES EN CENTRAL...'
+                : 'UBICACIÓN EN PROCESO DE GEORREFERENCIACIÓN'}
           </Text>
         </LinearGradient>
 

@@ -632,7 +632,24 @@ function normalizeAlertDoc(docId, raw = {}) {
   };
 }
 
-// Normalizador de Lista de Asistencia (Dual-Read V2 + V3 idéntico a mapToAttendanceSheet en FirebaseRepository.kt)
+// Normalizador de Lista de Asistencia (Dual-Read V2 + V3 idéntico a normalizeAttendanceDoc en SHARED/sentinelCore.js)
+function formatPersonSummary(val) {
+  if (!val) return '';
+  if (typeof val === 'object') {
+    const rad = String(val.idRadial || val.codigoRadial || val.id || '').trim();
+    const nom = String(val.nombre || val.nombreBombero || '').trim();
+    if (rad && nom) return `${rad} - ${nom}`;
+    return nom || rad;
+  }
+  const str = String(val).trim();
+  if (str === '[object Object]') return '';
+  const bracketMatch = str.match(/^\[([^\]]+)\]\s*(.+)$/);
+  if (bracketMatch) {
+    return `${bracketMatch[1].trim()} - ${bracketMatch[2].trim()}`;
+  }
+  return str;
+}
+
 function normalizeAttendanceSheetDoc(docId, raw = {}) {
   const idLista = String(raw.idLista || raw.id || docId || '').trim();
   const ts = Number(raw.timestamp || raw.createdAt || 0) || 0;
@@ -647,6 +664,9 @@ function normalizeAttendanceSheetDoc(docId, raw = {}) {
     String(raw.anulada || '').trim() === '1';
 
   const rawAbono = raw.esAbono ?? raw.abono ?? raw.userAbono ?? raw.tipo ?? 'NO';
+  const listaPorStr = formatPersonSummary(raw.listaPor || raw.listaPasadaPor || raw.creadoPor || '');
+  const obacStr = formatPersonSummary(raw.obac || raw.obacServicio || '');
+  const aprobadoPorStr = formatPersonSummary(raw.aprobadoPor || '');
 
   return {
     id: idLista,
@@ -657,20 +677,17 @@ function normalizeAttendanceSheetDoc(docId, raw = {}) {
     fecha,
     hora,
     lugar: String(raw.lugar || raw.direccion || '').trim(),
-    aprobadoPor: String(raw.aprobadoPor || '').trim(),
-    listaPor: String(raw.listaPor || raw.creadoPor || '').trim(),
-    obac:
-      typeof raw.obac === 'object'
-        ? String(raw.obac?.nombre || raw.obac?.idRadial || '')
-        : String(raw.obac || raw.obacServicio || '').trim(),
+    aprobadoPor: aprobadoPorStr,
+    listaPor: listaPorStr,
+    listaPasadaPor: listaPorStr,
+    obac: obacStr,
     detalle: String(raw.detalle || raw.detalles || raw.observacion || '').trim(),
     anulada: anuladaVal,
     userEstado: String(raw.userEstado || ''),
     userAbono: rawAbono,
     inlineBomberos: raw.bomberos && typeof raw.bomberos === 'object' ? raw.bomberos : null,
     timestamp: ts,
-    _metaTimestamp: metaTs,
-    _fieldTimestamps: raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object' ? raw._fieldTimestamps : {}
+    _metaTimestamp: metaTs
   };
 }
 
@@ -706,6 +723,8 @@ function readInitialActiveDispatchesFromLocalStorage() {
           return parsed.filter((d) => {
             if (!d || typeof d !== 'object') return false;
             const st = String(d.estado || '').toLowerCase().trim();
+            const rawOpFinal = String(d.operadorFinal || '').trim();
+            const opFinal = (rawOpFinal === 'null' || rawOpFinal === '<null>') ? '' : rawOpFinal;
             const isClosed =
               st === 'cancelada' ||
               st === 'cancelado' ||
@@ -715,8 +734,8 @@ function readInitialActiveDispatchesFromLocalStorage() {
               st === 'cerrado' ||
               st === 'terminada' ||
               st === 'terminado' ||
-              Boolean(d.operadorFinal) ||
-              Boolean(d.finalizadoAt);
+              Boolean(opFinal) ||
+              Number(d.finalizadoAt) > 0;
             return !isClosed && d.visibleMovil !== false;
           });
         }
@@ -742,7 +761,7 @@ function readInitialAttendanceFromLocalStorage() {
         const parsedUser = JSON.parse(rawUser);
         const userId = String(parsedUser?.idRegistro || parsedUser?.idRadial || '').trim();
         if (userId) {
-          const rawAtt = window.localStorage.getItem(`@sentinel_one_v3_attendance_v2_exact_${userId}`);
+          const rawAtt = window.localStorage.getItem(`@sentinel_one_v3_attendance_v4_canon_${userId}`);
           if (rawAtt) {
             const parsedAtt = JSON.parse(rawAtt);
             if (Array.isArray(parsedAtt)) return parsedAtt;
@@ -1039,6 +1058,8 @@ export const useDispatchStore = create((set, get) => ({
         : incomingNorm;
 
       const st = String(mergedItem.estado || '').toLowerCase().trim();
+      const rawOpFinal = String(mergedItem.operadorFinal || '').trim();
+      const opFinal = (rawOpFinal === 'null' || rawOpFinal === '<null>') ? '' : rawOpFinal;
       const isClosed =
         st === 'cancelada' ||
         st === 'cancelado' ||
@@ -1048,8 +1069,8 @@ export const useDispatchStore = create((set, get) => ({
         st === 'cerrado' ||
         st === 'terminada' ||
         st === 'terminado' ||
-        Boolean(mergedItem.operadorFinal) ||
-        Boolean(mergedItem.finalizadoAt);
+        Boolean(opFinal) ||
+        Number(mergedItem.finalizadoAt) > 0;
 
       if (isClosed) {
         closedServerIds.add(docId);
@@ -1061,12 +1082,13 @@ export const useDispatchStore = create((set, get) => ({
       }
     });
 
-    // Preservar despachos locales recién creados dentro de la ventana de protección si aún no están cerrados
+    // Preservar despachos locales activos que aún no hayan sido cerrados explícitamente por el servidor
     currentDispatches.forEach((localDisp) => {
       const sId = String(localDisp?.idServicio || '').trim();
       if (
         sId &&
         !closedServerIds.has(sId) &&
+        !isDispatchTooOld(localDisp) &&
         shouldKeepLocalByTimestamp('despachos', sId, localDisp, null) &&
         !activeList.some((a) => String(a.idServicio).trim() === sId)
       ) {
@@ -1114,7 +1136,7 @@ export const useDispatchStore = create((set, get) => ({
         });
         lastKnownDispatchId = newest.idServicio;
 
-        // Si al abrir la app hay un despacho activo reciente sin responder y está en 0-9, mostrar la pantalla del despacho en silencio (sin sonar)
+        // Si al abrir la app hay un despacho o pre-despacho activo reciente sin responder y está en 0-9, mostrar la pantalla del despacho en silencio (sin sonar)
         if (
           !isAirplane &&
           !isMeCentral &&
@@ -1133,7 +1155,7 @@ export const useDispatchStore = create((set, get) => ({
           const id = disp.idServicio;
           const clave = String(disp.clave || '10-0').trim();
 
-          // A. Nuevo despacho en vivo: solo mostrar overlay si el usuario está en 0-9 y no en Modo Avión (0-8 Absoluto)
+          // A. Nuevo despacho o pre-despacho en vivo: mostrar overlay de inmediato si el usuario está en 0-9 y no en Modo Avión (0-8 Absoluto)
           if (!notifiedDispatchIds.has(id)) {
             notifiedDispatchIds.add(id);
             lastDispatchClaves[id] = clave;
@@ -1721,11 +1743,10 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       get().subscribeAttendanceRealtime();
 
-      // Respaldo periódico cada 6s por si iOS WKWebView o red móvil pausa el canal de streaming
+      // Respaldo periódico cada 6s SOLO si han pasado más de 7s sin recibir snapshot en tiempo real
       restFallbackIntervalId = setInterval(() => {
-        const isIos = typeof window !== 'undefined' && Boolean(window.webkit?.messageHandlers?.iOSApp || window.__SENTINEL_PLATFORM__ === 'ios');
         const sinceLastSnap = Date.now() - lastSnapshotReceivedTs;
-        if (isIos || sinceLastSnap > 7000) {
+        if (sinceLastSnap > 7000) {
           get().hydrateFromFirestoreRest();
         }
       }, 6000);
@@ -1749,9 +1770,9 @@ export const useDispatchStore = create((set, get) => ({
       unsubAsistencia = null;
     }
 
-    const cacheKey = `@sentinel_one_v3_attendance_v2_exact_${userId}`;
-    const statusMapKey = `@sentinel_one_v3_att_status_map_${userId}`;
-    const initDoneKey = `@sentinel_one_v3_att_init_done_${userId}`;
+    const cacheKey = `@sentinel_one_v3_attendance_v4_canon_${userId}`;
+    const statusMapKey = `@sentinel_one_v3_att_status_map_v4_${userId}`;
+    const initDoneKey = `@sentinel_one_v3_att_init_done_v4_${userId}`;
     let cachedList = [];
     let statusCacheObj = {};
     let isInitDone = false;
@@ -1991,7 +2012,7 @@ export const useDispatchStore = create((set, get) => ({
   // ACCIONES OPERATIVAS (TIMBRE, PUERTA IOT, CENTRAL, DESPACHO, ALERTAS, CHAT)
   // =========================================================================
 
-  // 1. Botón TIMBRE: Solicitar apertura de puerta al Operador CAD (Idéntico a FirebaseRepository.kt líneas 627-661)
+  // 1. Botón TIMBRE: Solicitar apertura de puerta al Operador CAD (Idéntico a ESQUEMA_CANONICO_V3.md)
   solicitarAperturaPuerta: async () => {
     const isBypass = useLicenseStore.getState().isBypassMode;
     const isReadOnly = useLicenseStore.getState().isReadOnly;
@@ -2000,9 +2021,6 @@ export const useDispatchStore = create((set, get) => ({
     const user = useAuthStore.getState().user;
     if (!user) return { success: false };
 
-    const now = new Date();
-    const pad = (n) => String(n).padStart(2, '0');
-    const fechaFull = `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     const nowTs = Date.now();
     const solId = String(nowTs);
 
@@ -2012,34 +2030,23 @@ export const useDispatchStore = create((set, get) => ({
       : words.join(' ');
 
     const myReg = String(user.idRegistro || user.idRadial || '').trim();
-    knownDoorRequestKeys.add(`door_${myReg}_${fechaFull}`);
     knownDoorRequestKeys.add(`door_${solId}`);
 
     const docData = {
-      id: solId,
+      idSolicitud: solId,
       idRegistro: myReg,
-      idRadial: String(user.idRadial || ''),
       nombreBombero: shortName,
       compania: Number(user.compania || 1),
-      fecha: fechaFull,
-      timestamp: nowTs,
       estado: 'pendiente',
-      pushSent: false
+      timestamp: nowTs,
+      _metaTimestamp: nowTs
     };
 
     try {
       const db = getDb();
       await ensureFirebaseAuth();
       markLocalWrite('solicitudes_puerta', solId, nowTs);
-      markLocalWrite('accesos', 'central', nowTs);
-      await addDoc(collection(db, 'solicitudes_puerta'), docData);
-      try {
-        await setDoc(doc(db, 'accesos', 'central'), {
-          solicitudPuerta: docData,
-          _metaTimestamp: nowTs,
-          _fieldTimestamps: { solicitudPuerta: nowTs }
-        }, { merge: true });
-      } catch (e) {}
+      await setDoc(doc(db, 'solicitudes_puerta', solId), docData);
       return { success: true };
     } catch (e) {
       console.warn('Error en solicitarAperturaPuerta:', e);
@@ -2071,9 +2078,7 @@ export const useDispatchStore = create((set, get) => ({
         markLocalWrite('accesos', 'central', nowTs);
         await setDoc(doc(db, 'accesos', 'central'), {
           puerta: true,
-          timestampPuerta: nowTs,
-          _metaTimestamp: nowTs,
-          _fieldTimestamps: { puerta: nowTs, timestampPuerta: nowTs }
+          _metaTimestamp: nowTs
         }, { merge: true });
       }
       return { success: true };
@@ -2089,8 +2094,6 @@ export const useDispatchStore = create((set, get) => ({
     if (isBypass || isReadOnly) return { success: true };
 
     const nowTs = Date.now();
-    const dateNow = getLocalDateString();
-    const timeNow = getLocalTimeString();
 
     try {
       const db = getDb();
@@ -2102,8 +2105,6 @@ export const useDispatchStore = create((set, get) => ({
         await setDoc(doc(db, 'accesos', 'central', 'registros', sessionId), {
           estado: 'cerrado',
           timestampCierre: nowTs,
-          fechaCierre: dateNow,
-          horaCierre: timeNow,
           _metaTimestamp: nowTs
         }, { merge: true }).catch(() => {});
       }
@@ -2113,12 +2114,9 @@ export const useDispatchStore = create((set, get) => ({
         estado: 'cerrado',
         idInicio: '',
         idRegistro: '',
-        cargo: '',
         nombreBombero: '',
-        operador: '',
         timestampCierre: nowTs,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { estado: nowTs, timestampCierre: nowTs }
+        _metaTimestamp: nowTs
       }, { merge: true });
 
       return { success: true };
@@ -2213,7 +2211,6 @@ export const useDispatchStore = create((set, get) => ({
         informeObac: '',
         sirena: Boolean(sirenEnabled),
         visibleMovil: true,
-        pushSent: false,
         _metaTimestamp: nowTs
       };
 
@@ -2234,7 +2231,6 @@ export const useDispatchStore = create((set, get) => ({
           markLocalWrite('accesos', 'central', nowTs);
           await setDoc(doc(db, 'accesos', 'central'), {
             puerta: true,
-            timestampPuerta: nowTs,
             _metaTimestamp: nowTs
           }, { merge: true });
         } catch (_) {}
@@ -2265,8 +2261,7 @@ export const useDispatchStore = create((set, get) => ({
         finalizadoAt: nowTs,
         operadorFinal: String(user?.nombreBombero || get().centralOperatorName || 'OPERADOR CENTRAL'),
         visibleMovil: false,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { estado: nowTs, finalizadoAt: nowTs, visibleMovil: nowTs }
+        _metaTimestamp: nowTs
       });
     } catch (_) {}
   },
@@ -2285,8 +2280,7 @@ export const useDispatchStore = create((set, get) => ({
       const cleanLoc = String(locationText || '').trim().toUpperCase();
       const updateObj = {
         direccion: cleanLoc,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { direccion: nowTs }
+        _metaTimestamp: nowTs
       };
       if (coords && typeof coords.lat === 'number' && typeof coords.lng === 'number' && !isNaN(coords.lat) && !isNaN(coords.lng)) {
         updateObj.geo = {
@@ -2295,7 +2289,6 @@ export const useDispatchStore = create((set, get) => ({
           accuracy: 10,
           origen: isAlertanteGeo ? 'GPS_ALERTANTE' : 'MANUAL_CAD'
         };
-        updateObj._fieldTimestamps.geo = nowTs;
       }
       markLocalWrite('despachos', String(draftId), nowTs);
       await updateDoc(doc(db, 'despachos', String(draftId)), updateObj);
@@ -2386,7 +2379,6 @@ export const useDispatchStore = create((set, get) => ({
         },
         companias: Array.from(companiasSet),
         unidades: unidadesMap,
-        carros: selectedVehicles,
         estado: 'activa',
         createdAt: nowTs,
         h67: null,
@@ -2397,7 +2389,6 @@ export const useDispatchStore = create((set, get) => ({
         informeObac: '',
         sirena: sirenEnabled,
         visibleMovil: true,
-        pushSent: false,
         _metaTimestamp: nowTs
       };
 
@@ -2435,8 +2426,7 @@ export const useDispatchStore = create((set, get) => ({
           markLocalWrite('vehiculos', carroId, nowTs);
           return setDoc(doc(db, 'vehiculos', carroId), {
             enServicio: idServicio,
-            _metaTimestamp: nowTs,
-            _fieldTimestamps: { enServicio: nowTs }
+            _metaTimestamp: nowTs
           }, { merge: true }).catch(() => {});
         })
       );
@@ -2487,8 +2477,7 @@ export const useDispatchStore = create((set, get) => ({
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetId), {
         conforme: newConforme,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { conforme: nowTs }
+        _metaTimestamp: nowTs
       });
     } catch (e) {}
   },
@@ -2535,9 +2524,7 @@ export const useDispatchStore = create((set, get) => ({
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetId), {
         fijar: newFijar,
-        fijada: newFijada,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { fijar: nowTs, fijada: nowTs }
+        _metaTimestamp: nowTs
       });
     } catch (e) {}
   },
@@ -2608,8 +2595,7 @@ export const useDispatchStore = create((set, get) => ({
       await updateDoc(doc(db, 'alertas', targetAlert.idAlerta), {
         mensajeAlerta: finalChatString,
         conforme: senderRadial,
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { mensajeAlerta: nowTs, conforme: nowTs }
+        _metaTimestamp: nowTs
       });
     } catch (e) {
       console.warn('Error enviando mensaje de chat:', e);
@@ -2798,8 +2784,7 @@ export const useDispatchStore = create((set, get) => ({
       await ensureFirebaseAuth();
       await updateDoc(doc(db, 'alertas', targetId), {
         duracion: '',
-        _metaTimestamp: nowTs,
-        _fieldTimestamps: { duracion: nowTs }
+        _metaTimestamp: nowTs
       }).catch(async () => {
         await deleteDoc(doc(db, 'alertas', targetId));
       });
