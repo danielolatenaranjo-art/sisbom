@@ -810,7 +810,7 @@ object NotificationHelper {
         //   NO debe sonar el audio (salvo timbre de puerta o chat), SOLO debe vibrar fuerte y mostrar la pantalla sobre pantalla.
         val isUserLookingAtApp = MainActivity.isAppInForeground
         val shouldTriggerFeedback = !skipSoundBecauseAlreadyPlayed && !isReadOnlyUser
-        val shouldPlayAudioTone = shouldTriggerFeedback && (!isUserLookingAtApp || doorRequestId != null || chatId != null)
+        val shouldPlayAudioTone = shouldTriggerFeedback && (!isUserLookingAtApp || doorRequestId != null || chatId != null || alertGrade == 1)
 
         if (shouldTriggerFeedback) {
             try {
@@ -1199,13 +1199,52 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         }
 
         if (type == "STATUS_CHANGE") {
-            val newStatus = data["newStatus"]
-            if (!newStatus.isNullOrBlank()) {
-                val isUnavailable = (newStatus.trim().uppercase(Locale.ROOT) != "0-9")
-                prefs.edit()
-                    .putString("USER_ESTADO", newStatus.trim())
+            val newStatus = (data["newStatus"] ?: "").trim()
+            if (newStatus.isNotEmpty()) {
+                val isUnavailable = (newStatus.uppercase(Locale.ROOT) != "0-9")
+                val editor = prefs.edit()
+                    .putString("USER_ESTADO", newStatus)
                     .putString("IS_UNAVAILABLE", isUnavailable.toString())
+
+                val cachedUser = prefs.getString("fire_user", null)
+                if (!cachedUser.isNullOrBlank()) {
+                    try {
+                        val json = JSONObject(cachedUser)
+                        json.put("estado", newStatus)
+                        editor.putString("fire_user", json.toString())
+                    } catch (_: Exception) {}
+                }
+                editor.apply()
+            }
+
+            val lastSelfStatus = prefs.getString("LAST_SELF_STATUS_CHANGE", "") ?: ""
+            val lastSelfTime = prefs.getLong("LAST_SELF_STATUS_TIME", 0L)
+            val nowMs = System.currentTimeMillis()
+            val isSelfChange = newStatus.isNotEmpty() &&
+                newStatus.equals(lastSelfStatus.trim(), ignoreCase = true) &&
+                (nowMs - lastSelfTime < 20_000L)
+
+            val lastNotifStatus = prefs.getString("LAST_NOTIFIED_STATUS_CHANGE", "") ?: ""
+            val lastNotifTime = prefs.getLong("LAST_NOTIFIED_STATUS_TIME", 0L)
+            val alreadyNotified = newStatus.isNotEmpty() &&
+                newStatus.equals(lastNotifStatus.trim(), ignoreCase = true) &&
+                (nowMs - lastNotifTime < 10_000L)
+
+            if (!isSelfChange && !alreadyNotified) {
+                prefs.edit()
+                    .putString("LAST_NOTIFIED_STATUS_CHANGE", newStatus.uppercase(Locale.ROOT))
+                    .putLong("LAST_NOTIFIED_STATUS_TIME", nowMs)
                     .apply()
+                val statusTitle = remoteMessage.notification?.title ?: data["title"] ?: "ESTADO ACTUALIZADO"
+                val statusBody = remoteMessage.notification?.body ?: data["body"]
+                    ?: "Tu estado ha sido cambiado a $newStatus por la Central"
+                NotificationHelper.sendNotification(
+                    context = applicationContext,
+                    title = statusTitle,
+                    body = statusBody,
+                    isCritical = false,
+                    alertGrade = 1
+                )
             }
             return
         }
@@ -1500,6 +1539,7 @@ class DispatchForegroundService : Service() {
 
         if (!userId.isNullOrBlank()) {
             userDocListener?.remove()
+            var isFirstUserSnapshot = true
             userDocListener = db.collection("personal").document(userId)
                 .addSnapshotListener { doc, err ->
                     try {
@@ -1518,7 +1558,9 @@ class DispatchForegroundService : Service() {
                         val rango = doc.safeString("rango").ifEmpty { doc.safeString("cargo") }
                         val estadoEspecial = doc.safeString("estadoEspecial")
 
-                        val isUnavailable = (estado.trim().uppercase(Locale.ROOT) != "0-9")
+                        val prevEstado = (prefs.getString("USER_ESTADO", "") ?: "").trim().uppercase(Locale.ROOT)
+                        val cleanNewEstado = estado.trim().uppercase(Locale.ROOT)
+                        val isUnavailable = (cleanNewEstado != "0-9")
                         val editPrefs = prefs.edit()
                             .putString("USER_ESTADO", estado)
                             .putString("IS_UNAVAILABLE", isUnavailable.toString())
@@ -1531,6 +1573,32 @@ class DispatchForegroundService : Service() {
                         }
                         editPrefs.apply()
                         NotificationHelper.ensureChannels(applicationContext)
+
+                        if (!isFirstUserSnapshot && prevEstado.isNotEmpty() && cleanNewEstado.isNotEmpty() && prevEstado != cleanNewEstado) {
+                            val nowMs = System.currentTimeMillis()
+                            val lastSelfStatus = (prefs.getString("LAST_SELF_STATUS_CHANGE", "") ?: "").trim().uppercase(Locale.ROOT)
+                            val lastSelfTime = prefs.getLong("LAST_SELF_STATUS_TIME", 0L)
+                            val isSelfChange = (cleanNewEstado == lastSelfStatus) && (nowMs - lastSelfTime < 20_000L)
+
+                            val lastNotifStatus = (prefs.getString("LAST_NOTIFIED_STATUS_CHANGE", "") ?: "").trim().uppercase(Locale.ROOT)
+                            val lastNotifTime = prefs.getLong("LAST_NOTIFIED_STATUS_TIME", 0L)
+                            val alreadyNotified = (cleanNewEstado == lastNotifStatus) && (nowMs - lastNotifTime < 10_000L)
+
+                            if (!isSelfChange && !alreadyNotified && !prefs.getBoolean("MODO_AVION", false) && !prefs.getBoolean("SILENCIO_ABSOLUTO", false)) {
+                                prefs.edit()
+                                    .putString("LAST_NOTIFIED_STATUS_CHANGE", cleanNewEstado)
+                                    .putLong("LAST_NOTIFIED_STATUS_TIME", nowMs)
+                                    .apply()
+                                NotificationHelper.sendNotification(
+                                    context = applicationContext,
+                                    title = "ESTADO ACTUALIZADO",
+                                    body = "Tu estado ha sido cambiado a $cleanNewEstado por la Central",
+                                    isCritical = false,
+                                    alertGrade = 1
+                                )
+                            }
+                        }
+                        isFirstUserSnapshot = false
 
                         val isDispatchService = enServicio.isNotEmpty() &&
                             enServicio != "0" &&
@@ -3176,6 +3244,8 @@ class MainActivity : ComponentActivity() {
             if (active) {
                 editor.putString("USER_ESTADO", "0-8")
                 editor.putString("IS_UNAVAILABLE", "true")
+                editor.putString("LAST_SELF_STATUS_CHANGE", "0-8")
+                editor.putLong("LAST_SELF_STATUS_TIME", System.currentTimeMillis())
             }
             editor.apply()
             if (active) {
@@ -3185,6 +3255,17 @@ class MainActivity : ComponentActivity() {
                     nm.cancelAll()
                 } catch (_: Exception) {}
             }
+        }
+
+        @JavascriptInterface
+        fun markSelfStatusChange(newStatus: String?) {
+            val clean = newStatus?.trim() ?: return
+            if (clean.isEmpty()) return
+            val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putString("LAST_SELF_STATUS_CHANGE", clean)
+                .putLong("LAST_SELF_STATUS_TIME", System.currentTimeMillis())
+                .apply()
         }
 
         @JavascriptInterface

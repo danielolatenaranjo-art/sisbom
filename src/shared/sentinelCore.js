@@ -481,6 +481,29 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
 
   const localTs = getEntityMaxTimestamp(localUnit);
   const remoteTs = getEntityMaxTimestamp(remoteUnit);
+
+  // Si ambos tienen idSalida distintos, pertenecen a dos salidas diferentes del mismo carro:
+  // nunca mezclar sus tiempos monotónicamente; prevalece íntegramente la salida más reciente.
+  const localSalidaId = String(localUnit.idSalida || '').trim();
+  const remoteSalidaId = String(remoteUnit.idSalida || '').trim();
+  if (localSalidaId && remoteSalidaId && localSalidaId !== remoteSalidaId) {
+    return localTs >= remoteTs ? localUnit : remoteUnit;
+  }
+
+  // Si una de las unidades es una nueva salida pendiente de 6-0 (pending_departure sin idSalida ni epoch60)
+  // y la otra ya estaba cerrada (6-8) o pertenece a una salida previa con timestamp menor, no arrastrar estados viejos.
+  const isLocalFreshPending = !localSalidaId && !localUnit.epoch60 && !localUnit.departureTime && (!localUnit.status || localUnit.status === 'pending_departure');
+  const isRemoteFreshPending = !remoteSalidaId && !remoteUnit.epoch60 && !remoteUnit.departureTime && (!remoteUnit.status || remoteUnit.status === 'pending_departure');
+  const isLocalClosed = Boolean(localUnit.epoch68 || localUnit.time68 || localUnit.status === '6-8' || localUnit.status === 'disponible');
+  const isRemoteClosed = Boolean(remoteUnit.epoch68 || remoteUnit.time68 || remoteUnit.status === '6-8' || remoteUnit.status === 'disponible');
+
+  if (isLocalFreshPending && (isRemoteClosed || (localTs > 0 && localTs > remoteTs))) {
+    return localUnit;
+  }
+  if (isRemoteFreshPending && (isLocalClosed || (remoteTs > 0 && remoteTs >= localTs))) {
+    return remoteUnit;
+  }
+
   const localFieldTs = localUnit._fieldTimestamps || {};
   const remoteFieldTs = remoteUnit._fieldTimestamps || {};
 

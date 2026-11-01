@@ -654,6 +654,15 @@ export const useAuthStore = create((set, get) => ({
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
       try {
+        if (typeof window !== 'undefined') {
+          window.AndroidApp?.markSelfStatusChange?.(String(newStatus));
+          window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
+            action: 'markSelfStatusChange',
+            status: String(newStatus)
+          });
+        }
+      } catch (_) {}
+      try {
         const serialized = JSON.stringify(updatedUser);
         syncNativeStorageKey(USER_SESSION_KEY, serialized);
         await AsyncStorage.setItem(USER_SESSION_KEY, serialized);

@@ -376,30 +376,47 @@ exports.onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
   await Promise.all(promises);
 });
 
-// 4. SINCRONIZACIÓN DE ESTADO DE PERSONAL (0-9 / 0-8)
+// 4. SINCRONIZACIÓN DE ESTADO DE PERSONAL (0-9 / 0-8) DESDE LA CENTRAL (CON VIBRACIÓN Y NOTIFICACIÓN VISUAL)
 exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event) => {
   const before = event.data.before.data() || {};
   const after = event.data.after.data() || {};
-  const userId = event.params.userId;
+  const userId = String(after.idRegistro || event.params.userId || "").trim();
+  if (!userId) return;
 
-  const estadoBefore = before.estado || (before.disponible ? "0-9" : "0-8");
-  const estadoAfter = after.estado || (after.disponible ? "0-9" : "0-8");
+  const estadoBefore = String(before.estado || (before.disponible ? "0-9" : "0-8")).trim().toUpperCase();
+  const estadoAfter = String(after.estado || (after.disponible ? "0-9" : "0-8")).trim().toUpperCase();
   if (estadoBefore === estadoAfter) return;
 
+  const safeTopic = userId.replace(/\s+/g, "");
+  const titleText = "ESTADO ACTUALIZADO";
+  const bodyText = `Tu estado ha sido cambiado a ${estadoAfter} por la Central`;
+
   await admin.messaging().send({
-    topic: `usuario_${userId}`,
+    topic: `usuario_${safeTopic}`,
     data: {
+      title: titleText,
+      body: bodyText,
       type: "STATUS_CHANGE",
-      newStatus: String(estadoAfter)
+      newStatus: String(estadoAfter),
+      idRegistro: String(userId)
     },
-    android: {priority: "high"},
+    android: {
+      priority: "high",
+      ttl: 300000
+    },
     apns: {
       headers: {
-        "apns-priority": "5",
-        "apns-push-type": "background"
+        "apns-priority": "10",
+        "apns-push-type": "alert"
       },
       payload: {
         aps: {
+          alert: {
+            title: titleText,
+            body: bodyText
+          },
+          sound: "default",
+          category: "GENERAL_ALERT",
           "content-available": 1
         }
       }

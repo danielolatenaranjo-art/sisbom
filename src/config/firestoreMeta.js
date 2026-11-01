@@ -11,15 +11,38 @@ import {
   writeBatch as fsWriteBatch
 } from 'firebase/firestore';
 
+const stripUndefinedDeep = (val) => {
+  if (val === undefined) return undefined;
+  if (val === null || typeof val !== 'object') return val;
+  if (Array.isArray(val)) {
+    return val.map((item) => {
+      const cleaned = stripUndefinedDeep(item);
+      return cleaned === undefined ? null : cleaned;
+    });
+  }
+  const proto = Object.getPrototypeOf(val);
+  if (proto !== null && proto !== Object.prototype) {
+    return val;
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(val)) {
+    if (v !== undefined) {
+      out[k] = stripUndefinedDeep(v);
+    }
+  }
+  return out;
+};
+
 export const withFirestoreMeta = (data) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
-  const existingTs = Number(data._metaTimestamp);
+  const cleaned = stripUndefinedDeep(data);
+  const existingTs = Number(cleaned._metaTimestamp);
   const finalTs = (!isNaN(existingTs) && existingTs > 0) ? existingTs : Date.now();
   const next = {
-    ...data,
+    ...cleaned,
     _metaTimestamp: finalTs
   };
-  if (data._allowFinalizedEdit) {
+  if (cleaned._allowFinalizedEdit) {
     next._allowFinalizedEdit = finalTs;
   }
   return next;

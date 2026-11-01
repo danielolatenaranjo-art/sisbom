@@ -391,8 +391,10 @@ final class IOSRealtimeService {
     private var centralListener: ListenerRegistration?
     private var vehiculosListener: ListenerRegistration?
     private var alertasListener: ListenerRegistration?
+    private var personalListener: ListenerRegistration?
     private var activeProjectId: String?
     private var isFirstDispatchSnapshot = true
+    private var isFirstPersonalSnapshot = true
     private var knownDispatchIds = Set<String>()
     private var lastDispatchClaves: [String: String] = [:]
     private var lastUnitConductorReq: [String: Int64] = [:]
@@ -401,6 +403,7 @@ final class IOSRealtimeService {
     private var latestDespachosPayload: [[String: Any]]?
     private var latestVehiculosPayload: [[String: Any]]?
     private var latestAlertasPayload: [[String: Any]]?
+    private var latestPersonalPayload: [[String: Any]]?
 
     private init() {}
 
@@ -461,6 +464,8 @@ final class IOSRealtimeService {
         vehiculosListener = nil
         alertasListener?.remove()
         alertasListener = nil
+        personalListener?.remove()
+        personalListener = nil
         activeProjectId = nil
     }
 
@@ -480,6 +485,9 @@ final class IOSRealtimeService {
             if let a = latestAlertasPayload {
                 pushSnapshotToWebView(collection: "alertas", payload: a)
             }
+            if let p = latestPersonalPayload {
+                pushSnapshotToWebView(collection: "personal", payload: p)
+            }
             return
         }
         startListeners()
@@ -490,6 +498,7 @@ final class IOSRealtimeService {
         guard AppDelegate.currentTenantProjectId != nil || FirebaseApp.app() != nil else { return }
         activeProjectId = AppDelegate.currentTenantProjectId ?? FirebaseApp.app()?.options.projectID
         isFirstDispatchSnapshot = true
+        isFirstPersonalSnapshot = true
         let db = AppDelegate.activeFirestore()
 
         // 1. Listener nativo de accesos/central
@@ -782,6 +791,65 @@ final class IOSRealtimeService {
             }
             self.latestAlertasPayload = rawDocsArray
             self.pushSnapshotToWebView(collection: "alertas", payload: rawDocsArray)
+        }
+
+        // 5. Listener nativo de personal (sincronización de estados y aviso si la Central cambia el estado del usuario)
+        personalListener = db.collection("personal").addSnapshotListener { [weak self] snap, error in
+            guard let self = self, let documents = snap?.documents, error == nil else { return }
+            let defaults = UserDefaults.standard
+            let myId = (defaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var rawDocsArray: [[String: Any]] = []
+
+            for doc in documents {
+                let docId = doc.documentID
+                let cleanData = self.sanitizeDoc(doc.data())
+                rawDocsArray.append([
+                    "id": docId,
+                    "data": cleanData,
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ])
+
+                let idReg = ((cleanData["idRegistro"] as? String) ?? docId).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !myId.isEmpty && (docId == myId || idReg == myId) {
+                    let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let newEst = (!rawEst.isEmpty ? rawEst : (((cleanData["disponible"] as? Bool) == true) ? "0-9" : "0-8")).uppercased()
+                    let oldEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+
+                    if !newEst.isEmpty && newEst != oldEst {
+                        defaults.set(newEst, forKey: "USER_ESTADO")
+                        IOSSoundPlayer.shared.updateBackgroundKeepAlive()
+                        IOSLocationService.shared.updateStandbyKeepAlive()
+
+                        if !self.isFirstPersonalSnapshot {
+                            let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                            let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
+                            let nowMs = Date().timeIntervalSince1970 * 1000.0
+                            let isSelfChange = (newEst == lastSelfStatus) && ((nowMs - lastSelfTime) < 20_000.0)
+
+                            let lastNotifStatus = (defaults.string(forKey: "LAST_NOTIFIED_STATUS_CHANGE") ?? "").uppercased()
+                            let lastNotifTime = defaults.double(forKey: "LAST_NOTIFIED_STATUS_TIME")
+                            let alreadyNotified = (newEst == lastNotifStatus) && ((nowMs - lastNotifTime) < 10_000.0)
+
+                            if !isSelfChange && !alreadyNotified && !defaults.bool(forKey: "MODO_AVION") {
+                                defaults.set(newEst, forKey: "LAST_NOTIFIED_STATUS_CHANGE")
+                                defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
+                                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                                self.postLocalBanner(
+                                    id: "status_\(Int(nowMs))",
+                                    title: "ESTADO ACTUALIZADO",
+                                    body: "Tu estado ha sido cambiado a \(newEst) por la Central",
+                                    soundName: nil,
+                                    userInfo: ["type": "STATUS_CHANGE", "newStatus": newEst]
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            self.isFirstPersonalSnapshot = false
+            self.latestPersonalPayload = rawDocsArray
+            self.pushSnapshotToWebView(collection: "personal", payload: rawDocsArray)
         }
     }
 
@@ -1304,6 +1372,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let body = (userInfo["body"] as? String) ?? ""
         let is1210or66 = title.contains("12-10") || title.contains("6-6") || body.contains("12-10") || body.contains("6-6")
 
+        if type == "STATUS_CHANGE" {
+            let newStatus = ((userInfo["newStatus"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !newStatus.isEmpty {
+                defaults.set(newStatus, forKey: "USER_ESTADO")
+                IOSSoundPlayer.shared.updateBackgroundKeepAlive()
+                IOSLocationService.shared.updateStandbyKeepAlive()
+
+                let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
+                let nowMs = Date().timeIntervalSince1970 * 1000.0
+                let isSelfChange = (newStatus == lastSelfStatus) && ((nowMs - lastSelfTime) < 20_000.0)
+                if !isSelfChange {
+                    defaults.set(newStatus, forKey: "LAST_NOTIFIED_STATUS_CHANGE")
+                    defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
+                    AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                }
+            }
+            completionHandler(.newData)
+            return
+        }
+
         // Si el usuario es el Operador Central activo, NO hacer sonar el teléfono ni levantar alerta de asistencia en despachos
         if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && (type == "DISPATCH" || type == "DISPATCH_UPDATE" || type.isEmpty) {
             if !payloadId.isEmpty {
@@ -1370,6 +1459,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         if defaults.bool(forKey: "MODO_AVION") {
             completionHandler([])
+            return
+        }
+
+        if type == "STATUS_CHANGE" {
+            let newStatus = ((userInfo["newStatus"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !newStatus.isEmpty {
+                defaults.set(newStatus, forKey: "USER_ESTADO")
+                IOSSoundPlayer.shared.updateBackgroundKeepAlive()
+                IOSLocationService.shared.updateStandbyKeepAlive()
+            }
+            let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
+            let nowMs = Date().timeIntervalSince1970 * 1000.0
+            let isSelfChange = !newStatus.isEmpty && (newStatus == lastSelfStatus) && ((nowMs - lastSelfTime) < 20_000.0)
+            if isSelfChange {
+                completionHandler([])
+            } else {
+                defaults.set(newStatus, forKey: "LAST_NOTIFIED_STATUS_CHANGE")
+                defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
+                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                completionHandler([.banner, .list, .sound])
+            }
             return
         }
 
@@ -1626,6 +1737,8 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             let active = (dict["active"] as? Bool) ?? false
             defaults.set(active, forKey: "MODO_AVION")
             if active {
+                defaults.set("0-8", forKey: "LAST_SELF_STATUS_CHANGE")
+                defaults.set(Date().timeIntervalSince1970 * 1000.0, forKey: "LAST_SELF_STATUS_TIME")
                 IOSSoundPlayer.shared.stop()
                 IOSSoundPlayer.shared.stopBackgroundKeepAlive()
                 IOSLocationService.shared.updateStandbyKeepAlive()
@@ -1634,6 +1747,12 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 IOSLocationService.shared.updateStandbyKeepAlive()
             }
             AppDelegate.scheduleDailyReminders()
+        case "markSelfStatusChange":
+            let st = AppDelegate.stringFromAny(dict["status"]).uppercased()
+            if !st.isEmpty {
+                defaults.set(st, forKey: "LAST_SELF_STATUS_CHANGE")
+                defaults.set(Date().timeIntervalSince1970 * 1000.0, forKey: "LAST_SELF_STATUS_TIME")
+            }
         case "acknowledgeDispatch":
             let dispatchId = AppDelegate.stringFromAny(dict["dispatchId"])
             let declined = (dict["declined"] as? Bool) ?? false

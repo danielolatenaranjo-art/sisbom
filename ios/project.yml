@@ -54,7 +54,7 @@ targets:
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "3.0.3"
-        CFBundleVersion: "3010"
+        CFBundleVersion: "3011"
         UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true
