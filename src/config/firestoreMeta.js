@@ -14,10 +14,15 @@ import {
 export const withFirestoreMeta = (data) => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
   const existingTs = Number(data._metaTimestamp);
-  return {
+  const finalTs = (!isNaN(existingTs) && existingTs > 0) ? existingTs : Date.now();
+  const next = {
     ...data,
-    _metaTimestamp: (!isNaN(existingTs) && existingTs > 0) ? existingTs : Date.now()
+    _metaTimestamp: finalTs
   };
+  if (data._allowFinalizedEdit) {
+    next._allowFinalizedEdit = finalTs;
+  }
+  return next;
 };
 
 const withMeta = withFirestoreMeta;

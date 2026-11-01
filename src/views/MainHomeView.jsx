@@ -723,6 +723,10 @@ export const MainHomeView = ({ onLogout }) => {
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onNativeBack = () => {
+      if (fullscreenDispatchId) {
+        setFullscreenDispatchId(null);
+        return;
+      }
       if (isSentinelLinkModalOpen) {
         setIsSentinelLinkModalOpen(false);
         return;
@@ -772,6 +776,7 @@ export const MainHomeView = ({ onLogout }) => {
       window.removeEventListener('sentinelBackButton', onNativeBack);
     };
   }, [
+    fullscreenDispatchId,
     isSentinelLinkModalOpen,
     pendingCadKey,
     selectedAttendanceModal,

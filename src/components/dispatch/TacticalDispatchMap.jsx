@@ -338,6 +338,13 @@ export const TacticalDispatchMap = ({
       }
     } catch (_) {}
 
+    if (Platform.OS === 'web') {
+      try {
+        window.open(webUrl, '_blank', 'noopener,noreferrer');
+        return;
+      } catch (_) {}
+    }
+
     Linking.openURL(webUrl).catch(() => {});
   };
 

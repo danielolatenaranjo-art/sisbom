@@ -35,10 +35,12 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.Toast
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
@@ -2487,26 +2489,6 @@ class MainActivity : ComponentActivity() {
                     ),
                     SetOptions.merge()
                 )
-                db.collection("fcm_tokens").whereEqualTo("userId", userId).get()
-                    .addOnSuccessListener { snap ->
-                        try {
-                            for (doc in snap.documents) {
-                                if (doc.id != token) {
-                                    doc.reference.delete()
-                                }
-                            }
-                        } catch (_: Exception) {}
-                    }
-                db.collection("fcm_tokens").document(token).set(
-                    mapOf(
-                        "token" to token,
-                        "platform" to "android",
-                        "userId" to userId,
-                        "topics" to topics,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    ),
-                    SetOptions.merge()
-                )
             }
 
             if (!tokenOverride.isNullOrBlank()) {
@@ -2681,6 +2663,53 @@ class MainActivity : ComponentActivity() {
                     return handleExternalUri(Uri.parse(url))
                 }
 
+                override fun onReceivedError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    error: WebResourceError?
+                ) {
+                    val uri = request?.url
+                    if (uri != null) {
+                        val scheme = (uri.scheme ?: "").lowercase()
+                        val host = (uri.host ?: "").lowercase()
+                        if ((scheme != "https" && scheme != "http") || host != "appassets.androidplatform.net") {
+                            handleExternalUri(uri)
+                            if (request.isForMainFrame) {
+                                view?.stopLoading()
+                                if (view?.canGoBack() == true) {
+                                    view.goBack()
+                                } else {
+                                    view?.loadUrl("https://appassets.androidplatform.net/index.html")
+                                }
+                            }
+                            return
+                        }
+                    }
+                    super.onReceivedError(view, request, error)
+                }
+
+                @Deprecated("Deprecated in Java")
+                override fun onReceivedError(
+                    view: WebView?,
+                    errorCode: Int,
+                    description: String?,
+                    failingUrl: String?
+                ) {
+                    if (!failingUrl.isNullOrBlank() && !failingUrl.startsWith("https://appassets.androidplatform.net")) {
+                        try {
+                            handleExternalUri(Uri.parse(failingUrl))
+                        } catch (_: Exception) {}
+                        view?.stopLoading()
+                        if (view?.canGoBack() == true) {
+                            view.goBack()
+                        } else {
+                            view?.loadUrl("https://appassets.androidplatform.net/index.html")
+                        }
+                        return
+                    }
+                    super.onReceivedError(view, errorCode, description, failingUrl)
+                }
+
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     dispatchPendingIntentToWebView()
@@ -2714,8 +2743,20 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 val view = webView
-                if (view != null && view.canGoBack()) {
-                    view.goBack()
+                if (view != null) {
+                    val currentUrl = view.url ?: ""
+                    if (currentUrl.isNotBlank() && !currentUrl.startsWith("https://appassets.androidplatform.net")) {
+                        if (view.canGoBack()) {
+                            view.goBack()
+                        } else {
+                            view.loadUrl("https://appassets.androidplatform.net/index.html")
+                        }
+                        return
+                    }
+                    view.evaluateJavascript(
+                        "window.dispatchEvent(new CustomEvent('sentinelBackButton'));",
+                        null
+                    )
                 } else {
                     moveTaskToBack(true)
                 }
@@ -3419,6 +3460,25 @@ class MainActivity : ComponentActivity() {
             runOnUiThread {
                 try {
                     handleExternalUri(Uri.parse(url.trim()))
+                } catch (_: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun minimizeApp() {
+            runOnUiThread {
+                try {
+                    moveTaskToBack(true)
+                } catch (_: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun showToast(message: String?) {
+            if (message.isNullOrBlank()) return
+            runOnUiThread {
+                try {
+                    Toast.makeText(context, message.trim(), Toast.LENGTH_SHORT).show()
                 } catch (_: Exception) {}
             }
         }

@@ -339,7 +339,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     func stop() {
         audioPlayer?.stop()
         audioPlayer = nil
-        updateBackgroundKeepAlive()
     }
 
     func vibrateEmergency() {
@@ -912,15 +911,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             if FirebaseApp.app(name: appName) == nil {
                 FirebaseApp.configure(name: appName, options: options)
             }
-            // También reconfigurar la app por defecto para que Messaging.messaging() apunte al proyecto del tenant
-            FirebaseApp.app()?.delete { _ in
-                DispatchQueue.main.async {
-                    if FirebaseApp.app() == nil {
-                        FirebaseApp.configure(options: options)
-                    }
-                    finalizeTenantSetup()
-                }
-            }
+            finalizeTenantSetup()
         } else {
             finalizeTenantSetup()
         }
@@ -1280,14 +1271,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 "platform": "ios",
                 "_metaTimestamp": nowMs
             ], merge: true)
-
-            db.collection("fcm_tokens").document(token).setData([
-                "token": token,
-                "platform": "ios",
-                "userId": userId,
-                "topics": topics,
-                "updatedAt": FieldValue.serverTimestamp()
-            ], merge: true)
         }
 
         if let tok = tokenOverride, !tok.isEmpty {
@@ -1540,8 +1523,24 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         }
         let scheme = (url.scheme ?? "").lowercased()
         let host = (url.host ?? "").lowercased()
+
+        // Permitir siempre el esquema local de la app y recursos embebidos
+        if scheme == "sentinel" || scheme == "file" || scheme == "about" || scheme == "data" || scheme == "blob" {
+            decisionHandler(.allow)
+            return
+        }
+
+        // Permitir iframes secundarios (como el mapa táctico Leaflet y tiles de Google Maps dentro de srcDoc)
+        if let targetFrame = navigationAction.targetFrame, !targetFrame.isMainFrame {
+            if scheme == "https" || scheme == "http" {
+                decisionHandler(.allow)
+                return
+            }
+        }
+
         if scheme == "geo" || scheme == "tel" || scheme == "mailto" || scheme == "sms" || scheme == "whatsapp" || scheme == "maps" ||
-           host.contains("wa.me") || host.contains("whatsapp.com") || host.contains("maps.apple.com") || host.contains("google.com") {
+           host.contains("wa.me") || host.contains("whatsapp.com") || host.contains("maps.apple.com") ||
+           (host.contains("google.com") && url.path.contains("/maps")) {
             _ = Self.handleExternalUrl(url)
             decisionHandler(.cancel)
             return
@@ -1750,6 +1749,21 @@ final class SentinelLocalAssetSchemeHandler: NSObject, WKURLSchemeHandler {
             } else if let rootAlt = Bundle.main.resourceURL?.appendingPathComponent(relPath),
                       FileManager.default.fileExists(atPath: rootAlt.path) {
                 targetFile = rootAlt
+            }
+        }
+
+        // Si aún no existe el archivo JS con hash exacto (por ejemplo tras actualización de versión), buscar cualquier index-*.js en expo_bundle/static/js/web/
+        if !FileManager.default.fileExists(atPath: targetFile.path) && relPath.hasSuffix(".js") && (relPath.contains("expo_bundle/") || relPath.contains("_expo/")) {
+            let candidateDirs = [
+                wwwUrl.appendingPathComponent("expo_bundle/static/js/web", isDirectory: true),
+                wwwUrl.appendingPathComponent("_expo/static/js/web", isDirectory: true)
+            ]
+            for dir in candidateDirs {
+                if let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil),
+                   let firstJs = files.first(where: { $0.lastPathComponent.hasPrefix("index-") && $0.pathExtension.lowercased() == "js" }) {
+                    targetFile = firstJs
+                    break
+                }
             }
         }
 

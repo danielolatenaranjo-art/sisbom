@@ -1,0 +1,17 @@
+{
+  "name": "sentinel-one-v3-functions",
+  "description": "Cloud Functions for SENTINEL ONE V3 (Android FCM + iOS APNs Critical Alerts)",
+  "scripts": {
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "22"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^13.6.0",
+    "firebase-functions": "^7.0.0"
+  },
+  "private": true
+}

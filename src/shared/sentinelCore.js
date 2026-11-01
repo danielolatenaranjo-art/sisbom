@@ -409,6 +409,8 @@ const STATUS_PROGRESSION_ORDER = {
   'en trayecto': 1,
   en_lugar: 2,
   'en lugar': 2,
+  '6-15': 2.5,
+  '6-15 hospital': 2.5,
   retorno: 3,
   finalizado: 4,
   'en cuartel': 4,
@@ -482,16 +484,18 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
   const localFieldTs = localUnit._fieldTimestamps || {};
   const remoteFieldTs = remoteUnit._fieldTimestamps || {};
 
-  // Los timestamps progresivos de salida (6-0, 6-3, 6-9, 6-10, 6-8) son monotónicos:
+  // Los timestamps progresivos de salida (6-0, 6-3, 6-15, 6-9, 6-10, 6-8) son monotónicos:
   // si ya existe un timestamp en cualquiera de los dos, se conserva el mayor (nunca vuelve a null).
   const epoch60 = Math.max(Number(localUnit.epoch60 || 0), Number(remoteUnit.epoch60 || 0)) || null;
   const epoch63 = Math.max(Number(localUnit.epoch63 || 0), Number(remoteUnit.epoch63 || 0)) || null;
+  const epoch615 = Math.max(Number(localUnit.epoch615 || 0), Number(remoteUnit.epoch615 || 0)) || null;
   const epoch69 = Math.max(Number(localUnit.epoch69 || 0), Number(remoteUnit.epoch69 || 0)) || null;
   const epoch610 = Math.max(Number(localUnit.epoch610 || 0), Number(remoteUnit.epoch610 || 0)) || null;
   const epoch68 = Math.max(Number(localUnit.epoch68 || 0), Number(remoteUnit.epoch68 || 0)) || null;
 
   const departureTime = formatEpochToHHMM(epoch60) || localUnit.departureTime || remoteUnit.departureTime || '';
   const arrivalTime = formatEpochToHHMM(epoch63) || localUnit.arrivalTime || remoteUnit.arrivalTime || '';
+  const departureTime615 = formatEpochToHHMM(epoch615) || localUnit.departureTime615 || remoteUnit.departureTime615 || '';
   const time69 = formatEpochToHHMM(epoch69) || localUnit.time69 || remoteUnit.time69 || '';
   const time610 = formatEpochToHHMM(epoch610) || localUnit.time610 || remoteUnit.time610 || '';
   const time68 = formatEpochToHHMM(epoch68) || localUnit.time68 || remoteUnit.time68 || '';
@@ -503,6 +507,7 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
   if (epoch68 || time68) status = '6-8';
   else if (epoch610 || time610) status = 'finalizado';
   else if (epoch69 || time69) status = 'retorno';
+  else if ((epoch615 || departureTime615) && (!epoch63 || !epoch615 || epoch615 >= epoch63)) status = '6-15';
   else if (epoch63 || arrivalTime) status = 'en_lugar';
   else if (epoch60 || departureTime) status = 'en_trayecto';
 
@@ -549,14 +554,17 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
     kmVal: pickField('kmVal') || '',
     departureTime,
     arrivalTime,
+    departureTime615,
     time69,
     time610,
     time68,
     epoch60,
     epoch63,
+    epoch615,
     epoch69,
     epoch610,
     epoch68,
+    is615: status === '6-15' || Boolean((epoch615 || departureTime615) && !epoch69 && !time69 && !epoch610 && !time610 && !epoch68 && !time68),
     solicitudConductorTimestamp: Math.max(
       Number(localUnit.solicitudConductorTimestamp || 0),
       Number(remoteUnit.solicitudConductorTimestamp || 0)
@@ -694,6 +702,7 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
 
   const hora60 = formatEpochToHHMM(h60) || String(raw.hora60 || '').replace(/['"]/g, '').trim();
   const hora63 = formatEpochToHHMM(h63) || String(raw.hora63 || '').replace(/['"]/g, '').trim();
+  const hora615 = formatEpochToHHMM(h615) || String(raw.hora615 || '').replace(/['"]/g, '').trim();
   const hora69 = formatEpochToHHMM(h69) || String(raw.hora69 || '').replace(/['"]/g, '').trim();
   const hora610 = formatEpochToHHMM(h610) || String(raw.hora610 || '').replace(/['"]/g, '').trim();
   const hora68 = formatEpochToHHMM(h68) || String(raw.hora68 || '').replace(/['"]/g, '').trim();
@@ -719,6 +728,9 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
   } else if (h69 || hora69) {
     unitStatus = 'retorno';
     if (!estadoMovil) estadoMovil = 'retorno';
+  } else if ((h615 || hora615) && (!h63 || !h615 || h615 >= h63)) {
+    unitStatus = '6-15';
+    if (!estadoMovil) estadoMovil = '6-15 hospital';
   } else if (h63 || hora63) {
     unitStatus = 'en_lugar';
     if (!estadoMovil) estadoMovil = 'en lugar';
@@ -759,6 +771,7 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
     observacion,
     hora60,
     hora63,
+    hora615,
     hora69,
     hora610,
     hora68,
@@ -783,6 +796,7 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
 
   const departureTime = b.hora60 || ex.departureTime || '';
   const arrivalTime = b.hora63 || ex.arrivalTime || '';
+  const departureTime615 = b.hora615 || formatEpochToHHMM(b.tiempos?.h615) || ex.departureTime615 || '';
   const time69 = b.hora69 || ex.time69 || '';
   const time610 = b.hora610 || ex.time610 || '';
   const time68 = b.hora68 || ex.time68 || '';
@@ -794,6 +808,8 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
     status = 'finalizado';
   } else if (time69 || b.tiempos?.h69) {
     status = 'retorno';
+  } else if ((departureTime615 || b.tiempos?.h615) && (!b.tiempos?.h63 || !b.tiempos?.h615 || b.tiempos.h615 >= b.tiempos.h63)) {
+    status = '6-15';
   } else if (arrivalTime || b.tiempos?.h63) {
     status = 'en_lugar';
   } else if (departureTime || b.tiempos?.h60) {
@@ -813,16 +829,17 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
     kmVal: b.kmLlegada ? String(b.kmLlegada) : '',
     departureTime,
     arrivalTime,
+    departureTime615,
     time69,
     time610,
     time68,
     epoch60: b.tiempos?.h60 || null,
     epoch63: b.tiempos?.h63 || null,
+    epoch615: b.tiempos?.h615 || ex.epoch615 || null,
     epoch69: b.tiempos?.h69 || null,
     epoch610: b.tiempos?.h610 || null,
     epoch68: b.tiempos?.h68 || null,
-    is615: Boolean(b.tiempos?.h615 || ex.is615),
-    departureTime615: formatEpochToHHMM(b.tiempos?.h615) || ex.departureTime615 || '',
+    is615: status === '6-15' || Boolean((b.tiempos?.h615 || ex.is615) && !time69 && !time610 && !time68),
     solicitudConductorTimestamp: meta.solicitudConductorTimestamp || ex.solicitudConductorTimestamp || null,
     solicitudPersonalTimestamp: meta.solicitudPersonalTimestamp || ex.solicitudPersonalTimestamp || null,
     _metaTimestamp: b._metaTimestamp || 0
@@ -865,7 +882,10 @@ export const CANONICAL_DISPATCH_KEYS = new Set([
   'obacServicio',
   'sirena',
   'visibleMovil',
-  'pushSent'
+  'pushSent',
+  '_allowFinalizedEdit',
+  '_metaTimestamp',
+  '_fieldTimestamps'
 ]);
 
 export function sanitizeCanonicalUnidadesMap(unidadesInput = {}, unitsArray = []) {
@@ -1039,6 +1059,7 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
   if (h68) estadoMovil = 'en cuartel';
   else if (h610) estadoMovil = 'en cuartel';
   else if (h69) estadoMovil = 'retorno';
+  else if (h615 && (!h63 || h615 >= h63)) estadoMovil = '6-15 hospital';
   else if (h63) estadoMovil = 'en lugar';
   else if (h60) estadoMovil = 'en trayecto';
 
@@ -2240,12 +2261,30 @@ export function formatCompanyLabel(compId, customName = '') {
  */
 export function normalizeFirefighterDoc(docId, raw = {}) {
   if (!raw || typeof raw !== 'object') return {};
-  const idRegistro = String(raw.idRegistro || raw.id || docId || '').trim();
-  const idRadial = String(raw.idRadial ?? raw.codigoRadial ?? idRegistro).trim().toUpperCase();
-  const nombreBombero = String(raw.nombreBombero || raw.nombreCompleto || raw.nombre || '').trim().toUpperCase();
-  const cargo = String(raw.cargo || 'VOLUNTARIO').trim().toUpperCase();
+  const getVal = (...keys) => {
+    for (const k of keys) {
+      if (raw[k] !== undefined && raw[k] !== null && String(raw[k]).trim() !== '') return raw[k];
+    }
+    return undefined;
+  };
 
-  let compania = parseInt(String(raw.compania ?? '').replace(/\D/g, ''), 10);
+  const idRegistro = String(getVal('idRegistro', 'IDREGISTRO', 'id') ?? docId ?? '').trim();
+  const idRadial = String(
+    getVal('idRadial', 'IDRADIAL', 'IdRadial', 'codigoRadial', 'numeroRadial', 'radio', 'RADIO') ?? idRegistro
+  )
+    .trim()
+    .toUpperCase();
+  const nombreBombero = String(
+    getVal('nombreBombero', 'NOMBREBOMBERO', 'nombreCompleto', 'nombre', 'NOMBRE') ||
+      `${raw.nombres || ''} ${raw.apellidos || ''}`
+  )
+    .trim()
+    .toUpperCase();
+  const cargo = String(getVal('cargo', 'CARGO', 'Cargo', 'rango', 'RANGO') || 'VOLUNTARIO')
+    .trim()
+    .toUpperCase();
+
+  let compania = parseInt(String(getVal('compania', 'COMPANIA', 'Compania', 'company') ?? '').replace(/\D/g, ''), 10);
   if (isNaN(compania) || compania <= 0) {
     const cargoMatch = cargo.match(/(\d+)\s*[°ªº]?\s*(?:C[IÍ]A|COMPA[ÑN][IÍ]A)/i);
     if (cargoMatch) {
@@ -2255,13 +2294,14 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     }
   }
 
-  const rawActivoStr = String(raw.activo ?? 'SI').trim().toUpperCase();
+  const rawActivoVal = getVal('activo', 'ACTIVO', 'Activo');
+  const rawActivoStr = String(rawActivoVal ?? 'SI').trim().toUpperCase();
   const isActivo =
-    raw.activo === undefined ||
-    raw.activo === null ||
-    raw.activo === '' ||
-    raw.activo === true ||
-    raw.activo === 1 ||
+    rawActivoVal === undefined ||
+    rawActivoVal === null ||
+    rawActivoVal === '' ||
+    rawActivoVal === true ||
+    rawActivoVal === 1 ||
     rawActivoStr === '1' ||
     rawActivoStr === 'SI' ||
     rawActivoStr === 'SÍ' ||
@@ -2269,7 +2309,32 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     rawActivoStr === 'TRUE' ||
     rawActivoStr === 'ACTIVO';
 
+  const rawCondVal = getVal('conductor', 'CONDUCTOR', 'Conductor', 'esConductor', 'ESCONDUCTOR');
+  const rawCondStr = String(rawCondVal ?? '').trim().toUpperCase();
+  const isConductor =
+    rawCondVal === true ||
+    rawCondVal === 1 ||
+    rawCondStr === '1' ||
+    rawCondStr === 'SI' ||
+    rawCondStr === 'SÍ' ||
+    rawCondStr === 'S' ||
+    rawCondStr === 'TRUE' ||
+    cargo.includes('CONDUCTOR') ||
+    cargo.includes('MAQUINISTA');
+
+  // Lectura de estado 100% idéntica a `PersonalView.jsx` de `SENTINEL CAD` (línea 124)
+  const rawState = String(getVal('estado', 'ESTADO', 'estadoBase', 'ESTADOBASE') || '0-9').trim().toUpperCase();
+  const normalizedEstado =
+    rawState === '1'
+      ? '0-9'
+      : rawState === '0'
+      ? '0-8'
+      : rawState;
+
+  const rawEnServicio = getVal('enServicio', 'ENSERVICIO', 'EnServicio');
+
   return {
+    ...raw,
     id: idRegistro,
     idRegistro,
     rut: String(raw.rut || '').trim(),
@@ -2282,9 +2347,10 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     cargo,
     ordenEnLista: Number(raw.ordenEnLista ?? raw.orden ?? 999) || 999,
     activo: isActivo,
-    conductor: Boolean(raw.conductor ?? raw.esConductor),
-    estado: String(raw.estado || '0-9').trim(),
-    enServicio: String(raw.enServicio ?? '0').trim(),
+    conductor: isConductor,
+    isConductor,
+    estado: normalizedEstado,
+    enServicio: String(rawEnServicio ?? '0').trim(),
     contrasena: String(raw.contrasena ?? raw.password ?? '').trim(),
     _metaTimestamp: Number(raw._metaTimestamp || 0)
   };
