@@ -107,6 +107,7 @@ export const TacticalDispatchMap = ({
   const { isDarkMode: isDark = true } = useAuthStore();
   const [, setNowTick] = useState(Date.now());
   const [geocodedCoords, setGeocodedCoords] = useState(null);
+  const [headerHeightPx, setHeaderHeightPx] = useState(106);
   const pulseScaleAnim = useRef(new Animated.Value(0.85)).current;
   const pulseAlphaAnim = useRef(new Animated.Value(0.3)).current;
 
@@ -318,11 +319,19 @@ export const TacticalDispatchMap = ({
   const hasPreinforme = rawPreinforme.length > 0 && !rawPreinforme.toLowerCase().includes('a la espera');
 
   const handleOpenExternalMaps = () => {
-    if (!hasValidGps) return;
-    const label = cleanLugar ? `${clave} - ${cleanLugar}` : `Emergencia ${clave}`;
-    const geoUrl = `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label)})`;
-    const iosMapsUrl = `http://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label)}`;
-    const webUrl = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    if (!hasValidGps && !cleanLugar) return;
+    const label = cleanLugar
+      ? `${clave}${dispatchComuna ? ` - ${cleanLugar}, ${dispatchComuna}` : ` - ${cleanLugar}`}`
+      : `Emergencia ${clave}`;
+    const geoUrl = hasValidGps
+      ? `geo:${lat},${lng}?q=${lat},${lng}(${encodeURIComponent(label)})`
+      : `geo:0,0?q=${encodeURIComponent(label)}`;
+    const iosMapsUrl = hasValidGps
+      ? `http://maps.apple.com/?ll=${lat},${lng}&q=${encodeURIComponent(label)}`
+      : `http://maps.apple.com/?q=${encodeURIComponent(label)}`;
+    const webUrl = hasValidGps
+      ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(label)}`;
 
     try {
       if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
@@ -349,6 +358,8 @@ export const TacticalDispatchMap = ({
   };
 
   // Exact OSMDroid / GoogleMapsRoadmap color filter from IncidentMapPreview in TabScreens.kt
+  // In card mode, center the marker inside the 180px visible map viewport (headerHeightPx + 90px from top)
+  const targetMarkerYPx = isFullScreen ? 0 : Math.round((headerHeightPx || 106) + 90);
   const mapHtml = `
     <!DOCTYPE html>
     <html lang="es" class="notranslate" translate="no">
@@ -404,9 +415,13 @@ export const TacticalDispatchMap = ({
     <body class="notranslate" translate="no">
       <div id="map"></div>
       <script>
+        const targetLat = ${lat};
+        const targetLng = ${lng};
+        const zoomLevel = 14.5;
+        const targetYPx = ${targetMarkerYPx};
         const map = L.map('map', {
-          center: [${lat}, ${lng}],
-          zoom: 14.5,
+          center: [targetLat, targetLng],
+          zoom: zoomLevel,
           zoomControl: false,
           dragging: false,
           touchZoom: false,
@@ -426,14 +441,29 @@ export const TacticalDispatchMap = ({
           iconSize: [68, 68],
           iconAnchor: [34, 34]
         });
-        L.marker([${lat}, ${lng}], { icon: customIcon }).addTo(map);
+        L.marker([targetLat, targetLng], { icon: customIcon }).addTo(map);
         `
             : ''
         }
-        setTimeout(() => map.invalidateSize(), 100);
-        setTimeout(() => map.invalidateSize(), 350);
-        setTimeout(() => map.invalidateSize(), 800);
-        window.addEventListener('resize', () => map.invalidateSize());
+        function recenterToVisibleWindow() {
+          map.invalidateSize({ animate: false });
+          if (targetYPx > 0) {
+            const size = map.getSize();
+            if (size && size.y > 0) {
+              const offsetY = (size.y / 2) - targetYPx;
+              const projected = map.project([targetLat, targetLng], zoomLevel);
+              const shiftedCenter = map.unproject(L.point(projected.x, projected.y + offsetY), zoomLevel);
+              map.setView(shiftedCenter, zoomLevel, { animate: false });
+              return;
+            }
+          }
+          map.setView([targetLat, targetLng], zoomLevel, { animate: false });
+        }
+        recenterToVisibleWindow();
+        setTimeout(recenterToVisibleWindow, 80);
+        setTimeout(recenterToVisibleWindow, 250);
+        setTimeout(recenterToVisibleWindow, 650);
+        window.addEventListener('resize', recenterToVisibleWindow);
       </script>
     </body>
     </html>
@@ -443,7 +473,7 @@ export const TacticalDispatchMap = ({
     <View style={styles.mapLayer} pointerEvents="none">
       {Platform.OS === 'web' ? (
         <iframe
-          key={`map_${lat}_${lng}_${hasValidGps ? '1' : '0'}_${isDark ? 'd' : 'l'}_${pinHex}`}
+          key={`map_${lat}_${lng}_${hasValidGps ? '1' : '0'}_${isDark ? 'd' : 'l'}_${pinHex}_${targetMarkerYPx}`}
           srcDoc={mapHtml}
           style={styles.iframe}
           title="IncidentMapPreview"
@@ -513,6 +543,12 @@ export const TacticalDispatchMap = ({
       <View style={styles.contentColumn}>
         {/* TOP HEADER: Gradient fading downwards into transparency over the map */}
         <LinearGradient
+          onLayout={(e) => {
+            const h = e?.nativeEvent?.layout?.height;
+            if (typeof h === 'number' && h > 40 && Math.abs(h - headerHeightPx) > 2) {
+              setHeaderHeightPx(Math.round(h));
+            }
+          }}
           colors={
             isDark
               ? ['rgba(45, 6, 6, 0.98)', 'rgba(37, 5, 5, 0.94)', 'rgba(30, 4, 4, 0.85)', 'rgba(22, 3, 3, 0.50)', 'transparent']

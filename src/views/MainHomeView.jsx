@@ -6112,7 +6112,7 @@ export const MainHomeView = ({ onLogout }) => {
                 flex: 1,
                 justifyContent: 'space-between',
                 paddingTop: Platform.OS === 'ios' ? 54 : 46,
-                paddingBottom: 72,
+                paddingBottom: Platform.OS === 'ios' ? 40 : 34,
                 paddingHorizontal: 20
               }}
             >
@@ -6210,80 +6210,97 @@ export const MainHomeView = ({ onLogout }) => {
                 ) : null}
               </View>
 
-              {/* LAYER 3: FLOATING BOTTOM ACTION BUTTONS (Clean, accessible, raised above navigation bar — ASISTIR #10B981 / NO ASISTIR #180404 con borde rojo) */}
-              <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center', width: '100%' }}>
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    triggerHaptic('heavy');
-                    stopDispatchSound();
-                    const targetId = fsDispatch.idServicio;
-                    dismissFullscreenDispatch(targetId);
-                    setEmergencyResponse(targetId, 'ASISTO');
-                    setCurrentTab('actividad');
-                  }}
-                  style={{
-                    flex: 1,
-                    height: 56,
-                    borderRadius: 16,
-                    backgroundColor: '#10B981',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    shadowColor: '#000000',
-                    shadowOffset: { width: 0, height: 6 },
-                    shadowOpacity: 0.45,
-                    shadowRadius: 8,
-                    elevation: 8
-                  }}
-                >
-                  <Text
+              {/* LAYER 3: FLOATING BOTTOM ACTION BUTTONS + LOGO SENTINEL ONE (Clean, accessible, raised above navigation bar — ASISTIR #10B981 / NO ASISTIR #180404 con borde rojo) */}
+              <View style={{ width: '100%', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', gap: 16, alignItems: 'center', width: '100%' }}>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      triggerHaptic('heavy');
+                      stopDispatchSound();
+                      const targetId = fsDispatch.idServicio;
+                      dismissFullscreenDispatch(targetId);
+                      setEmergencyResponse(targetId, 'ASISTO');
+                      setCurrentTab('actividad');
+                    }}
                     style={{
-                      color: '#FFFFFF',
-                      fontSize: 18,
-                      fontWeight: '900',
-                      letterSpacing: 0.5
+                      flex: 1,
+                      height: 56,
+                      borderRadius: 16,
+                      backgroundColor: '#10B981',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      shadowColor: '#000000',
+                      shadowOffset: { width: 0, height: 6 },
+                      shadowOpacity: 0.45,
+                      shadowRadius: 8,
+                      elevation: 8
                     }}
                   >
-                    ASISTIR
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={{
+                        color: '#FFFFFF',
+                        fontSize: 18,
+                        fontWeight: '900',
+                        letterSpacing: 0.5
+                      }}
+                    >
+                      ASISTIR
+                    </Text>
+                  </TouchableOpacity>
 
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    triggerHaptic('medium');
-                    stopDispatchSound();
-                    const targetId = fsDispatch.idServicio;
-                    dismissFullscreenDispatch(targetId);
-                    setEmergencyResponse(targetId, 'NO_ASISTO');
-                  }}
-                  style={{
-                    flex: 1,
-                    height: 56,
-                    borderRadius: 16,
-                    backgroundColor: isDarkMode ? 'rgba(24, 4, 4, 0.85)' : '#FEF2F2',
-                    borderWidth: 2,
-                    borderColor: 'rgba(239, 68, 68, 0.90)',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    shadowColor: '#000000',
-                    shadowOffset: { width: 0, height: 6 },
-                    shadowOpacity: 0.35,
-                    shadowRadius: 8,
-                    elevation: 8
-                  }}
-                >
-                  <Text
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      triggerHaptic('medium');
+                      stopDispatchSound();
+                      const targetId = fsDispatch.idServicio;
+                      dismissFullscreenDispatch(targetId);
+                      setEmergencyResponse(targetId, 'NO_ASISTO');
+                    }}
                     style={{
-                      color: isDarkMode ? '#FFFFFF' : '#B91C1C',
-                      fontSize: 17,
-                      fontWeight: '700',
-                      letterSpacing: 0.5
+                      flex: 1,
+                      height: 56,
+                      borderRadius: 16,
+                      backgroundColor: isDarkMode ? 'rgba(24, 4, 4, 0.85)' : '#FEF2F2',
+                      borderWidth: 2,
+                      borderColor: 'rgba(239, 68, 68, 0.90)',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      shadowColor: '#000000',
+                      shadowOffset: { width: 0, height: 6 },
+                      shadowOpacity: 0.35,
+                      shadowRadius: 8,
+                      elevation: 8
                     }}
                   >
-                    NO ASISTIR
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={{
+                        color: isDarkMode ? '#FFFFFF' : '#B91C1C',
+                        fontSize: 17,
+                        fontWeight: '700',
+                        letterSpacing: 0.5
+                      }}
+                    >
+                      NO ASISTIR
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Image
+                  source={
+                    isDarkMode
+                      ? require('../../assets/SENTINEL_ONE.png')
+                      : require('../../assets/SENTINEL_ONE_LIGHT.png')
+                  }
+                  style={{
+                    height: 36,
+                    width: '62%',
+                    marginTop: 18,
+                    opacity: 0.94
+                  }}
+                  resizeMode="contain"
+                />
               </View>
             </LinearGradient>
           </View>
