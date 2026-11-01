@@ -1,14 +1,14 @@
 ✅ Token JWT ES256 generado correctamente.
 📱 App: SENTINEL ONE (id=6819802643)
 📄 Configurando Derechos sobre el Contenido (DOES_NOT_USE_THIRD_PARTY_CONTENT)...
-🏷️ Configurando Categoría Principal (UTILITIES) en AppInfo id=1bfd17e3-b54c-4177-9003-c861c0e936cc (state=PREPARE_FOR_SUBMISSION)...
+🏷️ Configurando Categoría Principal (UTILITIES) en AppInfo id=1bfd17e3-b54c-4177-9003-c861c0e936cc (state=REJECTED)...
 🔞 Completando Clasificación por Edades (AgeRatingDeclaration id=1bfd17e3-b54c-4177-9003-c861c0e936cc)...
    ✅ AgeRatingDeclaration actualizado al 100%.
 📝 Actualizando Copyright y ReleaseType en versión 3.0.3 (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
 🔞 Completando AgeRatingDeclaration de la versión (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
 ⚠️ HTTP 404 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/560a8f78-db6a-4284-afd1-3f1245a55675: {
   "errors" : [ {
-    "id" : "7634d170-2973-4287-a466-10dd1eb712ef",
+    "id" : "0536ff24-1d4e-486a-b2a5-649ebec96352",
     "status" : "404",
     "code" : "NOT_FOUND",
     "title" : "The specified resource does not exist",
@@ -21,7 +21,7 @@
 🌐 Configurando URL de Soporte, Textos y Capturas para es-ES (id=c9dc24ad-dc36-4500-b40b-91da8db3e90f)...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
   "errors" : [ {
-    "id" : "09db4ae7-a1d6-4d3e-a880-53c33c2fff24",
+    "id" : "9f3b9b38-eae2-403b-9dde-cf900fb7f4a6",
     "status" : "409",
     "code" : "STATE_ERROR",
     "title" : "The request cannot be fulfilled because of the state of another resource.",
@@ -32,9 +32,9 @@
 ✅ APP_IPHONE_65 ya cuenta con 2 capturas cargadas.
 ✅ APP_IPAD_PRO_3GEN_129 ya cuenta con 2 capturas cargadas.
 👤 Configurando datos de contacto y cuenta demo para el Revisor de Apple...
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/b1db6376-ff8e-4f01-ad5c-46c9f497b144: {
+⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/9043b907-3808-4e65-9b46-2c42b68ece12: {
   "errors" : [ {
-    "id" : "16165cec-0080-4264-b951-8a69a4271e1d",
+    "id" : "5d2d37ca-e844-4c6b-b48f-b7af19211859",
     "status" : "409",
     "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID",
     "title" : "The provided entity includes an attribute with an invalid value",
@@ -44,31 +44,31 @@
     }
   } ]
 }
-✅ Build 3004 vinculado a la versión 3.0.3.
+✅ Build 3009 vinculado a la versión 3.0.3.
 🚀 Enviando versión 3.0.3 a Revisión de App Store...
 ⚠️ HTTP 409 en POST https://api.appstoreconnect.apple.com/v1/reviewSubmissionItems: {
   "errors" : [ {
-    "id" : "3f7bbddb-c351-416c-8eef-86537994db22",
+    "id" : "1d550036-cdbe-4243-8b48-e8117582dc83",
     "status" : "409",
     "code" : "STATE_ERROR.ENTITY_STATE_INVALID",
-    "title" : "appStoreVersions with id '560a8f78-db6a-4284-afd1-3f1245a55675' is not in valid state.",
+    "title" : "appStoreVersions with id '892646905' is not in valid state.",
     "detail" : "This resource cannot be reviewed, please check associated errors to see why.",
     "meta" : {
       "associatedErrors" : {
-        "/v1/appDataUsages/" : [ {
-          "id" : "1340157d-6e2b-4af5-bd53-40fb15e6ff7f",
+        "/appStoreVersions/892646905" : [ {
+          "id" : "e487570c-fa95-4bcb-bbc7-99b4a776a251",
           "status" : "409",
-          "code" : "STATE_ERROR.APP_DATA_USAGES_REQUIRED",
-          "title" : "Answers to what data your app collects and how it's used are needed.",
-          "detail" : "You must have published answers to your app's data usages."
+          "code" : "STATE_ERROR.ITEM_PART_OF_ANOTHER_SUBMISSION",
+          "title" : "Item is already present in another reviewSubmission",
+          "detail" : "appStoreVersions with id 892646905 was already added to another reviewSubmission with id 391829da-b983-43a1-a5f1-4147b9774ea0"
         } ]
       }
     }
   } ]
 }
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/391829da-b983-43a1-a5f1-4147b9774ea0: {
+⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/3a5fd525-1280-4146-a3b7-e7d6e645a172: {
   "errors" : [ {
-    "id" : "e6c37aca-9888-4874-adc7-d780d9843539",
+    "id" : "1839f7e0-7c6d-4f64-938c-383e15c8810d",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
     "title" : "Relationship is required",
@@ -81,7 +81,7 @@
 ⚠️ Respuesta de envío a revisión: {
   "errors": [
     {
-      "id": "e6c37aca-9888-4874-adc7-d780d9843539",
+      "id": "1839f7e0-7c6d-4f64-938c-383e15c8810d",
       "status": "409",
       "code": "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
       "title": "Relationship is required",
@@ -95,7 +95,7 @@
 📋 Items en reviewSubmission: {
   "data": [],
   "links": {
-    "self": "https://api.appstoreconnect.apple.com/v1/reviewSubmissions/391829da-b983-43a1-a5f1-4147b9774ea0/items"
+    "self": "https://api.appstoreconnect.apple.com/v1/reviewSubmissions/3a5fd525-1280-4146-a3b7-e7d6e645a172/items"
   },
   "meta": {
     "paging": {
