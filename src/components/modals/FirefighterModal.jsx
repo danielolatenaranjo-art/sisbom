@@ -112,8 +112,10 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
       const db = getDb();
       if (db && bombero.idRegistro) {
         const nowTs = Date.now();
+        const isSelf = String(bombero.idRegistro) === String(user?.idRegistro || '');
         const payload = {
           estado: newEstado,
+          _changedByCentral: !isSelf,
           _metaTimestamp: nowTs
         };
         if (newEstado === 'LICENCIA') {

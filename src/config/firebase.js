@@ -1,5 +1,10 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { initializeFirestore, getFirestore } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  getFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager
+} from 'firebase/firestore';
 import {
   initializeAuth,
   getAuth,
@@ -84,11 +89,19 @@ function getOrInitFirestore(firebaseApp) {
   if (!firebaseApp) return null;
   try {
     return initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
       experimentalForceLongPolling: true,
       useFetchStreams: false
     });
   } catch {
-    return getFirestore(firebaseApp);
+    try {
+      return initializeFirestore(firebaseApp, {
+        experimentalForceLongPolling: true,
+        useFetchStreams: false
+      });
+    } catch {
+      return getFirestore(firebaseApp);
+    }
   }
 }
 

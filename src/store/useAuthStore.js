@@ -386,10 +386,6 @@ export const useAuthStore = create((set, get) => ({
           set({ user: parsed, isAuthenticated: true });
           syncNativeUserSession(parsed);
           syncNativeAirplaneMode(get().isAirplaneMode);
-          // Actualizar en segundo plano el documento real desde Firestore (incluyendo puerta: true, idRegistro y foto)
-          setTimeout(() => {
-            get().refreshUserProfile();
-          }, 150);
           return true;
         }
       }
@@ -679,6 +675,7 @@ export const useAuthStore = create((set, get) => ({
         await ensureFirebaseAuth();
         await updateDoc(doc(db, 'personal', String(docId)), {
           estado: newStatus,
+          _changedByCentral: !isSelf,
           _metaTimestamp: nowTs
         });
         console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${newStatus}`);
@@ -688,7 +685,7 @@ export const useAuthStore = create((set, get) => ({
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_metaTimestamp`;
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_changedByCentral&updateMask.fieldPaths=_metaTimestamp`;
 
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
@@ -696,6 +693,7 @@ export const useAuthStore = create((set, get) => ({
         body: JSON.stringify({
           fields: {
             estado: { stringValue: newStatus },
+            _changedByCentral: { booleanValue: !isSelf },
             _metaTimestamp: { integerValue: String(nowTs) }
           }
         })

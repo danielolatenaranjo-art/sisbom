@@ -386,6 +386,7 @@ exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event)
   const estadoBefore = String(before.estado || (before.disponible ? "0-9" : "0-8")).trim().toUpperCase();
   const estadoAfter = String(after.estado || (after.disponible ? "0-9" : "0-8")).trim().toUpperCase();
   if (estadoBefore === estadoAfter) return;
+  if (after._changedByCentral !== true) return;
 
   const safeTopic = userId.replace(/\s+/g, "");
   const titleText = "ESTADO ACTUALIZADO";

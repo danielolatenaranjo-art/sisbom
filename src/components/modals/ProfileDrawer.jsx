@@ -70,9 +70,6 @@ export const ProfileDrawer = ({ visible, onClose }) => {
     if (visible) {
       isClosingRef.current = false;
       setIsRendered(true);
-      if (refreshUserProfile) {
-        refreshUserProfile();
-      }
       slideAnim.stopAnimation();
       fadeAnim.stopAnimation();
       slideAnim.setValue(-DRAWER_WIDTH);
