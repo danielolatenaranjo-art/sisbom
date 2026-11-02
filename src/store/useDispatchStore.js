@@ -4,6 +4,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   collection,
   doc,
+  query,
+  where,
   onSnapshot,
   getDoc,
   getDocs,
@@ -942,12 +944,6 @@ export const useDispatchStore = create((set, get) => ({
       }
     } catch (_) {}
 
-    if (isMeCentral && currentUser && String(currentUser.estado || '').trim().toUpperCase() !== '0-9') {
-      try {
-        useAuthStore.getState().updateStatus('0-9');
-      } catch (_) {}
-    }
-
     return isMeCentral;
   },
 
@@ -1264,26 +1260,6 @@ export const useDispatchStore = create((set, get) => ({
         isLiveConnected: true
       });
     } else {
-      // Si la consulta viene vacía por fallo transitorio o snapshot inicial, NO vaciar los despachos locales a menos que el servidor haya cerrado explícitamente los IDs que teníamos
-      const hasUnclosedLocal = currentDispatches.some((d) => {
-        const sId = String(d?.idServicio || d?.id || '').trim();
-        return sId && !closedServerIds.has(sId) && !isDispatchTooOld(d);
-      });
-
-      if (hasUnclosedLocal && rawDocsArray.length === 0) {
-        const preserved = currentDispatches.filter((d) => {
-          const sId = String(d?.idServicio || d?.id || '').trim();
-          return sId && !closedServerIds.has(sId) && !isDispatchTooOld(d);
-        });
-        set({
-          activeDispatch: preserved[0] || null,
-          dispatchesList: preserved,
-          isLoading: false,
-          isLiveConnected: true
-        });
-        return;
-      }
-
       isFirstDispatchesSnapshot = false;
       persistActiveDispatchesToLocalStorage([]);
       set({
@@ -1631,13 +1607,11 @@ export const useDispatchStore = create((set, get) => ({
       // Asegurar autenticación primero para que los tokens REST y onSnapshot tengan permisos válidos
       await ensureFirebaseAuth().catch(() => {});
 
-      // Disparar hidratación inicial 1 sola vez al iniciar sesión / abrir la app
-      get().hydrateFromFirestoreRest(false);
-
       const db = getDb();
       if (!db) {
         console.warn('⚠️ [useDispatchStore] Firestore db no disponible.');
         set({ isLoading: false });
+        get().hydrateFromFirestoreRest(false);
         return;
       }
 
@@ -1646,7 +1620,11 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       // 1. LISTENER EN TIEMPO REAL: DESPACHOS ACTIVOS (`despachos`)
       // =====================================================================
-      unsubDespachos = onSnapshot(collection(db, 'despachos'), (snap) => {
+      const activeDispatchesQuery = query(
+        collection(db, 'despachos'),
+        where('estado', 'in', ['activa', 'ACTIVA', 'activo', 'ACTIVO', 'pre-despacho', 'PRE-DESPACHO', 'en curso', 'EN CURSO'])
+      );
+      unsubDespachos = onSnapshot(activeDispatchesQuery, (snap) => {
         lastSnapshotReceivedTs = Date.now();
         const rawDocs = [];
         snap.forEach((d) => {
@@ -1666,16 +1644,6 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       // 2. LISTENER EN TIEMPO REAL: PERSONAL Y DOTACIÓN (`personal`)
       // =====================================================================
-      useAuthStore.getState().refreshUserProfile()
-        .then((u) => {
-          get().recomputeCentralState();
-          const newId = String(u?.idRegistro || u?.idRadial || '').trim();
-          if (newId && newId !== lastSubscribedAttendanceUserId) {
-            get().subscribeAttendanceRealtime();
-          }
-        })
-        .catch(() => {});
-
       unsubPersonal = onSnapshot(collection(db, 'personal'), (snap) => {
         lastSnapshotReceivedTs = Date.now();
         const rawDocs = [];

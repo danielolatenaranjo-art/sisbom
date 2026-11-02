@@ -1205,6 +1205,9 @@ export function sanitizeCanonicalPersonnelUpdate(partial = {}) {
   if (partial.deviceId !== undefined || partial.fcmToken !== undefined) {
     clean.deviceId = String(partial.deviceId ?? partial.fcmToken ?? '').trim();
   }
+  if (partial._changedByCentral !== undefined) {
+    clean._changedByCentral = Boolean(partial._changedByCentral);
+  }
   return clean;
 }
 

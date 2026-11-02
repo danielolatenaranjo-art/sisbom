@@ -1568,6 +1568,7 @@ class DispatchForegroundService : Service() {
 
                         val prevEstado = (prefs.getString("USER_ESTADO", "") ?: "").trim().uppercase(Locale.ROOT)
                         val cleanNewEstado = estado.trim().uppercase(Locale.ROOT)
+                        val changedByCentral = doc.safeBool("_changedByCentral")
                         val isUnavailable = (cleanNewEstado != "0-9")
                         val editPrefs = prefs.edit()
                             .putString("USER_ESTADO", estado)
@@ -1582,7 +1583,7 @@ class DispatchForegroundService : Service() {
                         editPrefs.apply()
                         NotificationHelper.ensureChannels(applicationContext)
 
-                        if (!isFirstUserSnapshot && prevEstado.isNotEmpty() && cleanNewEstado.isNotEmpty() && prevEstado != cleanNewEstado) {
+                        if (!isFirstUserSnapshot && changedByCentral && prevEstado.isNotEmpty() && cleanNewEstado.isNotEmpty() && prevEstado != cleanNewEstado) {
                             val nowMs = System.currentTimeMillis()
                             val lastSelfStatus = (prefs.getString("LAST_SELF_STATUS_CHANGE", "") ?: "").trim().uppercase(Locale.ROOT)
                             val lastSelfTime = prefs.getLong("LAST_SELF_STATUS_TIME", 0L)
@@ -1629,6 +1630,7 @@ class DispatchForegroundService : Service() {
 
         despachosListener?.remove()
         despachosListener = db.collection("despachos")
+            .whereIn("estado", listOf("activa", "ACTIVA", "activo", "ACTIVO", "pre-despacho", "PRE-DESPACHO", "en curso", "EN CURSO"))
             .addSnapshotListener { snapshots, e ->
                 try {
                     if (e != null || snapshots == null) return@addSnapshotListener
@@ -2483,24 +2485,20 @@ class MainActivity : ComponentActivity() {
                 if (databaseUrl.isNotBlank()) builder.setDatabaseUrl(databaseUrl)
                 val options = builder.build()
 
-                // 1. Inicializar también la instancia DEFAULT (igual que SENTINEL ONE V2) para que FirebaseMessaging.getInstance()
-                // y los servicios en segundo plano cuando la app se cierra de Recientes reciban las notificaciones del Cuerpo activo
-                if (currentTenantProjectId != projectId || FirebaseApp.getApps(appContext).isEmpty()) {
+                // 1. Asegurar que la instancia DEFAULT esté inicializada sin llamar NUNCA a defaultApp.delete()
+                // (llamar a defaultApp.delete() provoca crash fatal java.lang.IllegalStateException: FirebaseApp was deleted en los workers de FCM/Firestore)
+                if (FirebaseApp.getApps(appContext).isEmpty()) {
                     try {
-                        val defaultApp = FirebaseApp.getInstance()
-                        if (defaultApp.options.projectId != projectId) {
-                            defaultApp.delete()
-                            FirebaseApp.initializeApp(appContext, options)
-                        }
+                        FirebaseApp.initializeApp(appContext, options)
                     } catch (_: Exception) {
                         try {
-                            FirebaseApp.initializeApp(appContext, options)
+                            FirebaseApp.initializeApp(appContext)
                         } catch (_: Exception) {}
                     }
-                    currentTenantProjectId = projectId
                 }
+                currentTenantProjectId = projectId
 
-                // 2. Mantener también la instancia nombrada por seguridad
+                // 2. Mantener la instancia nombrada por proyecto (tenant_<projectId>) para Firestore, Auth y RTDB del Cuerpo activo
                 val appName = "tenant_$projectId"
                 val existing = FirebaseApp.getApps(appContext).firstOrNull { it.name == appName }
                 dynamicFirebaseApp = existing ?: FirebaseApp.initializeApp(appContext, options, appName)

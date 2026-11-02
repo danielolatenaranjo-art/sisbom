@@ -531,7 +531,9 @@ final class IOSRealtimeService {
         }
 
         // 2. Listener nativo de despachos activos
-        despachosListener = db.collection("despachos").addSnapshotListener { [weak self] snap, error in
+        despachosListener = db.collection("despachos")
+            .whereField("estado", in: ["activa", "ACTIVA", "activo", "ACTIVO", "pre-despacho", "PRE-DESPACHO", "en curso", "EN CURSO"])
+            .addSnapshotListener { [weak self] snap, error in
             guard let self = self, let documents = snap?.documents, error == nil else { return }
             var rawDocsArray: [[String: Any]] = []
             let defaults = UserDefaults.standard
@@ -776,13 +778,14 @@ final class IOSRealtimeService {
                 let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let newEst = (!rawEst.isEmpty ? rawEst : (((cleanData["disponible"] as? Bool) == true) ? "0-9" : "0-8")).uppercased()
                 let oldEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let changedByCentral = (cleanData["_changedByCentral"] as? Bool) ?? false
 
                 if !newEst.isEmpty && newEst != oldEst {
                     defaults.set(newEst, forKey: "USER_ESTADO")
                     IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                     IOSLocationService.shared.updateStandbyKeepAlive()
 
-                    if !self.isFirstPersonalSnapshot {
+                    if !self.isFirstPersonalSnapshot && changedByCentral {
                         let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                         let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
                         let nowMs = Date().timeIntervalSince1970 * 1000.0
