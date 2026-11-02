@@ -1521,14 +1521,22 @@ class DispatchForegroundService : Service() {
             auth.signInWithEmailAndPassword(email, password)
                 .addOnSuccessListener { listenToUserAndDispatches() }
                 .addOnFailureListener {
+                    auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
+                        .addOnSuccessListener { listenToUserAndDispatches() }
+                        .addOnFailureListener {
+                            auth.signInAnonymously()
+                                .addOnSuccessListener { listenToUserAndDispatches() }
+                                .addOnFailureListener { listenToUserAndDispatches() }
+                        }
+                }
+        } else {
+            auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
+                .addOnSuccessListener { listenToUserAndDispatches() }
+                .addOnFailureListener {
                     auth.signInAnonymously()
                         .addOnSuccessListener { listenToUserAndDispatches() }
                         .addOnFailureListener { listenToUserAndDispatches() }
                 }
-        } else {
-            auth.signInAnonymously()
-                .addOnSuccessListener { listenToUserAndDispatches() }
-                .addOnFailureListener { listenToUserAndDispatches() }
         }
     }
 

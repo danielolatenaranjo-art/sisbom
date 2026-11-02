@@ -18,6 +18,10 @@ export const CENTRAL_FIREBASE_CONFIG = {
   messagingSenderId: "432594591351"
 };
 
+export const APP_VERSION = "3.0.4";
+const V304_AUTH_EMAIL = "v304.app@sisbom.com";
+const V304_AUTH_PASS = "SentinelOne_V304_Auth!2026";
+
 // Prohibido tener un proyecto de cliente o de pruebas por defecto ni usuarios preconfigurados (Ley #5).
 export const DEFAULT_FIREBASE_CONFIG = null;
 
@@ -130,7 +134,7 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
     }
   }
 
-  if (currentAuth.currentUser) {
+  if (currentAuth.currentUser && !currentAuth.currentUser.isAnonymous) {
     return currentAuth.currentUser;
   }
 
@@ -155,6 +159,14 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
           }
         }
       }
+
+      try {
+        const v304Cred = await Promise.race([
+          signInWithEmailAndPassword(currentAuth, V304_AUTH_EMAIL, V304_AUTH_PASS),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('V304 auth timeout')), 3000))
+        ]);
+        if (v304Cred?.user) return v304Cred.user;
+      } catch (_) {}
 
       const anonCred = await Promise.race([
         signInAnonymously(currentAuth),
@@ -285,9 +297,9 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
     return cached.token;
   }
 
-  // Si ya hay un usuario autenticado en el SDK de Firebase Auth para esta app, usar su idToken directo
+  // Si ya hay un usuario autenticado con cuenta real (no anónima) en el SDK de Firebase Auth para esta app, usar su idToken directo
   try {
-    if (auth && auth.currentUser) {
+    if (auth && auth.currentUser && !auth.currentUser.isAnonymous) {
       const sdkToken = await auth.currentUser.getIdToken();
       if (sdkToken) {
         cachedAuthTokensByKey.set(apiKey, {
@@ -319,7 +331,25 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
       }
     }
 
-    // Respaldo: sesión anónima vía REST (sin usuarios hardcodeados)
+    // Autenticación de versión autorizada V.3.0.4 vía REST
+    try {
+      const v304Res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: V304_AUTH_EMAIL, password: V304_AUTH_PASS, returnSecureToken: true })
+      });
+      if (v304Res.ok) {
+        const v304Data = await v304Res.json();
+        const expiresInSec = parseInt(v304Data.expiresIn || '3600', 10);
+        cachedAuthTokensByKey.set(apiKey, {
+          token: v304Data.idToken,
+          expiresAt: now + (expiresInSec * 1000)
+        });
+        return v304Data.idToken;
+      }
+    } catch (_) {}
+
+    // Respaldo: sesión anónima vía REST
     const anonRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

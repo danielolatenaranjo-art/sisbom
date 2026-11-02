@@ -765,91 +765,49 @@ final class IOSRealtimeService {
             self.pushSnapshotToWebView(collection: "despachos", payload: rawDocsArray)
         }
 
-        // 3. Listener nativo de vehículos
-        vehiculosListener = db.collection("vehiculos").addSnapshotListener { [weak self] snap, error in
-            guard let self = self, let documents = snap?.documents, error == nil else { return }
-            let rawDocsArray: [[String: Any]] = documents.map { doc in
-                [
-                    "id": doc.documentID,
-                    "data": self.sanitizeDoc(doc.data()),
-                    "hasPendingWrites": doc.metadata.hasPendingWrites
-                ]
-            }
-            self.latestVehiculosPayload = rawDocsArray
-            self.pushSnapshotToWebView(collection: "vehiculos", payload: rawDocsArray)
-        }
+        // 3. Listener nativo individual de personal/{myId} (sincronización de estado y aviso si la Central cambia el estado del usuario, 1 solo documento igual que en Android)
+        let currentDefaults = UserDefaults.standard
+        let currentMyId = (currentDefaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !currentMyId.isEmpty {
+            personalListener = db.collection("personal").document(currentMyId).addSnapshotListener { [weak self] doc, error in
+                guard let self = self, let doc = doc, doc.exists, let rawData = doc.data(), error == nil else { return }
+                let defaults = UserDefaults.standard
+                let cleanData = self.sanitizeDoc(rawData)
+                let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let newEst = (!rawEst.isEmpty ? rawEst : (((cleanData["disponible"] as? Bool) == true) ? "0-9" : "0-8")).uppercased()
+                let oldEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
 
-        // 4. Listener nativo de alertas / órdenes del día
-        alertasListener = db.collection("alertas").addSnapshotListener { [weak self] snap, error in
-            guard let self = self, let documents = snap?.documents, error == nil else { return }
-            let rawDocsArray: [[String: Any]] = documents.map { doc in
-                [
-                    "id": doc.documentID,
-                    "data": self.sanitizeDoc(doc.data()),
-                    "hasPendingWrites": doc.metadata.hasPendingWrites
-                ]
-            }
-            self.latestAlertasPayload = rawDocsArray
-            self.pushSnapshotToWebView(collection: "alertas", payload: rawDocsArray)
-        }
+                if !newEst.isEmpty && newEst != oldEst {
+                    defaults.set(newEst, forKey: "USER_ESTADO")
+                    IOSSoundPlayer.shared.updateBackgroundKeepAlive()
+                    IOSLocationService.shared.updateStandbyKeepAlive()
 
-        // 5. Listener nativo de personal (sincronización de estados y aviso si la Central cambia el estado del usuario)
-        personalListener = db.collection("personal").addSnapshotListener { [weak self] snap, error in
-            guard let self = self, let documents = snap?.documents, error == nil else { return }
-            let defaults = UserDefaults.standard
-            let myId = (defaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            var rawDocsArray: [[String: Any]] = []
+                    if !self.isFirstPersonalSnapshot {
+                        let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
+                        let nowMs = Date().timeIntervalSince1970 * 1000.0
+                        let isSelfChange = (newEst == lastSelfStatus) && ((nowMs - lastSelfTime) < 20_000.0)
 
-            for doc in documents {
-                let docId = doc.documentID
-                let cleanData = self.sanitizeDoc(doc.data())
-                rawDocsArray.append([
-                    "id": docId,
-                    "data": cleanData,
-                    "hasPendingWrites": doc.metadata.hasPendingWrites
-                ])
+                        let lastNotifStatus = (defaults.string(forKey: "LAST_NOTIFIED_STATUS_CHANGE") ?? "").uppercased()
+                        let lastNotifTime = defaults.double(forKey: "LAST_NOTIFIED_STATUS_TIME")
+                        let alreadyNotified = (newEst == lastNotifStatus) && ((nowMs - lastNotifTime) < 10_000.0)
 
-                let idReg = ((cleanData["idRegistro"] as? String) ?? docId).trimmingCharacters(in: .whitespacesAndNewlines)
-                if !myId.isEmpty && (docId == myId || idReg == myId) {
-                    let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                    let newEst = (!rawEst.isEmpty ? rawEst : (((cleanData["disponible"] as? Bool) == true) ? "0-9" : "0-8")).uppercased()
-                    let oldEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-
-                    if !newEst.isEmpty && newEst != oldEst {
-                        defaults.set(newEst, forKey: "USER_ESTADO")
-                        IOSSoundPlayer.shared.updateBackgroundKeepAlive()
-                        IOSLocationService.shared.updateStandbyKeepAlive()
-
-                        if !self.isFirstPersonalSnapshot {
-                            let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-                            let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
-                            let nowMs = Date().timeIntervalSince1970 * 1000.0
-                            let isSelfChange = (newEst == lastSelfStatus) && ((nowMs - lastSelfTime) < 20_000.0)
-
-                            let lastNotifStatus = (defaults.string(forKey: "LAST_NOTIFIED_STATUS_CHANGE") ?? "").uppercased()
-                            let lastNotifTime = defaults.double(forKey: "LAST_NOTIFIED_STATUS_TIME")
-                            let alreadyNotified = (newEst == lastNotifStatus) && ((nowMs - lastNotifTime) < 10_000.0)
-
-                            if !isSelfChange && !alreadyNotified && !defaults.bool(forKey: "MODO_AVION") {
-                                defaults.set(newEst, forKey: "LAST_NOTIFIED_STATUS_CHANGE")
-                                defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
-                                AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
-                                self.postLocalBanner(
-                                    id: "status_\(Int(nowMs))",
-                                    title: "ESTADO ACTUALIZADO",
-                                    body: "Tu estado ha sido cambiado a \(newEst) por la Central",
-                                    soundName: nil,
-                                    userInfo: ["type": "STATUS_CHANGE", "newStatus": newEst]
-                                )
-                            }
+                        if !isSelfChange && !alreadyNotified && !defaults.bool(forKey: "MODO_AVION") {
+                            defaults.set(newEst, forKey: "LAST_NOTIFIED_STATUS_CHANGE")
+                            defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
+                            AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
+                            self.postLocalBanner(
+                                id: "status_\(Int(nowMs))",
+                                title: "ESTADO ACTUALIZADO",
+                                body: "Tu estado ha sido cambiado a \(newEst) por la Central",
+                                soundName: nil,
+                                userInfo: ["type": "STATUS_CHANGE", "newStatus": newEst]
+                            )
                         }
                     }
                 }
+                self.isFirstPersonalSnapshot = false
             }
-
-            self.isFirstPersonalSnapshot = false
-            self.latestPersonalPayload = rawDocsArray
-            self.pushSnapshotToWebView(collection: "personal", payload: rawDocsArray)
         }
     }
 
@@ -1055,8 +1013,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 let securePass = pass.hasSuffix("_secure_sisbom") ? pass : "\(pass)_secure_sisbom"
                 auth.signIn(withEmail: email, password: securePass) { result, error in
                     if error != nil || result == nil {
-                        auth.signInAnonymously { _, _ in
-                            completion?()
+                        auth.signIn(withEmail: "v304.app@sisbom.com", password: "SentinelOne_V304_Auth!2026") { resV304, errV304 in
+                            if errV304 != nil || resV304 == nil {
+                                auth.signInAnonymously { _, _ in
+                                    completion?()
+                                }
+                            } else {
+                                completion?()
+                            }
                         }
                     } else {
                         completion?()
@@ -1065,8 +1029,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 return
             }
         }
-        auth.signInAnonymously { _, _ in
-            completion?()
+        auth.signIn(withEmail: "v304.app@sisbom.com", password: "SentinelOne_V304_Auth!2026") { resV304, errV304 in
+            if errV304 != nil || resV304 == nil {
+                auth.signInAnonymously { _, _ in
+                    completion?()
+                }
+            } else {
+                completion?()
+            }
         }
     }
 

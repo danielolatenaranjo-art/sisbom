@@ -567,7 +567,7 @@ export const ProfileDrawer = ({ visible, onClose }) => {
               </>
             ) : null}
 
-            {/* FOOTER DE VERSIÓN CON LOGO SENTINEL ONE OFICIAL + V.3.0.0 */}
+            {/* FOOTER DE VERSIÓN CON LOGO SENTINEL ONE OFICIAL + V.3.0.4 */}
             <View style={styles.versionFooter}>
               <Image
                 source={
@@ -578,7 +578,7 @@ export const ProfileDrawer = ({ visible, onClose }) => {
                 style={styles.footerLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.versionTitle}>V.3.0.0</Text>
+              <Text style={styles.versionTitle}>V.3.0.4</Text>
             </View>
           </ScrollView>
         </Animated.View>

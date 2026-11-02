@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es" class="notranslate" translate="no">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1.00001, viewport-fit=cover" />
+    <meta http-equiv="Content-Language" content="es" />
+    <meta name="google" content="notranslate" />
+    <meta name="googlebot" content="notranslate" />
+    <meta name="robots" content="notranslate" />
+    <title>SENTINEL ONE</title>
+    <style id="expo-reset">
+      /* Reset Expo Web */
+      html, body, #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background-color: #060911;
+        -webkit-font-smoothing: antialiased;
+      }
+    </style>
+    <script>
+      // Deshabilitar completamente el traductor de Google Chrome en todos los nodos
+      function protectNode(node) {
+        if (node && node.nodeType === 1) {
+          node.setAttribute('translate', 'no');
+          node.classList.add('notranslate');
+        }
+      }
+
+      function protectAll() {
+        if (document.title !== 'SENTINEL ONE') {
+          document.title = 'SENTINEL ONE';
+        }
+        document.documentElement.setAttribute('translate', 'no');
+        document.documentElement.classList.add('notranslate');
+        document.body && document.body.setAttribute('translate', 'no');
+        document.body && document.body.classList.add('notranslate');
+        document.querySelectorAll('div, span, p, a, button').forEach(protectNode);
+      }
+
+      const observer = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => {
+          mutation.addedNodes.forEach((node) => {
+            if (node.nodeType === 1) {
+              protectNode(node);
+              node.querySelectorAll('*').forEach(protectNode);
+            }
+          });
+        });
+      });
+
+      window.addEventListener('DOMContentLoaded', () => {
+        protectAll();
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+      });
+      setInterval(protectAll, 400);
+    </script>
+  </head>
+  <body class="notranslate" translate="no">
+    <div id="root" class="notranslate" translate="no"></div>
+  </body>
+</html>

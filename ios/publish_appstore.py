@@ -25,17 +25,17 @@ ISSUER_ID = os.environ.get("APPSTORE_ISSUER_ID", "").strip()
 PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
-TARGET_VERSION = "3.0.3"
-TARGET_BUILD_NUMBER = "3010"
+TARGET_VERSION = "3.0.4"
+TARGET_BUILD_NUMBER = "3013"
 
 SUPPORT_URL = "https://github.com/danielolatenaranjo-art/sisbom"
 COPYRIGHT_TEXT = "2026 Sistema Sentinel - Cuerpos de Bomberos"
 
 WHATS_NEW_ES = (
-    "SENTINEL ONE V.3.0.3:\n"
-    "- Sincronización en tiempo real de alta resiliencia para despachos de emergencia, estado de unidades y operador de Central de Alarmas.\n"
-    "- Optimización de mapas tácticos con geolocalización exacta de emergencias y telemetría en ruta.\n"
-    "- Mejoras en alertas sonoras de despacho (0-9) y gestión de estados operativos del personal bomberil."
+    "SENTINEL ONE V.3.0.4:\n"
+    "- Optimización de conexiones en tiempo real a Firestore (cero lecturas periódicas innecesarias y ahorro de batería).\n"
+    "- Mejoras en el mapa táctico de despachos activos y apertura directa en mapas nativos del dispositivo.\n"
+    "- Mejoras en alertas sonoras de despacho (0-9) y avisos de cambio de estado desde la Central de Alarmas."
 )
 
 PROMOTIONAL_TEXT_ES = (

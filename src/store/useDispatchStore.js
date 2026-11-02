@@ -234,8 +234,10 @@ let knownDoorRequestKeys = new Set();
 let isFirstCentralSnapshot = true;
 let lastSubscribedAttendanceUserId = '';
 let lastCentralRawData = null;
-let restFallbackIntervalId = null;
 let lastSnapshotReceivedTs = 0;
+let lastRestHydrationTs = 0;
+let activeSubscribedProjectId = '';
+const REST_HYDRATION_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos mínimo entre hidrataciones REST
 
 // ============================================================================
 // LEY #4: CONTROL MONOTÓNICO POR TIMESTAMP ("EL MAYOR TIMESTAMP GANA")
@@ -1502,11 +1504,16 @@ export const useDispatchStore = create((set, get) => ({
     isFirstCentralSnapshot = false;
   },
 
-  // Hidratación inmediata y respaldo en vivo por Firestore REST (garantiza 100% conexión en iOS WKWebView y redes restringidas)
-  hydrateFromFirestoreRest: async () => {
+  // Hidratación inicial por Firestore REST (solo 1 vez al abrir la app / iniciar sesión, con cooldown mínimo de 5 minutos ante error de red real)
+  hydrateFromFirestoreRest: async (force = false) => {
     try {
+      const nowTs = Date.now();
+      if (!force && lastRestHydrationTs > 0 && (nowTs - lastRestHydrationTs) < REST_HYDRATION_COOLDOWN_MS) {
+        return;
+      }
       const fbConfig = useLicenseStore.getState().firebaseConfig;
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
+      lastRestHydrationTs = nowTs;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
 
@@ -1523,7 +1530,7 @@ export const useDispatchStore = create((set, get) => ({
 
       const fetchDespachosRest = async () => {
         try {
-          const res = await fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=300`, apiKey).catch(() => null);
+          const res = await fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=15`, apiKey).catch(() => null);
           if (res && res.ok) {
             const dJson = await res.json();
             return (dJson?.documents || []).map((docItem) => ({
@@ -1602,29 +1609,34 @@ export const useDispatchStore = create((set, get) => ({
     }
   },
 
-  // Subscripción en tiempo real con onSnapshot (WebSockets / Long-Polling + Respaldo REST inmediato)
+  // Subscripción en tiempo real con onSnapshot (WebSockets / Long-Polling)
   subscribeRealtime: async () => {
-    get().unsubscribeRealtime();
-
-    set({ isLoading: true });
-
     try {
       const fbConfig = useLicenseStore.getState().firebaseConfig;
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) {
         set({ isLoading: false });
         return;
       }
+
+      if (activeSubscribedProjectId === fbConfig.projectId && unsubDespachos && unsubCentral) {
+        return;
+      }
+
+      get().unsubscribeRealtime();
+      activeSubscribedProjectId = fbConfig.projectId;
+      set({ isLoading: true });
+
       await reinitFirebaseWithConfig(fbConfig);
 
       // Asegurar autenticación primero para que los tokens REST y onSnapshot tengan permisos válidos
       await ensureFirebaseAuth().catch(() => {});
 
-      // Disparar hidratación inmediata vía REST
-      get().hydrateFromFirestoreRest();
+      // Disparar hidratación inicial 1 sola vez al iniciar sesión / abrir la app
+      get().hydrateFromFirestoreRest(false);
 
       const db = getDb();
       if (!db) {
-        console.warn('⚠️ [useDispatchStore] Firestore db no disponible, operando con sincronización REST.');
+        console.warn('⚠️ [useDispatchStore] Firestore db no disponible.');
         set({ isLoading: false });
         return;
       }
@@ -1743,18 +1755,10 @@ export const useDispatchStore = create((set, get) => ({
       // =====================================================================
       get().subscribeAttendanceRealtime();
 
-      // Respaldo periódico cada 6s SOLO si han pasado más de 7s sin recibir snapshot en tiempo real
-      restFallbackIntervalId = setInterval(() => {
-        const sinceLastSnap = Date.now() - lastSnapshotReceivedTs;
-        if (sinceLastSnap > 7000) {
-          get().hydrateFromFirestoreRest();
-        }
-      }, 6000);
-
     } catch (e) {
       console.error('❌ [SENTINEL ONE] Error conectando a Firestore onSnapshot:', e);
       set({ isLoading: false });
-      get().hydrateFromFirestoreRest();
+      get().hydrateFromFirestoreRest(false);
     }
   },
 
@@ -2808,11 +2812,9 @@ export const useDispatchStore = create((set, get) => ({
     unsubAlertas = null;
     unsubCentral = null;
     unsubAsistencia = null;
-    if (restFallbackIntervalId) {
-      clearInterval(restFallbackIntervalId);
-      restFallbackIntervalId = null;
-    }
-    set({ isLiveConnected: false });
+    activeSubscribedProjectId = '';
+    lastRestHydrationTs = 0;
+    set({ isLoading: false });
   },
 
   triggerNativeVibration: (patternCsv = '0,800,300,800') => {

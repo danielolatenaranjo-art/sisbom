@@ -178,7 +178,7 @@ jobs:
             --apiIssuer "$APPSTORE_ISSUER_ID" \
             --show-progress || true
 
-      - name: Configurar Versión 3.0.3 y Enviar a Producción en App Store Connect
+      - name: Configurar Versión 3.0.4 y Enviar a Producción en App Store Connect
         if: github.event.inputs.upload_appstore != 'false'
         env:
           APPSTORE_KEY_ID: ${{ secrets.APPSTORE_KEY_ID }}
