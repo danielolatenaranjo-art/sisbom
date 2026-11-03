@@ -12,7 +12,7 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
--keep class com.sisbom.misisbom.** { *; }
+-keep class com.sisbom.misisbom.MainActivity$WebAppInterface { *; }
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }

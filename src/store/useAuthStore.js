@@ -95,7 +95,7 @@ async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
   const maskFields = [
     'idRegistro', 'idRadial', 'ficha', 'rut', 'nombreBombero', 'nombre',
     'cargo', 'compania', 'estado', 'enServicio', 'conductor', 'activo',
-    'puerta', 'Puerta', 'contrasena', 'telefono', 'email',
+    'puerta', 'Puerta', 'contrasena', 'telefono', 'email', 'deviceId',
     'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds'
   ].map(f => `mask.fieldPaths=${f}`).join('&');
 
@@ -204,6 +204,7 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     telefono: raw.telefono || fallbackUser.telefono || '',
     email: raw.email || fallbackUser.email || '',
     contrasena: raw.contrasena !== undefined ? String(raw.contrasena) : String(fallbackUser.contrasena || ''),
+    deviceId: raw.deviceId !== undefined ? String(raw.deviceId || '') : String(fallbackUser.deviceId || ''),
     licenciaMedica: raw.licenciaMedica ?? fallbackUser.licenciaMedica ?? '',
     fechaSuspensionFin: raw.fechaSuspensionFin ?? fallbackUser.fechaSuspensionFin ?? '',
     permiso: raw.permiso ?? fallbackUser.permiso ?? 0,
@@ -569,11 +570,19 @@ export const useAuthStore = create((set, get) => ({
           [foundMatch],
           cleanId,
           cleanPass,
-          { allowRadialFallback: false }
+          { allowRadialFallback: false, firebaseAuthConfirmed: false }
         );
-        if (!matchedCreds && cleanPass !== '1805') {
-          set({ isLoading: false, error: 'Contraseña operacional incorrecta' });
-          return { success: false, error: 'Contraseña operacional incorrecta' };
+        if (!matchedCreds?.matched) {
+          const errMsg = matchedCreds?.error || 'Contraseña operacional incorrecta';
+          set({ isLoading: false, error: errMsg });
+          return { success: false, error: errMsg };
+        }
+
+        const existingDeviceId = String(foundMatch.deviceId ?? foundMatch.tokenFcm ?? foundMatch.fcmToken ?? '').trim();
+        if (existingDeviceId !== '') {
+          const boundMsg = 'Este usuario ya tiene un dispositivo registrado. Solicite desvincularlo en Comandancia o cierre sesión en el otro teléfono.';
+          set({ isLoading: false, error: boundMsg });
+          return { success: false, error: boundMsg };
         }
 
         const securePass = cleanPass.endsWith('_secure_sisbom') ? cleanPass : `${cleanPass}_secure_sisbom`;
@@ -1054,9 +1063,26 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  // Cerrar Sesión
+  // Cerrar Sesión (libera deviceId en Firestore para permitir iniciar sesión nuevamente)
   logout: async () => {
+    const currentUser = get().user;
+    const docId = String(currentUser?.idRegistro || currentUser?.idRadial || '').trim();
     get().stopLiveTelemetry();
+    if (docId) {
+      try {
+        const db = getDb();
+        if (db) {
+          await setDoc(
+            doc(db, 'personal', docId),
+            {
+              deviceId: '',
+              _metaTimestamp: Date.now()
+            },
+            { merge: true }
+          );
+        }
+      } catch (e) {}
+    }
     clearNativeUserSession();
     try {
       syncNativeStorageKey(USER_SESSION_KEY, null);

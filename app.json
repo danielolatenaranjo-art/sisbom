@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.misisbom.sisbom.NFR3L3CC3L",
-      "buildNumber": "3013",
+      "buildNumber": "3014",
       "infoPlist": {
         "CFBundleDisplayName": "SENTINEL ONE",
         "NSLocationWhenInUseUsageDescription": "SENTINEL ONE utiliza su ubicación para rutar la respuesta hacia la emergencia de bomberos y confirmar llegada al cuartel.",
@@ -29,7 +29,7 @@
     },
     "android": {
       "package": "com.sisbom.misisbom",
-      "versionCode": 3008,
+      "versionCode": 3009,
       "adaptiveIcon": {
         "foregroundImage": "./assets/Logo.png",
         "backgroundColor": "#060911"

@@ -6,13 +6,17 @@ import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.PictureInPictureParams
 import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.util.Rational
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
@@ -551,6 +555,44 @@ object NotificationHelper {
         }
     }
 
+    fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
+        val (height: Int, width: Int) = options.outHeight to options.outWidth
+        var inSampleSize = 1
+        if (height > reqHeight || width > reqWidth) {
+            val halfHeight: Int = height / 2
+            val halfWidth: Int = width / 2
+            while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
+                inSampleSize *= 2
+            }
+        }
+        return inSampleSize
+    }
+
+    fun decodeSampledBitmapFromFile(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
+        return BitmapFactory.Options().run {
+            inJustDecodeBounds = true
+            BitmapFactory.decodeFile(path, this)
+            inSampleSize = calculateInSampleSize(this, reqWidth, reqHeight)
+            inJustDecodeBounds = false
+            BitmapFactory.decodeFile(path, this)
+        }
+    }
+
+    fun decodeSampledBitmapFromResource(
+        res: android.content.res.Resources,
+        resId: Int,
+        reqWidth: Int,
+        reqHeight: Int
+    ): Bitmap? {
+        return BitmapFactory.Options().run {
+            inJustDecodeBounds = true
+            BitmapFactory.decodeResource(res, resId, this)
+            inSampleSize = calculateInSampleSize(this, reqWidth, reqHeight)
+            inJustDecodeBounds = false
+            BitmapFactory.decodeResource(res, resId, this)
+        }
+    }
+
     fun ensureChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -891,9 +933,9 @@ object NotificationHelper {
         val largeIconBitmap = try {
             val clientFile = File(context.filesDir, "client_logo.png")
             if (clientFile.exists() && clientFile.length() > 0) {
-                BitmapFactory.decodeFile(clientFile.absolutePath)
+                decodeSampledBitmapFromFile(clientFile.absolutePath, 192, 192)
             } else {
-                BitmapFactory.decodeResource(context.resources, R.drawable.logo)
+                decodeSampledBitmapFromResource(context.resources, R.drawable.logo, 192, 192)
             }
         } catch (_: Throwable) {
             null
@@ -2615,6 +2657,7 @@ class MainActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val barBgColor = android.graphics.Color.parseColor("#060911")
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(barBgColor),
             navigationBarStyle = SystemBarStyle.dark(barBgColor)
@@ -2728,6 +2771,10 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest?
                 ): Boolean {
                     val uri = request?.url ?: return false
+                    val scheme = (uri.scheme ?: "").lowercase()
+                    if (request.isForMainFrame == false && (scheme == "https" || scheme == "http")) {
+                        return false
+                    }
                     return handleExternalUri(uri)
                 }
 
@@ -2743,19 +2790,11 @@ class MainActivity : ComponentActivity() {
                     error: WebResourceError?
                 ) {
                     val uri = request?.url
-                    if (uri != null) {
+                    if (uri != null && request.isForMainFrame) {
                         val scheme = (uri.scheme ?: "").lowercase()
-                        val host = (uri.host ?: "").lowercase()
-                        if ((scheme != "https" && scheme != "http") || host != "appassets.androidplatform.net") {
+                        if (scheme != "https" && scheme != "http" && scheme != "about" && scheme != "data" && scheme != "blob") {
                             handleExternalUri(uri)
-                            if (request.isForMainFrame) {
-                                view?.stopLoading()
-                                if (view?.canGoBack() == true) {
-                                    view.goBack()
-                                } else {
-                                    view?.loadUrl("https://appassets.androidplatform.net/index.html")
-                                }
-                            }
+                            view?.stopLoading()
                             return
                         }
                     }
@@ -2769,17 +2808,14 @@ class MainActivity : ComponentActivity() {
                     description: String?,
                     failingUrl: String?
                 ) {
-                    if (!failingUrl.isNullOrBlank() && !failingUrl.startsWith("https://appassets.androidplatform.net")) {
-                        try {
-                            handleExternalUri(Uri.parse(failingUrl))
-                        } catch (_: Exception) {}
-                        view?.stopLoading()
-                        if (view?.canGoBack() == true) {
-                            view.goBack()
-                        } else {
-                            view?.loadUrl("https://appassets.androidplatform.net/index.html")
+                    if (!failingUrl.isNullOrBlank()) {
+                        val uri = try { Uri.parse(failingUrl) } catch (_: Exception) { null }
+                        val scheme = (uri?.scheme ?: "").lowercase()
+                        if (uri != null && scheme != "https" && scheme != "http" && scheme != "about" && scheme != "data" && scheme != "blob") {
+                            handleExternalUri(uri)
+                            view?.stopLoading()
+                            return
                         }
-                        return
                     }
                     super.onReceivedError(view, errorCode, description, failingUrl)
                 }
@@ -2848,13 +2884,28 @@ class MainActivity : ComponentActivity() {
     private fun handleExternalUri(uri: Uri): Boolean {
         val scheme = (uri.scheme ?: "").lowercase()
         val host = (uri.host ?: "").lowercase()
+        val path = (uri.path ?: "").lowercase()
 
-        // Permitir únicamente el host interno del bundle de la app
+        // Permitir siempre el host interno del bundle y esquemas internos del WebView
         if ((scheme == "https" || scheme == "http") && host == "appassets.androidplatform.net") {
             return false
         }
-        if (scheme == "about" || scheme == "data" || scheme == "blob") {
+        if (scheme == "about" || scheme == "data" || scheme == "blob" || scheme == "file") {
             return false
+        }
+
+        // NUNCA abrir endpoints de Firebase/Google APIs ni sub-recursos en el navegador externo
+        if (scheme == "https" || scheme == "http") {
+            val isExplicitMapOrSocial =
+                host.contains("wa.me") ||
+                host.contains("whatsapp.com") ||
+                host.contains("maps.apple.com") ||
+                host.contains("maps.app.goo.gl") ||
+                host.contains("waze.com") ||
+                (host.contains("google.com") && path.contains("/maps"))
+            if (!isExplicitMapOrSocial) {
+                return false
+            }
         }
 
         try {
@@ -2971,6 +3022,33 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         isAppInForeground = false
         super.onPause()
+    }
+
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        webView?.post {
+            webView?.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('sentinelPipChanged', { detail: { active: $isInPictureInPictureMode } }));",
+                null
+            )
+        }
+    }
+
+    fun enterTacticalPipMode(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            return try {
+                val params = PictureInPictureParams.Builder()
+                    .setAspectRatio(Rational(9, 16))
+                    .build()
+                enterPictureInPictureMode(params)
+            } catch (_: Exception) {
+                false
+            }
+        }
+        return false
     }
 
     private fun notifyWebViewPermissionsChanged() {
@@ -3220,6 +3298,16 @@ class MainActivity : ComponentActivity() {
                     fm.unsubscribeFromTopic("personal_$oldUserId")
                     fm.unsubscribeFromTopic("conductores")
                     fm.unsubscribeFromTopic("central_operador")
+                    try {
+                        val db = getActiveFirestore(context)
+                        db.collection("personal").document(oldUserId).set(
+                            mapOf(
+                                "deviceId" to "",
+                                "_metaTimestamp" to System.currentTimeMillis()
+                            ),
+                            SetOptions.merge()
+                        )
+                    } catch (_: Exception) {}
                 }
                 SoundPlayer.stop(context)
                 stopDispatchForegroundServiceSafely()
@@ -3313,6 +3401,15 @@ class MainActivity : ComponentActivity() {
         @JavascriptInterface
         fun clearPendingIntent() {
             pendingIntentJson = null
+        }
+
+        @JavascriptInterface
+        fun enterPipMode(): Boolean {
+            var entered = false
+            runOnUiThread {
+                entered = enterTacticalPipMode()
+            }
+            return entered
         }
 
         @JavascriptInterface
