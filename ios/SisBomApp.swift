@@ -1307,9 +1307,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             db.collection("personal").document(userId).setData([
                 "deviceId": token,
                 "tokenFcm": token,
-                "fcmToken": token,
-                "tokenIos": token,
-                "platform": "ios",
                 "_metaTimestamp": nowMs
             ], merge: true)
         }
@@ -1688,6 +1685,12 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 Messaging.messaging().unsubscribe(fromTopic: "personal_\(oldId)")
                 Messaging.messaging().unsubscribe(fromTopic: "conductores")
                 Messaging.messaging().unsubscribe(fromTopic: "central_operador")
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                AppDelegate.activeFirestore().collection("personal").document(oldId).setData([
+                    "deviceId": "",
+                    "tokenFcm": "",
+                    "_metaTimestamp": nowMs
+                ], merge: true)
             }
             defaults.removeObject(forKey: "USER_ID")
             IOSSoundPlayer.shared.stop()

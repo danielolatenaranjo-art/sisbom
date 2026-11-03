@@ -2500,13 +2500,22 @@ export function matchPersonnelCredentials(
   personnelList = [],
   username = '',
   password = '',
-  firebaseAuthConfirmed = false
+  optionsOrFirebaseAuthConfirmed = false
 ) {
   const u = String(username || '').trim();
   const p = String(password || '').trim();
   if (!u || !p) {
     return { matched: false, user: null, error: 'Complete todos los campos' };
   }
+
+  const isObjOpts =
+    optionsOrFirebaseAuthConfirmed && typeof optionsOrFirebaseAuthConfirmed === 'object';
+  const firebaseAuthConfirmed = isObjOpts
+    ? Boolean(optionsOrFirebaseAuthConfirmed.firebaseAuthConfirmed)
+    : Boolean(optionsOrFirebaseAuthConfirmed);
+  const allowRadialFallback = isObjOpts
+    ? optionsOrFirebaseAuthConfirmed.allowRadialFallback !== false
+    : true;
 
   const list = Array.isArray(personnelList) ? personnelList : [];
   const uLower = u.toLowerCase();
@@ -2519,7 +2528,7 @@ export function matchPersonnelCredentials(
     const rutClean = String(x.rut ?? '').replace(/[^0-9kK]/g, '').toLowerCase();
     return (
       (idReg && idReg === uLower) ||
-      (idRad && idRad === uLower) ||
+      (allowRadialFallback && idRad && idRad === uLower) ||
       (uCleanRut && rutClean && rutClean === uCleanRut)
     );
   };
@@ -2625,6 +2634,145 @@ export function verifyCommanderAuthorization(
     error: ''
   };
 }
+
+// ============================================================================
+// 11. COMANDO DE INCIDENTES (SENTINEL SCI V3), APOYO INTER-CUERPOS Y ÓRDENES NAV/ONE
+// ============================================================================
+
+/**
+ * Calcula la distancia geodésica en metros (fórmula de Haversine) entre dos coordenadas GPS.
+ */
+export function calculateHaversineDistanceMeters(lat1, lng1, lat2, lng2) {
+  const nLat1 = Number(lat1);
+  const nLng1 = Number(lng1);
+  const nLat2 = Number(lat2);
+  const nLng2 = Number(lng2);
+  if (
+    isNaN(nLat1) ||
+    isNaN(nLng1) ||
+    isNaN(nLat2) ||
+    isNaN(nLng2) ||
+    (nLat1 === 0 && nLng1 === 0) ||
+    (nLat2 === 0 && nLng2 === 0)
+  ) {
+    return null;
+  }
+  const R = 6371000;
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const dLat = toRad(nLat2 - nLat1);
+  const dLng = toRad(nLng2 - nLng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(nLat1)) * Math.cos(toRad(nLat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c);
+}
+
+/**
+ * Construye un documento canónico de Orden Táctica Georreferenciada para una unidad
+ * (leído en vivo por SENTINEL NAV en el carro y SENTINEL ONE en teléfonos).
+ */
+export function buildCanonicalSciTacticalOrderDoc(raw = {}) {
+  const nowMs = Date.now();
+  const idCarro = String(raw.idCarro || raw.unidad || raw.unitName || '').trim().toUpperCase();
+  const origenCuerpo = String(raw.origenCuerpo || raw.clientName || 'LOCAL').trim().toUpperCase();
+  const licenciaOrigen = String(raw.licenciaOrigen || raw.licenseKey || '').trim().toUpperCase();
+  const sectorAsignado = String(raw.sectorAsignado || raw.sector || 'ALFA').trim().toUpperCase();
+  const instruccionTactica = String(raw.instruccionTactica || raw.instruccion || '').trim();
+  const lat = Number(raw.lat ?? raw.destinoTactico?.lat ?? 0);
+  const lng = Number(raw.lng ?? raw.destinoTactico?.lng ?? 0);
+  const etiqueta = String(
+    raw.etiqueta || raw.destinoTactico?.etiqueta || `POSICIÓN ${idCarro} (${sectorAsignado})`
+  ).trim().toUpperCase();
+
+  return {
+    idCarro,
+    origenCuerpo,
+    licenciaOrigen,
+    idServicio: String(raw.idServicio || raw.serviceId || '').trim(),
+    claveServicio: String(raw.claveServicio || raw.clave || '10-0').trim().toUpperCase(),
+    sectorAsignado,
+    destinoTactico: !isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)
+      ? { lat, lng, etiqueta }
+      : null,
+    instruccionTactica,
+    alertaEvacuacion: Boolean(raw.alertaEvacuacion),
+    motivoEvacuacion: String(raw.motivoEvacuacion || '').trim(),
+    emitidoPor: String(raw.emitidoPor || 'COMANDANTE INCIDENTE SCI').trim().toUpperCase(),
+    estadoOrden: String(raw.estadoOrden || 'ACTIVA').trim().toUpperCase(),
+    timestampOrden: Number(raw.timestampOrden || nowMs),
+    updatedAt: nowMs,
+    _metaTimestamp: nowMs
+  };
+}
+
+/**
+ * Construye un documento canónico de Solicitud de Apoyo Inter-Cuerpos en `sisbom-central/sci_apoyos_intercuerpos`.
+ * Conecta el SENTINEL SCI de la comuna en emergencia con el SENTINEL CAD y SENTINEL ONE de los Cuerpos vecinos.
+ */
+export function buildCanonicalInterCorpsSupportDoc(raw = {}) {
+  const nowMs = Date.now();
+  const licenciaSolicitante = String(raw.licenciaSolicitante || '').trim().toUpperCase();
+  const cuerpoSolicitante = String(raw.cuerpoSolicitante || licenciaSolicitante).trim();
+  const licenciaApoyo = String(raw.licenciaApoyo || '').trim().toUpperCase();
+  const cuerpoApoyo = String(raw.cuerpoApoyo || licenciaApoyo).trim();
+  const idServicioOrigen = String(raw.idServicioOrigen || raw.serviceId || '').trim();
+  const idCarroSolicitado = String(raw.idCarroSolicitado || raw.unitName || 'CUALQUIERA').trim().toUpperCase();
+  const tipoSolicitud = String(raw.tipoSolicitud || 'SOLICITUD_UNIDAD').trim().toUpperCase(); // 'ALERTA_PREVENTIVA' | 'EVALUacion_APOYO' | 'SOLICITUD_UNIDAD'
+  const estado = String(raw.estado || 'PENDIENTE').trim().toUpperCase(); // 'ALERTA' | 'PENDIENTE' | 'ACEPTADO' | 'EN_CAMINO' | 'EN_LUGAR' | 'FINALIZADO' | 'RECHAZADO'
+
+  const idSolicitud = String(
+    raw.id ||
+      raw.idSolicitud ||
+      `APOYO_${licenciaSolicitante}_${licenciaApoyo}_${idCarroSolicitado.replace(/[^A-Z0-9]/g, '')}_${idServicioOrigen || nowMs}`
+  );
+
+  return {
+    id: idSolicitud,
+    idSolicitud,
+    licenciaSolicitante,
+    cuerpoSolicitante,
+    comunaSolicitante: String(raw.comunaSolicitante || '').trim(),
+    licenciaApoyo,
+    cuerpoApoyo,
+    comunaApoyo: String(raw.comunaApoyo || '').trim(),
+    idServicioOrigen,
+    claveEmergencia: String(raw.claveEmergencia || '10-0').trim().toUpperCase(),
+    direccionEmergencia: String(raw.direccionEmergencia || '').trim().toUpperCase(),
+    geoEmergencia: raw.geoEmergencia && typeof raw.geoEmergencia === 'object'
+      ? {
+          lat: Number(raw.geoEmergencia.lat || 0),
+          lng: Number(raw.geoEmergencia.lng || 0)
+        }
+      : null,
+    idCarroSolicitado,
+    sectorDestino: String(raw.sectorDestino || 'ESPERA').trim().toUpperCase(),
+    destinoTactico: raw.destinoTactico || null,
+    instruccionTactica: String(raw.instruccionTactica || 'Presentarse en Puesto de Comando / Área de Espera SCI').trim(),
+    comandanteSolicitante: String(raw.comandanteSolicitante || '').trim().toUpperCase(),
+    tipoSolicitud,
+    estado,
+    etaMinutos: raw.etaMinutos !== undefined ? Number(raw.etaMinutos) : null,
+    distanciaKm: raw.distanciaKm !== undefined ? Number(raw.distanciaKm) : null,
+    firebaseConfigApoyo: raw.firebaseConfigApoyo || null,
+    createdAt: Number(raw.createdAt || nowMs),
+    updatedAt: nowMs,
+    _metaTimestamp: nowMs
+  };
+}
+
+/**
+ * Normaliza un documento de `sci_apoyos_intercuerpos` para lectura segura en SCI, CAD, ONE y NAV.
+ */
+export function normalizeInterCorpsSupportDoc(docId, raw = {}) {
+  if (!raw || typeof raw !== 'object') return null;
+  return {
+    ...buildCanonicalInterCorpsSupportDoc({ ...raw, id: docId || raw.id || raw.idSolicitud }),
+    id: String(docId || raw.id || raw.idSolicitud || ''),
+    _metaTimestamp: getEntityMaxTimestamp(raw) || Number(raw.updatedAt || raw.createdAt || 0)
+  };
+}
+
 
 
 
