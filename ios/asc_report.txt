@@ -8,7 +8,7 @@
 🔞 Completando AgeRatingDeclaration de la versión (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
 ⚠️ HTTP 404 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/560a8f78-db6a-4284-afd1-3f1245a55675: {
   "errors" : [ {
-    "id" : "2f024d41-9a9e-4588-a25b-4ad43c0c6646",
+    "id" : "7b1dd3d7-92e9-473c-ba19-0eef947ad10b",
     "status" : "404",
     "code" : "NOT_FOUND",
     "title" : "The specified resource does not exist",
@@ -21,7 +21,7 @@
 🌐 Configurando URL de Soporte, Textos y Capturas para es-ES (id=c9dc24ad-dc36-4500-b40b-91da8db3e90f)...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
   "errors" : [ {
-    "id" : "672b002f-8859-494f-9d08-1b9d608b8fce",
+    "id" : "d34b3f70-7f6a-440a-946b-06373e34e81e",
     "status" : "409",
     "code" : "STATE_ERROR",
     "title" : "The request cannot be fulfilled because of the state of another resource.",
@@ -32,9 +32,9 @@
 ✅ APP_IPHONE_65 ya cuenta con 2 capturas cargadas.
 ✅ APP_IPAD_PRO_3GEN_129 ya cuenta con 2 capturas cargadas.
 👤 Configurando datos de contacto y cuenta demo para el Revisor de Apple...
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/3023d8d2-fd0c-45c2-a85f-27a1f2e5ff22: {
+⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/fc9fe35d-467e-45ca-a730-cecca1c90583: {
   "errors" : [ {
-    "id" : "813dd396-80d9-495a-8182-e9151ed8fe4a",
+    "id" : "41acc97a-e45e-4ba6-8538-bbc1a61e5fec",
     "status" : "409",
     "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID",
     "title" : "The provided entity includes an attribute with an invalid value",
@@ -46,7 +46,7 @@
 }
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersions/560a8f78-db6a-4284-afd1-3f1245a55675/relationships/build: {
   "errors" : [ {
-    "id" : "3e8a0f0a-384c-4af2-a2a8-c87f645b2cd3",
+    "id" : "fb61e0ef-0efd-4e94-a7ed-60365f71533f",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID.INVALID_STATE",
     "title" : "A relationship value is not acceptable for the current resource state.",
@@ -56,11 +56,11 @@
     }
   } ]
 }
-✅ Build 3012 vinculado a la versión 3.0.4.
+✅ Build 3014 vinculado a la versión 3.0.4.
 🚀 Enviando versión 3.0.3 a Revisión de App Store...
 ⚠️ HTTP 409 en POST https://api.appstoreconnect.apple.com/v1/reviewSubmissionItems: {
   "errors" : [ {
-    "id" : "d66c9847-43b9-44b2-adc4-b425bf5fd346",
+    "id" : "c8a9a853-ef6e-4423-a58d-56f2ef72f841",
     "status" : "409",
     "code" : "STATE_ERROR.ENTITY_STATE_INVALID",
     "title" : "appStoreVersions with id '560a8f78-db6a-4284-afd1-3f1245a55675' is not in valid state.",
@@ -68,7 +68,7 @@
     "meta" : {
       "associatedErrors" : {
         "/v1/appStoreVersions/560a8f78-db6a-4284-afd1-3f1245a55675" : [ {
-          "id" : "b87b7165-0995-4cc3-b91e-d112bb163be0",
+          "id" : "fb84fa71-1710-4998-a392-a1971e304587",
           "status" : "409",
           "code" : "STATE_ERROR.STATE_NOT_SUITABLE_TO_SUBMIT",
           "title" : "Invalid submission state.",
@@ -78,9 +78,9 @@
     }
   } ]
 }
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/70ac0e9c-57c3-4df4-90bd-32bbdf6445de: {
+⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/02709ce7-6c16-41bd-bcda-460eb2842837: {
   "errors" : [ {
-    "id" : "aab6b879-f645-4047-b52d-379274f9ff62",
+    "id" : "f72f6c8f-4923-4aed-8fb5-c56f4b39dbf5",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
     "title" : "Relationship is required",
@@ -93,7 +93,7 @@
 ⚠️ Respuesta de envío a revisión: {
   "errors": [
     {
-      "id": "aab6b879-f645-4047-b52d-379274f9ff62",
+      "id": "f72f6c8f-4923-4aed-8fb5-c56f4b39dbf5",
       "status": "409",
       "code": "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
       "title": "Relationship is required",
@@ -107,7 +107,7 @@
 📋 Items en reviewSubmission: {
   "data": [],
   "links": {
-    "self": "https://api.appstoreconnect.apple.com/v1/reviewSubmissions/70ac0e9c-57c3-4df4-90bd-32bbdf6445de/items"
+    "self": "https://api.appstoreconnect.apple.com/v1/reviewSubmissions/02709ce7-6c16-41bd-bcda-460eb2842837/items"
   },
   "meta": {
     "paging": {
@@ -118,7 +118,7 @@
 }
 🏁 Estado final de la versión 3.0.3: {
   "platform": "IOS",
-  "versionString": "3.0.3",
+  "versionString": "3.0.4",
   "appStoreState": "WAITING_FOR_REVIEW",
   "appVersionState": "WAITING_FOR_REVIEW",
   "copyright": "2026 Sistema Sentinel - Cuerpos de Bomberos",
