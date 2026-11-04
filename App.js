@@ -84,6 +84,7 @@ export default function App() {
         const disclosed = await AsyncStorage.getItem(DISCLOSURE_KEY);
         const currentPerms = readNativePermissionsStatus();
         const allGranted =
+          currentPerms.notifications &&
           currentPerms.backgroundLocation &&
           currentPerms.overlay &&
           currentPerms.batteryUnrestricted;
@@ -115,20 +116,8 @@ export default function App() {
     setLocationModalVisible(false);
     try {
       await AsyncStorage.setItem(DISCLOSURE_KEY, 'true');
-      if (typeof window !== 'undefined' && window.AndroidApp?.requestLocationAlways) {
-        window.AndroidApp.requestLocationAlways();
-      } else if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp?.postMessage) {
-        window.webkit.messageHandlers.iOSApp.postMessage({ action: 'requestLocationAlways' });
-      } else {
-        const { status: fgStatus } = await Location.requestForegroundPermissionsAsync();
-        if (fgStatus === 'granted') {
-          try {
-            await Location.requestBackgroundPermissionsAsync();
-          } catch (e) {}
-        }
-      }
     } catch (e) {
-      console.warn('Location permission request error:', e);
+      console.warn('Location permission save error:', e);
     }
   };
 

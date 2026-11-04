@@ -736,9 +736,18 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
   const fecha610 = formatEpochToDDMMYYYY(h610) || String(raw.fecha610 || '').trim();
   const fecha68 = formatEpochToDDMMYYYY(h68) || String(raw.fecha68 || '').trim();
 
-  const preinforme = String(raw.preinforme ?? raw.preInforme ?? raw.preinformeUnidad ?? '').trim();
-  const informe63 = String(raw.informe63 ?? raw.report ?? '').trim();
-  const observacion = String(raw.observacion ?? raw.observaciones ?? raw.motivo ?? '').trim();
+  const preinforme = String(
+    raw.preinforme ??
+    raw.preInforme ??
+    raw.preInforme60 ??
+    raw.preinformeUnidad ??
+    raw.motivo ??
+    raw.motivoSalida ??
+    ''
+  ).trim();
+  const informe63 = String(raw.informe63 ?? raw.informePreliminar ?? raw.report ?? '').trim();
+  const rawObs = String(raw.observacion ?? raw.observaciones ?? '').trim();
+  const observacion = /^LIBERACI[OÓ]N\s+URGENTE/i.test(rawObs) ? '' : rawObs;
 
   let unitStatus = 'pending_departure';
   let estadoMovil = String(raw.estadoMovil || '').trim();
@@ -1561,6 +1570,123 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
     token: String(gsObj.token ?? raw.googleSheetsBitacoraToken ?? '').trim()
   };
 
+  // Solicitud de Alerta Inter-Cuerpos SCI hacia SENTINEL ONE del Comandante (idRadial == "1", Grado 3) y estado de confirmación
+  const alertaIntercuerpoSci =
+    raw.alertaIntercuerpoSci && typeof raw.alertaIntercuerpoSci === 'object'
+      ? {
+          id: String(raw.alertaIntercuerpoSci.idAlerta || raw.alertaIntercuerpoSci.id || '').trim(),
+          idAlerta: String(raw.alertaIntercuerpoSci.idAlerta || raw.alertaIntercuerpoSci.id || '').trim(),
+          tipo: String(raw.alertaIntercuerpoSci.tipo || 'alerta').trim().toLowerCase(),
+          fechaAlerta: String(
+            raw.alertaIntercuerpoSci.fechaAlerta || `'${getLocalDateString(new Date(raw.alertaIntercuerpoSci.timestamp || Date.now()))}`
+          ).trim(),
+          horaAlerta: String(
+            raw.alertaIntercuerpoSci.horaAlerta || `'${getLocalTimeString(new Date(raw.alertaIntercuerpoSci.timestamp || Date.now()))}`
+          ).trim(),
+          razonAlerta: String(
+            raw.alertaIntercuerpoSci.razonAlerta ||
+              `SOLICITUD DE ALERTA POR CLAVE ${raw.alertaIntercuerpoSci.claveEmergencia || '10-0'} PARA UNIDADES EN APOYO`
+          )
+            .trim()
+            .toUpperCase(),
+          mensajeAlerta: String(
+            raw.alertaIntercuerpoSci.mensajeAlerta ||
+              raw.alertaIntercuerpoSci.mensajeSolicitud ||
+              `Solicitud de Alerta por Clave ${raw.alertaIntercuerpoSci.claveEmergencia || '10-0'} para Unidades en Apoyo`
+          ).trim(),
+          quienAlerta: String(
+            raw.alertaIntercuerpoSci.quienAlerta ||
+              `SCI - ${raw.alertaIntercuerpoSci.cuerpoSolicitante || raw.alertaIntercuerpoSci.licenciaSolicitante || 'COMANDANCIA'}`
+          )
+            .trim()
+            .toUpperCase(),
+          gradoAlerta: '3',
+          duracion: String(raw.alertaIntercuerpoSci.duracion ?? 'i').trim(),
+          aQuienAlerta: String(raw.alertaIntercuerpoSci.aQuienAlerta || '1').trim(),
+          conforme: String(raw.alertaIntercuerpoSci.conforme || '').trim(),
+          fijar: String(raw.alertaIntercuerpoSci.fijar || '').trim(),
+          licenciaSolicitante: String(raw.alertaIntercuerpoSci.licenciaSolicitante || '').trim().toUpperCase(),
+          cuerpoSolicitante: String(raw.alertaIntercuerpoSci.cuerpoSolicitante || '').trim(),
+          comunaSolicitante: String(raw.alertaIntercuerpoSci.comunaSolicitante || '').trim(),
+          licenciaApoyo: String(raw.alertaIntercuerpoSci.licenciaApoyo || licencia).trim().toUpperCase(),
+          cuerpoApoyo: String(raw.alertaIntercuerpoSci.cuerpoApoyo || nombreCliente).trim(),
+          idServicioOrigen: String(raw.alertaIntercuerpoSci.idServicioOrigen || '').trim(),
+          claveEmergencia: String(raw.alertaIntercuerpoSci.claveEmergencia || '10-0').trim().toUpperCase(),
+          direccionEmergencia: String(raw.alertaIntercuerpoSci.direccionEmergencia || '').trim().toUpperCase(),
+          geoEmergencia: raw.alertaIntercuerpoSci.geoEmergencia || null,
+          comandanteSolicitante: String(raw.alertaIntercuerpoSci.comandanteSolicitante || '').trim().toUpperCase(),
+          mensajeSolicitud: String(
+            raw.alertaIntercuerpoSci.mensajeSolicitud ||
+              raw.alertaIntercuerpoSci.mensajeAlerta ||
+              `Solicitud de Alerta por Clave ${raw.alertaIntercuerpoSci.claveEmergencia || '10-0'} para Unidades en Apoyo`
+          ).trim(),
+          estado: String(raw.alertaIntercuerpoSci.estado || 'PENDIENTE').trim().toUpperCase(), // 'PENDIENTE' | 'CONFIRMADA' | 'RECHAZADA' | 'FINALIZADA'
+          confirmadoPor: String(raw.alertaIntercuerpoSci.confirmadoPor || '').trim().toUpperCase(),
+          confirmadoAt: Number(raw.alertaIntercuerpoSci.confirmadoAt || 0) || null,
+          commanderToken: String(raw.alertaIntercuerpoSci.commanderToken || '').trim(),
+          commanderAuth:
+            raw.alertaIntercuerpoSci.commanderAuth && typeof raw.alertaIntercuerpoSci.commanderAuth === 'object'
+              ? {
+                  email: String(raw.alertaIntercuerpoSci.commanderAuth.email || '').trim(),
+                  password: String(raw.alertaIntercuerpoSci.commanderAuth.password || '').trim(),
+                  idRegistro: String(raw.alertaIntercuerpoSci.commanderAuth.idRegistro || '').trim(),
+                  idRadial: String(raw.alertaIntercuerpoSci.commanderAuth.idRadial || '1').trim()
+                }
+              : null,
+          unidadesDisponibles: Array.isArray(raw.alertaIntercuerpoSci.unidadesDisponibles)
+            ? raw.alertaIntercuerpoSci.unidadesDisponibles
+            : [],
+          companiasApoyo:
+            raw.alertaIntercuerpoSci.companiasApoyo && typeof raw.alertaIntercuerpoSci.companiasApoyo === 'object'
+              ? raw.alertaIntercuerpoSci.companiasApoyo
+              : null,
+          totalCompaniasApoyo: Number(raw.alertaIntercuerpoSci.totalCompaniasApoyo || 0) || null,
+          solicitudesUnidades:
+            raw.alertaIntercuerpoSci.solicitudesUnidades &&
+            typeof raw.alertaIntercuerpoSci.solicitudesUnidades === 'object'
+              ? raw.alertaIntercuerpoSci.solicitudesUnidades
+              : {},
+          chatDirecto:
+            raw.alertaIntercuerpoSci.chatDirecto &&
+            typeof raw.alertaIntercuerpoSci.chatDirecto === 'object'
+              ? {
+                  idAlerta: String(raw.alertaIntercuerpoSci.chatDirecto.idAlerta || ''),
+                  razonAlerta: String(raw.alertaIntercuerpoSci.chatDirecto.razonAlerta || '').trim().toUpperCase(),
+                  mensajeAlerta: String(raw.alertaIntercuerpoSci.chatDirecto.mensajeAlerta || '').trim(),
+                  quienAlerta: String(raw.alertaIntercuerpoSci.chatDirecto.quienAlerta || '').trim().toUpperCase(),
+                  gradoAlerta: '3',
+                  duracion: String(raw.alertaIntercuerpoSci.chatDirecto.duracion ?? 'C').trim(),
+                  aQuienAlerta: String(raw.alertaIntercuerpoSci.chatDirecto.aQuienAlerta || '').trim(),
+                  conforme: String(raw.alertaIntercuerpoSci.chatDirecto.conforme || '').trim(),
+                  fijar: String(raw.alertaIntercuerpoSci.chatDirecto.fijar || '1').trim(),
+                  updatedAt: Number(raw.alertaIntercuerpoSci.chatDirecto.updatedAt || Date.now())
+                }
+              : null,
+          chatIntercuerpos:
+            raw.alertaIntercuerpoSci.chatIntercuerpos &&
+            typeof raw.alertaIntercuerpoSci.chatIntercuerpos === 'object'
+              ? {
+                  idAlerta: String(raw.alertaIntercuerpoSci.chatIntercuerpos.idAlerta || 'SCI_CHAT_INTERCUERPOS'),
+                  razonAlerta: String(
+                    raw.alertaIntercuerpoSci.chatIntercuerpos.razonAlerta || 'RED INTER-CUERPOS SCI'
+                  )
+                    .trim()
+                    .toUpperCase(),
+                  mensajeAlerta: String(raw.alertaIntercuerpoSci.chatIntercuerpos.mensajeAlerta || '').trim(),
+                  quienAlerta: String(raw.alertaIntercuerpoSci.chatIntercuerpos.quienAlerta || '').trim().toUpperCase(),
+                  gradoAlerta: '3',
+                  duracion: String(raw.alertaIntercuerpoSci.chatIntercuerpos.duracion ?? 'C').trim(),
+                  aQuienAlerta: String(raw.alertaIntercuerpoSci.chatIntercuerpos.aQuienAlerta || '').trim(),
+                  conforme: String(raw.alertaIntercuerpoSci.chatIntercuerpos.conforme || '').trim(),
+                  fijar: String(raw.alertaIntercuerpoSci.chatIntercuerpos.fijar || '1').trim(),
+                  updatedAt: Number(raw.alertaIntercuerpoSci.chatIntercuerpos.updatedAt || Date.now())
+                }
+              : null,
+          timestamp: Number(raw.alertaIntercuerpoSci.timestamp || Date.now()),
+          updatedAt: Number(raw.alertaIntercuerpoSci.updatedAt || Date.now())
+        }
+      : null;
+
   return {
     key: licencia,
     licencia,
@@ -1585,6 +1711,7 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
     googleSheetsBitacoraEnabled: googleSheetsBitacora.enabled,
     googleSheetsBitacoraUrl: googleSheetsBitacora.url,
     googleSheetsBitacoraToken: googleSheetsBitacora.token,
+    alertaIntercuerpoSci,
     updatedAt: Number(raw.updatedAt || Date.now())
   };
 }
@@ -1628,7 +1755,52 @@ export function buildCanonicalSaasClientDoc(raw = {}) {
 // ============================================================================
 
 /**
- * Formatea un identificador de lista (`"2026-00453"` o `"2026453"`) a su número correlativo corto (`"453"`).
+ * Extrae el año de ciclo y el número correlativo secuencial de un `idLista`
+ * soportando tanto el formato antiguo `"cicloxxxx"` (`"20260453"`, `"2026453"`)
+ * como el formato nuevo `"ciclo-xxxx"` (`"2026-00453"`, `"2026-0453"`).
+ */
+export function parseAttendanceIdParts(idLista = '') {
+  const s = String(idLista || '').trim();
+  if (!s) return { cycleYear: null, seq: 0 };
+  if (/^\d{4}-\d+$/.test(s)) {
+    const [yrStr, seqStr] = s.split('-');
+    return {
+      cycleYear: parseInt(yrStr, 10) || null,
+      seq: parseInt(seqStr, 10) || 0,
+    };
+  }
+  if (/^\d{7,10}$/.test(s)) {
+    return {
+      cycleYear: parseInt(s.substring(0, 4), 10) || null,
+      seq: parseInt(s.substring(4), 10) || 0,
+    };
+  }
+  return {
+    cycleYear: null,
+    seq: parseInt(s.replace(/\D/g, ''), 10) || 0,
+  };
+}
+
+/**
+ * Compara dos documentos o identificadores de asistencia ordenando del más reciente al más antiguo
+ * unificando los formatos `"cicloxxxx"` y `"ciclo-xxxx"`.
+ */
+export function compareAttendanceIdsDesc(a, b) {
+  const idA = typeof a === 'object' ? (a?.idLista || a?.serviceId || a?.id || '') : a;
+  const idB = typeof b === 'object' ? (b?.idLista || b?.serviceId || b?.id || '') : b;
+  const pA = parseAttendanceIdParts(idA);
+  const pB = parseAttendanceIdParts(idB);
+  if (pA.cycleYear && pB.cycleYear && pA.cycleYear !== pB.cycleYear) {
+    return pB.cycleYear - pA.cycleYear;
+  }
+  if (pB.seq !== pA.seq) {
+    return pB.seq - pA.seq;
+  }
+  return String(idB).localeCompare(String(idA));
+}
+
+/**
+ * Formatea un identificador de lista (`"2026-00453"`, `"2026-0453"`, `"20260453"` o `"2026453"`) a su número correlativo corto (`"453"`).
  */
 export function formatAttendanceIdShort(idLista = '') {
   const s = String(idLista || '').trim();
@@ -1640,13 +1812,9 @@ export function formatAttendanceIdShort(idLista = '') {
       .filter(Boolean)
       .join(', ');
   }
-  if (/^\d{4}-\d+$/.test(s)) {
-    const seq = parseInt(s.split('-')[1], 10);
-    return !isNaN(seq) ? String(seq) : s;
-  }
-  if (/^\d{7,9}$/.test(s)) {
-    const seq = parseInt(s.substring(4), 10);
-    return !isNaN(seq) ? String(seq) : s;
+  const { cycleYear, seq } = parseAttendanceIdParts(s);
+  if (cycleYear && seq > 0) {
+    return String(seq);
   }
   return s;
 }
@@ -2521,24 +2689,35 @@ export function matchPersonnelCredentials(
   const uLower = u.toLowerCase();
   const uCleanRut = u.replace(/[^0-9kK]/g, '').toLowerCase();
 
-  const matchesIdentity = (x) => {
+  const matchesIdRegistro = (x) => {
     if (!x || typeof x !== 'object') return false;
     const idReg = String(x.idRegistro ?? x.id ?? '').trim().toLowerCase();
+    return Boolean(idReg && idReg === uLower);
+  };
+
+  const matchesFallbackIdentity = (x) => {
+    if (!x || typeof x !== 'object') return false;
     const idRad = String(x.idRadial ?? '').trim().toLowerCase();
     const rutClean = String(x.rut ?? '').replace(/[^0-9kK]/g, '').toLowerCase();
     return (
-      (idReg && idReg === uLower) ||
       (allowRadialFallback && idRad && idRad === uLower) ||
       (uCleanRut && rutClean && rutClean === uCleanRut)
     );
   };
 
+  // Prioridad absoluta a idRegistro (Ley #10: el "Usuario" es su idRegistro)
   let found = list.find(
-    (x) => matchesIdentity(x) && String(x.contrasena ?? x.password ?? '').trim() === p
+    (x) => matchesIdRegistro(x) && String(x.contrasena ?? x.password ?? '').trim() === p
   );
 
+  if (!found) {
+    found = list.find(
+      (x) => matchesFallbackIdentity(x) && String(x.contrasena ?? x.password ?? '').trim() === p
+    );
+  }
+
   if (!found && firebaseAuthConfirmed) {
-    found = list.find((x) => matchesIdentity(x));
+    found = list.find((x) => matchesIdRegistro(x)) || list.find((x) => matchesFallbackIdentity(x));
   }
 
   if (!found) {
@@ -2755,6 +2934,19 @@ export function buildCanonicalInterCorpsSupportDoc(raw = {}) {
     etaMinutos: raw.etaMinutos !== undefined ? Number(raw.etaMinutos) : null,
     distanciaKm: raw.distanciaKm !== undefined ? Number(raw.distanciaKm) : null,
     firebaseConfigApoyo: raw.firebaseConfigApoyo || null,
+    confirmadoPor: String(raw.confirmadoPor || '').trim().toUpperCase(),
+    confirmadoAt: Number(raw.confirmadoAt || 0) || null,
+    commanderToken: String(raw.commanderToken || '').trim(),
+    commanderAuth:
+      raw.commanderAuth && typeof raw.commanderAuth === 'object'
+        ? {
+            email: String(raw.commanderAuth.email || '').trim(),
+            password: String(raw.commanderAuth.password || '').trim(),
+            idRegistro: String(raw.commanderAuth.idRegistro || '').trim(),
+            idRadial: String(raw.commanderAuth.idRadial || '1').trim()
+          }
+        : null,
+    unidadesDisponibles: Array.isArray(raw.unidadesDisponibles) ? raw.unidadesDisponibles : [],
     createdAt: Number(raw.createdAt || nowMs),
     updatedAt: nowMs,
     _metaTimestamp: nowMs
@@ -2772,6 +2964,276 @@ export function normalizeInterCorpsSupportDoc(docId, raw = {}) {
     _metaTimestamp: getEntityMaxTimestamp(raw) || Number(raw.updatedAt || raw.createdAt || 0)
   };
 }
+
+/**
+ * Construye un documento de Alerta u Orden del Día con la estructura canónica exacta de `SENTINEL CAD` (`AlertasView.jsx`).
+ * Cuando se emite hacia otro Cuerpo de Bomberos (`isInterCorps === true` o destinatario Comandante), se forma en:
+ * - `gradoAlerta: "3"` (Crítico, activa `importante.mp3` y prioridad máxima en SENTINEL ONE)
+ * - `aQuienAlerta: "1"` (personal con `idRadial == "1"`, es decir, el Comandante, o su `idRegistro` si se resuelve)
+ */
+export function buildCanonicalCadAlertDoc(raw = {}) {
+  const nowMs = Number(raw.timestamp || Date.now());
+  const dObj = new Date(nowMs);
+  const dStr = getLocalDateString(dObj);
+  const tStr = getLocalTimeString(dObj);
+
+  const idAlerta = String(raw.idAlerta || raw.id || nowMs).replace(/^['"]+|['"]+$/g, '').trim();
+  const fechaRaw = String(raw.fechaAlerta || raw.fecha || dStr).replace(/^['"]+|['"]+$/g, '').trim();
+  const horaRaw = String(raw.horaAlerta || raw.hora || tStr).replace(/^['"]+|['"]+$/g, '').trim();
+
+  const razonAlerta = String(raw.razonAlerta || raw.razon || raw.titulo || 'COMUNICADO OFICIAL')
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim()
+    .toUpperCase();
+  const mensajeAlerta = String(raw.mensajeAlerta || raw.mensaje || raw.cuerpo || '').trim();
+  const quienAlerta = String(raw.quienAlerta || raw.creadoPor || raw.autor || 'COMANDANCIA - SCI')
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim()
+    .toUpperCase();
+
+  // Por defecto Grado 3 para alertas críticas / inter-cuerpos, o el grado indicado ('1' | '2' | '3')
+  const gradoAlerta = String(raw.gradoAlerta || raw.grado || '3').replace(/^['"]+|['"]+$/g, '').trim() || '3';
+  const duracion = raw.duracion !== undefined && raw.duracion !== null ? String(raw.duracion).trim() : 'i';
+
+  // Destinatario canónico: '1' (Comandante idRadial == "1", o lista de IDs separados por coma) o 'TC' (Toda la Compañía)
+  const aQuienAlerta = String(raw.aQuienAlerta || raw.destinatario || raw.destinatarios || '1')
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim() || '1';
+
+  const conforme = Array.isArray(raw.conforme)
+    ? raw.conforme.join(', ')
+    : String(raw.conforme || '').replace(/^['"]+|['"]+$/g, '').trim();
+  const fijar = Array.isArray(raw.fijar)
+    ? raw.fijar.join(', ')
+    : String(raw.fijar || '').replace(/^['"]+|['"]+$/g, '').trim();
+
+  return {
+    id: idAlerta,
+    idAlerta,
+    tipo: String(raw.tipo || (raw.numeroOrden ? 'orden' : 'alerta')).trim().toLowerCase(),
+    fechaAlerta: `'${fechaRaw}`,
+    horaAlerta: `'${horaRaw}`,
+    razonAlerta,
+    mensajeAlerta,
+    quienAlerta,
+    gradoAlerta,
+    duracion,
+    aQuienAlerta,
+    conforme,
+    fijar,
+    timestamp: nowMs,
+    _metaTimestamp: nowMs
+  };
+}
+
+/**
+ * Normaliza en modo Dual-Read un documento de `alertas/{idAlerta}` con la misma estructura exacta de `SENTINEL CAD` (`AlertasView.jsx`).
+ */
+export function normalizeCanonicalCadAlertDoc(docId, raw = {}) {
+  if (!raw || typeof raw !== 'object') return null;
+  const cleanPrefix = (val) => String(val ?? '').replace(/^['"]+|['"]+$/g, '').trim();
+  const idAlerta = cleanPrefix(raw.idAlerta || raw.id || docId);
+  const tipo = String(raw.tipo || (raw.numeroOrden ? 'orden' : 'alerta')).trim().toLowerCase();
+  const timestamp = Number(raw.timestamp || raw.createdAt || 0) || 0;
+  const fechaAlerta = cleanPrefix(
+    raw.fechaAlerta || raw.fecha || (timestamp ? formatEpochToDDMMYYYY(timestamp) : '') || getLocalDateString()
+  );
+  const horaAlerta = cleanPrefix(
+    raw.horaAlerta || raw.hora || (timestamp ? formatEpochToHHMM(timestamp) : '') || getLocalTimeString()
+  );
+  const fijarStr = Array.isArray(raw.fijar) ? raw.fijar.join(', ') : cleanPrefix(raw.fijar || '');
+  const conformeStr = Array.isArray(raw.conforme) ? raw.conforme.join(', ') : cleanPrefix(raw.conforme || '');
+  const quienStr = cleanPrefix(raw.quienAlerta || raw.creadoPor || raw.autor || 'CENTRAL DE ALARMAS');
+
+  let rawDuracion = 'i';
+  if (raw.eliminada === true || raw.estado === 'eliminada' || String(raw.oculta) === '1') {
+    rawDuracion = '';
+  } else if (raw.duracion !== undefined && raw.duracion !== null) {
+    rawDuracion = cleanPrefix(raw.duracion);
+  }
+
+  return {
+    id: idAlerta,
+    idAlerta,
+    tipo,
+    gradoAlerta: cleanPrefix(raw.gradoAlerta || raw.grado || '1') || '1',
+    aQuienAlerta: cleanPrefix(raw.aQuienAlerta || raw.destinatario || raw.destinatarios || 'TC') || 'TC',
+    quienAlerta: quienStr,
+    razonAlerta: cleanPrefix(raw.razonAlerta || raw.razon || raw.titulo || ''),
+    mensajeAlerta: String(raw.mensajeAlerta || raw.mensaje || raw.cuerpo || '').trim(),
+    fechaAlerta,
+    horaAlerta,
+    duracion: rawDuracion,
+    conforme: conformeStr,
+    fijar: fijarStr,
+    numeroOrden: cleanPrefix(raw.numeroOrden || raw.numero || ''),
+    fechaOrden: cleanPrefix(raw.fechaOrden || fechaAlerta),
+    firmaNombre: cleanPrefix(raw.firmaNombre || raw.firmante || ''),
+    firmaCargo: cleanPrefix(raw.firmaCargo || raw.cargoFirmante || ''),
+    timestamp,
+    _metaTimestamp: Math.max(timestamp, Number(raw._metaTimestamp || 0))
+  };
+}
+
+/**
+ * Busca en la colección `personal` al Comandante (`idRadial == "1"`, o `isCanonicalCommander`)
+ * y devuelve su `idRegistro` permanente para asignarlo en `aQuienAlerta` (regla oficial de `SENTINEL CAD` y `SENTINEL ONE`:
+ * `aQuienAlerta` almacena el `idRegistro` de la persona).
+ */
+export function resolveCommanderIdRegistroFromPersonal(personnelList = [], fallbackUser = null) {
+  const list = Array.isArray(personnelList) ? personnelList : [];
+
+  // 1. Buscar en personal por idRadial === "1"
+  const byRadialOne = list.find((p) => {
+    if (!p || typeof p !== 'object') return false;
+    const rad = String(p.idRadial || p.radial || '').trim();
+    return rad === '1' || parseInt(rad, 10) === 1;
+  });
+  if (byRadialOne && (byRadialOne.idRegistro || byRadialOne.id)) {
+    return String(byRadialOne.idRegistro || byRadialOne.id).trim();
+  }
+
+  // 2. Respaldo por cargo Comandante en personal
+  const byCmdCargo = list.find((p) => isCanonicalCommander(p));
+  if (byCmdCargo && (byCmdCargo.idRegistro || byCmdCargo.id)) {
+    return String(byCmdCargo.idRegistro || byCmdCargo.id).trim();
+  }
+
+  // 3. Si el usuario actual tiene idRadial == "1", usar su idRegistro
+  if (fallbackUser && isCanonicalCommander(fallbackUser) && fallbackUser.idRegistro) {
+    return String(fallbackUser.idRegistro).trim();
+  }
+
+  return '';
+}
+
+/**
+ * Formatea una entrada de mensaje de chat canónico según `SENTINEL CAD` (`AlertasView.jsx`) y `SENTINEL ONE` (`ChatModal.jsx`):
+ * `"DD-MM-YYYY/HH:MM/idRegistro: mensaje |"`
+ */
+export function formatCanonicalChatEntry({
+  senderId = '1',
+  texto = '',
+  fecha = '',
+  hora = ''
+} = {}) {
+  const cleanMsg = String(texto || '').trim().replace(/\|/g, ' ');
+  if (!cleanMsg) return '';
+  const dStr = String(fecha || getLocalDateString()).replace(/^['"]+|['"]+$/g, '').trim();
+  const tStr = String(hora || getLocalTimeString()).replace(/^['"]+|['"]+$/g, '').trim();
+  const sId = String(senderId || '1').trim();
+  return `${dStr}/${tStr}/${sId}: ${cleanMsg} |`;
+}
+
+/**
+ * Concatena un nuevo mensaje al `mensajeAlerta` de una alerta de conversación (`duracion: "C"`).
+ */
+export function appendCanonicalChatMessage(existingMensajeAlerta = '', entryOrParams = '') {
+  const entry =
+    typeof entryOrParams === 'string'
+      ? entryOrParams.trim()
+      : formatCanonicalChatEntry(entryOrParams);
+  if (!entry) return String(existingMensajeAlerta || '').trim();
+  const existing = String(existingMensajeAlerta || '').trim();
+  if (!existing) return entry;
+  if (existing.endsWith('|')) return `${existing} ${entry}`;
+  return `${existing} | ${entry}`;
+}
+
+/**
+ * Parsea `mensajeAlerta` de una alerta de conversación (`duracion: "C"`) separada por `|`
+ * (idéntico a `parseChatMessages` en `SENTINEL CAD` `AlertasView.jsx` líneas 198-258 y `SENTINEL ONE` `ChatModal.jsx`).
+ */
+export function parseCanonicalChatMessages(
+  rawMensaje = '',
+  fallbackSender = 'COMANDANCIA',
+  fallbackDate = '',
+  fallbackTime = ''
+) {
+  if (!rawMensaje) return [];
+  const rawParts = String(rawMensaje)
+    .split('|')
+    .map((m) => m.trim())
+    .filter(Boolean);
+
+  return rawParts.map((msg, idx) => {
+    const firstColon = msg.indexOf(':');
+    if (firstColon !== -1 && msg.includes('/')) {
+      const metaPart = msg.substring(0, firstColon).trim();
+      const textPart = msg.substring(firstColon + 1).trim();
+      const metaSegments = metaPart.split('/');
+      if (metaSegments.length >= 3) {
+        const dateStr = metaSegments[0].trim();
+        const timeStr = metaSegments[1].trim();
+        const senderId = metaSegments.slice(2).join('/').trim();
+        return {
+          id: `${dateStr}-${timeStr}-${senderId}-${idx}`,
+          fecha: dateStr,
+          hora: timeStr,
+          senderId,
+          texto: textPart
+        };
+      }
+      if (metaSegments.length === 2) {
+        const timeStr = metaSegments[0].trim();
+        const senderId = metaSegments[1].trim();
+        return {
+          id: `${timeStr}-${senderId}-${idx}`,
+          fecha: fallbackDate,
+          hora: timeStr,
+          senderId,
+          texto: textPart
+        };
+      }
+    }
+
+    if (firstColon !== -1) {
+      return {
+        id: `colon-${idx}`,
+        fecha: fallbackDate,
+        hora: fallbackTime,
+        senderId: msg.substring(0, firstColon).trim(),
+        texto: msg.substring(firstColon + 1).trim()
+      };
+    }
+
+    return {
+      id: `raw-${idx}`,
+      fecha: fallbackDate,
+      hora: fallbackTime,
+      senderId: fallbackSender,
+      texto: msg
+    };
+  });
+}
+
+/**
+ * Construye el documento canónico para la subcolección `personal/{idRegistro}/estados/{timestamp}`
+ * (ESQUEMA_CANONICO_V3.md). Registra todo cambio de estado operativo (0-9, 0-8, PERMISO, LICENCIA, CDS, SUSPENDIDO)
+ * junto con el timestamp Unix en ms, el estado nuevo, el estado anterior, el origen ('ONE' | 'CAD' | 'CORE') y quién lo modificó.
+ */
+export function buildCanonicalPersonStatusHistoryDoc(raw = {}) {
+  const nowMs = Number(raw.timestamp || Date.now()) || Date.now();
+  const idEstado = String(raw.idEstado || raw.id || nowMs).trim();
+  const estado = String(raw.estado || '0-9').trim().toUpperCase();
+  const estadoAnterior = String(raw.estadoAnterior || '').trim().toUpperCase();
+  const origen = String(raw.origen || 'ONE').trim().toUpperCase();
+  const modificadoPor = String(raw.modificadoPor || '').trim();
+  const enServicio = String(raw.enServicio ?? '0').trim() || '0';
+
+  return {
+    idEstado,
+    estado,
+    estadoAnterior,
+    origen,
+    modificadoPor,
+    enServicio,
+    timestamp: nowMs,
+    _metaTimestamp: nowMs
+  };
+}
+
+
 
 
 

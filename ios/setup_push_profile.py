@@ -91,24 +91,25 @@ def main():
 
         if bundle_res_id:
             print(f"   Bundle Resource ID encontrado: {bundle_res_id}")
-            # Habilitar PUSH_NOTIFICATIONS
-            cap_body = {
-                "data": {
-                    "type": "bundleIdCapabilities",
-                    "attributes": {
-                        "capabilityType": "PUSH_NOTIFICATIONS",
-                        "settings": []
-                    },
-                    "relationships": {
-                        "bundleId": {
-                            "data": {"type": "bundleIds", "id": bundle_res_id}
+            # Habilitar PUSH_NOTIFICATIONS y TIME_SENSITIVE_NOTIFICATIONS
+            for cap_type in ("PUSH_NOTIFICATIONS", "TIME_SENSITIVE_NOTIFICATIONS"):
+                cap_body = {
+                    "data": {
+                        "type": "bundleIdCapabilities",
+                        "attributes": {
+                            "capabilityType": cap_type,
+                            "settings": []
+                        },
+                        "relationships": {
+                            "bundleId": {
+                                "data": {"type": "bundleIds", "id": bundle_res_id}
+                            }
                         }
                     }
                 }
-            }
-            st_cap, _ = api_request("POST", "/v1/bundleIdCapabilities", body=cap_body, token=token)
-            if st_cap in (200, 201, 409):
-                print("   Capacidad PUSH_NOTIFICATIONS activa en el App ID.")
+                st_cap, _ = api_request("POST", "/v1/bundleIdCapabilities", body=cap_body, token=token)
+                if st_cap in (200, 201, 409):
+                    print(f"   Capacidad {cap_type} activa en el App ID.")
 
             # Buscar certificados de distribución activos
             st_cert, res_cert = api_request("GET", "/v1/certificates?filter[certificateType]=DISTRIBUTION,IOS_DISTRIBUTION", token=token)

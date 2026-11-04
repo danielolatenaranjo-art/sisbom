@@ -16,7 +16,8 @@ import {
 import {
   getEntityMaxTimestamp,
   matchPersonnelCredentials,
-  sanitizeCanonicalPersonnelUpdate
+  sanitizeCanonicalPersonnelUpdate,
+  buildCanonicalPersonStatusHistoryDoc
 } from '../shared/sentinelCore';
 
 const USER_SESSION_KEY = '@sentinel_one_v3_user_session';
@@ -387,6 +388,9 @@ export const useAuthStore = create((set, get) => ({
           set({ user: parsed, isAuthenticated: true });
           syncNativeUserSession(parsed);
           syncNativeAirplaneMode(get().isAirplaneMode);
+          if (typeof window !== 'undefined' && window.__SENTINEL_FCM_TOKEN__) {
+            setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__), 600);
+          }
           return true;
         }
       }
@@ -394,6 +398,63 @@ export const useAuthStore = create((set, get) => ({
       console.warn('Error restoring user session:', e);
     }
     return false;
+  },
+
+  syncFcmToken: async (rawToken) => {
+    const cleanToken = String(rawToken || (typeof window !== 'undefined' ? window.__SENTINEL_FCM_TOKEN__ : '') || '').trim();
+    if (!cleanToken || cleanToken.length < 20) return false;
+    const currentUser = get().user;
+    if (!currentUser) return false;
+    const docId = String(currentUser.idRegistro || currentUser.idRadial || '').trim();
+    if (!docId) return false;
+
+    if (String(currentUser.deviceId || '').trim() !== cleanToken) {
+      const updatedUser = { ...currentUser, deviceId: cleanToken };
+      set({ user: updatedUser });
+      try {
+        const serialized = JSON.stringify(updatedUser);
+        syncNativeStorageKey(USER_SESSION_KEY, serialized);
+        await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
+      } catch (_) {}
+    }
+
+    const isBypass = useLicenseStore.getState().isBypassMode;
+    const isReadOnly = useLicenseStore.getState().isReadOnly;
+    if (isBypass || isReadOnly) return false;
+
+    const nowTs = Date.now();
+    try {
+      const db = getDb();
+      if (db) {
+        await ensureFirebaseAuth();
+        await updateDoc(doc(db, 'personal', docId), {
+          deviceId: cleanToken,
+          tokenFcm: cleanToken,
+          fcmToken: cleanToken,
+          _metaTimestamp: nowTs
+        });
+        return true;
+      }
+    } catch (_) {
+      const fbConfig = useLicenseStore.getState().firebaseConfig;
+      if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return false;
+      const projId = fbConfig.projectId;
+      const apiKey = fbConfig.apiKey;
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=_metaTimestamp`;
+      fetchFirestoreWithAuth(patchUrl, apiKey, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            deviceId: { stringValue: cleanToken },
+            tokenFcm: { stringValue: cleanToken },
+            fcmToken: { stringValue: cleanToken },
+            _metaTimestamp: { integerValue: String(nowTs) }
+          }
+        })
+      }).catch(() => {});
+    }
+    return true;
   },
 
   refreshUserProfile: async () => {
@@ -614,6 +675,9 @@ export const useAuthStore = create((set, get) => ({
 
         set({ user: userObj, isAuthenticated: true, isLoading: false, error: '' });
         syncNativeUserSession(userObj);
+        if (typeof window !== 'undefined' && window.__SENTINEL_FCM_TOKEN__) {
+          setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__), 600);
+        }
         return { success: true, user: userObj };
       }
     } catch (e) {
@@ -625,19 +689,23 @@ export const useAuthStore = create((set, get) => ({
   },
 
   // Alternar Estado: 0-9, 0-8 o estados administrativos (también permite cambiar a otro bombero si es Comandante/Capitán/Operador)
-  updateStatus: async (newStatus, targetDocId = null) => {
+  updateStatus: async (newStatus, targetDocId = null, options = {}) => {
     const currentUser = get().user;
     if (!currentUser) return;
 
     const isSelf = !targetDocId || String(targetDocId) === String(currentUser.idRegistro);
     const docId = isSelf ? String(currentUser.idRegistro || currentUser.idRadial) : String(targetDocId);
+    const prevEstado = isSelf
+      ? String(currentUser.estado || '0-9').trim().toUpperCase()
+      : String(options.previousStatus || '').trim().toUpperCase();
+    const cleanNewStatus = String(newStatus || '0-9').trim().toUpperCase();
     const nowTs = Date.now();
 
     if (isSelf) {
-      pendingStatusValue = newStatus;
+      pendingStatusValue = cleanNewStatus;
       lastStatusChangeTs = nowTs;
       // Si el usuario cambia explícitamente a 0-9, desactivar automáticamente el Modo Avión (0-8 Absoluto) igual que en V2
-      if (newStatus === '0-9' && get().isAirplaneMode) {
+      if (cleanNewStatus === '0-9' && get().isAirplaneMode) {
         set({ isAirplaneMode: false });
         syncNativeAirplaneMode(false);
         try {
@@ -653,17 +721,17 @@ export const useAuthStore = create((set, get) => ({
       }
       const updatedUser = {
         ...currentUser,
-        estado: newStatus,
+        estado: cleanNewStatus,
         _metaTimestamp: nowTs
       };
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
       try {
         if (typeof window !== 'undefined') {
-          window.AndroidApp?.markSelfStatusChange?.(String(newStatus));
+          window.AndroidApp?.markSelfStatusChange?.(String(cleanNewStatus));
           window.webkit?.messageHandlers?.iOSApp?.postMessage?.({
             action: 'markSelfStatusChange',
-            status: String(newStatus)
+            status: String(cleanNewStatus)
           });
         }
       } catch (_) {}
@@ -678,16 +746,38 @@ export const useAuthStore = create((set, get) => ({
     const isReadOnly = useLicenseStore.getState().isReadOnly;
     if (isBypass || isReadOnly || !docId) return;
 
+    const statusHistoryDoc = buildCanonicalPersonStatusHistoryDoc({
+      idEstado: String(nowTs),
+      estado: cleanNewStatus,
+      estadoAnterior: prevEstado,
+      origen: options.origen || 'ONE',
+      modificadoPor: String(
+        options.modificadoPor ||
+          currentUser.nombreBombero ||
+          currentUser.nombre ||
+          currentUser.idRegistro ||
+          ''
+      ).trim(),
+      enServicio: isSelf ? String(currentUser.enServicio || '0') : String(options.enServicio || '0'),
+      timestamp: nowTs
+    });
+
     try {
       const db = getDb();
       if (db) {
         await ensureFirebaseAuth();
         await updateDoc(doc(db, 'personal', String(docId)), {
-          estado: newStatus,
+          estado: cleanNewStatus,
           _changedByCentral: !isSelf,
           _metaTimestamp: nowTs
         });
-        console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${newStatus}`);
+        await setDoc(
+          doc(db, 'personal', String(docId), 'estados', String(nowTs)),
+          statusHistoryDoc
+        ).catch((histErr) => {
+          console.warn('Error registrando subcolección estados en Firestore:', histErr);
+        });
+        console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${cleanNewStatus} (historial registrado)`);
       }
     } catch (dbErr) {
       const fbConfig = useLicenseStore.getState().firebaseConfig;
@@ -701,9 +791,27 @@ export const useAuthStore = create((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fields: {
-            estado: { stringValue: newStatus },
+            estado: { stringValue: cleanNewStatus },
             _changedByCentral: { booleanValue: !isSelf },
             _metaTimestamp: { integerValue: String(nowTs) }
+          }
+        })
+      }).catch(() => {});
+
+      const histUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}/estados?documentId=${encodeURIComponent(String(nowTs))}`;
+      fetchFirestoreWithAuth(histUrl, apiKey, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            idEstado: { stringValue: statusHistoryDoc.idEstado },
+            estado: { stringValue: statusHistoryDoc.estado },
+            estadoAnterior: { stringValue: statusHistoryDoc.estadoAnterior },
+            origen: { stringValue: statusHistoryDoc.origen },
+            modificadoPor: { stringValue: statusHistoryDoc.modificadoPor },
+            enServicio: { stringValue: statusHistoryDoc.enServicio },
+            timestamp: { integerValue: String(statusHistoryDoc.timestamp) },
+            _metaTimestamp: { integerValue: String(statusHistoryDoc._metaTimestamp) }
           }
         })
       }).catch(() => {});
@@ -1076,6 +1184,8 @@ export const useAuthStore = create((set, get) => ({
             doc(db, 'personal', docId),
             {
               deviceId: '',
+              tokenFcm: '',
+              fcmToken: '',
               _metaTimestamp: Date.now()
             },
             { merge: true }
@@ -1097,3 +1207,13 @@ export const useAuthStore = create((set, get) => ({
     set({ user: null, isAuthenticated: false, error: '' });
   }
 }));
+
+if (typeof window !== 'undefined' && !window.__SENTINEL_FCM_EVENT_BOUND__) {
+  window.__SENTINEL_FCM_EVENT_BOUND__ = true;
+  window.addEventListener('sentinelNativeFcmToken', (ev) => {
+    const tok = ev?.detail?.token || window.__SENTINEL_FCM_TOKEN__;
+    if (tok) {
+      useAuthStore.getState().syncFcmToken(tok);
+    }
+  });
+}
