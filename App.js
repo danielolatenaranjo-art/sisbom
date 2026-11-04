@@ -10,7 +10,6 @@ import {
   Easing
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Location from 'expo-location';
 
 import { SentinelBackground } from './src/components/common/SentinelBackground';
 import { LicenseActivationView } from './src/views/LicenseActivationView';
@@ -26,6 +25,24 @@ import { useAuthStore } from './src/store/useAuthStore';
 import { useDispatchStore } from './src/store/useDispatchStore';
 
 const DISCLOSURE_KEY = '@sentinel_one_location_disclosed_v3';
+
+function persistDisclosureAccepted() {
+  try {
+    if (typeof window !== 'undefined') {
+      if (window.localStorage) {
+        window.localStorage.setItem(DISCLOSURE_KEY, 'true');
+      }
+      if (window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+        window.webkit.messageHandlers.iOSApp.postMessage({
+          action: 'syncStorageCache',
+          key: DISCLOSURE_KEY,
+          value: 'true'
+        });
+      }
+    }
+  } catch (_) {}
+  AsyncStorage.setItem(DISCLOSURE_KEY, 'true').catch(() => {});
+}
 
 export default function App() {
   const { authorized, logoUrl, init: initLicense } = useLicenseStore();
@@ -75,30 +92,66 @@ export default function App() {
     };
   }, []);
 
-  // ÚNICAMENTE después de iniciar sesión con el usuario: inicializar despacho y verificar permisos operativos + Aviso Destacado Google Play
+  // ÚNICAMENTE después de iniciar sesión y finalizar el arranque: verificar permisos operativos
   useEffect(() => {
-    if (authorized && isAuthenticated) {
-      initDispatch(false);
-
-      const checkPostLoginPermissions = async () => {
-        const disclosed = await AsyncStorage.getItem(DISCLOSURE_KEY);
-        const currentPerms = readNativePermissionsStatus();
-        const allGranted =
-          currentPerms.notifications &&
-          currentPerms.backgroundLocation &&
-          currentPerms.overlay &&
-          currentPerms.batteryUnrestricted;
-        if (!disclosed || !allGranted) {
-          setTimeout(() => setLocationModalVisible(true), 500);
-        }
-      };
-
-      checkPostLoginPermissions();
-    } else {
+    if (!authorized || !isAuthenticated) {
       setLocationModalVisible(false);
       setBgStage((prev) => (prev === 'wind-gust' || prev === 'logout-emerge-login' ? prev : 'login'));
+      return;
     }
-  }, [authorized, isAuthenticated]);
+
+    initDispatch(false);
+
+    if (isBooting) return;
+
+    let cancelled = false;
+    const evaluatePermissions = async () => {
+      const currentPerms = readNativePermissionsStatus();
+      const allGranted =
+        currentPerms.notifications &&
+        currentPerms.backgroundLocation &&
+        currentPerms.overlay &&
+        currentPerms.batteryUnrestricted;
+
+      if (allGranted) {
+        persistDisclosureAccepted();
+        if (!cancelled) setLocationModalVisible(false);
+        return;
+      }
+
+      const disclosed = await AsyncStorage.getItem(DISCLOSURE_KEY).catch(() => null);
+      if (!disclosed || !allGranted) {
+        if (!cancelled) setLocationModalVisible(true);
+      }
+    };
+
+    const timer = setTimeout(evaluatePermissions, 350);
+
+    const onPermsChanged = () => {
+      const updated = readNativePermissionsStatus();
+      if (
+        updated.notifications &&
+        updated.backgroundLocation &&
+        updated.overlay &&
+        updated.batteryUnrestricted
+      ) {
+        persistDisclosureAccepted();
+        setLocationModalVisible(false);
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('sentinelPermissionsChanged', onPermsChanged);
+    }
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('sentinelPermissionsChanged', onPermsChanged);
+      }
+    };
+  }, [authorized, isAuthenticated, isBooting]);
 
   const triggerWindBurstToLogin = () => {
     setBgStage('wind-gust');
@@ -114,11 +167,7 @@ export default function App() {
 
   const handleAcceptLocation = async () => {
     setLocationModalVisible(false);
-    try {
-      await AsyncStorage.setItem(DISCLOSURE_KEY, 'true');
-    } catch (e) {
-      console.warn('Location permission save error:', e);
-    }
+    persistDisclosureAccepted();
   };
 
   const handleDeclineLocation = async () => {
@@ -250,26 +299,26 @@ const styles = StyleSheet.create({
     paddingBottom: 38
   },
   bootCenterZone: {
-    height: 64,
     alignItems: 'center',
-    justifyContent: 'center'
+    justifyContent: 'center',
+    paddingVertical: 16
   },
   bootBottomZone: {
     flex: 1,
     width: '100%',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    paddingBottom: 92
+    justifyContent: 'flex-start',
+    paddingTop: 42
   },
   bootInstitutionLogo: {
-    width: 215,
-    height: 215
+    width: 148,
+    height: 148
   },
   bootSpinner: {
-    transform: [{ scale: 1.45 }]
+    transform: [{ scale: 1.35 }]
   },
   bootSentinelOneBottomLogo: {
     width: 240,
-    height: 60
+    height: 54
   }
 });

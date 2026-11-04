@@ -2545,6 +2545,18 @@ class NotificationActionReceiver : BroadcastReceiver() {
 class SisBomApplication : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
+        val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            val msg = throwable.message ?: ""
+            val isBgThread = thread != Looper.getMainLooper().thread
+            if (isBgThread && throwable is IllegalStateException &&
+                (msg.contains("FirebaseApp was deleted") || msg.contains("FirebaseApp is not initialized"))
+            ) {
+                Log.w("SENTINEL_FIREBASE", "Ignorando excepción transitoria de worker Firebase en segundo plano: $msg")
+                return@setDefaultUncaughtExceptionHandler
+            }
+            prevHandler?.uncaughtException(thread, throwable)
+        }
         MainActivity.initializeDynamicFirebase(this)
     }
 }
@@ -2587,9 +2599,22 @@ class MainActivity : ComponentActivity() {
             try {
                 val appContext = context.applicationContext
                 val prefs = appContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-                val jsonStr = configJsonStr
+                var jsonStr = configJsonStr
                     ?: prefs.getString("DYNAMIC_FIREBASE_CONFIG", null)
                     ?: prefs.getString("saas_firebase_config", null)
+                if (jsonStr.isNullOrBlank()) {
+                    val saasClientRaw = prefs.getString("WEBSTORAGE_@sentinel_saas_client", null)
+                        ?: prefs.getString("WEBSTORAGE_@sentinel_one_v3_license_cache", null)
+                    if (!saasClientRaw.isNullOrBlank()) {
+                        try {
+                            val clientObj = JSONObject(saasClientRaw)
+                            val fbCfg = clientObj.optJSONObject("firebaseConfig") ?: clientObj
+                            if (fbCfg.optString("projectId", "").isNotBlank() && fbCfg.optString("apiKey", "").isNotBlank()) {
+                                jsonStr = fbCfg.toString()
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
                 if (jsonStr.isNullOrBlank()) {
                     // CRÍTICO: No inicializar FirebaseApp([DEFAULT]) con google-services.json antes de anexar licencia,
                     // para que cuando el usuario ingrese la licencia, [DEFAULT] y FirebaseMessaging pertenezcan al Sender ID del cliente.
