@@ -110,6 +110,19 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         updateStandbyKeepAlive()
     }
 
+    func currentSynchronousPerms() -> (fine: Bool, bg: Bool, notif: Bool) {
+        let status: CLAuthorizationStatus
+        if #available(iOS 14.0, *) {
+            status = manager.authorizationStatus
+        } else {
+            status = CLLocationManager.authorizationStatus()
+        }
+        let fine = (status == .authorizedAlways || status == .authorizedWhenInUse)
+        let bg = (status == .authorizedAlways)
+        let notif = UserDefaults.standard.bool(forKey: "IOS_NOTIF_GRANTED")
+        return (fine, bg, notif)
+    }
+
     func syncPermissionsToWebView() {
         let status: CLAuthorizationStatus
         if #available(iOS 14.0, *) {
@@ -125,6 +138,11 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
                 settings.authorizationStatus == .provisional ||
                 settings.authorizationStatus == .ephemeral
             )
+            let defaults = UserDefaults.standard
+            defaults.set(notifGranted, forKey: "IOS_NOTIF_GRANTED")
+            if fine && bg && notifGranted {
+                defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
+            }
             DispatchQueue.main.async {
                 guard let wv = AppDelegate.sharedWebView else { return }
                 let js = """
@@ -137,6 +155,9 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
                             batteryUnrestricted: true,
                             notifications: \(notifGranted ? "true" : "false")
                         };
+                        if (\(fine && bg && notifGranted ? "true" : "false") && window.localStorage) {
+                            window.localStorage.setItem('@sentinel_one_location_disclosed_v3', 'true');
+                        }
                         window.dispatchEvent(new CustomEvent('sentinelPermissionsChanged'));
                     } catch (e) {}
                 })();
@@ -300,32 +321,53 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    var isPlayingAlarm: Bool {
+        return audioPlayer?.isPlaying == true
+    }
+
     func isAlarmProtectedFromAutoStop(windowMs: Int64 = 25_000) -> Bool {
         guard let active = audioPlayer, active.isPlaying else { return false }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         return (nowMs - lastAlarmStartMs) < windowMs
     }
 
+    func prepareVolumeViewInWindow() {
+        let attachBlock: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            if let existing = self.hiddenVolumeView, existing.window != nil {
+                return
+            }
+            let vv = self.hiddenVolumeView ?? MPVolumeView(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
+            vv.frame = CGRect(x: 0, y: 0, width: 1, height: 1)
+            vv.alpha = 0.015
+            vv.clipsToBounds = true
+            vv.isUserInteractionEnabled = false
+            vv.showsRouteButton = false
+            if let winScene = UIApplication.shared.connectedScenes.first(where: { $0 is UIWindowScene }) as? UIWindowScene,
+               let win = winScene.windows.first(where: { $0.isKeyWindow }) ?? winScene.windows.first {
+                win.addSubview(vv)
+                self.hiddenVolumeView = vv
+            } else if let win = UIApplication.shared.windows.first {
+                win.addSubview(vv)
+                self.hiddenVolumeView = vv
+            }
+        }
+        if Thread.isMainThread {
+            attachBlock()
+        } else {
+            DispatchQueue.main.async(execute: attachBlock)
+        }
+    }
+
     func forceHardwareSystemVolumeToMax() {
         let applyMax: () -> Void = { [weak self] in
             guard let self = self else { return }
-            if self.hiddenVolumeView == nil {
-                let vv = MPVolumeView(frame: CGRect(x: -2000, y: -2000, width: 1, height: 1))
-                vv.alpha = 0.001
-                vv.isUserInteractionEnabled = false
-                if let winScene = UIApplication.shared.connectedScenes.first(where: { $0 is UIWindowScene }) as? UIWindowScene,
-                   let win = winScene.windows.first {
-                    win.addSubview(vv)
-                } else if let win = UIApplication.shared.windows.first {
-                    win.addSubview(vv)
-                }
-                self.hiddenVolumeView = vv
-            }
+            self.prepareVolumeViewInWindow()
             guard let vv = self.hiddenVolumeView else { return }
             for subview in vv.subviews {
                 if let slider = subview as? UISlider {
                     slider.setValue(1.0, animated: false)
-                    slider.sendActions(for: .valueChanged)
+                    slider.sendActions(for: [.touchUpInside, .valueChanged])
                 }
             }
         }
@@ -334,8 +376,9 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         } else {
             DispatchQueue.main.async(execute: applyMax)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: applyMax)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: applyMax)
     }
 
     func resolveSoundFileName(for claveOrName: String) -> String {
@@ -514,7 +557,11 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             let enServicio = defaults.string(forKey: "USER_EN_SERVICIO") ?? ""
             if enServicio == dispatchId || enServicio == "-\(dispatchId)" { return }
 
-            self.play(nameOrClave: clave, forceMaxVolume: true)
+            if AppDelegate.isAppInForeground {
+                self.vibrateEmergency()
+            } else {
+                self.play(nameOrClave: clave, forceMaxVolume: true)
+            }
         }
         repeatTimers[dispatchId] = timer
     }
@@ -746,24 +793,33 @@ final class IOSRealtimeService {
                             }
                         }
                     }
-                    // Si es un despacho activo reciente (< 10 min) que aún no ha sonado en este dispositivo, disparar alerta urgente
-                    if isRecentDispatch && !alertedIds.contains(docId) && !isAttending && !hasDeclined && !isAirplane && !isCentral {
+                    // Al abrir la app por primera vez: si está en primer plano NO debe sonar la sirena fuerte, solo vibrar y abrir pantalla sobre pantalla
+                    let isRecentFiveMin = createdTs > 0 && (nowMs - createdTs) < 300_000
+                    if isRecentFiveMin && !alertedIds.contains(docId) && !isAttending && !hasDeclined && !isAirplane && !isCentral {
                         alertedIds.append(docId)
                         didModifyAlerted = true
-                        if is09 {
-                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
-                            AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                        } else {
+                        if AppDelegate.isAppInForeground {
                             IOSSoundPlayer.shared.vibrateEmergency()
+                            if is09 {
+                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            }
+                        } else {
+                            if is09 {
+                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            } else {
+                                IOSSoundPlayer.shared.vibrateEmergency()
+                            }
+                            self.postLocalBanner(
+                                id: "disp_\(docId)",
+                                title: "🚨 DESPACHO \(clave)",
+                                body: direccion,
+                                soundName: nil,
+                                playDefaultIfNil: !is09,
+                                userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                            )
                         }
-                        self.postLocalBanner(
-                            id: "disp_\(docId)",
-                            title: "🚨 DESPACHO \(clave)",
-                            body: direccion,
-                            soundName: is09 ? "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3" : nil,
-                            userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
-                        )
                     } else if !alertedIds.contains(docId) {
                         alertedIds.append(docId)
                         didModifyAlerted = true
@@ -792,20 +848,28 @@ final class IOSRealtimeService {
                         didModifyAlerted = true
                     }
                     if !isAttending && !hasDeclined {
-                        if is09 {
-                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
-                            AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                        } else {
+                        if AppDelegate.isAppInForeground {
                             IOSSoundPlayer.shared.vibrateEmergency()
+                            if is09 {
+                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            }
+                        } else {
+                            if is09 {
+                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            } else {
+                                IOSSoundPlayer.shared.vibrateEmergency()
+                            }
+                            self.postLocalBanner(
+                                id: "disp_\(docId)",
+                                title: "🚨 DESPACHO \(clave)",
+                                body: direccion,
+                                soundName: nil,
+                                playDefaultIfNil: !is09,
+                                userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                            )
                         }
-                        self.postLocalBanner(
-                            id: "disp_\(docId)",
-                            title: "🚨 DESPACHO \(clave)",
-                            body: direccion,
-                            soundName: is09 ? "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3" : nil,
-                            userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
-                        )
                     }
                 } else {
                     // A2. Transición de pre-despacho -> activa / en curso
@@ -813,20 +877,28 @@ final class IOSRealtimeService {
                     self.lastDispatchEstados[docId] = estado
                     let isPreToActive = (prevEstado == "pre-despacho") && (estado == "activa" || estado == "activo" || estado == "en curso")
                     if isPreToActive && !isAttending && !hasDeclined {
-                        if is09 {
-                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
-                            AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                        } else {
+                        if AppDelegate.isAppInForeground {
                             IOSSoundPlayer.shared.vibrateEmergency()
+                            if is09 {
+                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            }
+                        } else {
+                            if is09 {
+                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                            } else {
+                                IOSSoundPlayer.shared.vibrateEmergency()
+                            }
+                            self.postLocalBanner(
+                                id: "disp_act_\(docId)",
+                                title: "🚨 DESPACHO \(clave)",
+                                body: direccion,
+                                soundName: nil,
+                                playDefaultIfNil: !is09,
+                                userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                            )
                         }
-                        self.postLocalBanner(
-                            id: "disp_act_\(docId)",
-                            title: "🚨 DESPACHO \(clave)",
-                            body: direccion,
-                            soundName: is09 ? "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3" : nil,
-                            userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
-                        )
                     }
 
                     // B. Escalamiento (10-30 / FORESTAL / 9-0)
@@ -836,15 +908,20 @@ final class IOSRealtimeService {
                         let cUp = clave.uppercased()
                         let isEscalation = cUp.contains("10-30") || cUp.contains("FORESTAL") || cUp.contains("9-0") || cUp.contains("COMANDANCIA")
                         if isEscalation && !isAttending {
-                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
                             AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                            self.postLocalBanner(
-                                id: "esc_\(docId)_\(clave)",
-                                title: "🔥 CAMBIO DE CLAVE A \(clave)",
-                                body: "\(direccion) - ¡SE REQUIERE PERSONAL!",
-                                soundName: "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3",
-                                userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
-                            )
+                            if AppDelegate.isAppInForeground {
+                                IOSSoundPlayer.shared.vibrateEmergency()
+                            } else {
+                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                                self.postLocalBanner(
+                                    id: "esc_\(docId)_\(clave)",
+                                    title: "🔥 CAMBIO DE CLAVE A \(clave)",
+                                    body: "\(direccion) - ¡SE REQUIERE PERSONAL!",
+                                    soundName: nil,
+                                    playDefaultIfNil: false,
+                                    userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
+                                )
+                            }
                         }
                     } else {
                         self.lastDispatchClaves[docId] = clave
@@ -863,19 +940,27 @@ final class IOSRealtimeService {
                         if cTs > prevCTs && cTs > 0 {
                             self.lastUnitConductorReq[key] = cTs
                             if isConductor && !isAttending && !hasDeclined {
-                                if is09 {
-                                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-                                    AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                                } else {
+                                if AppDelegate.isAppInForeground {
                                     IOSSoundPlayer.shared.vibrateEmergency()
+                                    if is09 {
+                                        AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                                    }
+                                } else {
+                                    if is09 {
+                                        IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
+                                        AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                                    } else {
+                                        IOSSoundPlayer.shared.vibrateEmergency()
+                                    }
+                                    self.postLocalBanner(
+                                        id: "req1210_\(key)_\(cTs)",
+                                        title: "🚨 SOLICITUD 12-10 (\(uName))",
+                                        body: "Se solicita conductor para unidad \(uName) en \(direccion)",
+                                        soundName: nil,
+                                        playDefaultIfNil: !is09,
+                                        userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
+                                    )
                                 }
-                                self.postLocalBanner(
-                                    id: "req1210_\(key)_\(cTs)",
-                                    title: "🚨 SOLICITUD 12-10 (\(uName))",
-                                    body: "Se solicita conductor para unidad \(uName) en \(direccion)",
-                                    soundName: is09 ? "importante.mp3" : nil,
-                                    userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
-                                )
                             }
                         } else if prevCTs == 0 {
                             self.lastUnitConductorReq[key] = cTs
@@ -885,19 +970,27 @@ final class IOSRealtimeService {
                         if pTs > prevPTs && pTs > 0 {
                             self.lastUnitPersonalReq[key] = pTs
                             if !isAttending && !hasDeclined {
-                                if is09 {
-                                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-                                    AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                                } else {
+                                if AppDelegate.isAppInForeground {
                                     IOSSoundPlayer.shared.vibrateEmergency()
+                                    if is09 {
+                                        AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                                    }
+                                } else {
+                                    if is09 {
+                                        IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
+                                        AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                                    } else {
+                                        IOSSoundPlayer.shared.vibrateEmergency()
+                                    }
+                                    self.postLocalBanner(
+                                        id: "req66_\(key)_\(pTs)",
+                                        title: "🚨 SOLICITUD 6-6 (\(uName))",
+                                        body: "Se solicita personal para unidad \(uName) en \(direccion)",
+                                        soundName: nil,
+                                        playDefaultIfNil: !is09,
+                                        userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
+                                    )
                                 }
-                                self.postLocalBanner(
-                                    id: "req66_\(key)_\(pTs)",
-                                    title: "🚨 SOLICITUD 6-6 (\(uName))",
-                                    body: "Se solicita personal para unidad \(uName) en \(direccion)",
-                                    soundName: is09 ? "importante.mp3" : nil,
-                                    userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
-                                )
                             }
                         } else if prevPTs == 0 {
                             self.lastUnitPersonalReq[key] = pTs
@@ -971,7 +1064,7 @@ final class IOSRealtimeService {
         }
     }
 
-    private func postLocalBanner(id: String, title: String, body: String, soundName: String?, userInfo: [String: Any]) {
+    private func postLocalBanner(id: String, title: String, body: String, soundName: String?, playDefaultIfNil: Bool = true, userInfo: [String: Any]) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -983,8 +1076,10 @@ final class IOSRealtimeService {
         }
         if let sName = soundName, !sName.isEmpty {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(rawValue: sName))
-        } else {
+        } else if playDefaultIfNil {
             content.sound = .default
+        } else {
+            content.sound = nil
         }
         let req = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
@@ -1025,6 +1120,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     static var sharedWebView: WKWebView?
     static var currentTenantProjectId: String?
     static var cachedApnsDeviceToken: Data?
+    static var isAppInForeground: Bool = true
     private var bgTaskId: UIBackgroundTaskIdentifier = .invalid
 
     private static let knownIosAppIdsByProject: [String: String] = [
@@ -1246,18 +1342,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         configureNotificationCategories()
         requestNotificationPermissions(application: application)
         Self.scheduleDailyReminders()
+        IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
         IOSLocationService.shared.updateStandbyKeepAlive()
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
+        Self.isAppInForeground = false
         // Al pasar a Recientes / segundo plano, mantener vivo el canal de audio, GPS standby y tarea de fondo si está en 0-9
+        IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
         IOSLocationService.shared.updateStandbyKeepAlive()
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
+        Self.isAppInForeground = false
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
         IOSLocationService.shared.updateStandbyKeepAlive()
         if bgTaskId != .invalid {
@@ -1276,15 +1376,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
+        Self.isAppInForeground = true
         if bgTaskId != .invalid {
             application.endBackgroundTask(bgTaskId)
             bgTaskId = .invalid
         }
-        // Si está sonando una alarma de emergencia recién disparada (< 25s), NO cortarla al desbloquear el iPhone;
-        // solo se detiene al presionar ASISTIR / NO ASISTIR o al terminar el tono.
-        if !IOSSoundPlayer.shared.isAlarmProtectedFromAutoStop() {
-            IOSSoundPlayer.shared.stop()
+        // Al abrir o volver a la app en primer plano: NUNCA debe sonar la alarma fuerte, se detiene el audio y solo vibra
+        let wasPlaying = IOSSoundPlayer.shared.isPlayingAlarm
+        IOSSoundPlayer.shared.stop()
+        if wasPlaying {
+            IOSSoundPlayer.shared.vibrateEmergency()
         }
+        IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSLocationService.shared.syncPermissionsToWebView()
         IOSLocationService.shared.updateStandbyKeepAlive()
         if Self.currentTenantProjectId != nil {
@@ -1610,17 +1713,26 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         if is1210or66 {
-            if is09 {
+            if Self.isAppInForeground {
+                IOSSoundPlayer.shared.vibrateEmergency()
+            } else if is09 {
                 IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
             }
             if is09 && !payloadId.isEmpty {
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
         } else if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
-            IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-            if !payloadId.isEmpty {
-                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
-                Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
+            if Self.isAppInForeground {
+                IOSSoundPlayer.shared.vibrateEmergency()
+                if !payloadId.isEmpty {
+                    Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
+                }
+            } else {
+                IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
+                if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
+                    Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
+                }
             }
         }
         completionHandler(.newData)
@@ -1688,12 +1800,21 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 completionHandler([])
                 return
             }
+            if !payloadId.isEmpty && (is09 || isEscalation) {
+                Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
+            }
+            if Self.isAppInForeground {
+                IOSSoundPlayer.shared.vibrateEmergency()
+                completionHandler([])
+                return
+            }
             if is09 || isEscalation {
                 IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                 if !payloadId.isEmpty {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
-                    Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
                 }
+                completionHandler([.banner, .list])
+                return
             }
             completionHandler([.banner, .list, .sound])
             return
@@ -2017,7 +2138,13 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         case "playSound":
             let soundName = (dict["soundName"] as? String) ?? "despacho"
             let forceMax = (dict["forceMaxVolume"] as? Bool) ?? true
-            IOSSoundPlayer.shared.play(nameOrClave: soundName, forceMaxVolume: forceMax)
+            let upperS = soundName.uppercased()
+            let isAlertMsg = upperS.contains("ALERTA") || upperS.contains("IMPORTANTE")
+            if AppDelegate.isAppInForeground && !isAlertMsg {
+                IOSSoundPlayer.shared.vibrateEmergency()
+            } else {
+                IOSSoundPlayer.shared.play(nameOrClave: soundName, forceMaxVolume: forceMax)
+            }
         case "stopSound":
             IOSSoundPlayer.shared.stop()
         case "vibrate":
@@ -2195,6 +2322,11 @@ struct SentinelWebViewContainer: UIViewRepresentable {
                 storageMap[k] = val
             }
         }
+        let syncPerms = IOSLocationService.shared.currentSynchronousPerms()
+        if syncPerms.fine && syncPerms.bg && syncPerms.notif {
+            storageMap["@sentinel_one_location_disclosed_v3"] = "true"
+            defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
+        }
         let storageJson: String
         if let jsonData = try? JSONSerialization.data(withJSONObject: storageMap),
            let jsonStr = String(data: jsonData, encoding: .utf8) {
@@ -2207,12 +2339,12 @@ struct SentinelWebViewContainer: UIViewRepresentable {
         (function() {
             try {
                 window.__SENTINEL_PLATFORM__ = 'ios';
-                window.__SENTINEL_IOS_PERMS__ = window.__SENTINEL_IOS_PERMS__ || {
-                    fineLocation: false,
-                    backgroundLocation: false,
+                window.__SENTINEL_IOS_PERMS__ = {
+                    fineLocation: \(syncPerms.fine ? "true" : "false"),
+                    backgroundLocation: \(syncPerms.bg ? "true" : "false"),
                     overlay: true,
                     batteryUnrestricted: true,
-                    notifications: false
+                    notifications: \(syncPerms.notif ? "true" : "false")
                 };
                 var restored = \(storageJson);
                 if (window.localStorage && restored) {
@@ -2244,8 +2376,14 @@ struct SentinelWebViewContainer: UIViewRepresentable {
         } else if let indexUrl = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "www") {
             wv.loadFileURL(indexUrl, allowingReadAccessTo: indexUrl.deletingLastPathComponent())
         }
+        IOSLocationService.shared.syncPermissionsToWebView()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            IOSLocationService.shared.syncPermissionsToWebView()
+            IOSSoundPlayer.shared.prepareVolumeViewInWindow()
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             IOSLocationService.shared.syncPermissionsToWebView()
+            IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         }
         return wv
     }

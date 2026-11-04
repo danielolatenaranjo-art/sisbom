@@ -60,9 +60,8 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
 
   useEffect(() => {
     if (!visible) return;
-    refreshPerms();
 
-    const handler = () => {
+    const checkAndAutoClose = () => {
       const updated = refreshPerms();
       if (
         updated.notifications &&
@@ -70,16 +69,22 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
         updated.overlay &&
         updated.batteryUnrestricted
       ) {
-        setTimeout(() => {
-          if (onAccept) onAccept(updated);
-        }, 450);
+        if (onAccept) onAccept(updated);
+        return true;
       }
+      return false;
+    };
+
+    if (checkAndAutoClose()) return;
+
+    const handler = () => {
+      checkAndAutoClose();
     };
 
     if (typeof window !== 'undefined') {
       window.addEventListener('sentinelPermissionsChanged', handler);
     }
-    const interval = setInterval(refreshPerms, 1200);
+    const interval = setInterval(checkAndAutoClose, 1000);
 
     return () => {
       if (typeof window !== 'undefined') {
