@@ -8,7 +8,7 @@
 🔞 Completando AgeRatingDeclaration de la versión (id=560a8f78-db6a-4284-afd1-3f1245a55675)...
 ⚠️ HTTP 404 en PATCH https://api.appstoreconnect.apple.com/v1/ageRatingDeclarations/560a8f78-db6a-4284-afd1-3f1245a55675: {
   "errors" : [ {
-    "id" : "7b1dd3d7-92e9-473c-ba19-0eef947ad10b",
+    "id" : "367ddb81-99a8-440a-8e5f-f931f8a8486a",
     "status" : "404",
     "code" : "NOT_FOUND",
     "title" : "The specified resource does not exist",
@@ -21,7 +21,7 @@
 🌐 Configurando URL de Soporte, Textos y Capturas para es-ES (id=c9dc24ad-dc36-4500-b40b-91da8db3e90f)...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
   "errors" : [ {
-    "id" : "d34b3f70-7f6a-440a-946b-06373e34e81e",
+    "id" : "5b6feb0f-a023-4bc1-a943-fe4f57568027",
     "status" : "409",
     "code" : "STATE_ERROR",
     "title" : "The request cannot be fulfilled because of the state of another resource.",
@@ -34,7 +34,7 @@
 👤 Configurando datos de contacto y cuenta demo para el Revisor de Apple...
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/builds/fc9fe35d-467e-45ca-a730-cecca1c90583: {
   "errors" : [ {
-    "id" : "41acc97a-e45e-4ba6-8538-bbc1a61e5fec",
+    "id" : "68472713-bdea-4324-ab7f-98d743d84e3f",
     "status" : "409",
     "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID",
     "title" : "The provided entity includes an attribute with an invalid value",
@@ -46,7 +46,7 @@
 }
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersions/560a8f78-db6a-4284-afd1-3f1245a55675/relationships/build: {
   "errors" : [ {
-    "id" : "fb61e0ef-0efd-4e94-a7ed-60365f71533f",
+    "id" : "c037e7a5-600e-46f9-a821-c2b45d2dd6be",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID.INVALID_STATE",
     "title" : "A relationship value is not acceptable for the current resource state.",
@@ -60,7 +60,7 @@
 🚀 Enviando versión 3.0.3 a Revisión de App Store...
 ⚠️ HTTP 409 en POST https://api.appstoreconnect.apple.com/v1/reviewSubmissionItems: {
   "errors" : [ {
-    "id" : "c8a9a853-ef6e-4423-a58d-56f2ef72f841",
+    "id" : "bfe892e3-64a3-48f9-ab0e-27c7a81cc288",
     "status" : "409",
     "code" : "STATE_ERROR.ENTITY_STATE_INVALID",
     "title" : "appStoreVersions with id '560a8f78-db6a-4284-afd1-3f1245a55675' is not in valid state.",
@@ -68,7 +68,7 @@
     "meta" : {
       "associatedErrors" : {
         "/v1/appStoreVersions/560a8f78-db6a-4284-afd1-3f1245a55675" : [ {
-          "id" : "fb84fa71-1710-4998-a392-a1971e304587",
+          "id" : "a9b6b7d4-edbd-4273-a84e-d6f6db26e7a5",
           "status" : "409",
           "code" : "STATE_ERROR.STATE_NOT_SUITABLE_TO_SUBMIT",
           "title" : "Invalid submission state.",
@@ -80,7 +80,7 @@
 }
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/reviewSubmissions/02709ce7-6c16-41bd-bcda-460eb2842837: {
   "errors" : [ {
-    "id" : "f72f6c8f-4923-4aed-8fb5-c56f4b39dbf5",
+    "id" : "779f7ad2-4b64-4099-999b-6578b01ae0bf",
     "status" : "409",
     "code" : "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
     "title" : "Relationship is required",
@@ -93,7 +93,7 @@
 ⚠️ Respuesta de envío a revisión: {
   "errors": [
     {
-      "id": "f72f6c8f-4923-4aed-8fb5-c56f4b39dbf5",
+      "id": "779f7ad2-4b64-4099-999b-6578b01ae0bf",
       "status": "409",
       "code": "ENTITY_ERROR.RELATIONSHIP.REQUIRED",
       "title": "Relationship is required",
