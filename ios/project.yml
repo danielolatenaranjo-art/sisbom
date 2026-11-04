@@ -54,7 +54,7 @@ targets:
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "3.0.4"
-        CFBundleVersion: "3014"
+        CFBundleVersion: "3016"
         UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true
@@ -76,6 +76,14 @@ targets:
         NSCameraUsageDescription: "SENTINEL ONE requiere acceso a la cámara para adjuntar fotografías en reportes y bitácora de emergencias."
         NSPhotoLibraryUsageDescription: "SENTINEL ONE requiere acceso a la galería para adjuntar imágenes a reportes de servicio y bitácora."
         ITSAppUsesNonExemptEncryption: false
+        LSApplicationQueriesSchemes:
+          - whatsapp
+          - tel
+          - sms
+          - mailto
+          - maps
+          - comgooglemaps
+          - waze
         CFBundleIcons:
           CFBundlePrimaryIcon:
             CFBundleIconFiles:

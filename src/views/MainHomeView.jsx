@@ -409,7 +409,10 @@ export const MainHomeView = ({ onLogout }) => {
     setActiveChatAlert,
     dismissFullscreenDispatch,
     clearUrgentBanner,
-    stopDispatchSound
+    stopDispatchSound,
+    interCorpsAlert,
+    isRespondingInterCorps,
+    respondToInterCorpsAlert
   } = useDispatchStore();
 
   const [currentTab, setCurrentTab] = useState('actividad'); // 'actividad' | 'ordenes' | 'alertas' | 'asistencia' | 'disponibles'
@@ -1435,18 +1438,19 @@ export const MainHomeView = ({ onLogout }) => {
     const currentId = cadDraftId || 'draft-session';
     const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone}`;
     const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${generatedLink}`;
-    const waUrl = `https://api.whatsapp.com/send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
+    const waAppUrl = `whatsapp://send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
+    const waWebUrl = `https://api.whatsapp.com/send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
     try {
       if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
-        window.AndroidApp.openExternalUrl(waUrl);
+        window.AndroidApp.openExternalUrl(waAppUrl);
         return;
       }
       if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp) {
-        window.webkit.messageHandlers.iOSApp.postMessage({ action: 'openExternalUrl', url: waUrl });
+        window.webkit.messageHandlers.iOSApp.postMessage({ action: 'openExternalUrl', url: waAppUrl });
         return;
       }
       if (typeof window !== 'undefined' && window.open) {
-        window.open(waUrl, '_blank');
+        window.open(waWebUrl, '_blank');
       }
     } catch (_) {}
   };
@@ -1929,6 +1933,218 @@ export const MainHomeView = ({ onLogout }) => {
 
     return (
       <View style={styles.tabScrollContainer}>
+        {/* TARJETA TÁCTICA DE ALERTA INTER-CUERPOS PARA EL COMANDANTE (idRadial == 1) */}
+        {isComandante && interCorpsAlert && interCorpsAlert.estado ? (
+          <View
+            style={[
+              styles.glassCard,
+              {
+                backgroundColor: isDarkMode ? 'rgba(30, 12, 16, 0.96)' : '#FFF1F2',
+                borderColor:
+                  interCorpsAlert.estado === 'CONFIRMADA' || interCorpsAlert.estado === 'APOYO_OFRECIDO'
+                    ? '#10B981'
+                    : interCorpsAlert.estado === 'EN_ESPERA'
+                      ? '#F59E0B'
+                      : interCorpsAlert.estado === 'RECHAZADA'
+                        ? '#EF4444'
+                        : '#F87171',
+                borderWidth: 1.5,
+                padding: 14,
+                marginBottom: 14
+              }
+            ]}
+          >
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+                <View
+                  style={{
+                    backgroundColor: 'rgba(239, 68, 68, 0.22)',
+                    borderColor: '#EF4444',
+                    borderWidth: 1,
+                    paddingHorizontal: 7,
+                    paddingVertical: 2,
+                    borderRadius: 6
+                  }}
+                >
+                  <Text style={{ color: '#FCA5A5', fontSize: 9, fontWeight: '900' }}>
+                    GRADO 3 • RED INTER-CUERPOS SCI
+                  </Text>
+                </View>
+                <View
+                  style={{
+                    backgroundColor:
+                      interCorpsAlert.estado === 'CONFIRMADA' || interCorpsAlert.estado === 'APOYO_OFRECIDO'
+                        ? 'rgba(16, 185, 129, 0.22)'
+                        : interCorpsAlert.estado === 'EN_ESPERA'
+                          ? 'rgba(245, 158, 11, 0.22)'
+                          : interCorpsAlert.estado === 'RECHAZADA'
+                            ? 'rgba(239, 68, 68, 0.22)'
+                            : 'rgba(245, 158, 11, 0.20)',
+                    paddingHorizontal: 7,
+                    paddingVertical: 2,
+                    borderRadius: 6
+                  }}
+                >
+                  <Text
+                    style={{
+                      color:
+                        interCorpsAlert.estado === 'CONFIRMADA' || interCorpsAlert.estado === 'APOYO_OFRECIDO'
+                          ? '#34D399'
+                          : interCorpsAlert.estado === 'EN_ESPERA'
+                            ? '#FBBF24'
+                            : interCorpsAlert.estado === 'RECHAZADA'
+                              ? '#F87171'
+                              : '#FDE68A',
+                      fontSize: 9,
+                      fontWeight: '900'
+                    }}
+                  >
+                    {interCorpsAlert.estado === 'CONFIRMADA'
+                      ? '✓ APOYO CONFIRMADO'
+                      : interCorpsAlert.estado === 'APOYO_OFRECIDO'
+                        ? '🚒 APOYO OFRECIDO'
+                        : interCorpsAlert.estado === 'EN_ESPERA'
+                          ? '⏳ EN ESPERA'
+                          : interCorpsAlert.estado === 'RECHAZADA'
+                            ? '✕ RECHAZADO'
+                            : '🚨 SOLICITUD PENDIENTE'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <Text
+              style={{
+                color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                fontSize: 13.5,
+                fontWeight: '900',
+                marginBottom: 4
+              }}
+            >
+              {interCorpsAlert.razonAlerta ||
+                `SOLICITUD DE ALERTA POR CLAVE ${interCorpsAlert.claveEmergencia || '10-12'} PARA UNIDADES EN APOYO`}
+            </Text>
+
+            <Text
+              style={{
+                color: isDarkMode ? '#CBD5E1' : '#334155',
+                fontSize: 11.5,
+                lineHeight: 16,
+                marginBottom: 10
+              }}
+            >
+              {String(
+                interCorpsAlert.mensajeAlerta ||
+                  interCorpsAlert.mensajeSolicitud ||
+                  `Solicitud desde ${interCorpsAlert.nombreCuerpoSolicitante || 'Cuerpo de Bomberos Vecino'}`
+              ).replace(/\|/g, '\n')}
+            </Text>
+
+            {/* 4 BOTONES TÁCTICOS DE RESPUESTA DEL COMANDANTE */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('heavy');
+                  await respondToInterCorpsAlert('CONFIRMADA', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert.estado === 'CONFIRMADA' ? '#059669' : 'rgba(16, 185, 129, 0.22)',
+                  borderColor: '#10B981',
+                  borderWidth: 1,
+                  borderRadius: 9,
+                  paddingVertical: 9,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                  ✓ CONFIRMAR APOYO
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('medium');
+                  await respondToInterCorpsAlert('EN_ESPERA', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert.estado === 'EN_ESPERA' ? '#D97706' : 'rgba(245, 158, 11, 0.20)',
+                  borderColor: '#F59E0B',
+                  borderWidth: 1,
+                  borderRadius: 9,
+                  paddingVertical: 9,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                  ⏳ ESPERAR
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('medium');
+                  await respondToInterCorpsAlert('RECHAZADA', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert.estado === 'RECHAZADA' ? '#DC2626' : 'rgba(239, 68, 68, 0.20)',
+                  borderColor: '#EF4444',
+                  borderWidth: 1,
+                  borderRadius: 9,
+                  paddingVertical: 9,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                  ✕ RECHAZAR
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('heavy');
+                  await respondToInterCorpsAlert('APOYO_OFRECIDO', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert.estado === 'APOYO_OFRECIDO' ? '#0284C7' : 'rgba(14, 165, 233, 0.22)',
+                  borderColor: '#0EA5E9',
+                  borderWidth: 1,
+                  borderRadius: 9,
+                  paddingVertical: 9,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                  🚒 OFRECER APOYO
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
         {/* Operador CAD Info Card (Solo visible si el usuario NO es el propio Operador CAD) */}
         {!isMeCentralOperator ? (
           <View
@@ -4037,7 +4253,7 @@ export const MainHomeView = ({ onLogout }) => {
     // Resolver nombres de destinatarios desde idRegistro (con fallback a idRadial)
     const resolveTargetLabel = (aQuienRaw = 'TC') => {
       const clean = String(aQuienRaw || 'TC').trim();
-      if (!clean || clean.toUpperCase() === 'TC' || clean.toUpperCase() === 'SC' || clean === '1') {
+      if (!clean || clean.toUpperCase() === 'TC' || clean.toUpperCase() === 'SC') {
         return 'Toda la Compañía';
       }
       const ids = clean.split(',').map((s) => s.trim()).filter(Boolean);
@@ -4060,7 +4276,7 @@ export const MainHomeView = ({ onLogout }) => {
       .filter((alerta) => {
         const aQuien = String(alerta.aQuienAlerta || 'TC').trim();
         const aQuienUp = aQuien.toUpperCase();
-        if (!aQuien || aQuienUp === 'TC' || aQuienUp === 'SC' || aQuien === '1' || isComandante) {
+        if (!aQuien || aQuienUp === 'TC' || aQuienUp === 'SC' || isComandante) {
           return true;
         }
         const ids = aQuien.split(',').map((s) => s.trim()).filter(Boolean);
@@ -4091,6 +4307,171 @@ export const MainHomeView = ({ onLogout }) => {
 
     return (
       <View style={styles.tabScrollContainer}>
+        {/* BARRA RÁPIDA DE COMANDANCIA PARA OFRECER / RESPONDER APOYO INTER-CUERPOS EN RED SCI */}
+        {isComandante ? (
+          <View
+            style={[
+              styles.glassCard,
+              {
+                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.94)' : '#F8FAFC',
+                borderColor: 'rgba(14, 165, 233, 0.35)',
+                padding: 12,
+                marginBottom: 12
+              }
+            ]}
+          >
+            <View
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 8
+              }}
+            >
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <Text
+                  style={{
+                    color: '#38BDF8',
+                    fontSize: 9.5,
+                    fontWeight: '900',
+                    letterSpacing: 0.6
+                  }}
+                >
+                  RED DE APOYO INTER-CUERPOS SENTINEL SCI (ID RADIAL 1)
+                </Text>
+                <Text
+                  style={{
+                    color: isDarkMode ? '#E2E8F0' : '#1E293B',
+                    fontSize: 11.5,
+                    fontWeight: '700',
+                    marginTop: 2
+                  }}
+                >
+                  {interCorpsAlert?.estado === 'CONFIRMADA'
+                    ? '✓ Apoyo confirmado — Unidades disponibles (0-9) conectadas a SCI'
+                    : interCorpsAlert?.estado === 'APOYO_OFRECIDO'
+                      ? '🚒 Apoyo ofrecido — Unidades disponibles (0-9) habilitadas en Red SCI'
+                      : interCorpsAlert?.estado === 'EN_ESPERA'
+                        ? '⏳ En espera de evaluación de Comandancia'
+                        : interCorpsAlert?.estado === 'RECHAZADA'
+                          ? '✕ Solicitud de apoyo rechazada'
+                          : 'Responda a alertas de apoyo o habilite sus unidades disponibles (0-9)'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('heavy');
+                  await respondToInterCorpsAlert('CONFIRMADA', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert?.estado === 'CONFIRMADA'
+                      ? '#059669'
+                      : 'rgba(16, 185, 129, 0.20)',
+                  borderColor: '#10B981',
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                  ✓ CONFIRMAR APOYO
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('medium');
+                  await respondToInterCorpsAlert('EN_ESPERA', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert?.estado === 'EN_ESPERA'
+                      ? '#D97706'
+                      : 'rgba(245, 158, 11, 0.20)',
+                  borderColor: '#F59E0B',
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                  ⏳ ESPERAR
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('medium');
+                  await respondToInterCorpsAlert('RECHAZADA', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert?.estado === 'RECHAZADA'
+                      ? '#DC2626'
+                      : 'rgba(239, 68, 68, 0.20)',
+                  borderColor: '#EF4444',
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                  ✕ RECHAZAR
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                disabled={isRespondingInterCorps}
+                onPress={async () => {
+                  triggerHaptic('heavy');
+                  await respondToInterCorpsAlert('APOYO_OFRECIDO', interCorpsAlert);
+                }}
+                style={{
+                  flex: 1,
+                  minWidth: '47%',
+                  backgroundColor:
+                    interCorpsAlert?.estado === 'APOYO_OFRECIDO'
+                      ? '#0284C7'
+                      : 'rgba(14, 165, 233, 0.22)',
+                  borderColor: '#0EA5E9',
+                  borderWidth: 1,
+                  borderRadius: 8,
+                  paddingVertical: 8,
+                  paddingHorizontal: 8,
+                  alignItems: 'center'
+                }}
+                activeOpacity={0.85}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                  🚒 OFRECER APOYO
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+
         {visibleAlerts.length === 0 ? (
           <View
             style={[
@@ -4127,7 +4508,7 @@ export const MainHomeView = ({ onLogout }) => {
             const targetLabel = resolveTargetLabel(alerta.aQuienAlerta);
             const isWholeCompany =
               !alerta.aQuienAlerta ||
-              ['TC', 'SC', '1'].includes(String(alerta.aQuienAlerta).trim().toUpperCase());
+              ['TC', 'SC'].includes(String(alerta.aQuienAlerta).trim().toUpperCase());
             const conformesCount = String(alerta.conforme || '')
               .split(',')
               .map((s) => s.trim())
@@ -4522,6 +4903,197 @@ export const MainHomeView = ({ onLogout }) => {
                     {String(alerta.mensajeAlerta).replace(/\|/g, '\n')}
                   </Text>
                 ) : null}
+
+                {/* BOTONES DE RESPUESTA DE APOYO INTER-CUERPOS EN TARJETA DE ALERTA (Confirmar Apoyo, Esperar, Rechazar, Ofrecer Apoyo) */}
+                {(() => {
+                  const cmdPerson = (firefightersList || []).find((p) => String(p.idRadial).trim() === '1');
+                  const cmdReg = String(cmdPerson?.idRegistro || myIdReg || '').trim();
+                  const aQuienTokens = String(alerta.aQuienAlerta || '')
+                    .split(',')
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                  const isTargetedToCommander = Boolean(
+                    (cmdReg && aQuienTokens.includes(cmdReg)) ||
+                      (myIdReg && isComandante && aQuienTokens.includes(myIdReg))
+                  );
+                  const isSupportAlert = Boolean(
+                    alerta.tipoSolicitud ||
+                      alerta.licenciaSolicitante ||
+                      alerta.estadoApoyo ||
+                      String(alerta.razonAlerta || '').toUpperCase().includes('APOYO') ||
+                      String(alerta.razonAlerta || '').toUpperCase().includes('SOLICITUD DE ALERTA') ||
+                      (grado === '3' && isTargetedToCommander)
+                  );
+                  if (!isSupportAlert || !isComandante) return null;
+
+                  const currentResp = String(
+                    alerta.estadoApoyo ||
+                      (interCorpsAlert && String(interCorpsAlert.idAlerta) === String(alerta.idAlerta)
+                        ? interCorpsAlert.estado
+                        : '') ||
+                      ''
+                  ).toUpperCase();
+
+                  return (
+                    <View
+                      style={{
+                        marginTop: 4,
+                        marginBottom: 8,
+                        paddingTop: 8,
+                        borderTopWidth: 1,
+                        borderTopColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'
+                      }}
+                    >
+                      {currentResp && currentResp !== 'PENDIENTE' ? (
+                        <View
+                          style={{
+                            marginBottom: 8,
+                            paddingVertical: 4,
+                            paddingHorizontal: 8,
+                            borderRadius: 6,
+                            backgroundColor:
+                              currentResp === 'CONFIRMADA' || currentResp === 'APOYO_OFRECIDO'
+                                ? 'rgba(16, 185, 129, 0.16)'
+                                : currentResp === 'EN_ESPERA'
+                                  ? 'rgba(245, 158, 11, 0.16)'
+                                  : 'rgba(239, 68, 68, 0.16)',
+                            borderWidth: 1,
+                            borderColor:
+                              currentResp === 'CONFIRMADA' || currentResp === 'APOYO_OFRECIDO'
+                                ? 'rgba(16, 185, 129, 0.45)'
+                                : currentResp === 'EN_ESPERA'
+                                  ? 'rgba(245, 158, 11, 0.45)'
+                                  : 'rgba(239, 68, 68, 0.45)',
+                            alignSelf: 'flex-start'
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color:
+                                currentResp === 'CONFIRMADA' || currentResp === 'APOYO_OFRECIDO'
+                                  ? '#34D399'
+                                  : currentResp === 'EN_ESPERA'
+                                    ? '#FBBF24'
+                                    : '#F87171',
+                              fontSize: 9.5,
+                              fontWeight: '900'
+                            }}
+                          >
+                            {currentResp === 'CONFIRMADA'
+                              ? '✓ APOYO CONFIRMADO — UNIDADES DISPONIBLES CONECTADAS'
+                              : currentResp === 'APOYO_OFRECIDO'
+                                ? '🚒 APOYO OFRECIDO EN RED SCI'
+                                : currentResp === 'EN_ESPERA'
+                                  ? '⏳ EN ESPERA DE CONFIRMACIÓN'
+                                  : '✕ APOYO RECHAZADO'}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                        <TouchableOpacity
+                          disabled={isRespondingInterCorps}
+                          onPress={async () => {
+                            triggerHaptic('heavy');
+                            await respondToInterCorpsAlert('CONFIRMADA', alerta);
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: '47%',
+                            backgroundColor:
+                              currentResp === 'CONFIRMADA' ? '#059669' : 'rgba(16, 185, 129, 0.22)',
+                            borderColor: '#10B981',
+                            borderWidth: 1,
+                            borderRadius: 8,
+                            paddingVertical: 7,
+                            paddingHorizontal: 6,
+                            alignItems: 'center'
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                            ✓ CONFIRMAR APOYO
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          disabled={isRespondingInterCorps}
+                          onPress={async () => {
+                            triggerHaptic('medium');
+                            await respondToInterCorpsAlert('EN_ESPERA', alerta);
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: '47%',
+                            backgroundColor:
+                              currentResp === 'EN_ESPERA' ? '#D97706' : 'rgba(245, 158, 11, 0.20)',
+                            borderColor: '#F59E0B',
+                            borderWidth: 1,
+                            borderRadius: 8,
+                            paddingVertical: 7,
+                            paddingHorizontal: 6,
+                            alignItems: 'center'
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                            ⏳ ESPERAR
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          disabled={isRespondingInterCorps}
+                          onPress={async () => {
+                            triggerHaptic('medium');
+                            await respondToInterCorpsAlert('RECHAZADA', alerta);
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: '47%',
+                            backgroundColor:
+                              currentResp === 'RECHAZADA' ? '#DC2626' : 'rgba(239, 68, 68, 0.20)',
+                            borderColor: '#EF4444',
+                            borderWidth: 1,
+                            borderRadius: 8,
+                            paddingVertical: 7,
+                            paddingHorizontal: 6,
+                            alignItems: 'center'
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                            ✕ RECHAZAR
+                          </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          disabled={isRespondingInterCorps}
+                          onPress={async () => {
+                            triggerHaptic('heavy');
+                            await respondToInterCorpsAlert('APOYO_OFRECIDO', alerta);
+                          }}
+                          style={{
+                            flex: 1,
+                            minWidth: '47%',
+                            backgroundColor:
+                              currentResp === 'APOYO_OFRECIDO' ? '#0284C7' : 'rgba(14, 165, 233, 0.22)',
+                            borderColor: '#0EA5E9',
+                            borderWidth: 1,
+                            borderRadius: 8,
+                            paddingVertical: 7,
+                            paddingHorizontal: 6,
+                            alignItems: 'center'
+                          }}
+                          activeOpacity={0.85}
+                        >
+                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
+                            🚒 OFRECER APOYO
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })()}
 
                 <View
                   style={[

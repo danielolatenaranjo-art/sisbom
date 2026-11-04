@@ -22,6 +22,9 @@ import { useAuthStore } from './useAuthStore';
 import {
   getDb,
   getRtdb,
+  getCentralDb,
+  getAuthInstance,
+  resolveCachedUserAuthCredentials,
   ensureFirebaseAuth,
   reinitFirebaseWithConfig,
   DEFAULT_FIREBASE_CONFIG,
@@ -34,6 +37,12 @@ import {
   getLocalDateString,
   getLocalTimeString,
   resolveCompanyFromVehicleId,
+  resolveCoreUnitStatusInfo,
+  buildCanonicalCadAlertDoc,
+  resolveCommanderIdRegistroFromPersonal,
+  formatCanonicalChatEntry,
+  appendCanonicalChatMessage,
+  normalizeSaasClientDoc,
   getEntityMaxTimestamp,
   mergeServiceUnitByHigherTimestamp
 } from '../shared/sentinelCore';
@@ -219,6 +228,8 @@ let unsubAlertas = null;
 let unsubCentral = null;
 let unsubAsistencia = null;
 let unsubProtocols = null;
+let unsubCentralInterCorps = null;
+let lastInterCorpsAlertTs = 0;
 
 let isFirstDispatchesSnapshot = true;
 let notifiedDispatchIds = new Set();
@@ -630,6 +641,17 @@ function normalizeAlertDoc(docId, raw = {}) {
     fechaOrden: cleanSheetPrefix(raw.fechaOrden || fechaAlerta),
     firmaNombre: cleanSheetPrefix(raw.firmaNombre || ''),
     firmaCargo: cleanSheetPrefix(raw.firmaCargo || ''),
+    tipoSolicitud: cleanSheetPrefix(raw.tipoSolicitud || ''),
+    licenciaSolicitante: cleanSheetPrefix(raw.licenciaSolicitante || '').toUpperCase(),
+    nombreCuerpoSolicitante: cleanSheetPrefix(raw.nombreCuerpoSolicitante || ''),
+    claveEmergencia: cleanSheetPrefix(raw.claveEmergencia || ''),
+    direccionEmergencia: cleanSheetPrefix(raw.direccionEmergencia || ''),
+    idCarroSolicitado: cleanSheetPrefix(raw.idCarroSolicitado || ''),
+    sectorDestino: cleanSheetPrefix(raw.sectorDestino || ''),
+    instruccionTactica: cleanSheetPrefix(raw.instruccionTactica || ''),
+    estadoApoyo: cleanSheetPrefix(raw.estadoApoyo || raw.estadoRespuesta || '').toUpperCase(),
+    respondidoPor: cleanSheetPrefix(raw.respondidoPor || ''),
+    respondidoAt: Number(raw.respondidoAt || 0) || null,
     timestamp,
     _metaTimestamp: metaTs,
     _fieldTimestamps: raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object' ? raw._fieldTimestamps : {}
@@ -800,6 +822,8 @@ export const useDispatchStore = create((set, get) => ({
   protocols: { ...DEFAULT_PROTOCOLS },
   activeChatAlert: null,
   chatAlert: null,
+  interCorpsAlert: null,
+  isRespondingInterCorps: false,
   isLoading: false,
   soundObject: null,
   isAudioPlaying: false,
@@ -1363,6 +1387,32 @@ export const useDispatchStore = create((set, get) => ({
     useAuthStore.getState().syncUserFromPersonalList(list);
     get().recomputeCentralState();
     const syncedUser = useAuthStore.getState().user;
+
+    // Asegurar que las alertas inter-cuerpos ya recibidas tengan en aQuienAlerta el idRegistro del Comandante (idRadial == "1")
+    const cmdIdReg = resolveCommanderIdRegistroFromPersonal(list, syncedUser);
+    if (cmdIdReg) {
+      const curInter = get().interCorpsAlert;
+      if (curInter && String(curInter.aQuienAlerta || '') !== cmdIdReg) {
+        set({ interCorpsAlert: { ...curInter, aQuienAlerta: cmdIdReg } });
+      }
+      const curAllAlerts = get().allAlertsList || [];
+      let changedAny = false;
+      const updatedAlerts = curAllAlerts.map((a) => {
+        const isSciAlert =
+          (curInter && String(a.idAlerta) === String(curInter.idAlerta)) ||
+          String(a.idAlerta || '').startsWith('SCI_ALERTA_') ||
+          String(a.idAlerta || '').startsWith('SCI_CHAT_') ||
+          Boolean(a.tipoSolicitud || a.licenciaSolicitante);
+        if (isSciAlert && String(a.aQuienAlerta || '') !== cmdIdReg) {
+          changedAny = true;
+          return { ...a, aQuienAlerta: cmdIdReg };
+        }
+        return a;
+      });
+      if (changedAny) {
+        set(splitAlertsAndOrders(updatedAlerts, get().activeChatAlert));
+      }
+    }
     const syncedId = String(syncedUser?.idRegistro || '').trim();
     if (syncedId && syncedId !== lastSubscribedAttendanceUserId) {
       get().subscribeAttendanceRealtime();
@@ -1722,6 +1772,241 @@ export const useDispatchStore = create((set, get) => ({
       // 6. LISTENER Y CACHÉ DE ASISTENCIAS (`asistencia`)
       // =====================================================================
       get().subscribeAttendanceRealtime();
+
+      // =====================================================================
+      // 7. LISTENER EN TIEMPO REAL: RED DE APOYO INTER-CUERPOS (`sisbom-central/saas_clientes/{licenseKey}`)
+      //    Recibe alertas Grado 3 al Comandante (`idRadial == "1"`) desde SENTINEL SCI
+      // =====================================================================
+      const ownLicKey = String(useLicenseStore.getState().licenseKey || '').trim().toUpperCase();
+      const centralDb = getCentralDb();
+      if (ownLicKey && centralDb) {
+        if (unsubCentralInterCorps) {
+          try { unsubCentralInterCorps(); } catch (_) {}
+          unsubCentralInterCorps = null;
+        }
+        unsubCentralInterCorps = onSnapshot(
+          doc(centralDb, 'saas_clientes', ownLicKey),
+          async (snap) => {
+            if (!snap.exists()) return;
+            const rawClient = snap.data() || {};
+            const normClient = normalizeSaasClientDoc(ownLicKey, rawClient);
+            const alertSci = normClient?.alertaIntercuerpoSci;
+            if (!alertSci || typeof alertSci !== 'object') {
+              set({ interCorpsAlert: null });
+              return;
+            }
+
+            const currentUser = useAuthStore.getState().user;
+            const myRad = String(currentUser?.idRadial || '').trim();
+            const isCmd = myRad === '1' || String(currentUser?.cargo || '').toUpperCase().includes('COMANDANTE');
+            const statusUp = String(alertSci.estado || 'PENDIENTE').toUpperCase();
+            const alertId = String(alertSci.idAlerta || alertSci.id || `SCI_ALERTA_${alertSci.timestamp || Date.now()}`);
+            const incomingTs = Number(alertSci.updatedAt || alertSci.timestamp || Date.now());
+            const isCancelledAlert =
+              statusUp === 'CANCELADA' ||
+              statusUp === 'CANCELADO' ||
+              String(alertSci.duracion ?? 'i').trim() === '';
+
+            // Buscar en personal por idRadial == "1" y obtener su idRegistro para ponerlo en aQuienAlerta
+            const commanderIdRegistro =
+              resolveCommanderIdRegistroFromPersonal(get().firefightersList, currentUser) ||
+              String(isCmd ? currentUser?.idRegistro || '' : '').trim();
+
+            if (isCancelledAlert) {
+              set({ interCorpsAlert: null });
+              const currentAllAfterCancel = (get().allAlertsList || []).filter(
+                (a) =>
+                  String(a.idAlerta) !== alertId &&
+                  !String(a.idAlerta || '').startsWith(`SCI_CHAT_${ownLicKey}`)
+              );
+              set(splitAlertsAndOrders(currentAllAfterCancel, get().activeChatAlert));
+              try {
+                const localDb = getDb();
+                if (localDb) {
+                  await updateDoc(doc(localDb, 'alertas', alertId), {
+                    duracion: '',
+                    _metaTimestamp: incomingTs
+                  }).catch(() => {});
+                }
+              } catch (_) {}
+              return;
+            }
+
+            set({
+              interCorpsAlert: {
+                ...alertSci,
+                idAlerta: alertId,
+                aQuienAlerta: commanderIdRegistro || String(alertSci.aQuienAlerta || '').trim(),
+                estado: statusUp
+              }
+            });
+
+            // Reflejar la alerta Grado 3 en la lista local de alertas (formato canónico SENTINEL CAD con aQuienAlerta = idRegistro del Comandante)
+            const canonicalAlertObj = normalizeAlertDoc(alertId, {
+              idAlerta: alertId,
+              fechaAlerta: alertSci.fechaAlerta || `'${getLocalDateString()}`,
+              horaAlerta: alertSci.horaAlerta || `'${getLocalTimeString()}`,
+              razonAlerta:
+                alertSci.razonAlerta ||
+                `SOLICITUD DE ALERTA POR CLAVE ${alertSci.claveEmergencia || '10-12'} PARA UNIDADES EN APOYO`,
+              mensajeAlerta:
+                alertSci.mensajeAlerta ||
+                alertSci.mensajeSolicitud ||
+                `Solicitud de apoyo inter-cuerpo desde ${alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || 'Cuerpo Vecino'}.`,
+              quienAlerta:
+                alertSci.quienAlerta ||
+                `COMANDANTE SCI - ${alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || 'CUERPO VECINO'}`,
+              gradoAlerta: '3',
+              duracion: 'i',
+              aQuienAlerta: commanderIdRegistro,
+              conforme: statusUp !== 'PENDIENTE' ? (currentUser?.idRadial || '1') : '',
+              fijar: '1',
+              tipoSolicitud: alertSci.tipoSolicitud || 'ALERTA_PREVENTIVA',
+              licenciaSolicitante: alertSci.licenciaSolicitante || '',
+              nombreCuerpoSolicitante: alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || '',
+              claveEmergencia: alertSci.claveEmergencia || '10-12',
+              direccionEmergencia: alertSci.direccionEmergencia || '',
+              estadoApoyo: statusUp,
+              respondidoPor: alertSci.confirmadoPor || '',
+              respondidoAt: alertSci.confirmadoAt || null,
+              timestamp: incomingTs,
+              _metaTimestamp: incomingTs
+            });
+
+            let nextAll = [...(get().allAlertsList || [])];
+            const existsIdx = nextAll.findIndex((a) => String(a.idAlerta) === alertId);
+            if (existsIdx >= 0) {
+              nextAll = nextAll.map((a, idx) => (idx === existsIdx ? { ...a, ...canonicalAlertObj } : a));
+            } else {
+              nextAll = [canonicalAlertObj, ...nextAll];
+            }
+
+            // Si existe canal de chat directo (`chatDirecto`) o chat general inter-cuerpos (`chatIntercuerpos`) con duracion: 'C',
+            // reflejarlos en `alertas` con aQuienAlerta = idRegistro del Comandante (idRadial == 1)
+            const syncSciChatChannel = async (chatRaw, defaultChatId, defaultChatTitle) => {
+              if (!chatRaw || typeof chatRaw !== 'object') return;
+              const chatDur = String(chatRaw.duracion ?? 'C').trim();
+              const chatId = String(chatRaw.idAlerta || defaultChatId).trim();
+              if (!chatDur) {
+                nextAll = nextAll.filter((a) => String(a.idAlerta) !== chatId);
+                return;
+              }
+              const chatTs = Number(chatRaw.updatedAt || incomingTs || Date.now());
+              const chatAlertNorm = normalizeAlertDoc(chatId, {
+                idAlerta: chatId,
+                fechaAlerta: `'${getLocalDateString()}`,
+                horaAlerta: `'${getLocalTimeString()}`,
+                razonAlerta: String(chatRaw.razonAlerta || defaultChatTitle).trim().toUpperCase(),
+                mensajeAlerta: String(chatRaw.mensajeAlerta || '').trim(),
+                quienAlerta: String(chatRaw.quienAlerta || 'RED INTER-CUERPOS SCI').trim().toUpperCase(),
+                gradoAlerta: '3',
+                duracion: 'C',
+                aQuienAlerta: commanderIdRegistro,
+                conforme: String(chatRaw.conforme || '').trim(),
+                fijar: '1',
+                timestamp: chatTs,
+                _metaTimestamp: chatTs
+              });
+              const idxChat = nextAll.findIndex((a) => String(a.idAlerta) === chatId);
+              if (idxChat >= 0) {
+                nextAll[idxChat] = { ...nextAll[idxChat], ...chatAlertNorm };
+              } else {
+                nextAll = [chatAlertNorm, ...nextAll];
+              }
+              try {
+                const localDb = getDb();
+                if (localDb && commanderIdRegistro) {
+                  markLocalWrite('alertas', chatId, chatTs);
+                  await setDoc(
+                    doc(localDb, 'alertas', chatId),
+                    {
+                      idAlerta: chatId,
+                      fechaAlerta: chatAlertNorm.fechaAlerta,
+                      horaAlerta: chatAlertNorm.horaAlerta,
+                      razonAlerta: chatAlertNorm.razonAlerta,
+                      mensajeAlerta: chatAlertNorm.mensajeAlerta,
+                      quienAlerta: chatAlertNorm.quienAlerta,
+                      gradoAlerta: '3',
+                      duracion: 'C',
+                      aQuienAlerta: commanderIdRegistro,
+                      conforme: chatAlertNorm.conforme,
+                      fijar: '1',
+                      _metaTimestamp: chatTs
+                    },
+                    { merge: true }
+                  ).catch(() => {});
+                }
+              } catch (_) {}
+            };
+
+            if (alertSci.chatDirecto) {
+              const reqCorpTitle =
+                alertSci.cuerpoSolicitante ||
+                alertSci.nombreCuerpoSolicitante ||
+                useLicenseStore.getState().clientName ||
+                ownLicKey;
+              await syncSciChatChannel(
+                alertSci.chatDirecto,
+                `SCI_CHAT_${ownLicKey}`,
+                reqCorpTitle
+              );
+            }
+
+            if (alertSci.chatIntercuerpos) {
+              await syncSciChatChannel(
+                alertSci.chatIntercuerpos,
+                'SCI_CHAT_INTERCUERPOS',
+                'RED INTER-CUERPOS SCI'
+              );
+            }
+
+            set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
+
+            // Si es una alerta nueva en estado PENDIENTE y el usuario es el Comandante (idRadial == 1):
+            // reproducir tono de Alerta Grado 3 (`importante`) y sincronizar en `alertas` del tenant con aQuienAlerta = idRegistro del Comandante
+            if (statusUp === 'PENDIENTE' && incomingTs > lastInterCorpsAlertTs) {
+              lastInterCorpsAlertTs = incomingTs;
+              if (isCmd) {
+                get().playDispatchSound('importante', {
+                  forceMaxVolume: true,
+                  vibratePatternCsv: '0,1000,300,1000,300,1000'
+                });
+                set({
+                  urgentBannerMessage: `🚨 ${canonicalAlertObj.razonAlerta} (${alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || 'Red SCI'})`
+                });
+              }
+              try {
+                const localDb = getDb();
+                if (localDb && commanderIdRegistro && !knownAlertIds.has(alertId)) {
+                  knownAlertIds.add(alertId);
+                  markLocalWrite('alertas', alertId, incomingTs);
+                  await setDoc(doc(localDb, 'alertas', alertId), {
+                    idAlerta: alertId,
+                    fechaAlerta: canonicalAlertObj.fechaAlerta,
+                    horaAlerta: canonicalAlertObj.horaAlerta,
+                    razonAlerta: canonicalAlertObj.razonAlerta,
+                    mensajeAlerta: canonicalAlertObj.mensajeAlerta,
+                    quienAlerta: canonicalAlertObj.quienAlerta,
+                    gradoAlerta: '3',
+                    duracion: 'i',
+                    aQuienAlerta: commanderIdRegistro,
+                    conforme: '',
+                    fijar: '1',
+                    tipoSolicitud: canonicalAlertObj.tipoSolicitud,
+                    licenciaSolicitante: canonicalAlertObj.licenciaSolicitante,
+                    nombreCuerpoSolicitante: canonicalAlertObj.nombreCuerpoSolicitante,
+                    claveEmergencia: canonicalAlertObj.claveEmergencia,
+                    direccionEmergencia: canonicalAlertObj.direccionEmergencia,
+                    estadoApoyo: 'PENDIENTE',
+                    _metaTimestamp: incomingTs
+                  }, { merge: true });
+                }
+              } catch (_) {}
+            }
+          },
+          () => {}
+        );
+      }
 
     } catch (e) {
       console.error('❌ [SENTINEL ONE] Error conectando a Firestore onSnapshot:', e);
@@ -2569,6 +2854,39 @@ export const useDispatchStore = create((set, get) => ({
         conforme: senderRadial,
         _metaTimestamp: nowTs
       });
+
+      // Si es un canal de chat inter-cuerpos de SENTINEL SCI (`SCI_CHAT_*`), sincronizar también con sisbom-central
+      const targetIdStr = String(targetAlert.idAlerta || '').trim();
+      if (targetIdStr.startsWith('SCI_CHAT_')) {
+        const ownLicKey = String(useLicenseStore.getState().licenseKey || '').trim().toUpperCase();
+        const centralDb = getCentralDb();
+        if (centralDb && ownLicKey) {
+          const isGeneral = targetIdStr === 'SCI_CHAT_INTERCUERPOS';
+          const chatFieldKey = isGeneral ? 'chatIntercuerpos' : 'chatDirecto';
+          await setDoc(
+            doc(centralDb, 'saas_clientes', ownLicKey),
+            {
+              alertaIntercuerpoSci: {
+                [chatFieldKey]: {
+                  idAlerta: targetIdStr,
+                  razonAlerta: targetAlert.razonAlerta || (isGeneral ? 'RED INTER-CUERPOS SCI' : ownLicKey),
+                  mensajeAlerta: finalChatString,
+                  quienAlerta: targetAlert.quienAlerta || 'RED INTER-CUERPOS SCI',
+                  gradoAlerta: '3',
+                  duracion: 'C',
+                  aQuienAlerta: String(targetAlert.aQuienAlerta || senderId),
+                  conforme: senderRadial,
+                  fijar: '1',
+                  updatedAt: nowTs
+                },
+                updatedAt: nowTs
+              },
+              updatedAt: nowTs
+            },
+            { merge: true }
+          ).catch(() => {});
+        }
+      }
     } catch (e) {
       console.warn('Error enviando mensaje de chat:', e);
     }
@@ -2766,9 +3084,277 @@ export const useDispatchStore = create((set, get) => ({
     }
   },
 
+  // 11. Responder a Alerta de Apoyo Inter-Cuerpos (Confirmar Apoyo, Esperar, Rechazar, Ofrecer Apoyo)
+  respondToInterCorpsAlert: async (decision = 'CONFIRMADA', targetAlert = null) => {
+    const cleanDecision = String(decision || 'CONFIRMADA').trim().toUpperCase();
+    const user = useAuthStore.getState().user;
+    const licState = useLicenseStore.getState();
+    const ownLicKey = String(licState.licenseKey || '').trim().toUpperCase();
+    const myRadial = String(user?.idRadial || '1').trim();
+    const commanderLabel = `[${myRadial}] ${String(user?.nombreBombero || user?.nombre || 'COMANDANTE').toUpperCase()}`;
+    const nowTs = Date.now();
+
+    set({ isRespondingInterCorps: true });
+    get().stopDispatchSound();
+    get().clearUrgentBanner();
+
+    try {
+      await ensureFirebaseAuth();
+      const authInst = getAuthInstance();
+      let commanderToken = '';
+      try {
+        if (authInst?.currentUser) {
+          commanderToken = await authInst.currentUser.getIdToken();
+        }
+      } catch (_) {}
+
+      const cachedCreds = resolveCachedUserAuthCredentials();
+      const isGrantingAccess = cleanDecision === 'CONFIRMADA' || cleanDecision === 'APOYO_OFRECIDO';
+
+      const commanderAuth = isGrantingAccess && cachedCreds?.email && cachedCreds?.password
+        ? {
+            email: cachedCreds.email,
+            password: cachedCreds.password,
+            idRegistro: String(user?.idRegistro || '1'),
+            idRadial: '1'
+          }
+        : null;
+
+      // Filtrar unidades disponibles (0-9) de nuestra flota para compartir con SENTINEL SCI
+      const allVehicles = get().vehiculosList || get().vehiclesList || [];
+      const activeDisps = get().dispatchesList || [];
+      const availableUnits = isGrantingAccess
+        ? allVehicles
+            .filter((v) => {
+              const uName = String(v.idCarro || v.id || '').trim().toUpperCase();
+              if (!uName || uName === 'INIT') return false;
+              const info = resolveCoreUnitStatusInfo(v, activeDisps, allVehicles);
+              return info.isAvailable;
+            })
+            .map((v) => ({
+              id: String(v.idCarro || v.id).trim().toUpperCase(),
+              idCarro: String(v.idCarro || v.id).trim().toUpperCase(),
+              unidad: String(v.idCarro || v.id).trim().toUpperCase(),
+              tipo: String(v.tipo || 'BOMBA').toUpperCase(),
+              compania: Number(v.compania || resolveCompanyFromVehicleId(v.idCarro || v.id)) || 1,
+              estado: '0-9',
+              conductor: String(v.conductor || ''),
+              capacidadAgua: String(v.capacidadAgua || '')
+            }))
+        : [];
+
+      const currentInterAlert = targetAlert || get().interCorpsAlert || {};
+      const alertId = String(
+        currentInterAlert.idAlerta ||
+          currentInterAlert.id ||
+          `SCI_ALERTA_${ownLicKey}_${nowTs}`
+      );
+
+      // Buscar en personal por idRadial == "1" y obtener su idRegistro para ponerlo en aQuienAlerta
+      const commanderIdRegistro =
+        resolveCommanderIdRegistroFromPersonal(get().firefightersList, user) ||
+        String(user?.idRegistro || '').trim();
+
+      // Si el Comandante aprueba/ofrece apoyo (`CONFIRMADA` o `APOYO_OFRECIDO`), inicializar el canal de chat directo (`duracion: "C"`)
+      // cuyo título (`razonAlerta`) es el nombre del Cuerpo de Bomberos y `aQuienAlerta` es el `idRegistro` del Comandante (idRadial == 1)
+      const directChatId = `SCI_CHAT_${ownLicKey}`;
+      const ownCorpFullTitle = String(
+        licState.clientName || licState.nombreMostrar || ownLicKey
+      )
+        .trim()
+        .toUpperCase();
+      const requestingCorpTitle = String(
+        currentInterAlert.cuerpoSolicitante ||
+          currentInterAlert.nombreCuerpoSolicitante ||
+          ownCorpFullTitle
+      )
+        .trim()
+        .toUpperCase();
+      const existingDirectChatMsg = String(
+        currentInterAlert.chatDirecto?.mensajeAlerta || ''
+      ).trim();
+      const initialChatEntry = isGrantingAccess
+        ? appendCanonicalChatMessage(
+            existingDirectChatMsg,
+            formatCanonicalChatEntry({
+              senderId: commanderIdRegistro || user?.idRegistro || '1',
+              texto:
+                cleanDecision === 'APOYO_OFRECIDO'
+                  ? `Apoyo inter-cuerpo ofrecido por ${ownCorpFullTitle} (${availableUnits.length} unidades 0-9 disponibles). Canal directo habilitado.`
+                  : `Apoyo confirmado por ${ownCorpFullTitle} (${availableUnits.length} unidades 0-9 disponibles). Canal directo habilitado.`
+            })
+          )
+        : existingDirectChatMsg;
+
+      const chatDirectoObj = isGrantingAccess
+        ? {
+            idAlerta: directChatId,
+            razonAlerta: requestingCorpTitle,
+            mensajeAlerta: initialChatEntry,
+            quienAlerta: commanderLabel,
+            gradoAlerta: '3',
+            duracion: 'C',
+            aQuienAlerta: commanderIdRegistro,
+            conforme: myRadial,
+            fijar: '1',
+            updatedAt: nowTs
+          }
+        : currentInterAlert.chatDirecto || null;
+
+      const updatedInterAlert = {
+        ...currentInterAlert,
+        idAlerta: alertId,
+        id: alertId,
+        licenciaApoyo: ownLicKey,
+        nombreCuerpoApoyo: licState.clientName || licState.nombreMostrar || ownLicKey,
+        gradoAlerta: '3',
+        aQuienAlerta: commanderIdRegistro,
+        estado: cleanDecision,
+        confirmadoPor: commanderLabel,
+        confirmadoAt: nowTs,
+        commanderToken: isGrantingAccess ? commanderToken : '',
+        commanderAuth: isGrantingAccess ? commanderAuth : null,
+        unidadesDisponibles: availableUnits,
+        companiasApoyo: licState.cuarteles || {},
+        totalCompaniasApoyo: Number(licState.totalCompanias || 1) || 1,
+        chatDirecto: chatDirectoObj,
+        updatedAt: nowTs
+      };
+
+      set({ interCorpsAlert: updatedInterAlert });
+
+      // 1. Actualizar en sisbom-central/saas_clientes/{ownLicKey} para que SENTINEL SCI reciba la respuesta al instante
+      const centralDb = getCentralDb();
+      if (centralDb && ownLicKey) {
+        await setDoc(
+          doc(centralDb, 'saas_clientes', ownLicKey),
+          {
+            alertaIntercuerpoSci: updatedInterAlert,
+            updatedAt: nowTs
+          },
+          { merge: true }
+        ).catch((err) => {
+          console.warn('Error actualizando alertaIntercuerpoSci en sisbom-central:', err);
+        });
+      }
+
+      // 2. Actualizar la alerta en la lista local y en la colección `alertas` de Firestore (con aQuienAlerta = idRegistro del Comandante)
+      let nextAll = [...(get().allAlertsList || [])];
+      const existingAlert = nextAll.find((a) => String(a.idAlerta || a.id) === alertId);
+
+      if (existingAlert) {
+        const currentConformes = String(existingAlert.conforme || '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!currentConformes.includes(myRadial)) currentConformes.push(myRadial);
+        const newConforme = currentConformes.join(',');
+
+        markLocalWrite('alertas', alertId, nowTs);
+        nextAll = nextAll.map((a) =>
+          String(a.idAlerta || a.id) === alertId
+            ? {
+                ...a,
+                aQuienAlerta: commanderIdRegistro || a.aQuienAlerta,
+                conforme: newConforme,
+                estadoApoyo: cleanDecision,
+                respondidoPor: commanderLabel,
+                respondidoAt: nowTs,
+                _metaTimestamp: nowTs
+              }
+            : a
+        );
+
+        const db = getDb();
+        if (db) {
+          await setDoc(
+            doc(db, 'alertas', alertId),
+            {
+              aQuienAlerta: commanderIdRegistro || existingAlert.aQuienAlerta || '',
+              conforme: newConforme,
+              estadoApoyo: cleanDecision,
+              respondidoPor: commanderLabel,
+              respondidoAt: nowTs,
+              _metaTimestamp: nowTs
+            },
+            { merge: true }
+          ).catch(() => {});
+        }
+      } else if (cleanDecision === 'APOYO_OFRECIDO') {
+        // Si el Comandante ofreció apoyo proactivamente sin alerta previa, registrar el comunicado Grado 3 en el muro con aQuienAlerta = idRegistro
+        const offerAlertDoc = buildCanonicalCadAlertDoc({
+          idAlerta: alertId,
+          gradoAlerta: '3',
+          aQuienAlerta: commanderIdRegistro,
+          duracion: 'i',
+          quienAlerta: commanderLabel,
+          razonAlerta: `APOYO INTER-CUERPO OFRECIDO (${availableUnits.length} UNIDADES DISPONIBLES)`,
+          mensajeAlerta:
+            `El Comandante ${commanderLabel} ha habilitado y ofrecido apoyo inter-cuerpo en la Red SENTINEL SCI ` +
+            `con ${availableUnits.length} unidad(es) disponible(s) (${availableUnits.map((u) => u.idCarro).join(', ') || 'Sin carros 0-9'}).`,
+          conforme: myRadial,
+          fijar: '1',
+          timestamp: nowTs
+        });
+        const normOffer = normalizeAlertDoc(alertId, {
+          ...offerAlertDoc,
+          tipoSolicitud: 'APOYO_OFRECIDO',
+          estadoApoyo: 'APOYO_OFRECIDO',
+          respondidoPor: commanderLabel,
+          respondidoAt: nowTs,
+          _metaTimestamp: nowTs
+        });
+        markLocalWrite('alertas', alertId, nowTs);
+        nextAll = [normOffer, ...nextAll];
+
+        const db = getDb();
+        if (db) {
+          await setDoc(doc(db, 'alertas', alertId), normOffer, { merge: true }).catch(() => {});
+        }
+      }
+
+      // 3. Si el Comandante aprobó/ofreció apoyo, publicar también la alerta de conversación (`duracion: "C"`) en `alertas`
+      if (isGrantingAccess && chatDirectoObj) {
+        const chatAlertDoc = buildCanonicalCadAlertDoc({
+          idAlerta: directChatId,
+          razonAlerta: chatDirectoObj.razonAlerta,
+          mensajeAlerta: chatDirectoObj.mensajeAlerta,
+          quienAlerta: commanderLabel,
+          gradoAlerta: '3',
+          duracion: 'C',
+          aQuienAlerta: commanderIdRegistro,
+          conforme: myRadial,
+          fijar: '1',
+          timestamp: nowTs
+        });
+        const normChat = normalizeAlertDoc(directChatId, chatAlertDoc);
+        markLocalWrite('alertas', directChatId, nowTs);
+        const chatIdx = nextAll.findIndex((a) => String(a.idAlerta) === directChatId);
+        if (chatIdx >= 0) {
+          nextAll[chatIdx] = { ...nextAll[chatIdx], ...normChat };
+        } else {
+          nextAll = [normChat, ...nextAll];
+        }
+        const db = getDb();
+        if (db) {
+          await setDoc(doc(db, 'alertas', directChatId), chatAlertDoc, { merge: true }).catch(() => {});
+        }
+      }
+
+      set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
+
+      return { success: true, estado: cleanDecision, availableUnitsCount: availableUnits.length };
+    } catch (e) {
+      console.warn('Error en respondToInterCorpsAlert:', e);
+      return { success: false, error: e.message };
+    } finally {
+      set({ isRespondingInterCorps: false });
+    }
+  },
+
   // Desconectar listeners al salir o cambiar de vista
   unsubscribeRealtime: () => {
-    [unsubDespachos, unsubPersonal, unsubVehiculos, unsubProtocols, unsubAlertas, unsubCentral, unsubAsistencia].forEach(unsub => {
+    [unsubDespachos, unsubPersonal, unsubVehiculos, unsubProtocols, unsubAlertas, unsubCentral, unsubAsistencia, unsubCentralInterCorps].forEach(unsub => {
       if (unsub) {
         try { unsub(); } catch (e) {}
       }
@@ -2780,6 +3366,7 @@ export const useDispatchStore = create((set, get) => ({
     unsubAlertas = null;
     unsubCentral = null;
     unsubAsistencia = null;
+    unsubCentralInterCorps = null;
     activeSubscribedProjectId = '';
     lastRestHydrationTs = 0;
     set({ isLoading: false });

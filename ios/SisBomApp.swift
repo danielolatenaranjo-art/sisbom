@@ -4,6 +4,7 @@ import WebKit
 import UserNotifications
 import AVFoundation
 import AudioToolbox
+import MediaPlayer
 import CoreLocation
 import FirebaseCore
 import FirebaseAuth
@@ -45,15 +46,63 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
                 self?.manager.requestAlwaysAuthorization()
             }
         } else if status == .authorizedWhenInUse {
+            let defaults = UserDefaults.standard
+            let askedAlwaysBefore = defaults.bool(forKey: "IOS_ASKED_ALWAYS_LOCATION")
+            defaults.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
             manager.requestAlwaysAuthorization()
+            if askedAlwaysBefore {
+                DispatchQueue.main.async {
+                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
+                    }
+                }
+            }
+        } else if status == .denied || status == .restricted {
+            DispatchQueue.main.async {
+                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
+                }
+            }
         }
         syncPermissionsToWebView()
         updateStandbyKeepAlive()
     }
 
+    func requestNotificationsPermission() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            if settings.authorizationStatus == .notDetermined {
+                center.requestAuthorization(options: [.alert, .badge, .sound, .criticalAlert]) { granted, _ in
+                    if !granted {
+                        center.requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
+                            self.syncPermissionsToWebView()
+                        }
+                    } else {
+                        self.syncPermissionsToWebView()
+                    }
+                    DispatchQueue.main.async {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
+                }
+            } else if settings.authorizationStatus == .denied {
+                DispatchQueue.main.async {
+                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
+                    }
+                }
+            } else {
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+                self.syncPermissionsToWebView()
+            }
+        }
+    }
+
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         if #available(iOS 14.0, *) {
             if manager.authorizationStatus == .authorizedWhenInUse {
+                UserDefaults.standard.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
                 manager.requestAlwaysAuthorization()
             }
         }
@@ -69,24 +118,31 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
             status = CLLocationManager.authorizationStatus()
         }
         let fine = (status == .authorizedAlways || status == .authorizedWhenInUse)
-        let bg = (status == .authorizedAlways || status == .authorizedWhenInUse)
-        guard let wv = AppDelegate.sharedWebView else { return }
-        let js = """
-        (function() {
-            try {
-                window.__SENTINEL_IOS_PERMS__ = {
-                    fineLocation: \(fine ? "true" : "false"),
-                    backgroundLocation: \(bg ? "true" : "false"),
-                    overlay: true,
-                    batteryUnrestricted: true,
-                    notifications: true
-                };
-                window.dispatchEvent(new CustomEvent('sentinelPermissionsChanged'));
-            } catch (e) {}
-        })();
-        """
-        DispatchQueue.main.async {
-            wv.evaluateJavaScript(js, completionHandler: nil)
+        let bg = (status == .authorizedAlways)
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let notifGranted = (
+                settings.authorizationStatus == .authorized ||
+                settings.authorizationStatus == .provisional ||
+                settings.authorizationStatus == .ephemeral
+            )
+            DispatchQueue.main.async {
+                guard let wv = AppDelegate.sharedWebView else { return }
+                let js = """
+                (function() {
+                    try {
+                        window.__SENTINEL_IOS_PERMS__ = {
+                            fineLocation: \(fine ? "true" : "false"),
+                            backgroundLocation: \(bg ? "true" : "false"),
+                            overlay: true,
+                            batteryUnrestricted: true,
+                            notifications: \(notifGranted ? "true" : "false")
+                        };
+                        window.dispatchEvent(new CustomEvent('sentinelPermissionsChanged'));
+                    } catch (e) {}
+                })();
+                """
+                wv.evaluateJavaScript(js, completionHandler: nil)
+            }
         }
     }
 
@@ -219,6 +275,68 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     private var audioPlayer: AVAudioPlayer?
     private var keepAlivePlayer: AVAudioPlayer?
     private var repeatTimers: [String: Timer] = [:]
+    private var hiddenVolumeView: MPVolumeView?
+    private(set) var lastAlarmStartMs: Int64 = 0
+    private var lastPlayedSoundKey: String = ""
+
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+    }
+
+    @objc private func handleAudioInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeVal = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeVal) else { return }
+        if type == .ended {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.updateBackgroundKeepAlive()
+            }
+        }
+    }
+
+    func isAlarmProtectedFromAutoStop(windowMs: Int64 = 25_000) -> Bool {
+        guard let active = audioPlayer, active.isPlaying else { return false }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        return (nowMs - lastAlarmStartMs) < windowMs
+    }
+
+    func forceHardwareSystemVolumeToMax() {
+        let applyMax: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            if self.hiddenVolumeView == nil {
+                let vv = MPVolumeView(frame: CGRect(x: -2000, y: -2000, width: 1, height: 1))
+                vv.alpha = 0.001
+                vv.isUserInteractionEnabled = false
+                if let winScene = UIApplication.shared.connectedScenes.first(where: { $0 is UIWindowScene }) as? UIWindowScene,
+                   let win = winScene.windows.first {
+                    win.addSubview(vv)
+                } else if let win = UIApplication.shared.windows.first {
+                    win.addSubview(vv)
+                }
+                self.hiddenVolumeView = vv
+            }
+            guard let vv = self.hiddenVolumeView else { return }
+            for subview in vv.subviews {
+                if let slider = subview as? UISlider {
+                    slider.setValue(1.0, animated: false)
+                    slider.sendActions(for: .valueChanged)
+                }
+            }
+        }
+        if Thread.isMainThread {
+            applyMax()
+        } else {
+            DispatchQueue.main.async(execute: applyMax)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: applyMax)
+    }
 
     func resolveSoundFileName(for claveOrName: String) -> String {
         let c = claveOrName.uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
@@ -288,8 +406,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     func play(nameOrClave: String, forceMaxVolume: Bool = true) {
-        stop()
-        stopBackgroundKeepAlive()
         let defaults = UserDefaults.standard
         let upper = nameOrClave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if defaults.bool(forKey: "MODO_AVION") {
@@ -299,6 +415,21 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             return
         }
         let fileName = resolveSoundFileName(for: nameOrClave)
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+
+        // Evitar que Push + Firestore Snapshot disparen el mismo MP3 con milisegundos de diferencia cortándose entre sí
+        if let active = audioPlayer, active.isPlaying, fileName == lastPlayedSoundKey, (nowMs - lastAlarmStartMs) < 3_500 {
+            if forceMaxVolume {
+                forceHardwareSystemVolumeToMax()
+            }
+            vibrateEmergency()
+            return
+        }
+
+        audioPlayer?.stop()
+        audioPlayer = nil
+        stopBackgroundKeepAlive()
+
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "mp3")
                 ?? Bundle.main.url(forResource: "despacho", withExtension: "mp3")
@@ -310,6 +441,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         do {
             let session = AVAudioSession.sharedInstance()
             if forceMaxVolume {
+                forceHardwareSystemVolumeToMax()
                 // .playback ignora el interruptor físico de silencio en iOS para emergencias en 0-9
                 try session.setCategory(.playback, mode: .default, options: [.duckOthers])
             } else {
@@ -323,6 +455,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             player.prepareToPlay()
             player.play()
             self.audioPlayer = player
+            self.lastAlarmStartMs = nowMs
+            self.lastPlayedSoundKey = fileName
             vibrateEmergency()
         } catch {
             vibrateEmergency()
@@ -332,6 +466,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         if player === audioPlayer {
             audioPlayer = nil
+            lastAlarmStartMs = 0
+            lastPlayedSoundKey = ""
             updateBackgroundKeepAlive()
         }
     }
@@ -339,6 +475,9 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     func stop() {
         audioPlayer?.stop()
         audioPlayer = nil
+        lastAlarmStartMs = 0
+        lastPlayedSoundKey = ""
+        updateBackgroundKeepAlive()
     }
 
     func vibrateEmergency() {
@@ -374,7 +513,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
             let enServicio = defaults.string(forKey: "USER_EN_SERVICIO") ?? ""
             if enServicio == dispatchId || enServicio == "-\(dispatchId)" { return }
-            if UIApplication.shared.applicationState == .active { return }
 
             self.play(nameOrClave: clave, forceMaxVolume: true)
         }
@@ -397,6 +535,7 @@ final class IOSRealtimeService {
     private var isFirstPersonalSnapshot = true
     private var knownDispatchIds = Set<String>()
     private var lastDispatchClaves: [String: String] = [:]
+    private var lastDispatchEstados: [String: String] = [:]
     private var lastUnitConductorReq: [String: Int64] = [:]
     private var lastUnitPersonalReq: [String: Int64] = [:]
     private var latestCentralPayload: [String: Any]?
@@ -534,7 +673,18 @@ final class IOSRealtimeService {
         despachosListener = db.collection("despachos")
             .whereField("estado", in: ["activa", "ACTIVA", "activo", "ACTIVO", "pre-despacho", "PRE-DESPACHO", "en curso", "EN CURSO"])
             .addSnapshotListener { [weak self] snap, error in
-            guard let self = self, let documents = snap?.documents, error == nil else { return }
+            guard let self = self else { return }
+            if error != nil {
+                self.despachosListener?.remove()
+                self.despachosListener = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    AppDelegate.authenticateNativeApp(AppDelegate.activeFirebaseApp()) {
+                        self.ensureListenersRunning()
+                    }
+                }
+                return
+            }
+            guard let documents = snap?.documents else { return }
             var rawDocsArray: [[String: Any]] = []
             let defaults = UserDefaults.standard
             let isAirplane = defaults.bool(forKey: "MODO_AVION")
@@ -547,7 +697,6 @@ final class IOSRealtimeService {
             var alertedIds = defaults.stringArray(forKey: "ALERTED_DISPATCH_IDS") ?? []
             var didModifyAlerted = false
             let userEnServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let isAppForeground = (UIApplication.shared.applicationState == .active)
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
 
             for doc in documents {
@@ -586,6 +735,7 @@ final class IOSRealtimeService {
                 if self.isFirstDispatchSnapshot {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
+                    self.lastDispatchEstados[docId] = estado
                     if let unidades = (cleanData["unidades"] as? [String: Any]) ?? (cleanData["unidadesEnServicio"] as? [String: Any]) {
                         for (uName, uVal) in unidades {
                             if let uMap = uVal as? [String: Any] {
@@ -601,12 +751,8 @@ final class IOSRealtimeService {
                         alertedIds.append(docId)
                         didModifyAlerted = true
                         if is09 {
-                            if isAppForeground {
-                                IOSSoundPlayer.shared.vibrateEmergency()
-                            } else {
-                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
-                            }
+                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
                             AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                         } else {
                             IOSSoundPlayer.shared.vibrateEmergency()
@@ -628,6 +774,7 @@ final class IOSRealtimeService {
                 if isAirplane || isCentral {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
+                    self.lastDispatchEstados[docId] = estado
                     if !alertedIds.contains(docId) {
                         alertedIds.append(docId)
                         didModifyAlerted = true
@@ -639,20 +786,15 @@ final class IOSRealtimeService {
                 if !self.knownDispatchIds.contains(docId) {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
+                    self.lastDispatchEstados[docId] = estado
                     if !alertedIds.contains(docId) {
                         alertedIds.append(docId)
                         didModifyAlerted = true
                     }
                     if !isAttending && !hasDeclined {
                         if is09 {
-                            if isAppForeground {
-                                // Si la app está abierta en primer plano: NO hacer sonar el tono, solo vibrar fuerte y levantar pantalla completa
-                                IOSSoundPlayer.shared.vibrateEmergency()
-                            } else {
-                                // Con la app en recientes / segundo plano / pantalla bloqueada: hacer sonar el tono oficial de la clave al 100%
-                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
-                            }
+                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
                             AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                         } else {
                             IOSSoundPlayer.shared.vibrateEmergency()
@@ -666,6 +808,27 @@ final class IOSRealtimeService {
                         )
                     }
                 } else {
+                    // A2. Transición de pre-despacho -> activa / en curso
+                    let prevEstado = self.lastDispatchEstados[docId] ?? ""
+                    self.lastDispatchEstados[docId] = estado
+                    let isPreToActive = (prevEstado == "pre-despacho") && (estado == "activa" || estado == "activo" || estado == "en curso")
+                    if isPreToActive && !isAttending && !hasDeclined {
+                        if is09 {
+                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                            IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                            AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
+                        } else {
+                            IOSSoundPlayer.shared.vibrateEmergency()
+                        }
+                        self.postLocalBanner(
+                            id: "disp_act_\(docId)",
+                            title: "🚨 DESPACHO \(clave)",
+                            body: direccion,
+                            soundName: is09 ? "\(IOSSoundPlayer.shared.resolveSoundFileName(for: clave)).mp3" : nil,
+                            userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                        )
+                    }
+
                     // B. Escalamiento (10-30 / FORESTAL / 9-0)
                     let prevClave = self.lastDispatchClaves[docId] ?? ""
                     if !prevClave.isEmpty && prevClave != clave {
@@ -673,11 +836,7 @@ final class IOSRealtimeService {
                         let cUp = clave.uppercased()
                         let isEscalation = cUp.contains("10-30") || cUp.contains("FORESTAL") || cUp.contains("9-0") || cUp.contains("COMANDANCIA")
                         if isEscalation && !isAttending {
-                            if isAppForeground {
-                                IOSSoundPlayer.shared.vibrateEmergency()
-                            } else {
-                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                            }
+                            IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
                             AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             self.postLocalBanner(
                                 id: "esc_\(docId)_\(clave)",
@@ -705,11 +864,7 @@ final class IOSRealtimeService {
                             self.lastUnitConductorReq[key] = cTs
                             if isConductor && !isAttending && !hasDeclined {
                                 if is09 {
-                                    if isAppForeground {
-                                        IOSSoundPlayer.shared.vibrateEmergency()
-                                    } else {
-                                        IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-                                    }
+                                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                                     AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                                 } else {
                                     IOSSoundPlayer.shared.vibrateEmergency()
@@ -731,11 +886,7 @@ final class IOSRealtimeService {
                             self.lastUnitPersonalReq[key] = pTs
                             if !isAttending && !hasDeclined {
                                 if is09 {
-                                    if isAppForeground {
-                                        IOSSoundPlayer.shared.vibrateEmergency()
-                                    } else {
-                                        IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-                                    }
+                                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                                     AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                                 } else {
                                     IOSSoundPlayer.shared.vibrateEmergency()
@@ -772,7 +923,13 @@ final class IOSRealtimeService {
         let currentMyId = (currentDefaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !currentMyId.isEmpty {
             personalListener = db.collection("personal").document(currentMyId).addSnapshotListener { [weak self] doc, error in
-                guard let self = self, let doc = doc, doc.exists, let rawData = doc.data(), error == nil else { return }
+                guard let self = self else { return }
+                if error != nil {
+                    self.personalListener?.remove()
+                    self.personalListener = nil
+                    return
+                }
+                guard let doc = doc, doc.exists, let rawData = doc.data() else { return }
                 let defaults = UserDefaults.standard
                 let cleanData = self.sanitizeDoc(rawData)
                 let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -864,8 +1021,10 @@ final class IOSRealtimeService {
 // 3. APP DELEGATE: FIREBASE DINÁMICO, RECORDATORIOS DIARIOS Y NOTIFICACIONES PUSH
 // ============================================================================
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate, MessagingDelegate {
+    static weak var shared: AppDelegate?
     static var sharedWebView: WKWebView?
     static var currentTenantProjectId: String?
+    static var cachedApnsDeviceToken: Data?
     private var bgTaskId: UIBackgroundTaskIdentifier = .invalid
 
     private static let knownIosAppIdsByProject: [String: String] = [
@@ -918,6 +1077,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         let finalizeTenantSetup: () -> Void = {
             currentTenantProjectId = projectId
+            if let delegate = shared {
+                Messaging.messaging().delegate = delegate
+            }
+            if let apnsTok = cachedApnsDeviceToken {
+                Messaging.messaging().apnsToken = apnsTok
+            }
             restoreUserDefaultsFromCachedWebSessionIfNeeded()
             let targetApp = activeFirebaseApp()
             authenticateNativeApp(targetApp) {
@@ -1002,7 +1167,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
         let auth = Auth.auth(app: targetApp)
-        if auth.currentUser != nil {
+        // IMPORTANTE: firestore.rules bloquea usuarios anónimos (sign_in_provider != 'anonymous').
+        // Si hay una sesión anónima cacheada de versiones anteriores, debemos reemplazarla por login autenticado.
+        if let currentUser = auth.currentUser, !currentUser.isAnonymous {
             completion?()
             return
         }
@@ -1016,14 +1183,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 let securePass = pass.hasSuffix("_secure_sisbom") ? pass : "\(pass)_secure_sisbom"
                 auth.signIn(withEmail: email, password: securePass) { result, error in
                     if error != nil || result == nil {
-                        auth.signIn(withEmail: "v304.app@sisbom.com", password: "SentinelOne_V304_Auth!2026") { resV304, errV304 in
-                            if errV304 != nil || resV304 == nil {
-                                auth.signInAnonymously { _, _ in
-                                    completion?()
-                                }
-                            } else {
-                                completion?()
-                            }
+                        auth.signIn(withEmail: "v304.app@sisbom.com", password: "SentinelOne_V304_Auth!2026") { _, _ in
+                            completion?()
                         }
                     } else {
                         completion?()
@@ -1032,14 +1193,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 return
             }
         }
-        auth.signIn(withEmail: "v304.app@sisbom.com", password: "SentinelOne_V304_Auth!2026") { resV304, errV304 in
-            if errV304 != nil || resV304 == nil {
-                auth.signInAnonymously { _, _ in
-                    completion?()
-                }
-            } else {
-                completion?()
-            }
+        auth.signIn(withEmail: "v304.app@sisbom.com", password: "SentinelOne_V304_Auth!2026") { _, _ in
+            completion?()
         }
     }
 
@@ -1076,18 +1231,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        Self.shared = self
         UIApplication.shared.isIdleTimerDisabled = true
         Self.restoreUserDefaultsFromCachedWebSessionIfNeeded()
+        UNUserNotificationCenter.current().delegate = self
 
+        // CRÍTICO: Solo configurar FirebaseApp([DEFAULT]) cuando ya existe una licencia de cliente anexada.
+        // Jamás llamar FirebaseApp.configure() con GoogleService-Info.plist por defecto antes de anexar licencia,
+        // para que FirebaseApp.app() ([DEFAULT]) y Messaging.messaging() pertenezcan siempre al Sender ID del cliente.
         if let tenantDict = Self.resolveStoredTenantConfig() {
             Self.configureDynamicFirebase(configDict: tenantDict)
-        } else if FirebaseApp.app() == nil {
-            // Solo inicializar FirebaseApp base para APNs/Messaging sin arrancar listeners de despachos contra proyecto incorrecto
-            FirebaseApp.configure()
         }
-
-        Messaging.messaging().delegate = self
-        UNUserNotificationCenter.current().delegate = self
 
         configureNotificationCategories()
         requestNotificationPermissions(application: application)
@@ -1126,8 +1280,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             application.endBackgroundTask(bgTaskId)
             bgTaskId = .invalid
         }
-        // Al abrir o volver a la app manualmente, silenciar la alarma audible y mantener vivo el keep-alive + listeners sin reiniciarlos
-        IOSSoundPlayer.shared.stop()
+        // Si está sonando una alarma de emergencia recién disparada (< 25s), NO cortarla al desbloquear el iPhone;
+        // solo se detiene al presionar ASISTIR / NO ASISTIR o al terminar el tono.
+        if !IOSSoundPlayer.shared.isAlarmProtectedFromAutoStop() {
+            IOSSoundPlayer.shared.stop()
+        }
         IOSLocationService.shared.syncPermissionsToWebView()
         IOSLocationService.shared.updateStandbyKeepAlive()
         if Self.currentTenantProjectId != nil {
@@ -1251,7 +1408,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     private func requestNotificationPermissions(application: UIApplication) {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .badge, .sound, .criticalAlert]) { granted, _ in
+        var opts: UNAuthorizationOptions = [.alert, .badge, .sound]
+        if #available(iOS 15.0, *) {
+            opts.insert(.timeSensitive)
+        }
+        center.requestAuthorization(options: opts) { granted, _ in
             if !granted {
                 center.requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
             }
@@ -1262,6 +1423,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        Self.cachedApnsDeviceToken = deviceToken
+        guard FirebaseApp.app() != nil else { return }
         Messaging.messaging().apnsToken = deviceToken
         let userId = UserDefaults.standard.string(forKey: "USER_ID") ?? ""
         if !userId.isEmpty {
@@ -1276,13 +1439,35 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if !userId.isEmpty {
             Self.syncFcmTopicsAndToken(userId: userId, tokenOverride: token)
         }
+        Self.emitFcmTokenToWebView(token)
+    }
+
+    static func emitFcmTokenToWebView(_ token: String) {
+        guard !token.isEmpty else { return }
+        let escaped = token.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        DispatchQueue.main.async {
+            guard let wv = sharedWebView else { return }
+            let js = """
+            (function() {
+                try {
+                    window.__SENTINEL_FCM_TOKEN__ = "\(escaped)";
+                    window.dispatchEvent(new CustomEvent('sentinelNativeFcmToken', { detail: { token: "\(escaped)" } }));
+                } catch (e) {}
+            })();
+            """
+            wv.evaluateJavaScript(js, completionHandler: nil)
+        }
     }
 
     static func syncFcmTopicsAndToken(userId: String, tokenOverride: String? = nil) {
-        guard !userId.isEmpty else { return }
+        guard !userId.isEmpty, FirebaseApp.app() != nil else { return }
+        if let apnsTok = cachedApnsDeviceToken {
+            Messaging.messaging().apnsToken = apnsTok
+        }
         let defaults = UserDefaults.standard
         let isConductor = defaults.bool(forKey: "USER_CONDUCTOR")
         let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
+        let activePid = currentTenantProjectId ?? FirebaseApp.app()?.options.projectID ?? ""
 
         var topics = [
             "all",
@@ -1295,20 +1480,48 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if isConductor { topics.append("conductores") }
         if isCentral { topics.append("central_operador") }
 
-        for t in topics {
-            Messaging.messaging().subscribe(toTopic: t)
+        let subscribeAllTopics: () -> Void = {
+            for t in topics {
+                Messaging.messaging().subscribe(toTopic: t)
+            }
+            if !isConductor { Messaging.messaging().unsubscribe(fromTopic: "conductores") }
+            if !isCentral { Messaging.messaging().unsubscribe(fromTopic: "central_operador") }
         }
-        if !isConductor { Messaging.messaging().unsubscribe(fromTopic: "conductores") }
-        if !isCentral { Messaging.messaging().unsubscribe(fromTopic: "central_operador") }
 
         let saveTokenToFirestore: (String) -> Void = { token in
-            let db = activeFirestore()
-            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-            db.collection("personal").document(userId).setData([
-                "deviceId": token,
-                "tokenFcm": token,
-                "_metaTimestamp": nowMs
-            ], merge: true)
+            defaults.set(token, forKey: "FCM_TOKEN")
+            if !activePid.isEmpty {
+                defaults.set(activePid, forKey: "FCM_TOKEN_PROJECT_ID")
+            }
+            emitFcmTokenToWebView(token)
+            subscribeAllTopics()
+            authenticateNativeApp(activeFirebaseApp()) {
+                let db = activeFirestore()
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                db.collection("personal").document(userId).setData([
+                    "deviceId": token,
+                    "tokenFcm": token,
+                    "fcmToken": token,
+                    "platform": "ios",
+                    "_metaTimestamp": nowMs
+                ], merge: true)
+            }
+        }
+
+        let storedTokenPid = defaults.string(forKey: "FCM_TOKEN_PROJECT_ID") ?? ""
+        if !activePid.isEmpty && storedTokenPid != activePid && tokenOverride == nil {
+            // Si el token previo en Keychain fue emitido para otro proyecto (ej. pruebas-sisbom), regenerarlo para el proyecto activo
+            Messaging.messaging().deleteToken { _ in
+                if let apnsTok = cachedApnsDeviceToken {
+                    Messaging.messaging().apnsToken = apnsTok
+                }
+                Messaging.messaging().token { tok, _ in
+                    if let tok = tok, !tok.isEmpty {
+                        saveTokenToFirestore(tok)
+                    }
+                }
+            }
+            return
         }
 
         if let tok = tokenOverride, !tok.isEmpty {
@@ -1328,7 +1541,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
-        Messaging.messaging().appDidReceiveMessage(userInfo)
+        if FirebaseApp.app() != nil {
+            Messaging.messaging().appDidReceiveMessage(userInfo)
+        }
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: "MODO_AVION") {
             completionHandler(.noData)
@@ -1373,7 +1588,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased()
         let is09 = (userEstado == "0-9")
-        let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL"))
+        let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL") || clave.contains("9-0"))
 
         let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
         let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
@@ -1395,27 +1610,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         if is1210or66 {
-            if is09 && application.applicationState != .active {
+            if is09 {
                 IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
             }
             if is09 && !payloadId.isEmpty {
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
         } else if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
-            if application.applicationState != .active {
-                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                if !payloadId.isEmpty {
-                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
-                }
-            }
+            IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
             if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
         }
         completionHandler(.newData)
     }
 
-    // Recepción de Push con la app en primer plano: si ya tiene la app abierta, mostrar pantalla del despacho sin hacer sonar la sirena
+    // Recepción de Push con la app en primer plano o segundo plano
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
@@ -1470,7 +1681,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         let userEstado = defaults.string(forKey: "USER_ESTADO") ?? "0-9"
         let is09 = (userEstado == "0-9")
-        let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL"))
+        let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL") || clave.contains("9-0"))
 
         if type == "DISPATCH" || type == "DISPATCH_UPDATE" {
             if isAttending || (type == "DISPATCH_UPDATE" && !isEscalation) || (hasDeclined && !isEscalation) {
@@ -1478,15 +1689,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 return
             }
             if is09 || isEscalation {
+                IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                 if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                     Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
                 }
             }
-            if UIApplication.shared.applicationState != .active {
-                completionHandler([.banner, .list, .sound])
-            } else {
-                completionHandler([.banner, .list])
-            }
+            completionHandler([.banner, .list, .sound])
             return
         }
         completionHandler([.banner, .list, .sound])
@@ -1588,6 +1797,54 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                     return
                 }
             }
+
+            if scheme == "whatsapp" || host.contains("wa.me") || host.contains("whatsapp.com") {
+                var waSchemeUrl: URL? = (scheme == "whatsapp") ? url : nil
+                var waUniversalUrl: URL? = (scheme == "https" || scheme == "http") ? url : nil
+
+                if waSchemeUrl == nil, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                    let queryItems = components.queryItems ?? []
+                    let phoneParam = queryItems.first(where: { $0.name == "phone" })?.value
+                        ?? url.path.replacingOccurrences(of: "/", with: "")
+                    let textParam = queryItems.first(where: { $0.name == "text" })?.value ?? ""
+                    let cleanDigits = phoneParam.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+                    if !cleanDigits.isEmpty {
+                        var comps = URLComponents()
+                        comps.scheme = "whatsapp"
+                        comps.host = "send"
+                        var items = [URLQueryItem(name: "phone", value: cleanDigits)]
+                        if !textParam.isEmpty {
+                            items.append(URLQueryItem(name: "text", value: textParam))
+                        }
+                        comps.queryItems = items
+                        waSchemeUrl = comps.url
+                    }
+                }
+
+                if waUniversalUrl == nil, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                    let queryItems = components.queryItems ?? []
+                    let phoneParam = queryItems.first(where: { $0.name == "phone" })?.value ?? ""
+                    let textParam = queryItems.first(where: { $0.name == "text" })?.value ?? ""
+                    let cleanDigits = phoneParam.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
+                    if !cleanDigits.isEmpty {
+                        var comps = URLComponents(string: "https://wa.me/\(cleanDigits)")
+                        if !textParam.isEmpty {
+                            comps?.queryItems = [URLQueryItem(name: "text", value: textParam)]
+                        }
+                        waUniversalUrl = comps?.url
+                    }
+                }
+
+                if let primaryUrl = waSchemeUrl {
+                    UIApplication.shared.open(primaryUrl, options: [:]) { success in
+                        if !success, let fallbackUrl = waUniversalUrl {
+                            UIApplication.shared.open(fallbackUrl, options: [:], completionHandler: nil)
+                        }
+                    }
+                    return
+                }
+            }
+
             UIApplication.shared.open(url, options: [:], completionHandler: nil)
         }
         return true
@@ -1646,6 +1903,14 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             }
         case "requestLocationAlways":
             IOSLocationService.shared.requestAlwaysPermissions()
+        case "requestNotificationsPermission":
+            IOSLocationService.shared.requestNotificationsPermission()
+        case "openAppSettings":
+            DispatchQueue.main.async {
+                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
+                }
+            }
         case "syncUserSession":
             if let user = dict["user"] as? [String: Any] {
                 let userId = AppDelegate.stringFromAny(user["idRegistro"] ?? user["id"])
@@ -1947,7 +2212,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
                     backgroundLocation: false,
                     overlay: true,
                     batteryUnrestricted: true,
-                    notifications: true
+                    notifications: false
                 };
                 var restored = \(storageJson);
                 if (window.localStorage && restored) {

@@ -6,11 +6,12 @@ admin.initializeApp();
 setGlobalOptions({maxInstances: 10});
 
 function resolveApnsSound(clave) {
-  if (!clave) return "alertas.mp3";
+  if (!clave) return "despacho.mp3";
   const c = String(clave).toUpperCase().trim();
-  if (c.includes("10-30") || c.includes("FORESTAL")) return "c10_30.mp3";
+  if (c.includes("FORESTAL")) return "c10_2Forestal.mp3";
+  if (c.includes("10-30")) return "c10_30.mp3";
   if (c.includes("9-0")) return "c9_0.mp3";
-  if (c.includes("LLAMADO") && c.includes("COMANDANCIA")) return "llamado_comandancia.mp3";
+  if (c.includes("LLAMADO") && c.includes("COMANDANCIA")) return "c_llamadoComandancia.mp3";
   if (c.startsWith("10-10")) return "c10_10.mp3";
   if (c.startsWith("10-12")) return "c10_12.mp3";
   if (c.startsWith("10-15")) return "c10_15.mp3";
@@ -24,7 +25,36 @@ function resolveApnsSound(clave) {
   if (c.startsWith("10-7")) return "c10_7.mp3";
   if (c.startsWith("10-8")) return "c10_8.mp3";
   if (c.startsWith("10-9")) return "c10_9.mp3";
-  return "alertas.mp3";
+  return "despacho.mp3";
+}
+
+function isValidFcmRegistrationToken(raw) {
+  const tok = String(raw || "").trim();
+  return tok.length > 60 && tok.includes(":");
+}
+
+async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral) {
+  if (!isValidFcmRegistrationToken(token)) return;
+  const cleanId = String(userId || "").trim().replace(/\s+/g, "");
+  const topics = ["all", "despachos", "alertas", "alertas_generales"];
+  if (cleanId) {
+    topics.push(`usuario_${cleanId}`);
+    topics.push(`personal_${cleanId}`);
+  }
+  if (isConductor) topics.push("conductores");
+  if (isCentral) topics.push("central_operador");
+
+  await Promise.all(
+    topics.map((t) =>
+      admin.messaging().subscribeToTopic([token], t).catch(() => null)
+    )
+  );
+  if (!isConductor) {
+    await admin.messaging().unsubscribeFromTopic([token], "conductores").catch(() => null);
+  }
+  if (!isCentral) {
+    await admin.messaging().unsubscribeFromTopic([token], "central_operador").catch(() => null);
+  }
 }
 
 function extractUnitsString(data) {
@@ -88,7 +118,7 @@ function getChileDateTimeStrings(epochMs) {
   }
 }
 
-// 1. NUEVO DESPACHO (Dual-Read V2 + V3 Canónico + Retrocompatibilidad Total con V2.1.0, V2.2.5 y V3.0.0)
+// 1. NUEVO DESPACHO (Dual-Read V2 + V3 Canónico + Retrocompatibilidad Total con V2.1.0, V2.2.5 y V3.0.4)
 exports.onNewDispatch = onDocumentCreated("despachos/{dispatchId}", async (event) => {
   const snap = event.data;
   if (!snap) return;
@@ -109,6 +139,7 @@ exports.onNewDispatch = onDocumentCreated("despachos/{dispatchId}", async (event
   const fechaDespacho = String(data.fechaDespacho || data.fecha || clDt.fechaDespacho);
   const horaDespacho = String(data.horaDespacho || data.hora || clDt.horaDespacho);
   const createdAt = String(epochMs);
+  const apnsSound = resolveApnsSound(clave);
 
   const message = {
     topic: "despachos",
@@ -144,13 +175,11 @@ exports.onNewDispatch = onDocumentCreated("despachos/{dispatchId}", async (event
             title: `🚨 DESPACHO: ${clave}`,
             body: unidades ? `${direccion}\nUnidades: ${unidades}` : `${direccion}`
           },
-          sound: {
-            critical: 1,
-            name: resolveApnsSound(clave),
-            volume: 1.0
-          },
+          sound: apnsSound,
+          badge: 1,
           category: "EMERGENCY_DISPATCH",
-          "interruption-level": "critical",
+          "interruption-level": "time-sensitive",
+          "relevance-score": 1.0,
           "content-available": 1,
           "mutable-content": 1
         }
@@ -210,10 +239,13 @@ exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (e
                 title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
                 body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`
               },
-              sound: {critical: 1, name: "c10_30.mp3", volume: 1.0},
+              sound: resolveApnsSound(newClave),
+              badge: 1,
               category: "EMERGENCY_DISPATCH",
-              "interruption-level": "critical",
-              "content-available": 1
+              "interruption-level": "time-sensitive",
+              "relevance-score": 1.0,
+              "content-available": 1,
+              "mutable-content": 1
             }
           }
         }
@@ -254,9 +286,12 @@ exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (e
                 body: `Se solicita conductor para unidad ${unitName} en ${direccion}`
               },
               sound: "importante.mp3",
+              badge: 1,
               category: "EMERGENCY_DISPATCH",
               "interruption-level": "time-sensitive",
-              "content-available": 1
+              "relevance-score": 1.0,
+              "content-available": 1,
+              "mutable-content": 1
             }
           }
         }
@@ -288,9 +323,12 @@ exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (e
                 body: `Se solicita personal para unidad ${unitName} en ${direccion}`
               },
               sound: "importante.mp3",
+              badge: 1,
               category: "EMERGENCY_DISPATCH",
               "interruption-level": "time-sensitive",
-              "content-available": 1
+              "relevance-score": 1.0,
+              "content-available": 1,
+              "mutable-content": 1
             }
           }
         }
@@ -359,13 +397,13 @@ exports.onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
               title: isOrden ? `📋 ${titulo}` : `🔔 ALERTA GRADO ${grado}: ${titulo}`,
               body: mensaje
             },
-            sound: isG3
-              ? {critical: 1, name: "importante.mp3", volume: 1.0}
-              : isG2
-                ? "importante.mp3"
-                : "default",
+            sound: (isG3 || isG2) ? "importante.mp3" : "alertas.mp3",
+            badge: 1,
             category: "GENERAL_ALERT",
-            "interruption-level": isG3 ? "critical" : isG2 ? "time-sensitive" : "active"
+            "interruption-level": (isG3 || isG2) ? "time-sensitive" : "active",
+            "relevance-score": isG3 ? 1.0 : 0.8,
+            "content-available": 1,
+            "mutable-content": 1
           }
         }
       }
@@ -418,11 +456,38 @@ exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event)
           },
           sound: "default",
           category: "GENERAL_ALERT",
+          "interruption-level": "time-sensitive",
           "content-available": 1
         }
       }
     }
   });
+});
+
+// 4B. SUSCRIPCIÓN AUTOMÁTICA DE TOKENS FCM A TÓPICOS EN CREACIÓN Y ACTUALIZACIÓN DE PERSONAL
+exports.subscribeTokenToTopics = onDocumentCreated("personal/{userId}", async (event) => {
+  const snap = event.data;
+  if (!snap) return;
+  const data = snap.data() || {};
+  const userId = String(data.idRegistro || event.params.userId || "").trim();
+  const tok = String(data.deviceId || data.tokenFcm || data.fcmToken || "").trim();
+  const isConductor = Boolean(data.conductor);
+  if (isValidFcmRegistrationToken(tok)) {
+    await subscribeFcmTokenForUser(tok, userId, isConductor, false);
+  }
+});
+
+exports.syncTokenTopicsOnUpdate = onDocumentUpdated("personal/{userId}", async (event) => {
+  const before = event.data.before.data() || {};
+  const after = event.data.after.data() || {};
+  const userId = String(after.idRegistro || event.params.userId || "").trim();
+  const tokAfter = String(after.deviceId || after.tokenFcm || after.fcmToken || "").trim();
+  const tokBefore = String(before.deviceId || before.tokenFcm || before.fcmToken || "").trim();
+  const condAfter = Boolean(after.conductor);
+  const condBefore = Boolean(before.conductor);
+  if (isValidFcmRegistrationToken(tokAfter) && (tokAfter !== tokBefore || condAfter !== condBefore)) {
+    await subscribeFcmTokenForUser(tokAfter, userId, condAfter, false);
+  }
 });
 
 // 5. SOLICITUD DE APERTURA DE PUERTA (TIMBRE CUARTEL)
@@ -459,20 +524,20 @@ exports.onDoorRequestCreated = onDocumentCreated("solicitudes_puerta/{requestId}
             title: "🚪 SOLICITUD DE APERTURA DE PUERTA",
             body: `${solicitanteNombre} solicita abrir el portón del cuartel.`
           },
-          sound: {
-            critical: 1,
-            name: "importante.mp3",
-            volume: 1.0
-          },
+          sound: "importante.mp3",
+          badge: 1,
           category: "DOOR_REQUEST_ALERT",
-          "interruption-level": "critical"
+          "interruption-level": "time-sensitive",
+          "relevance-score": 1.0,
+          "content-available": 1,
+          "mutable-content": 1
         }
       }
     }
   });
 });
 
-// Alias compatibles con despliegue existente en proyectos Firebase (enviarDespacho / actualizarDespacho / etc.)
+// Alias compatibles con despliegue existente en proyectos Firebase (enviarDespacho / actualizarDespacho / enviarAlerta / etc.)
 exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (event) => {
   const beforeSnap = event.data.before;
   const afterSnap = event.data.after;
@@ -520,7 +585,6 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
   if (unidades && after.carrosTexto !== unidades) backfillPatch.carrosTexto = unidades;
   if (carrosList.length > 0 && !Array.isArray(after.carros)) backfillPatch.carros = carrosList;
 
-  const isInitialCreate = !before;
   const isTransitionFromPreToActive =
     estadoBeforeLower === "pre-despacho" &&
     (estadoAfterLower === "activa" || estadoAfterLower === "activo" || estadoAfterLower === "en curso");
@@ -550,6 +614,9 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
     titleText = (clave === "10-12" && claveApoyo) ? `${clave} (${claveApoyo}) en ${direccion}` : `${clave} en ${direccion}`;
   }
 
+  const apnsSound = resolveApnsSound(clave);
+
+  // SIEMPRE incluir bloque APNs tanto en creación inicial como en transición de pre-despacho a activa
   const msg = {
     topic: "despachos",
     data: {
@@ -574,11 +641,8 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
     android: {
       priority: "high",
       ttl: 300000
-    }
-  };
-
-  if (!alreadySent || isInitialCreate) {
-    msg.apns = {
+    },
+    apns: {
       headers: {
         "apns-priority": "10",
         "apns-push-type": "alert"
@@ -589,19 +653,17 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
             title: `🚨 ${titleText}`,
             body: String(bodyText)
           },
-          sound: {
-            critical: 1,
-            name: resolveApnsSound(clave),
-            volume: 1.0
-          },
+          sound: apnsSound,
+          badge: 1,
           category: "EMERGENCY_DISPATCH",
-          "interruption-level": "critical",
+          "interruption-level": "time-sensitive",
+          "relevance-score": 1.0,
           "content-available": 1,
           "mutable-content": 1
         }
       }
-    };
-  }
+    }
+  };
 
   await admin.messaging().send(msg);
   await afterSnap.ref.update(Object.assign({}, backfillPatch, {
@@ -611,8 +673,6 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
 });
 
 exports.actualizarDespacho = exports.onDispatchUpdated;
-exports.actualizarEstadoPersonal = exports.onPersonalUpdated;
+exports.enviarAlerta = exports.onNewAlert;
+exports.actualizarEstadoPersonal = onDocumentUpdated("personal/{userId}", async () => {});
 exports.solicitarAperturaPuerta = exports.onDoorRequestCreated;
-
-
-

@@ -56,6 +56,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
@@ -243,11 +244,35 @@ object SoundPlayer {
     private var savedNotifVol: Int? = null
     private var savedRingVol: Int? = null
     private var savedRingerMode: Int? = null
+    @Volatile
+    var lastAlarmStartMs: Long = 0L
+    private var alarmWakeLock: PowerManager.WakeLock? = null
+
+    fun isAlarmProtectedFromAutoStop(windowMs: Long = 25_000L): Boolean {
+        val elapsed = System.currentTimeMillis() - lastAlarmStartMs
+        if (elapsed in 0..windowMs) return true
+        return try {
+            mediaPlayer?.isPlaying == true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     @Synchronized
     fun play(context: Context, resId: Int, forceMaxVolume: Boolean = false) {
         val appContext = context.applicationContext
         val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        lastAlarmStartMs = System.currentTimeMillis()
+
+        try {
+            val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (alarmWakeLock == null) {
+                alarmWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentinelOneV3::SoundPlayerWakeLock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            alarmWakeLock?.acquire(22_000L)
+        } catch (_: Exception) {}
 
         // Si ya está sonando exactamente este mismo tono de alarma, NO cortarlo ni reiniciarlo
         try {
@@ -261,6 +286,7 @@ object SoundPlayer {
         } catch (_: Exception) {}
 
         stopAudioOnly(appContext)
+        lastAlarmStartMs = System.currentTimeMillis()
 
         if (forceMaxVolume) {
             saveAndEnforceMaxVolumes(audioManager)
@@ -477,6 +503,7 @@ object SoundPlayer {
 
     @Synchronized
     fun stop(context: Context? = null) {
+        lastAlarmStartMs = 0L
         stopAudioOnly(context)
         if (context != null) {
             try {
@@ -751,7 +778,7 @@ object NotificationHelper {
             return
         }
 
-        val userEstado = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+        val userEstado = (prefs.getString("USER_ESTADO", "0-9") ?: "0-9").trim().uppercase(Locale.ROOT)
         val estadoEspecial = (prefs.getString("USER_ESTADO_ESPECIAL", "") ?: "").trim().uppercase(Locale.ROOT)
         val isUnavailable = prefs.getString("IS_UNAVAILABLE", "false") == "true"
         val is09 = userEstado == "0-9" && !isUnavailable
@@ -947,13 +974,15 @@ object NotificationHelper {
                 if (largeIconBitmap != null) {
                     setLargeIcon(largeIconBitmap)
                 }
+                if (!isCritical && !playLoud && !effectiveVibrateOnly && alertGrade != 3 && alertGrade != 2) {
+                    setSilent(true)
+                }
             }
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setAutoCancel(true)
             .setOnlyAlertOnce(true)
-            .setSilent(true)
             .setContentIntent(pendingIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
 
@@ -1365,8 +1394,9 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
+        val rawEstadoPush = (data["estado"] ?: "activa").trim().lowercase(Locale.ROOT)
         val soundTrackKey = when (type) {
-            "DISPATCH" -> dispatchId
+            "DISPATCH" -> if (dispatchId != null && rawEstadoPush == "pre-despacho") "${dispatchId}_pre" else dispatchId
             "DISPATCH_UPDATE" -> when {
                 dispatchId != null && is1210or66Push -> "${dispatchId}_req_${data["createdAt"] ?: title}"
                 dispatchId != null && isEscalation -> "${dispatchId}_${clave}"
@@ -1376,8 +1406,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             else -> null
         }
         val alreadyPlayed = if (soundTrackKey != null) {
-            val played = PlayedSoundsTracker.hasPlayed(applicationContext, soundTrackKey) ||
-                (dispatchId != null && !isEscalation && !is1210or66Push && PlayedSoundsTracker.hasPlayed(applicationContext, dispatchId))
+            val played = PlayedSoundsTracker.hasPlayed(applicationContext, soundTrackKey)
             if (!played) PlayedSoundsTracker.markPlayed(applicationContext, soundTrackKey)
             played
         } else false
@@ -1403,7 +1432,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         // Despertar pantalla completa automáticamente si es despacho nuevo (en 0-9) o escalamiento, y no ha respondido aún
         if ((type == "DISPATCH" || isEscalation) && !isAttendingThisDispatch && (!hasDeclinedThisDispatch || isEscalation) && !alreadyPlayed) {
-            val userEstado = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+            val userEstado = (prefs.getString("USER_ESTADO", "0-9") ?: "0-9").trim().uppercase(Locale.ROOT)
             val isUnavailable = prefs.getString("IS_UNAVAILABLE", "false") == "true"
             val is09 = userEstado == "0-9" && !isUnavailable
             val isCentral = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
@@ -1464,6 +1493,7 @@ class DispatchForegroundService : Service() {
     private val lastUnitConductorReq = mutableMapOf<String, Long>()
     private val lastUnitPersonalReq = mutableMapOf<String, Long>()
     private val lastDispatchClaves = mutableMapOf<String, String>()
+    private val lastDispatchEstados = mutableMapOf<String, String>()
     private var isInitialLoad = true
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
@@ -1540,7 +1570,7 @@ class DispatchForegroundService : Service() {
 
     private fun authenticateAndListen() {
         val auth = MainActivity.getActiveAuth(applicationContext)
-        if (auth.currentUser != null) {
+        if (auth.currentUser != null && auth.currentUser?.isAnonymous == false) {
             listenToUserAndDispatches()
             return
         }
@@ -1552,10 +1582,10 @@ class DispatchForegroundService : Service() {
             try {
                 val obj = JSONObject(fireUserJson)
                 val idReg = obj.optString("idRegistro", obj.optString("id", "")).trim()
-                val pass = obj.optString("password", obj.optString("claveAcceso", obj.optString("clave", ""))).trim()
+                val pass = obj.optString("password", obj.optString("claveAcceso", obj.optString("clave", obj.optString("contrasena", "")))).trim()
                 if (idReg.isNotEmpty() && pass.isNotEmpty()) {
-                    email = "${idReg}@sisbom.com"
-                    password = "${pass}_secure_sisbom"
+                    email = if (idReg.contains("@")) idReg else "${idReg}@sisbom.com"
+                    password = if (pass.endsWith("_secure_sisbom")) pass else "${pass}_secure_sisbom"
                 }
             } catch (_: Exception) {}
         }
@@ -1565,20 +1595,12 @@ class DispatchForegroundService : Service() {
                 .addOnFailureListener {
                     auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
                         .addOnSuccessListener { listenToUserAndDispatches() }
-                        .addOnFailureListener {
-                            auth.signInAnonymously()
-                                .addOnSuccessListener { listenToUserAndDispatches() }
-                                .addOnFailureListener { listenToUserAndDispatches() }
-                        }
+                        .addOnFailureListener { listenToUserAndDispatches() }
                 }
         } else {
             auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
                 .addOnSuccessListener { listenToUserAndDispatches() }
-                .addOnFailureListener {
-                    auth.signInAnonymously()
-                        .addOnSuccessListener { listenToUserAndDispatches() }
-                        .addOnFailureListener { listenToUserAndDispatches() }
-                }
+                .addOnFailureListener { listenToUserAndDispatches() }
         }
     }
 
@@ -1696,6 +1718,7 @@ class DispatchForegroundService : Service() {
                         for (doc in activeDocs) {
                             notifiedDispatches.add(doc.id)
                             lastDispatchClaves[doc.id] = doc.safeString("clave")
+                            lastDispatchEstados[doc.id] = doc.safeString("estado").uppercase(Locale.ROOT)
                             val uServicio = (doc.get("unidadesEnServicio") ?: doc.get("unidades")) as? Map<*, *>
                             uServicio?.forEach { (k, v) ->
                                 val uName = k as? String ?: return@forEach
@@ -1749,7 +1772,7 @@ class DispatchForegroundService : Service() {
                                         claveForRepeat = clave
                                     )
 
-                                    val userEstadoInit = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+                                    val userEstadoInit = (prefs.getString("USER_ESTADO", "0-9") ?: "0-9").trim().uppercase(Locale.ROOT)
                                     val isCentralInit = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
                                     val userRangoInit = prefs.getString("USER_RANGO", "") ?: ""
                                     val isReadOnlyInit = userRangoInit.trim().equals("BOMBERO HONORARIO", ignoreCase = true)
@@ -1800,7 +1823,7 @@ class DispatchForegroundService : Service() {
                     }
 
                     val currentUserId = prefs.getString("USER_ID", null)
-                    val userEstado = prefs.getString("USER_ESTADO", "0-8") ?: "0-8"
+                    val userEstado = prefs.getString("USER_ESTADO", "0-9") ?: "0-9"
                     val isConductor = prefs.getBoolean("USER_CONDUCTOR", false)
                     val enServicio = (prefs.getString("USER_EN_SERVICIO", "") ?: "").trim()
                     val attendedIds = prefs.getStringSet("ATTENDED_DISPATCH_IDS", emptySet()) ?: emptySet()
@@ -1845,15 +1868,17 @@ class DispatchForegroundService : Service() {
                     if (!notifiedDispatches.contains(id)) {
                         notifiedDispatches.add(id)
                         lastDispatchClaves[id] = clave
+                        lastDispatchEstados[id] = estadoDoc
+                        val trackKey = if (estadoDoc == "PRE-DESPACHO") "${id}_pre" else id
 
                         if (TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt) || isAlreadyAttending || hasAlreadyDeclined) {
-                            PlayedSoundsTracker.markPlayed(applicationContext, id)
+                            PlayedSoundsTracker.markPlayed(applicationContext, trackKey)
                             continue
                         }
 
-                        val alreadyPlayed = PlayedSoundsTracker.hasPlayed(applicationContext, id)
+                        val alreadyPlayed = PlayedSoundsTracker.hasPlayed(applicationContext, trackKey)
                         if (!alreadyPlayed) {
-                            PlayedSoundsTracker.markPlayed(applicationContext, id)
+                            PlayedSoundsTracker.markPlayed(applicationContext, trackKey)
                         }
 
                         val soundRes = NotificationHelper.getSoundResForClave(applicationContext, clave)
@@ -1897,6 +1922,54 @@ class DispatchForegroundService : Service() {
                             } catch (_: Exception) {}
                         }
                     } else {
+                        // 1B. Transición de PRE-DESPACHO -> ACTIVA / EN CURSO
+                        val prevEstado = lastDispatchEstados[id] ?: ""
+                        lastDispatchEstados[id] = estadoDoc
+                        val isPreToActive = prevEstado == "PRE-DESPACHO" && (estadoDoc == "ACTIVA" || estadoDoc == "ACTIVO" || estadoDoc == "EN CURSO")
+                        if (isPreToActive && !isAlreadyAttending && !hasAlreadyDeclined) {
+                            val alreadyPlayedActive = PlayedSoundsTracker.hasPlayed(applicationContext, id)
+                            if (!alreadyPlayedActive) {
+                                PlayedSoundsTracker.markPlayed(applicationContext, id)
+                            }
+                            val soundRes = NotificationHelper.getSoundResForClave(applicationContext, clave)
+                            val bodyText = if (unidadesStr.isNotEmpty()) "$direccion\nUnidades: $unidadesStr" else direccion
+                            NotificationHelper.sendNotification(
+                                context = applicationContext,
+                                title = "DESPACHO: $clave",
+                                body = bodyText,
+                                isCritical = true,
+                                customSoundRes = soundRes,
+                                dispatchId = id,
+                                skipSoundBecauseAlreadyPlayed = alreadyPlayedActive,
+                                claveForRepeat = clave
+                            )
+                            val isCentral = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
+                            val userRango = prefs.getString("USER_RANGO", "") ?: ""
+                            val isReadOnlyUser = userRango.trim().equals("BOMBERO HONORARIO", ignoreCase = true)
+                            val estadoEspecial = prefs.getString("USER_ESTADO_ESPECIAL", "") ?: ""
+                            val isSilentStatus = estadoEspecial in listOf("CDS", "SUSPENDIDO", "LICENCIA", "SILENCIO_ABSOLUTO", "PERMISO", "COMISION_SERVICIO")
+                            if (!alreadyPlayedActive && !isCentral && !isReadOnlyUser && !isSilentStatus && userEstado == "0-9") {
+                                try {
+                                    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+                                    @Suppress("DEPRECATION")
+                                    val wl = pm.newWakeLock(
+                                        PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
+                                        "SentinelOneV3::ServicePreToActiveWake"
+                                    )
+                                    wl.acquire(12_000L)
+                                } catch (_: Exception) {}
+                                try {
+                                    val fullScreenIntent = Intent(this@DispatchForegroundService, MainActivity::class.java).apply {
+                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                                        putExtra("DISPATCH_ID", id)
+                                        putExtra("SHOW_FULLSCREEN_ALERT", true)
+                                        putExtra("AUTO_LAUNCHED_FROM_ALARM", true)
+                                    }
+                                    startActivity(fullScreenIntent)
+                                } catch (_: Exception) {}
+                            }
+                        }
+
                         // 2. Detectar escalamiento (10-0 -> 10-30, 10-2 -> ALARMA FORESTAL)
                         val oldClave = lastDispatchClaves[id] ?: ""
                         if (oldClave.isNotEmpty() && oldClave != clave) {
@@ -2467,6 +2540,16 @@ class NotificationActionReceiver : BroadcastReceiver() {
 }
 
 // ============================================================================
+// 6.9. APPLICATION: INICIALIZACIÓN TEMPRANA DE FIREBASE DINÁMICO DEL CLIENTE
+// ============================================================================
+class SisBomApplication : android.app.Application() {
+    override fun onCreate() {
+        super.onCreate()
+        MainActivity.initializeDynamicFirebase(this)
+    }
+}
+
+// ============================================================================
 // 7. MAIN ACTIVITY & PUENTE JS <-> NATIVO ANDROID (SENTINEL ONE V3)
 // ============================================================================
 class MainActivity : ComponentActivity() {
@@ -2484,6 +2567,22 @@ class MainActivity : ComponentActivity() {
         @Volatile
         private var currentTenantProjectId: String? = null
 
+        private val knownAndroidAppIdsByProject = mapOf(
+            "sisbom-central" to "1:432594591351:android:99a442ea6ae05276beb072",
+            "pruebas-sisbom" to "1:306101642399:android:7e02cfca71bdccd391aeaa",
+            "sisbom-de5f8" to "1:39449538456:android:b2f806e0a0e9fc927485ed"
+        )
+
+        private fun resolveValidAndroidAppId(projectId: String, json: JSONObject): String {
+            val explicitAndroid = json.optString("androidAppId", "")
+            if (explicitAndroid.contains(":android:")) return explicitAndroid
+            knownAndroidAppIdsByProject[projectId]?.let { return it }
+            val rawAppId = json.optString("appId", "")
+            if (rawAppId.contains(":android:")) return rawAppId
+            val senderId = json.optString("messagingSenderId", "432594591351")
+            return "1:$senderId:android:99a442ea6ae05276beb072"
+        }
+
         fun initializeDynamicFirebase(context: Context, configJsonStr: String? = null) {
             try {
                 val appContext = context.applicationContext
@@ -2492,10 +2591,8 @@ class MainActivity : ComponentActivity() {
                     ?: prefs.getString("DYNAMIC_FIREBASE_CONFIG", null)
                     ?: prefs.getString("saas_firebase_config", null)
                 if (jsonStr.isNullOrBlank()) {
-                    if (FirebaseApp.getApps(appContext).isEmpty()) {
-                        FirebaseApp.initializeApp(appContext)
-                    }
-                    dynamicFirebaseApp = FirebaseApp.getInstance()
+                    // CRÍTICO: No inicializar FirebaseApp([DEFAULT]) con google-services.json antes de anexar licencia,
+                    // para que cuando el usuario ingrese la licencia, [DEFAULT] y FirebaseMessaging pertenezcan al Sender ID del cliente.
                     return
                 }
 
@@ -2509,14 +2606,14 @@ class MainActivity : ComponentActivity() {
                 val json = JSONObject(jsonStr)
                 val apiKey = json.optString("apiKey", "")
                 val projectId = json.optString("projectId", "")
-                val applicationId = json.optString("appId", "").ifBlank { "1:306101642399:android:8951568bc9434d1191aeaa" }
+                if (apiKey.isBlank() || projectId.isBlank()) return
+
+                val applicationId = resolveValidAndroidAppId(projectId, json)
                 val messagingSenderId = json.optString("messagingSenderId", "306101642399")
                 val storageBucket = json.optString("storageBucket", "")
                 val databaseUrl = json.optString("databaseURL", "").ifBlank {
-                    if (projectId.isNotBlank()) "https://$projectId-default-rtdb.firebaseio.com" else ""
+                    "https://$projectId-default-rtdb.firebaseio.com"
                 }
-
-                if (apiKey.isBlank() || projectId.isBlank()) return
 
                 val builder = FirebaseOptions.Builder()
                     .setApiKey(apiKey)
@@ -2527,8 +2624,7 @@ class MainActivity : ComponentActivity() {
                 if (databaseUrl.isNotBlank()) builder.setDatabaseUrl(databaseUrl)
                 val options = builder.build()
 
-                // 1. Asegurar que la instancia DEFAULT esté inicializada sin llamar NUNCA a defaultApp.delete()
-                // (llamar a defaultApp.delete() provoca crash fatal java.lang.IllegalStateException: FirebaseApp was deleted en los workers de FCM/Firestore)
+                // 1. Inicializar [DEFAULT] directamente con las opciones del cliente sin llamar NUNCA a defaultApp.delete()
                 if (FirebaseApp.getApps(appContext).isEmpty()) {
                     try {
                         FirebaseApp.initializeApp(appContext, options)
@@ -2540,33 +2636,45 @@ class MainActivity : ComponentActivity() {
                 }
                 currentTenantProjectId = projectId
 
-                // 2. Mantener la instancia nombrada por proyecto (tenant_<projectId>) para Firestore, Auth y RTDB del Cuerpo activo
-                val appName = "tenant_$projectId"
-                val existing = FirebaseApp.getApps(appContext).firstOrNull { it.name == appName }
-                dynamicFirebaseApp = existing ?: FirebaseApp.initializeApp(appContext, options, appName)
-                Log.d("SENTINEL_FIREBASE", "Firebase dinámico inicializado para tenant: $projectId")
+                // 2. Si [DEFAULT] ya coincide con el projectId del cliente, usarlo directamente; de lo contrario usar instancia nombrada
+                val defaultApp = try { FirebaseApp.getInstance() } catch (_: Exception) { null }
+                dynamicFirebaseApp = if (defaultApp != null && defaultApp.options.projectId == projectId) {
+                    defaultApp
+                } else {
+                    val appName = "tenant_$projectId"
+                    val existing = FirebaseApp.getApps(appContext).firstOrNull { it.name == appName }
+                    existing ?: FirebaseApp.initializeApp(appContext, options, appName)
+                }
+                Log.d("SENTINEL_FIREBASE", "Firebase dinámico inicializado para tenant: $projectId (sender=$messagingSenderId)")
             } catch (e: Exception) {
-                Log.w("SENTINEL_FIREBASE", "Usando FirebaseApp por defecto: ${e.message}")
+                Log.w("SENTINEL_FIREBASE", "Error inicializando Firebase dinámico: ${e.message}")
             }
         }
 
-        fun getActiveFirestore(context: Context): FirebaseFirestore {
+        private fun ensureFallbackFirebaseApp(context: Context): FirebaseApp {
             initializeDynamicFirebase(context)
-            val app = dynamicFirebaseApp
-            return if (app != null) FirebaseFirestore.getInstance(app) else FirebaseFirestore.getInstance()
+            dynamicFirebaseApp?.let { return it }
+            val appContext = context.applicationContext
+            if (FirebaseApp.getApps(appContext).isEmpty()) {
+                FirebaseApp.initializeApp(appContext)
+            }
+            return FirebaseApp.getInstance()
+        }
+
+        fun getActiveFirestore(context: Context): FirebaseFirestore {
+            val app = ensureFallbackFirebaseApp(context)
+            return FirebaseFirestore.getInstance(app)
         }
 
         fun getActiveAuth(context: Context): FirebaseAuth {
-            initializeDynamicFirebase(context)
-            val app = dynamicFirebaseApp
-            return if (app != null) FirebaseAuth.getInstance(app) else FirebaseAuth.getInstance()
+            val app = ensureFallbackFirebaseApp(context)
+            return FirebaseAuth.getInstance(app)
         }
 
         fun getActiveRtdb(context: Context): FirebaseDatabase? {
-            initializeDynamicFirebase(context)
             return try {
-                val app = dynamicFirebaseApp
-                if (app != null) FirebaseDatabase.getInstance(app) else FirebaseDatabase.getInstance()
+                val app = ensureFallbackFirebaseApp(context)
+                FirebaseDatabase.getInstance(app)
             } catch (_: Exception) {
                 null
             }
@@ -2575,12 +2683,21 @@ class MainActivity : ComponentActivity() {
         fun registerFcmTokenInFirestore(context: Context, userId: String, tokenOverride: String? = null) {
             if (userId.isBlank()) return
             val appContext = context.applicationContext
+            initializeDynamicFirebase(appContext)
+            if (FirebaseApp.getApps(appContext).isEmpty()) return
+
             val prefs = appContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
             val isConductor = prefs.getBoolean("USER_CONDUCTOR", false)
             val isCentral = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
+            val activePid = currentTenantProjectId ?: try { FirebaseApp.getInstance().options.projectId ?: "" } catch (_: Exception) { "" }
 
             val applyToken: (String) -> Unit = { token ->
-                prefs.edit().putString("FCM_TOKEN", token).apply()
+                val edit = prefs.edit().putString("FCM_TOKEN", token)
+                if (activePid.isNotBlank()) {
+                    edit.putString("FCM_TOKEN_PROJECT_ID", activePid)
+                }
+                edit.apply()
+
                 val topics = mutableListOf(
                     "all",
                     "despachos",
@@ -2597,14 +2714,40 @@ class MainActivity : ComponentActivity() {
                 if (!isConductor) fm.unsubscribeFromTopic("conductores")
                 if (!isCentral) fm.unsubscribeFromTopic("central_operador")
 
-                val db = getActiveFirestore(appContext)
-                db.collection("personal").document(userId).set(
-                    mapOf(
-                        "deviceId" to token,
-                        "_metaTimestamp" to System.currentTimeMillis()
-                    ),
-                    SetOptions.merge()
-                )
+                val writeTokenDoc: () -> Unit = {
+                    val db = getActiveFirestore(appContext)
+                    db.collection("personal").document(userId).set(
+                        mapOf(
+                            "deviceId" to token,
+                            "tokenFcm" to token,
+                            "fcmToken" to token,
+                            "platform" to "android",
+                            "_metaTimestamp" to System.currentTimeMillis()
+                        ),
+                        SetOptions.merge()
+                    )
+                }
+
+                val auth = getActiveAuth(appContext)
+                if (auth.currentUser != null && auth.currentUser?.isAnonymous == false) {
+                    writeTokenDoc()
+                } else {
+                    auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
+                        .addOnCompleteListener { writeTokenDoc() }
+                }
+            }
+
+            val storedTokenPid = prefs.getString("FCM_TOKEN_PROJECT_ID", "") ?: ""
+            if (activePid.isNotBlank() && storedTokenPid != activePid && tokenOverride.isNullOrBlank()) {
+                // Si el token previo fue emitido con otro SenderId (ej. sisbom-central 432594591351), regenerarlo para el proyecto activo
+                FirebaseMessaging.getInstance().deleteToken().addOnCompleteListener {
+                    FirebaseMessaging.getInstance().token.addOnSuccessListener { newToken ->
+                        if (!newToken.isNullOrBlank()) {
+                            applyToken(newToken)
+                        }
+                    }
+                }
+                return
             }
 
             if (!tokenOverride.isNullOrBlank()) {
@@ -2909,11 +3052,45 @@ class MainActivity : ComponentActivity() {
         }
 
         try {
+            if (scheme == "tel") {
+                val dialIntent = Intent(Intent.ACTION_DIAL, uri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(dialIntent)
+                return true
+            }
+
+            if (scheme == "whatsapp" || host.contains("wa.me") || host.contains("whatsapp.com")) {
+                var targetUri = uri
+                if (scheme == "https" || scheme == "http") {
+                    val phoneParam = uri.getQueryParameter("phone")
+                        ?: path.removePrefix("/").trim()
+                    val textParam = uri.getQueryParameter("text") ?: ""
+                    val cleanDigits = phoneParam.replace(Regex("\\D"), "")
+                    if (cleanDigits.isNotEmpty()) {
+                        val waBuilder = StringBuilder("whatsapp://send?phone=$cleanDigits")
+                        if (textParam.isNotEmpty()) {
+                            waBuilder.append("&text=${Uri.encode(textParam)}")
+                        }
+                        targetUri = Uri.parse(waBuilder.toString())
+                    }
+                }
+                val waIntent = Intent(Intent.ACTION_VIEW, targetUri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(waIntent)
+                return true
+            }
+
             val viewIntent = Intent(Intent.ACTION_VIEW, uri).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             startActivity(viewIntent)
         } catch (_: Exception) {
+            if (scheme == "whatsapp" || host.contains("wa.me") || host.contains("whatsapp.com")) {
+                Toast.makeText(this, "WhatsApp no está instalado en este dispositivo", Toast.LENGTH_SHORT).show()
+                return true
+            }
             // Si falla geo: (ej. sin app de mapas asociada a geo:), abrir Google Maps Web en navegador externo
             if (scheme == "geo") {
                 try {
@@ -3013,7 +3190,7 @@ class MainActivity : ComponentActivity() {
         val autoLaunched = intent?.getBooleanExtra("AUTO_LAUNCHED_FROM_ALARM", false) == true
         if (autoLaunched) {
             intent?.removeExtra("AUTO_LAUNCHED_FROM_ALARM")
-        } else {
+        } else if (!SoundPlayer.isAlarmProtectedFromAutoStop()) {
             SoundPlayer.stopAudioOnly(this)
         }
         notifyWebViewPermissionsChanged()
@@ -3062,11 +3239,66 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNotificationPermissionOnly() {
+        val areEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+            val granted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!granted) {
+                val prefs = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val askedBefore = prefs.getBoolean("NOTIF_PERMISSION_ASKED", false)
+                val shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+                prefs.edit().putBoolean("NOTIF_PERMISSION_ASKED", true).apply()
+                if (askedBefore && !shouldShowRationale) {
+                    openAppNotificationSettings()
+                } else {
+                    permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                }
+                return
             }
         }
+        if (!areEnabled) {
+            openAppNotificationSettings()
+        }
+    }
+
+    private fun openAppNotificationSettings() {
+        try {
+            val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                    putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            } else {
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            try {
+                val fallback = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(fallback)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun openAppDetailsSettingsWithHint(hintMessage: String? = null) {
+        try {
+            if (!hintMessage.isNullOrBlank()) {
+                Toast.makeText(this, hintMessage, Toast.LENGTH_LONG).show()
+            }
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (_: Exception) {}
     }
 
     private fun requestBackgroundLocationStep() {
@@ -3076,14 +3308,26 @@ class MainActivity : ComponentActivity() {
                 Manifest.permission.ACCESS_BACKGROUND_LOCATION
             ) == PackageManager.PERMISSION_GRANTED
             if (!bgGranted) {
+                val prefs = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val askedBgBefore = prefs.getBoolean("BG_LOCATION_ASKED", false)
+                val shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                prefs.edit().putBoolean("BG_LOCATION_ASKED", true).apply()
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    Toast.makeText(
+                        this,
+                        "Seleccione: Permisos -> Ubicación -> Permitir todo el tiempo",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+                if (askedBgBefore && !shouldShowRationale) {
+                    openAppDetailsSettingsWithHint("En Permisos -> Ubicación, elija 'Permitir todo el tiempo'")
+                    return
+                }
                 try {
                     backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
                 } catch (_: Exception) {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.fromParts("package", packageName, null)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    startActivity(intent)
+                    openAppDetailsSettingsWithHint("En Permisos -> Ubicación, elija 'Permitir todo el tiempo'")
                 }
             }
         }
@@ -3103,6 +3347,15 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!fineGranted && !coarseGranted) {
+            val askedFgBefore = prefs.getBoolean("FG_LOCATION_ASKED", false)
+            val shouldShowRationale = shouldShowRequestPermissionRationale(Manifest.permission.ACCESS_FINE_LOCATION)
+            prefs.edit().putBoolean("FG_LOCATION_ASKED", true).apply()
+
+            if (askedFgBefore && !shouldShowRationale) {
+                openAppDetailsSettingsWithHint("En Permisos -> Ubicación, elija 'Permitir todo el tiempo'")
+                return
+            }
+
             pendingBackgroundLocationAfterForeground = true
             val perms = mutableListOf(
                 Manifest.permission.ACCESS_FINE_LOCATION,
@@ -3533,13 +3786,14 @@ class MainActivity : ComponentActivity() {
                     true
                 }
 
+                val notificationsSysEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
                 val notifications = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    ContextCompat.checkSelfPermission(
+                    notificationsSysEnabled && ContextCompat.checkSelfPermission(
                         context,
                         Manifest.permission.POST_NOTIFICATIONS
                     ) == PackageManager.PERMISSION_GRANTED
                 } else {
-                    true
+                    notificationsSysEnabled
                 }
 
                 JSONObject().apply {
@@ -3558,6 +3812,13 @@ class MainActivity : ComponentActivity() {
         fun requestLocationAlways() {
             runOnUiThread {
                 requestLocationAlwaysFlow()
+            }
+        }
+
+        @JavascriptInterface
+        fun requestNotificationsPermission() {
+            runOnUiThread {
+                requestNotificationPermissionOnly()
             }
         }
 

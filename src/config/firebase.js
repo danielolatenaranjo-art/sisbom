@@ -396,3 +396,29 @@ export async function fetchFirestoreWithAuth(url, apiKey, options = {}) {
 
   return fetch(url, { ...options, headers });
 }
+
+let centralApp = null;
+let centralDb = null;
+
+export function getCentralDb() {
+  if (centralDb) return centralDb;
+  try {
+    const existing = getApps().find((a) => a.name === 'sisbom_central_broker');
+    centralApp = existing || initializeApp(CENTRAL_FIREBASE_CONFIG, 'sisbom_central_broker');
+    try {
+      centralDb = initializeFirestore(centralApp, {
+        experimentalForceLongPolling: true,
+        useFetchStreams: false
+      });
+    } catch {
+      centralDb = getFirestore(centralApp);
+    }
+    return centralDb;
+  } catch (e) {
+    console.warn('Error inicializando Central Firestore:', e);
+    return null;
+  }
+}
+
+export { resolveCachedUserAuthCredentials };
+
