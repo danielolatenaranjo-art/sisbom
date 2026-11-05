@@ -878,13 +878,19 @@ final class IOSRealtimeService {
                 let rawDir = ((cleanData["direccion"] as? String) ?? (cleanData["lugar"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let direccion = !rawDir.isEmpty ? rawDir : (estado == "pre-despacho" ? "Pre-despacho en preparación..." : "Ubicación en curso")
 
-                let createdTs = (cleanData["createdAt"] as? NSNumber)?.int64Value
-                    ?? Int64((cleanData["createdAt"] as? String) ?? "")
-                    ?? (cleanData["creadoEn"] as? NSNumber)?.int64Value
-                    ?? (cleanData["timestamp"] as? NSNumber)?.int64Value
-                    ?? Int64((cleanData["timestamp"] as? String) ?? "")
-                    ?? 0
-                let isLateFiveMin = createdTs > 1_000_000_000_000 && (nowMs - createdTs) > 300_000 // > 5 minutos
+                var createdTs: Int64 = 0
+                if let n = cleanData["createdAt"] as? NSNumber {
+                    createdTs = n.int64Value
+                } else if let s = cleanData["createdAt"] as? String, let v = Int64(s) {
+                    createdTs = v
+                } else if let n = cleanData["creadoEn"] as? NSNumber {
+                    createdTs = n.int64Value
+                } else if let n = cleanData["timestamp"] as? NSNumber {
+                    createdTs = n.int64Value
+                } else if let s = cleanData["timestamp"] as? String, let v = Int64(s) {
+                    createdTs = v
+                }
+                let isLateFiveMin: Bool = (createdTs > 1_000_000_000_000) && ((nowMs - createdTs) > 300_000) // > 5 minutos
 
                 let isAttending = attendedIds.contains(docId) || userEnServicio == docId
                 let hasDeclined = declinedIds.contains(docId) || userEnServicio == "-\(docId)"
@@ -1912,13 +1918,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         let isRepeat60s = ((userInfo["isRepeat60s"] as? String) == "true")
-        let createdMs = Int64((userInfo["createdAt"] as? String) ?? "")
-            ?? (userInfo["createdAt"] as? NSNumber)?.int64Value
-            ?? Int64((userInfo["timestamp"] as? String) ?? "")
-            ?? (userInfo["timestamp"] as? NSNumber)?.int64Value
-            ?? 0
+        var createdMs: Int64 = 0
+        if let s = userInfo["createdAt"] as? String, let v = Int64(s) {
+            createdMs = v
+        } else if let n = userInfo["createdAt"] as? NSNumber {
+            createdMs = n.int64Value
+        } else if let s = userInfo["timestamp"] as? String, let v = Int64(s) {
+            createdMs = v
+        } else if let n = userInfo["timestamp"] as? NSNumber {
+            createdMs = n.int64Value
+        }
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let isLateDispatch = !isRepeat60s && !isEscalation && !is1210or66 && createdMs > 1_000_000_000_000 && (nowMs - createdMs) > 300_000
+        let isLateDispatch: Bool = !isRepeat60s && !isEscalation && !is1210or66 && (createdMs > 1_000_000_000_000) && ((nowMs - createdMs) > 300_000)
 
         if is1210or66 {
             if Self.isAppInForeground {
@@ -2015,13 +2026,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 completionHandler([])
                 return
             }
-            let createdMs = Int64((userInfo["createdAt"] as? String) ?? "")
-                ?? (userInfo["createdAt"] as? NSNumber)?.int64Value
-                ?? Int64((userInfo["timestamp"] as? String) ?? "")
-                ?? (userInfo["timestamp"] as? NSNumber)?.int64Value
-                ?? 0
+            var createdMs: Int64 = 0
+            if let s = userInfo["createdAt"] as? String, let v = Int64(s) {
+                createdMs = v
+            } else if let n = userInfo["createdAt"] as? NSNumber {
+                createdMs = n.int64Value
+            } else if let s = userInfo["timestamp"] as? String, let v = Int64(s) {
+                createdMs = v
+            } else if let n = userInfo["timestamp"] as? NSNumber {
+                createdMs = n.int64Value
+            }
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-            let isLateDispatch = !isRepeat60s && !isEscalation && createdMs > 1_000_000_000_000 && (nowMs - createdMs) > 300_000
+            let isLateDispatch: Bool = !isRepeat60s && !isEscalation && (createdMs > 1_000_000_000_000) && ((nowMs - createdMs) > 300_000)
 
             if isLateDispatch {
                 // Si el despacho llega tardío (> 5 min) por mala señal: NO sonar sirena, solo vibrar y mostrar notificación sin sonido
