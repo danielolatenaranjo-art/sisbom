@@ -26,7 +26,7 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.0.4"
-TARGET_BUILD_NUMBER = "3021"
+TARGET_BUILD_NUMBER = "3023"
 
 SUPPORT_URL = "https://github.com/danielolatenaranjo-art/sisbom"
 COPYRIGHT_TEXT = "2026 Sistema Sentinel - Cuerpos de Bomberos"

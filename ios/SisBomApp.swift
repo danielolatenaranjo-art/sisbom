@@ -878,11 +878,13 @@ final class IOSRealtimeService {
                 let rawDir = ((cleanData["direccion"] as? String) ?? (cleanData["lugar"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let direccion = !rawDir.isEmpty ? rawDir : (estado == "pre-despacho" ? "Pre-despacho en preparación..." : "Ubicación en curso")
 
-                let createdTs = (cleanData["creadoEn"] as? NSNumber)?.int64Value
+                let createdTs = (cleanData["createdAt"] as? NSNumber)?.int64Value
+                    ?? Int64((cleanData["createdAt"] as? String) ?? "")
+                    ?? (cleanData["creadoEn"] as? NSNumber)?.int64Value
                     ?? (cleanData["timestamp"] as? NSNumber)?.int64Value
-                    ?? (cleanData["_metaTimestamp"] as? NSNumber)?.int64Value
+                    ?? Int64((cleanData["timestamp"] as? String) ?? "")
                     ?? 0
-                let isRecentDispatch = createdTs > 0 && (nowMs - createdTs) < 600_000 // últimos 10 minutos
+                let isLateFiveMin = createdTs > 1_000_000_000_000 && (nowMs - createdTs) > 300_000 // > 5 minutos
 
                 let isAttending = attendedIds.contains(docId) || userEnServicio == docId
                 let hasDeclined = declinedIds.contains(docId) || userEnServicio == "-\(docId)"
@@ -901,12 +903,25 @@ final class IOSRealtimeService {
                             }
                         }
                     }
-                    // Al abrir la app por primera vez: si está en primer plano NO debe sonar la sirena fuerte, solo vibrar y abrir pantalla sobre pantalla
-                    let isRecentFiveMin = createdTs > 0 && (nowMs - createdTs) < 300_000
-                    if isRecentFiveMin && !alertedIds.contains(docId) && !isAttending && !hasDeclined && !isAirplane && !isCentral {
+                    // Al abrir la app por primera vez:
+                    // - Si el despacho tiene < 5 min y la app está en primer plano: solo vibrar y abrir pantalla sobre pantalla.
+                    // - Si el despacho tiene > 5 min (llegó tardío por mala señal): NO sonar sirena, solo vibrar y mostrar notificación silenciosa.
+                    if !alertedIds.contains(docId) && !isAttending && !hasDeclined && !isAirplane && !isCentral {
                         alertedIds.append(docId)
                         didModifyAlerted = true
-                        if AppDelegate.isAppInForeground {
+                        if isLateFiveMin {
+                            IOSSoundPlayer.shared.vibrateEmergency()
+                            if !AppDelegate.isAppInForeground {
+                                self.postLocalBanner(
+                                    id: "disp_\(docId)",
+                                    title: "⚠️ NOTIFICACIÓN TARDÍA POR MALA COBERTURA TELEFÓNICA",
+                                    body: "DESPACHO \(clave): \(direccion)",
+                                    soundName: nil,
+                                    playDefaultIfNil: false,
+                                    userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                                )
+                            }
+                        } else if AppDelegate.isAppInForeground {
                             IOSSoundPlayer.shared.vibrateEmergency()
                             if is09 {
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
@@ -928,9 +943,6 @@ final class IOSRealtimeService {
                                 userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
                             )
                         }
-                    } else if !alertedIds.contains(docId) {
-                        alertedIds.append(docId)
-                        didModifyAlerted = true
                     }
                     continue
                 }
@@ -946,7 +958,7 @@ final class IOSRealtimeService {
                     continue
                 }
 
-                    // A. Nuevo despacho o pre-despacho en vivo (Primer tono + programación del segundo tono a los 60s)
+                    // A. Nuevo despacho o pre-despacho en vivo (Primer tono + programación del segundo tono a los 60s; si tiene > 5 min por mala señal, solo vibrar y mostrar notificación)
                 if !self.knownDispatchIds.contains(docId) {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
@@ -956,7 +968,17 @@ final class IOSRealtimeService {
                         didModifyAlerted = true
                     }
                     if !isAttending && !hasDeclined {
-                        if AppDelegate.isAppInForeground {
+                        if isLateFiveMin {
+                            IOSSoundPlayer.shared.vibrateEmergency()
+                            self.postLocalBanner(
+                                id: "disp_\(docId)",
+                                title: "⚠️ NOTIFICACIÓN TARDÍA POR MALA COBERTURA TELEFÓNICA",
+                                body: "DESPACHO \(clave): \(direccion)",
+                                soundName: nil,
+                                playDefaultIfNil: false,
+                                userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
+                            )
+                        } else if AppDelegate.isAppInForeground {
                             IOSSoundPlayer.shared.vibrateEmergency()
                             if is09 {
                                 IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
@@ -1890,6 +1912,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         let isRepeat60s = ((userInfo["isRepeat60s"] as? String) == "true")
+        let createdMs = Int64((userInfo["createdAt"] as? String) ?? "")
+            ?? (userInfo["createdAt"] as? NSNumber)?.int64Value
+            ?? Int64((userInfo["timestamp"] as? String) ?? "")
+            ?? (userInfo["timestamp"] as? NSNumber)?.int64Value
+            ?? 0
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        let isLateDispatch = !isRepeat60s && !isEscalation && !is1210or66 && createdMs > 1_000_000_000_000 && (nowMs - createdMs) > 300_000
+
         if is1210or66 {
             if Self.isAppInForeground {
                 IOSSoundPlayer.shared.vibrateEmergency()
@@ -1900,7 +1930,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
         } else if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
-            if Self.isAppInForeground && !isRepeat60s {
+            if isLateDispatch {
+                // Si el despacho llega tardío (> 5 min) por mala señal: NO sonar sirena, solo vibrar
+                IOSSoundPlayer.shared.vibrateEmergency()
+            } else if Self.isAppInForeground && !isRepeat60s {
                 IOSSoundPlayer.shared.vibrateEmergency()
                 if !payloadId.isEmpty {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
@@ -1980,6 +2013,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if type == "DISPATCH" || type == "DISPATCH_UPDATE" {
             if isAttending || (type == "DISPATCH_UPDATE" && !isEscalation) || (hasDeclined && !isEscalation) {
                 completionHandler([])
+                return
+            }
+            let createdMs = Int64((userInfo["createdAt"] as? String) ?? "")
+                ?? (userInfo["createdAt"] as? NSNumber)?.int64Value
+                ?? Int64((userInfo["timestamp"] as? String) ?? "")
+                ?? (userInfo["timestamp"] as? NSNumber)?.int64Value
+                ?? 0
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            let isLateDispatch = !isRepeat60s && !isEscalation && createdMs > 1_000_000_000_000 && (nowMs - createdMs) > 300_000
+
+            if isLateDispatch {
+                // Si el despacho llega tardío (> 5 min) por mala señal: NO sonar sirena, solo vibrar y mostrar notificación sin sonido
+                IOSSoundPlayer.shared.vibrateEmergency()
+                completionHandler([.banner, .list])
                 return
             }
             if !payloadId.isEmpty && (is09 || isEscalation) {
