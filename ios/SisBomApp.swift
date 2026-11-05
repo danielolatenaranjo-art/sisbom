@@ -1258,7 +1258,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 return
             }
             let encodedUid = prevUid.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prevUid
-            let patchUrlStr = "https://firestore.googleapis.com/v1/projects/\(prevPid)/databases/(default)/documents/personal/\(encodedUid)?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=apnsToken&updateMask.fieldPaths=hardwareDeviceId&updateMask.fieldPaths=_metaTimestamp"
+            let patchUrlStr = "https://firestore.googleapis.com/v1/projects/\(prevPid)/databases/(default)/documents/personal/\(encodedUid)?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=apnsToken&updateMask.fieldPaths=_metaTimestamp"
             guard let patchUrl = URL(string: patchUrlStr) else { return }
             var patchReq = URLRequest(url: patchUrl)
             patchReq.httpMethod = "PATCH"
@@ -1268,10 +1268,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             let patchPayload: [String: Any] = [
                 "fields": [
                     "deviceId": ["stringValue": ""],
-                    "tokenFcm": ["stringValue": ""],
-                    "fcmToken": ["stringValue": ""],
                     "apnsToken": ["stringValue": ""],
-                    "hardwareDeviceId": ["stringValue": ""],
                     "_metaTimestamp": ["integerValue": "\(nowMs)"]
                 ]
             ]
@@ -1761,7 +1758,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                 db.collection("personal").document(userId).setData([
                     "apnsToken": apnsHex,
-                    "hardwareDeviceId": hwId,
                     "platform": "ios",
                     "_metaTimestamp": nowMs
                 ], merge: true)
@@ -1782,9 +1778,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                 var patch: [String: Any] = [
                     "deviceId": token,
-                    "tokenFcm": token,
-                    "fcmToken": token,
-                    "hardwareDeviceId": hwId,
                     "platform": "ios",
                     "_metaTimestamp": nowMs
                 ]
@@ -2273,10 +2266,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                 AppDelegate.activeFirestore().collection("personal").document(oldId).setData([
                     "deviceId": "",
-                    "tokenFcm": "",
-                    "fcmToken": "",
                     "apnsToken": "",
-                    "hardwareDeviceId": "",
                     "_metaTimestamp": nowMs
                 ], merge: true)
             }

@@ -10,8 +10,7 @@ import {
   getAuth,
   browserLocalPersistence,
   inMemoryPersistence,
-  signInWithEmailAndPassword,
-  signInAnonymously
+  signInWithEmailAndPassword
 } from 'firebase/auth';
 import { getDatabase } from 'firebase/database';
 
@@ -138,11 +137,20 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
       : `${String(customPass).trim()}_secure_sisbom`;
     try {
       const cred = await signInWithEmailAndPassword(currentAuth, email, securePass);
-      return cred?.user || null;
+      if (cred?.user) {
+        try {
+          const apiKey = currentAuth.app?.options?.apiKey;
+          const tok = await cred.user.getIdToken();
+          if (apiKey && tok) {
+            cachedAuthTokensByKey.set(apiKey, { token: tok, expiresAt: Date.now() + 3000 * 1000 });
+          }
+        } catch (_) {}
+        return cred.user;
+      }
     } catch {
       try {
         const credRaw = await signInWithEmailAndPassword(currentAuth, email, String(customPass).trim());
-        return credRaw?.user || null;
+        if (credRaw?.user) return credRaw.user;
       } catch (_) {}
     }
   }
@@ -160,7 +168,7 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
         try {
           const cred = await Promise.race([
             signInWithEmailAndPassword(currentAuth, userCreds.email, userCreds.password),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 3500))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 8000))
           ]);
           if (cred?.user) return cred.user;
         } catch (_) {
@@ -176,16 +184,10 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
       try {
         const v304Cred = await Promise.race([
           signInWithEmailAndPassword(currentAuth, V304_AUTH_EMAIL, V304_AUTH_PASS),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('V304 auth timeout')), 3000))
+          new Promise((_, reject) => setTimeout(() => reject(new Error('V304 auth timeout')), 8000))
         ]);
         if (v304Cred?.user) return v304Cred.user;
       } catch (_) {}
-
-      const anonCred = await Promise.race([
-        signInAnonymously(currentAuth),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Anon auth timeout')), 2500))
-      ]);
-      if (anonCred?.user) return anonCred.user;
     } catch (_) {
     } finally {
       authPromise = null;
@@ -361,22 +363,6 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
         return v304Data.idToken;
       }
     } catch (_) {}
-
-    // Respaldo: sesión anónima vía REST
-    const anonRes = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ returnSecureToken: true })
-    });
-    if (anonRes.ok) {
-      const anonData = await anonRes.json();
-      const expiresInSec = parseInt(anonData.expiresIn || '3600', 10);
-      cachedAuthTokensByKey.set(apiKey, {
-        token: anonData.idToken,
-        expiresAt: now + (expiresInSec * 1000)
-      });
-      return anonData.idToken;
-    }
   } catch (err) {
     console.warn('Error obtaining Firebase Auth token:', err);
   }
