@@ -111,7 +111,9 @@ async function sendDirectApnsToIosUsers({
   collapseId = "",
   data = {},
   targetUserIds = null,
-  onlyConductors = false
+  onlyConductors = false,
+  unrespondedOnlyForDispatchId = "",
+  respondedUserIds = null
 }) {
   try {
     const db = admin.firestore();
@@ -131,6 +133,14 @@ async function sendDirectApnsToIosUsers({
       const p = d.data() || {};
       if (p.modoAvion === true || p.silencioAbsoluto === true) continue;
       if (onlyConductors && !p.conductor) continue;
+      if (unrespondedOnlyForDispatchId) {
+        const est = String(p.estado || (p.disponible === false ? "0-8" : "0-9")).trim().toUpperCase();
+        if (est !== "0-9") continue;
+        const enSvc = String(p.enServicio || "").trim();
+        if (enSvc === unrespondedOnlyForDispatchId || enSvc === `-${unrespondedOnlyForDispatchId}`) continue;
+        const uid = String(p.idRegistro || d.id || "").trim();
+        if (respondedUserIds && respondedUserIds.has(uid)) continue;
+      }
       const candidate = String(p.apnsToken || "").trim().toLowerCase();
       if (/^[0-9a-f]{64}$/.test(candidate)) {
         apnsTokens.add(candidate);
@@ -699,7 +709,7 @@ const onDoorRequestCreated = onDocumentCreated("solicitudes_puerta/{requestId}",
 });
 
 // Alias compatibles con despliegue existente en proyectos Firebase (enviarDespacho / actualizarDespacho / enviarAlerta / etc.)
-exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (event) => {
+exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", timeoutSeconds: 120}, async (event) => {
   const beforeSnap = event.data.before;
   const afterSnap = event.data.after;
   if (!afterSnap || !afterSnap.exists) return;
@@ -709,7 +719,6 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
   const dispatchId = event.params.dispatchId;
 
   const estadoAfterLower = String(after.estado || "").toLowerCase().trim();
-  const estadoBeforeLower = before ? String(before.estado || "").toLowerCase().trim() : "";
   const finalizadoAt = Number(after.finalizadoAt || 0);
   if (
     (after.operadorFinal && String(after.operadorFinal).trim() !== "") ||
@@ -746,15 +755,14 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
   if (unidades && after.carrosTexto !== unidades) backfillPatch.carrosTexto = unidades;
   if (carrosList.length > 0 && !Array.isArray(after.carros)) backfillPatch.carros = carrosList;
 
-  const isTransitionFromPreToActive =
-    estadoBeforeLower === "pre-despacho" &&
-    (estadoAfterLower === "activa" || estadoAfterLower === "activo" || estadoAfterLower === "en curso");
+  // El primer tono suena UNA SOLA VEZ al crearse el despacho (ya sea en pre-despacho o activa).
+  // El paso de pre-despacho a activa NO vuelve a disparar tono; el segundo tono es estrictamente a los 60 segundos si no ha respondido.
   const alreadySent = after.pushSent === true || (before && before.pushSent === true);
 
   const shouldSendPush =
     (estadoAfterLower === "pre-despacho" || estadoAfterLower === "activa" || estadoAfterLower === "activo" || estadoAfterLower === "en curso") &&
     after.visibleMovil !== false &&
-    (!alreadySent || isTransitionFromPreToActive);
+    !alreadySent;
 
   if (!shouldSendPush) {
     if (Object.keys(backfillPatch).length > 0) {
@@ -777,7 +785,6 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
 
   const apnsSound = resolveApnsSound(clave);
 
-  // SIEMPRE incluir bloque APNs tanto en creación inicial como en transición de pre-despacho a activa
   const msg = {
     topic: "despachos",
     data: {
@@ -836,12 +843,73 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
       category: "EMERGENCY_DISPATCH",
       collapseId: `disp_${dispatchId}`,
       data: msg.data
-    })
+    }),
+    afterSnap.ref.update(Object.assign({}, backfillPatch, {
+      pushSent: true,
+      pushSentAt: Date.now()
+    }))
   ]);
-  await afterSnap.ref.update(Object.assign({}, backfillPatch, {
-    pushSent: true,
-    pushSentAt: Date.now()
-  }));
+
+  // Segundo tono exactamente a los 60 segundos después del primer tono,
+  // únicamente para los bomberos en 0-9 que NO hayan marcado Asistir ni No Asistir.
+  await new Promise((resolve) => setTimeout(resolve, 60000));
+
+  try {
+    const freshSnap = await afterSnap.ref.get();
+    if (!freshSnap || !freshSnap.exists) return;
+    const fresh = freshSnap.data() || {};
+    const freshEstado = String(fresh.estado || "").toLowerCase().trim();
+    const freshFinalizadoAt = Number(fresh.finalizadoAt || 0);
+    if (
+      (fresh.operadorFinal && String(fresh.operadorFinal).trim() !== "") ||
+      freshFinalizadoAt > 0 ||
+      ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "anulado", "terminado", "terminada"].includes(freshEstado)
+    ) {
+      return;
+    }
+
+    const respondedSet = new Set();
+    const collectIds = (arr) => {
+      if (!Array.isArray(arr)) return;
+      for (const item of arr) {
+        if (!item) continue;
+        if (typeof item === "string") respondedSet.add(item.trim());
+        else if (typeof item === "object") {
+          const idVal = String(item.id || item.idRegistro || item.bomberoId || "").trim();
+          if (idVal) respondedSet.add(idVal);
+        }
+      }
+    };
+    collectIds(fresh.asistentes);
+    collectIds(fresh.noAsistentes);
+
+    const freshClave = String(fresh.clave || clave || "10-0").trim();
+    const freshDir = String(fresh.direccion || fresh.lugar || direccion || "Ubicación en curso").trim();
+    const freshUnidades = extractUnitsString(fresh) || unidades || "Unidades en despacho";
+    const freshTitle = `${freshClave} en ${freshDir}`;
+    const freshSound = resolveApnsSound(freshClave);
+
+    await sendDirectApnsToIosUsers({
+      title: `🚨 ${freshTitle}`,
+      body: String(freshUnidades),
+      sound: freshSound,
+      category: "EMERGENCY_DISPATCH",
+      collapseId: `disp_rep60_${dispatchId}`,
+      unrespondedOnlyForDispatchId: String(dispatchId),
+      respondedUserIds: respondedSet,
+      data: Object.assign({}, msg.data, {
+        clave: freshClave,
+        direccion: freshDir,
+        lugar: freshDir,
+        unidades: freshUnidades,
+        carrosTexto: freshUnidades,
+        estado: String(fresh.estado || "activa"),
+        isRepeat60s: "true"
+      })
+    });
+  } catch (repErr) {
+    console.warn("Repeat 60s APNs warning:", repErr.message);
+  }
 });
 
 exports.actualizarDespacho = onDispatchUpdated;
