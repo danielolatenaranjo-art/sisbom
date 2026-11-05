@@ -97,6 +97,7 @@ async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
     'idRegistro', 'idRadial', 'ficha', 'rut', 'nombreBombero', 'nombre',
     'cargo', 'compania', 'estado', 'enServicio', 'conductor', 'activo',
     'puerta', 'Puerta', 'contrasena', 'telefono', 'email', 'deviceId',
+    'tokenFcm', 'fcmToken', 'apnsToken', 'hardwareDeviceId',
     'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds'
   ].map(f => `mask.fieldPaths=${f}`).join('&');
 
@@ -423,16 +424,19 @@ export const useAuthStore = create((set, get) => ({
     if (isBypass || isReadOnly) return false;
 
     const nowTs = Date.now();
+    const hwId = typeof window !== 'undefined' ? String(window.__SENTINEL_HW_DEVICE_ID__ || '').trim() : '';
     try {
       const db = getDb();
       if (db) {
         await ensureFirebaseAuth();
-        await updateDoc(doc(db, 'personal', docId), {
+        const patchObj = {
           deviceId: cleanToken,
           tokenFcm: cleanToken,
           fcmToken: cleanToken,
           _metaTimestamp: nowTs
-        });
+        };
+        if (hwId) patchObj.hardwareDeviceId = hwId;
+        await updateDoc(doc(db, 'personal', docId), patchObj);
         return true;
       }
     } catch (_) {
@@ -440,18 +444,19 @@ export const useAuthStore = create((set, get) => ({
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return false;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=_metaTimestamp`;
+      const maskHw = hwId ? '&updateMask.fieldPaths=hardwareDeviceId' : '';
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=_metaTimestamp${maskHw}`;
+      const fieldsObj = {
+        deviceId: { stringValue: cleanToken },
+        tokenFcm: { stringValue: cleanToken },
+        fcmToken: { stringValue: cleanToken },
+        _metaTimestamp: { integerValue: String(nowTs) }
+      };
+      if (hwId) fieldsObj.hardwareDeviceId = { stringValue: hwId };
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            deviceId: { stringValue: cleanToken },
-            tokenFcm: { stringValue: cleanToken },
-            fcmToken: { stringValue: cleanToken },
-            _metaTimestamp: { integerValue: String(nowTs) }
-          }
-        })
+        body: JSON.stringify({ fields: fieldsObj })
       }).catch(() => {});
     }
     return true;
@@ -641,9 +646,24 @@ export const useAuthStore = create((set, get) => ({
 
         const existingDeviceId = String(foundMatch.deviceId ?? foundMatch.tokenFcm ?? foundMatch.fcmToken ?? '').trim();
         if (existingDeviceId !== '') {
-          const boundMsg = 'Este usuario ya tiene un dispositivo registrado. Solicite desvincularlo en Comandancia o cierre sesión en el otro teléfono.';
-          set({ isLoading: false, error: boundMsg });
-          return { success: false, error: boundMsg };
+          const myFcmTok = typeof window !== 'undefined' ? String(window.__SENTINEL_FCM_TOKEN__ || '').trim() : '';
+          const myApnsTok = typeof window !== 'undefined' ? String(window.__SENTINEL_APNS_TOKEN__ || '').trim().toLowerCase() : '';
+          const myHwId = typeof window !== 'undefined' ? String(window.__SENTINEL_HW_DEVICE_ID__ || '').trim() : '';
+          const lastKcSession = typeof window !== 'undefined' ? String(window.__SENTINEL_KEYCHAIN_LAST_SESSION__ || '').trim() : '';
+          const currentPid = String(useLicenseStore.getState().firebaseConfig?.projectId || '').trim();
+          const targetDocId = String(foundMatch.idRegistro || cleanId).trim();
+
+          const isSamePhysicalDevice =
+            (myFcmTok !== '' && existingDeviceId === myFcmTok) ||
+            (myApnsTok !== '' && String(foundMatch.apnsToken || '').trim().toLowerCase() === myApnsTok) ||
+            (myHwId !== '' && String(foundMatch.hardwareDeviceId || '').trim() === myHwId) ||
+            (lastKcSession !== '' && currentPid !== '' && lastKcSession === `${currentPid}:${targetDocId}`);
+
+          if (!isSamePhysicalDevice) {
+            const boundMsg = 'Este usuario ya tiene un dispositivo registrado. Solicite desvincularlo en Comandancia o cierre sesión en el otro teléfono.';
+            set({ isLoading: false, error: boundMsg });
+            return { success: false, error: boundMsg };
+          }
         }
 
         const securePass = cleanPass.endsWith('_secure_sisbom') ? cleanPass : `${cleanPass}_secure_sisbom`;
@@ -1186,6 +1206,8 @@ export const useAuthStore = create((set, get) => ({
               deviceId: '',
               tokenFcm: '',
               fcmToken: '',
+              apnsToken: '',
+              hardwareDeviceId: '',
               _metaTimestamp: Date.now()
             },
             { merge: true }
