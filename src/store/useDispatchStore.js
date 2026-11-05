@@ -1110,7 +1110,6 @@ export const useDispatchStore = create((set, get) => ({
       if (
         sId &&
         !closedServerIds.has(sId) &&
-        !isDispatchTooOld(localDisp) &&
         shouldKeepLocalByTimestamp('despachos', sId, localDisp, null) &&
         !activeList.some((a) => String(a.idServicio).trim() === sId)
       ) {
@@ -1556,14 +1555,47 @@ export const useDispatchStore = create((set, get) => ({
 
       const fetchDespachosRest = async () => {
         try {
-          const res = await fetchFirestoreWithAuth(`${baseUrl}/despachos?pageSize=15`, apiKey).catch(() => null);
+          const queryUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents:runQuery`;
+          const res = await fetchFirestoreWithAuth(queryUrl, apiKey, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              structuredQuery: {
+                from: [{ collectionId: 'despachos' }],
+                where: {
+                  fieldFilter: {
+                    field: { fieldPath: 'estado' },
+                    op: 'IN',
+                    value: {
+                      arrayValue: {
+                        values: [
+                          { stringValue: 'activa' },
+                          { stringValue: 'ACTIVA' },
+                          { stringValue: 'activo' },
+                          { stringValue: 'ACTIVO' },
+                          { stringValue: 'pre-despacho' },
+                          { stringValue: 'PRE-DESPACHO' },
+                          { stringValue: 'en curso' },
+                          { stringValue: 'EN CURSO' }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            })
+          }).catch(() => null);
           if (res && res.ok) {
-            const dJson = await res.json();
-            return (dJson?.documents || []).map((docItem) => ({
-              id: docItem.name.split('/').pop(),
-              data: parseRestDocFields(docItem),
-              hasPendingWrites: false
-            }));
+            const rows = await res.json();
+            if (Array.isArray(rows)) {
+              return rows
+                .filter((r) => r && r.document && r.document.name)
+                .map((r) => ({
+                  id: r.document.name.split('/').pop(),
+                  data: parseRestDocFields(r.document),
+                  hasPendingWrites: false
+                }));
+            }
           }
         } catch (_) {}
         return null;
@@ -1666,6 +1698,7 @@ export const useDispatchStore = create((set, get) => ({
       }
 
       console.log(`📡 [SENTINEL ONE] Conectando 6 listeners onSnapshot en vivo a: ${fbConfig.projectId}`);
+      get().hydrateFromFirestoreRest(true);
 
       // =====================================================================
       // 1. LISTENER EN TIEMPO REAL: DESPACHOS ACTIVOS (`despachos`)
@@ -1687,8 +1720,13 @@ export const useDispatchStore = create((set, get) => ({
         get().applyDispatchesRawDocs(rawDocs);
       }, (err) => {
         console.warn('⚠️ [SENTINEL ONE] Error en listener onSnapshot despachos:', err.message);
+        unsubDespachos = null;
+        activeSubscribedProjectId = '';
         set({ isLoading: false });
-        get().hydrateFromFirestoreRest();
+        get().hydrateFromFirestoreRest(true);
+        setTimeout(() => {
+          get().subscribeRealtime();
+        }, 2500);
       });
 
       // =====================================================================

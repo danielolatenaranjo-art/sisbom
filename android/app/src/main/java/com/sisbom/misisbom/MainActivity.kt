@@ -1711,6 +1711,8 @@ class DispatchForegroundService : Service() {
                         opFinal.isEmpty() && !cerrado
                     }
 
+                    MainActivity.emitNativeDispatchesSnapshot(activeDocs)
+
                     if (isInitialLoad) {
                         for (doc in activeDocs) {
                             notifiedDispatches.add(doc.id)
@@ -2548,6 +2550,61 @@ class MainActivity : ComponentActivity() {
         private var dynamicFirebaseApp: FirebaseApp? = null
         @Volatile
         private var currentTenantProjectId: String? = null
+        @Volatile
+        private var activeWebView: WebView? = null
+        @Volatile
+        private var lastNativeDispatchesMsgJson: String? = null
+
+        private fun anyToJsonValue(value: Any?): Any {
+            return when (value) {
+                null -> JSONObject.NULL
+                is Map<*, *> -> {
+                    val obj = JSONObject()
+                    for ((k, v) in value) {
+                        val key = k?.toString() ?: continue
+                        obj.put(key, anyToJsonValue(v))
+                    }
+                    obj
+                }
+                is Iterable<*> -> {
+                    val arr = org.json.JSONArray()
+                    for (item in value) {
+                        arr.put(anyToJsonValue(item))
+                    }
+                    arr
+                }
+                is com.google.firebase.Timestamp -> value.toDate().time
+                is Number, is Boolean, is String -> value
+                else -> value.toString()
+            }
+        }
+
+        fun emitNativeDispatchesSnapshot(docs: List<com.google.firebase.firestore.DocumentSnapshot>) {
+            try {
+                val arr = org.json.JSONArray()
+                for (d in docs) {
+                    val item = JSONObject()
+                    item.put("id", d.id)
+                    item.put("data", anyToJsonValue(d.data ?: emptyMap<String, Any>()))
+                    item.put("hasPendingWrites", false)
+                    arr.put(item)
+                }
+                val msg = JSONObject()
+                msg.put("collection", "despachos")
+                msg.put("payload", arr)
+                val msgStr = msg.toString()
+                lastNativeDispatchesMsgJson = msgStr
+                val wv = activeWebView ?: return
+                wv.post {
+                    try {
+                        wv.evaluateJavascript(
+                            "try { var msg = $msgStr; window.__SENTINEL_NATIVE_SNAPSHOTS__ = window.__SENTINEL_NATIVE_SNAPSHOTS__ || {}; window.__SENTINEL_NATIVE_SNAPSHOTS__[msg.collection] = msg.payload; window.dispatchEvent(new CustomEvent('sentinelNativeFirestoreSync', { detail: msg })); } catch(e) {}",
+                            null
+                        )
+                    } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+        }
 
         private val knownAndroidAppIdsByProject = mapOf(
             "sisbom-central" to "1:432594591351:android:99a442ea6ae05276beb072",
@@ -2599,7 +2656,7 @@ class MainActivity : ComponentActivity() {
                     if (idToken.isBlank()) return@Thread
 
                     val encodedUid = Uri.encode(prevUid)
-                    val patchUrl = URL("https://firestore.googleapis.com/v1/projects/$prevPid/databases/(default)/documents/personal/$encodedUid?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=hardwareDeviceId&updateMask.fieldPaths=_metaTimestamp")
+                    val patchUrl = URL("https://firestore.googleapis.com/v1/projects/$prevPid/databases/(default)/documents/personal/$encodedUid?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=_metaTimestamp")
                     val patchConn = (patchUrl.openConnection() as HttpURLConnection).apply {
                         requestMethod = "PATCH"
                         doOutput = true
@@ -2611,9 +2668,6 @@ class MainActivity : ComponentActivity() {
                     val nowMs = System.currentTimeMillis()
                     val fieldsObj = JSONObject().apply {
                         put("deviceId", JSONObject().put("stringValue", ""))
-                        put("tokenFcm", JSONObject().put("stringValue", ""))
-                        put("fcmToken", JSONObject().put("stringValue", ""))
-                        put("hardwareDeviceId", JSONObject().put("stringValue", ""))
                         put("_metaTimestamp", JSONObject().put("integerValue", nowMs.toString()))
                     }
                     val patchBody = JSONObject().put("fields", fieldsObj)
@@ -2757,7 +2811,6 @@ class MainActivity : ComponentActivity() {
             val activePid = currentTenantProjectId ?: try { FirebaseApp.getInstance().options.projectId ?: "" } catch (_: Exception) { "" }
 
             val applyToken: (String) -> Unit = { token ->
-                val hwId = getHardwareDeviceId(appContext)
                 val edit = prefs.edit()
                     .putString("FCM_TOKEN", token)
                     .putString("LAST_TENANT_USER_ID", userId)
@@ -2788,9 +2841,6 @@ class MainActivity : ComponentActivity() {
                     db.collection("personal").document(userId).set(
                         mapOf(
                             "deviceId" to token,
-                            "tokenFcm" to token,
-                            "fcmToken" to token,
-                            "hardwareDeviceId" to hwId,
                             "platform" to "android",
                             "_metaTimestamp" to System.currentTimeMillis()
                         ),
@@ -3041,6 +3091,13 @@ class MainActivity : ComponentActivity() {
                         "try { window.__SENTINEL_HW_DEVICE_ID__ = '$hwId'; if ('$fcmTok') window.__SENTINEL_FCM_TOKEN__ = '$fcmTok'; } catch(e) {}",
                         null
                     )
+                    val cachedDispatchesJson = lastNativeDispatchesMsgJson
+                    if (!cachedDispatchesJson.isNullOrBlank()) {
+                        view?.evaluateJavascript(
+                            "try { window.dispatchEvent(new CustomEvent('sentinelNativeFirestoreSync', { detail: $cachedDispatchesJson })); } catch(e) {}",
+                            null
+                        )
+                    }
                     dispatchPendingIntentToWebView()
                 }
             }
@@ -3062,6 +3119,7 @@ class MainActivity : ComponentActivity() {
         }
 
         webView = wv
+        activeWebView = wv
         setContentView(wv)
         ViewCompat.setOnApplyWindowInsetsListener(wv) { view, windowInsets ->
             val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -3466,6 +3524,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        if (activeWebView === webView) {
+            activeWebView = null
+        }
         try {
             if (wakeLock?.isHeld == true) {
                 wakeLock?.release()
@@ -3633,9 +3694,6 @@ class MainActivity : ComponentActivity() {
                         db.collection("personal").document(oldUserId).set(
                             mapOf(
                                 "deviceId" to "",
-                                "tokenFcm" to "",
-                                "fcmToken" to "",
-                                "hardwareDeviceId" to "",
                                 "_metaTimestamp" to System.currentTimeMillis()
                             ),
                             SetOptions.merge()

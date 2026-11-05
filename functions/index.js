@@ -640,7 +640,7 @@ exports.subscribeTokenToTopics = onDocumentCreated("personal/{userId}", async (e
   if (!snap) return;
   const data = snap.data() || {};
   const userId = String(data.idRegistro || event.params.userId || "").trim();
-  const tok = String(data.deviceId || data.tokenFcm || data.fcmToken || "").trim();
+  const tok = String(data.deviceId || "").trim();
   const isConductor = Boolean(data.conductor);
   if (isValidFcmRegistrationToken(tok)) {
     await subscribeFcmTokenForUser(tok, userId, isConductor, false);
@@ -651,8 +651,8 @@ exports.syncTokenTopicsOnUpdate = onDocumentUpdated("personal/{userId}", async (
   const before = event.data.before.data() || {};
   const after = event.data.after.data() || {};
   const userId = String(after.idRegistro || event.params.userId || "").trim();
-  const tokAfter = String(after.deviceId || after.tokenFcm || after.fcmToken || "").trim();
-  const tokBefore = String(before.deviceId || before.tokenFcm || before.fcmToken || "").trim();
+  const tokAfter = String(after.deviceId || "").trim();
+  const tokBefore = String(before.deviceId || "").trim();
   const condAfter = Boolean(after.conductor);
   const condBefore = Boolean(before.conductor);
   if (isValidFcmRegistrationToken(tokAfter) && (tokAfter !== tokBefore || condAfter !== condBefore)) {

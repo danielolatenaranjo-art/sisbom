@@ -424,19 +424,14 @@ export const useAuthStore = create((set, get) => ({
     if (isBypass || isReadOnly) return false;
 
     const nowTs = Date.now();
-    const hwId = typeof window !== 'undefined' ? String(window.__SENTINEL_HW_DEVICE_ID__ || '').trim() : '';
     try {
       const db = getDb();
       if (db) {
         await ensureFirebaseAuth();
-        const patchObj = {
+        await updateDoc(doc(db, 'personal', docId), {
           deviceId: cleanToken,
-          tokenFcm: cleanToken,
-          fcmToken: cleanToken,
           _metaTimestamp: nowTs
-        };
-        if (hwId) patchObj.hardwareDeviceId = hwId;
-        await updateDoc(doc(db, 'personal', docId), patchObj);
+        });
         return true;
       }
     } catch (_) {
@@ -444,19 +439,16 @@ export const useAuthStore = create((set, get) => ({
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return false;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const maskHw = hwId ? '&updateMask.fieldPaths=hardwareDeviceId' : '';
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=_metaTimestamp${maskHw}`;
-      const fieldsObj = {
-        deviceId: { stringValue: cleanToken },
-        tokenFcm: { stringValue: cleanToken },
-        fcmToken: { stringValue: cleanToken },
-        _metaTimestamp: { integerValue: String(nowTs) }
-      };
-      if (hwId) fieldsObj.hardwareDeviceId = { stringValue: hwId };
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=_metaTimestamp`;
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fields: fieldsObj })
+        body: JSON.stringify({
+          fields: {
+            deviceId: { stringValue: cleanToken },
+            _metaTimestamp: { integerValue: String(nowTs) }
+          }
+        })
       }).catch(() => {});
     }
     return true;
@@ -644,11 +636,10 @@ export const useAuthStore = create((set, get) => ({
           return { success: false, error: errMsg };
         }
 
-        const existingDeviceId = String(foundMatch.deviceId ?? foundMatch.tokenFcm ?? foundMatch.fcmToken ?? '').trim();
-        if (existingDeviceId !== '') {
+        const existingDeviceId = String(foundMatch.deviceId ?? '').trim();
+        if (existingDeviceId !== '' && existingDeviceId.includes(':') && existingDeviceId.length > 60) {
           const myFcmTok = typeof window !== 'undefined' ? String(window.__SENTINEL_FCM_TOKEN__ || '').trim() : '';
           const myApnsTok = typeof window !== 'undefined' ? String(window.__SENTINEL_APNS_TOKEN__ || '').trim().toLowerCase() : '';
-          const myHwId = typeof window !== 'undefined' ? String(window.__SENTINEL_HW_DEVICE_ID__ || '').trim() : '';
           const lastKcSession = typeof window !== 'undefined' ? String(window.__SENTINEL_KEYCHAIN_LAST_SESSION__ || '').trim() : '';
           const currentPid = String(useLicenseStore.getState().firebaseConfig?.projectId || '').trim();
           const targetDocId = String(foundMatch.idRegistro || cleanId).trim();
@@ -656,7 +647,6 @@ export const useAuthStore = create((set, get) => ({
           const isSamePhysicalDevice =
             (myFcmTok !== '' && existingDeviceId === myFcmTok) ||
             (myApnsTok !== '' && String(foundMatch.apnsToken || '').trim().toLowerCase() === myApnsTok) ||
-            (myHwId !== '' && String(foundMatch.hardwareDeviceId || '').trim() === myHwId) ||
             (lastKcSession !== '' && currentPid !== '' && lastKcSession === `${currentPid}:${targetDocId}`);
 
           if (!isSamePhysicalDevice) {
@@ -1204,10 +1194,7 @@ export const useAuthStore = create((set, get) => ({
             doc(db, 'personal', docId),
             {
               deviceId: '',
-              tokenFcm: '',
-              fcmToken: '',
               apnsToken: '',
-              hardwareDeviceId: '',
               _metaTimestamp: Date.now()
             },
             { merge: true }
