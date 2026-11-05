@@ -419,6 +419,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             guard let self = self else { return }
             self.prepareVolumeViewInWindow()
             guard let vv = self.hiddenVolumeView else { return }
+            vv.setNeedsLayout()
+            vv.layoutIfNeeded()
             for subview in vv.subviews {
                 if let slider = subview as? UISlider {
                     slider.setValue(1.0, animated: false)
@@ -431,9 +433,11 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         } else {
             DispatchQueue.main.async(execute: applyMax)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: applyMax)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: applyMax)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.35, execute: applyMax)
     }
 
     func resolveSoundFileName(for claveOrName: String) -> String {
@@ -477,6 +481,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             return
         }
         if let ka = keepAlivePlayer, ka.isPlaying {
+            ka.volume = 0.002
             return
         }
 
@@ -487,10 +492,11 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try session.setActive(true)
+            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try? session.setActive(true)
             let player = try AVAudioPlayer(contentsOf: url)
-            player.volume = 0.0
+            // Volumen 0.002 (-54dB, inaudible al oído humano pero evita que CoreAudio suspenda el stream por volumen 0.0)
+            player.volume = 0.002
             player.numberOfLoops = -1
             player.prepareToPlay()
             player.play()
@@ -504,6 +510,12 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     func play(nameOrClave: String, forceMaxVolume: Bool = true) {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.play(nameOrClave: nameOrClave, forceMaxVolume: forceMaxVolume)
+            }
+            return
+        }
         let defaults = UserDefaults.standard
         let upper = nameOrClave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         if defaults.bool(forKey: "MODO_AVION") {
@@ -526,7 +538,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
         audioPlayer?.stop()
         audioPlayer = nil
-        stopBackgroundKeepAlive()
+        keepAlivePlayer?.volume = 0.0
 
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "mp3")
@@ -536,17 +548,19 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             return
         }
 
-        do {
-            let session = AVAudioSession.sharedInstance()
-            if forceMaxVolume {
-                forceHardwareSystemVolumeToMax()
-                // .playback ignora el interruptor físico de silencio en iOS para emergencias en 0-9
-                try session.setCategory(.playback, mode: .default, options: [.duckOthers])
-            } else {
-                try session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+        let session = AVAudioSession.sharedInstance()
+        if forceMaxVolume {
+            // CRÍTICO: Usar [.mixWithOthers, .duckOthers] con .playback en segundo plano
+            // para saltar el interruptor físico de silencio (botón de silencio) SIN lanzar error 561015905 (!pla)
+            if (try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers, .duckOthers])) == nil {
+                try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             }
-            try session.setActive(true)
+        } else {
+            try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+        }
+        try? session.setActive(true)
 
+        do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
             player.volume = 1.0
@@ -555,6 +569,9 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             self.audioPlayer = player
             self.lastAlarmStartMs = nowMs
             self.lastPlayedSoundKey = fileName
+            if forceMaxVolume {
+                forceHardwareSystemVolumeToMax()
+            }
             vibrateEmergency()
         } catch {
             vibrateEmergency()
@@ -589,36 +606,72 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     func cancelRepeat(for dispatchId: String) {
-        let keys = repeatTimers.keys.filter { $0 == dispatchId || $0.hasPrefix("\(dispatchId)_") }
-        for k in keys {
-            repeatTimers[k]?.invalidate()
-            repeatTimers.removeValue(forKey: k)
+        let cancelBlock: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            let keys = self.repeatTimers.keys.filter { $0 == dispatchId || $0.hasPrefix("\(dispatchId)_") }
+            for k in keys {
+                self.repeatTimers[k]?.invalidate()
+                self.repeatTimers.removeValue(forKey: k)
+            }
+            let notifId = "repeat_60s_\(dispatchId)"
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notifId])
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notifId])
+        }
+        if Thread.isMainThread {
+            cancelBlock()
+        } else {
+            DispatchQueue.main.async(execute: cancelBlock)
         }
     }
 
     func scheduleRepeat(dispatchId: String, clave: String) {
-        cancelRepeat(for: dispatchId)
-        let timer = Timer.scheduledTimer(withTimeInterval: 60.0, repeats: false) { [weak self] _ in
+        let scheduleBlock: () -> Void = { [weak self] in
             guard let self = self else { return }
-            self.repeatTimers.removeValue(forKey: dispatchId)
-            let defaults = UserDefaults.standard
-            if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "IS_CENTRAL_ACTIVE") { return }
-            let estado = defaults.string(forKey: "USER_ESTADO") ?? "0-8"
-            if estado != "0-9" { return }
-            let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
-            let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
-            if declined.contains(dispatchId) || attended.contains(dispatchId) { return }
+            self.cancelRepeat(for: dispatchId)
 
-            let enServicio = defaults.string(forKey: "USER_EN_SERVICIO") ?? ""
-            if enServicio == dispatchId || enServicio == "-\(dispatchId)" { return }
-
-            if AppDelegate.isAppInForeground {
-                self.vibrateEmergency()
-            } else {
-                self.play(nameOrClave: clave, forceMaxVolume: true)
+            // 1. Respaldo del sistema iOS a los 60s exactos por si el dispositivo bloqueado congela el proceso
+            let fileName = self.resolveSoundFileName(for: clave)
+            let content = UNMutableNotificationContent()
+            content.title = "🚨 RECORDATORIO DESPACHO \(clave)"
+            content.body = "Aún no has confirmado asistencia (ASISTIR / NO ASISTIR)"
+            content.categoryIdentifier = "EMERGENCY_DISPATCH"
+            content.userInfo = ["type": "DISPATCH", "payloadId": dispatchId, "clave": clave, "isRepeat60s": "true"]
+            content.sound = UNNotificationSound(named: UNNotificationSoundName("\(fileName).mp3"))
+            if #available(iOS 15.0, *) {
+                content.interruptionLevel = .timeSensitive
+                content.relevanceScore = 1.0
             }
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60.0, repeats: false)
+            let req = UNNotificationRequest(identifier: "repeat_60s_\(dispatchId)", content: content, trigger: trigger)
+            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+
+            // 2. Timer en RunLoop.main (.common) para disparar el segundo tono al 100% de volumen saltando modo silencio
+            let timer = Timer(timeInterval: 60.0, repeats: false) { [weak self] _ in
+                guard let self = self else { return }
+                self.repeatTimers.removeValue(forKey: dispatchId)
+                let defaults = UserDefaults.standard
+                if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "IS_CENTRAL_ACTIVE") { return }
+                let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-8").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if estado != "0-9" { return }
+                let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
+                let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
+                if declined.contains(dispatchId) || attended.contains(dispatchId) { return }
+
+                let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if enServicio == dispatchId || enServicio == "-\(dispatchId)" { return }
+
+                // El segundo tono a los 60 segundos SIEMPRE debe sonar si el bombero no ha puesto Asistir o No Asistir
+                self.play(nameOrClave: clave, forceMaxVolume: true)
+                AppDelegate.dispatchNativeIntentToWebView(dispatchId: dispatchId, showFullscreen: true)
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            self.repeatTimers[dispatchId] = timer
         }
-        repeatTimers[dispatchId] = timer
+        if Thread.isMainThread {
+            scheduleBlock()
+        } else {
+            DispatchQueue.main.async(execute: scheduleBlock)
+        }
     }
 }
 
@@ -893,7 +946,7 @@ final class IOSRealtimeService {
                     continue
                 }
 
-                // A. Nuevo despacho o pre-despacho en vivo
+                    // A. Nuevo despacho o pre-despacho en vivo (Primer tono + programación del segundo tono a los 60s)
                 if !self.knownDispatchIds.contains(docId) {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
@@ -906,6 +959,7 @@ final class IOSRealtimeService {
                         if AppDelegate.isAppInForeground {
                             IOSSoundPlayer.shared.vibrateEmergency()
                             if is09 {
+                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             }
                         } else {
@@ -927,33 +981,13 @@ final class IOSRealtimeService {
                         }
                     }
                 } else {
-                    // A2. Transición de pre-despacho -> activa / en curso
+                    // A2. Transición de pre-despacho -> activa / en curso:
+                    // NO debe volver a sonar ni reiniciar el contador de 60 segundos; el segundo tono es únicamente a los 60s del primer tono.
                     let prevEstado = self.lastDispatchEstados[docId] ?? ""
                     self.lastDispatchEstados[docId] = estado
                     let isPreToActive = (prevEstado == "pre-despacho") && (estado == "activa" || estado == "activo" || estado == "en curso")
-                    if isPreToActive && !isAttending && !hasDeclined {
-                        if AppDelegate.isAppInForeground {
-                            IOSSoundPlayer.shared.vibrateEmergency()
-                            if is09 {
-                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                            }
-                        } else {
-                            if is09 {
-                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
-                                AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
-                            } else {
-                                IOSSoundPlayer.shared.vibrateEmergency()
-                            }
-                            self.postLocalBanner(
-                                id: "disp_act_\(docId)",
-                                title: "🚨 DESPACHO \(clave)",
-                                body: direccion,
-                                soundName: nil,
-                                playDefaultIfNil: !is09,
-                                userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
-                            )
-                        }
+                    if isPreToActive && !isAttending && !hasDeclined && is09 {
+                        AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                     }
 
                     // B. Escalamiento (10-30 / FORESTAL / 9-0)
@@ -1862,6 +1896,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
 
+        let isRepeat60s = ((userInfo["isRepeat60s"] as? String) == "true")
         if is1210or66 {
             if Self.isAppInForeground {
                 IOSSoundPlayer.shared.vibrateEmergency()
@@ -1872,15 +1907,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
         } else if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
-            if Self.isAppInForeground {
+            if Self.isAppInForeground && !isRepeat60s {
                 IOSSoundPlayer.shared.vibrateEmergency()
                 if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                     Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
                 }
             } else {
                 IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                 if !payloadId.isEmpty {
-                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
+                    if !isRepeat60s {
+                        IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
+                    }
                     Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
                 }
             }
@@ -1898,6 +1936,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let type = (userInfo["type"] as? String) ?? ""
         let payloadId = (userInfo["payloadId"] as? String) ?? (userInfo["dispatchId"] as? String) ?? ""
         let clave = (userInfo["clave"] as? String) ?? ""
+        let isRepeat60s = ((userInfo["isRepeat60s"] as? String) == "true")
         let defaults = UserDefaults.standard
 
         if defaults.bool(forKey: "MODO_AVION") {
@@ -1953,14 +1992,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             if !payloadId.isEmpty && (is09 || isEscalation) {
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
-            if Self.isAppInForeground {
+            if Self.isAppInForeground && !isRepeat60s {
                 IOSSoundPlayer.shared.vibrateEmergency()
+                if !payloadId.isEmpty && is09 {
+                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
+                }
                 completionHandler([])
                 return
             }
             if is09 || isEscalation {
                 IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-                if !payloadId.isEmpty {
+                if !payloadId.isEmpty && !isRepeat60s {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                 }
                 completionHandler([.banner, .list])

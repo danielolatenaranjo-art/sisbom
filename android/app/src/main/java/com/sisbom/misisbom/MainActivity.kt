@@ -932,8 +932,8 @@ object NotificationHelper {
             }
         }
 
-        // Si es un despacho (o escalamiento) con sonido fuerte activo en segundo plano, programar repetición a los 60 segundos si no ha respondido
-        if (dispatchId != null && playLoud && !isUserLookingAtApp && (is09 || isEscalation) && !skipSoundBecauseAlreadyPlayed && !isReadOnlyUser && !isPartialSilentStatus) {
+        // Programar siempre el segundo tono a los 60 segundos del primer tono si el bombero está en 0-9 (o escalamiento) y no ha respondido
+        if (dispatchId != null && playLoud && (is09 || isEscalation) && !skipSoundBecauseAlreadyPlayed && !isReadOnlyUser && !isPartialSilentStatus) {
             scheduleRepeatAlert(context.applicationContext, dispatchId, claveForRepeat ?: title)
         }
 
@@ -1120,7 +1120,6 @@ object NotificationHelper {
             val attendedIds = prefs.getStringSet("ATTENDED_DISPATCH_IDS", emptySet()) ?: emptySet()
             val userEnServicio = (prefs.getString("USER_EN_SERVICIO", "") ?: "").trim()
             if (declinedIds.contains(dispatchId) || attendedIds.contains(dispatchId) || userEnServicio == dispatchId || userEnServicio == "-$dispatchId") return@Runnable
-            if (MainActivity.isAppInForeground) return@Runnable
 
             val db = MainActivity.getActiveFirestore(context)
             db.collection("despachos").document(dispatchId).get().addOnSuccessListener { doc ->
@@ -1198,7 +1197,6 @@ object NotificationHelper {
             val declinedIds = prefs.getStringSet("DECLINED_DISPATCH_IDS", emptySet()) ?: emptySet()
             val userEnServicio = (prefs.getString("USER_EN_SERVICIO", "") ?: "").trim()
             if (attendedIds.contains(dispatchId) || declinedIds.contains(dispatchId) || userEnServicio == dispatchId || userEnServicio == "-$dispatchId") return@Runnable
-            if (MainActivity.isAppInForeground) return@Runnable
             if (userEstado != "0-9") return@Runnable
             if (is1210 && !isConductor) return@Runnable
             if (estadoEspecial in listOf("CDS", "SUSPENDIDO", "LICENCIA", "SILENCIO_ABSOLUTO", "PERMISO", "COMISION_SERVICIO")) return@Runnable
@@ -1394,9 +1392,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
-        val rawEstadoPush = (data["estado"] ?: "activa").trim().lowercase(Locale.ROOT)
         val soundTrackKey = when (type) {
-            "DISPATCH" -> if (dispatchId != null && rawEstadoPush == "pre-despacho") "${dispatchId}_pre" else dispatchId
+            "DISPATCH" -> dispatchId
             "DISPATCH_UPDATE" -> when {
                 dispatchId != null && is1210or66Push -> "${dispatchId}_req_${data["createdAt"] ?: title}"
                 dispatchId != null && isEscalation -> "${dispatchId}_${clave}"
@@ -1864,12 +1861,12 @@ class DispatchForegroundService : Service() {
                             }
                         })
 
-                    // 1. Detectar nuevo despacho
+                    // 1. Detectar nuevo despacho (Primer tono + programación del segundo tono a los 60s)
                     if (!notifiedDispatches.contains(id)) {
                         notifiedDispatches.add(id)
                         lastDispatchClaves[id] = clave
                         lastDispatchEstados[id] = estadoDoc
-                        val trackKey = if (estadoDoc == "PRE-DESPACHO") "${id}_pre" else id
+                        val trackKey = id
 
                         if (TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt) || isAlreadyAttending || hasAlreadyDeclined) {
                             PlayedSoundsTracker.markPlayed(applicationContext, trackKey)
@@ -1922,15 +1919,13 @@ class DispatchForegroundService : Service() {
                             } catch (_: Exception) {}
                         }
                     } else {
-                        // 1B. Transición de PRE-DESPACHO -> ACTIVA / EN CURSO
+                        // 1B. Transición de PRE-DESPACHO -> ACTIVA / EN CURSO:
+                        // NO debe volver a sonar ni reiniciar el contador de 60 segundos; solo actualiza el texto del banner en silencio.
                         val prevEstado = lastDispatchEstados[id] ?: ""
                         lastDispatchEstados[id] = estadoDoc
                         val isPreToActive = prevEstado == "PRE-DESPACHO" && (estadoDoc == "ACTIVA" || estadoDoc == "ACTIVO" || estadoDoc == "EN CURSO")
                         if (isPreToActive && !isAlreadyAttending && !hasAlreadyDeclined) {
-                            val alreadyPlayedActive = PlayedSoundsTracker.hasPlayed(applicationContext, id)
-                            if (!alreadyPlayedActive) {
-                                PlayedSoundsTracker.markPlayed(applicationContext, id)
-                            }
+                            PlayedSoundsTracker.markPlayed(applicationContext, id)
                             val soundRes = NotificationHelper.getSoundResForClave(applicationContext, clave)
                             val bodyText = if (unidadesStr.isNotEmpty()) "$direccion\nUnidades: $unidadesStr" else direccion
                             NotificationHelper.sendNotification(
@@ -1940,34 +1935,9 @@ class DispatchForegroundService : Service() {
                                 isCritical = true,
                                 customSoundRes = soundRes,
                                 dispatchId = id,
-                                skipSoundBecauseAlreadyPlayed = alreadyPlayedActive,
+                                skipSoundBecauseAlreadyPlayed = true,
                                 claveForRepeat = clave
                             )
-                            val isCentral = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
-                            val userRango = prefs.getString("USER_RANGO", "") ?: ""
-                            val isReadOnlyUser = userRango.trim().equals("BOMBERO HONORARIO", ignoreCase = true)
-                            val estadoEspecial = prefs.getString("USER_ESTADO_ESPECIAL", "") ?: ""
-                            val isSilentStatus = estadoEspecial in listOf("CDS", "SUSPENDIDO", "LICENCIA", "SILENCIO_ABSOLUTO", "PERMISO", "COMISION_SERVICIO")
-                            if (!alreadyPlayedActive && !isCentral && !isReadOnlyUser && !isSilentStatus && userEstado == "0-9") {
-                                try {
-                                    val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-                                    @Suppress("DEPRECATION")
-                                    val wl = pm.newWakeLock(
-                                        PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.ON_AFTER_RELEASE,
-                                        "SentinelOneV3::ServicePreToActiveWake"
-                                    )
-                                    wl.acquire(12_000L)
-                                } catch (_: Exception) {}
-                                try {
-                                    val fullScreenIntent = Intent(this@DispatchForegroundService, MainActivity::class.java).apply {
-                                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                                        putExtra("DISPATCH_ID", id)
-                                        putExtra("SHOW_FULLSCREEN_ALERT", true)
-                                        putExtra("AUTO_LAUNCHED_FROM_ALARM", true)
-                                    }
-                                    startActivity(fullScreenIntent)
-                                } catch (_: Exception) {}
-                            }
                         }
 
                         // 2. Detectar escalamiento (10-0 -> 10-30, 10-2 -> ALARMA FORESTAL)
