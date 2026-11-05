@@ -1,9 +1,167 @@
 const {onDocumentCreated, onDocumentUpdated, onDocumentWritten} = require("firebase-functions/v2/firestore");
 const {setGlobalOptions} = require("firebase-functions/v2");
 const admin = require("firebase-admin");
+const crypto = require("crypto");
+const http2 = require("http2");
 
 admin.initializeApp();
 setGlobalOptions({maxInstances: 10});
+
+// ============================================================================
+// DIRECT HTTP/2 APNs SENDER (BYPASSES FIREBASE CONSOLE APNs CREDENTIAL ISSUES)
+// Key ID: 5LAKW2U93F | Team ID: NFR3L3CC3L | Environment: Sandbox & Production
+// ============================================================================
+const APNS_KEY_ID = "5LAKW2U93F";
+const APNS_TEAM_ID = "NFR3L3CC3L";
+const APNS_BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L";
+const APNS_P8_KEY = [
+  "-----BEGIN PRIVATE KEY-----",
+  "MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgZq+ZjJqT3FVw7uPJ",
+  "asrKEqqdSX1W+Tw91JLjhNuO/gKgCgYIKoZIzj0DAQehRANCAAQqqufVBTeS4nD6",
+  "u278mfmTx8IzESZBMjI33kiFaLES4bolidmABM12l4PIzIPrHSQzKBAxsk7mGNPP",
+  "RqGC5IA9",
+  "-----END PRIVATE KEY-----"
+].join("\n");
+
+let cachedApnsJwt = "";
+let cachedApnsJwtIssuedAt = 0;
+
+function getApnsJwt() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (cachedApnsJwt && (nowSec - cachedApnsJwtIssuedAt) < 2700) {
+    return cachedApnsJwt;
+  }
+  const header = Buffer.from(JSON.stringify({alg: "ES256", kid: APNS_KEY_ID})).toString("base64url");
+  const claims = Buffer.from(JSON.stringify({iss: APNS_TEAM_ID, iat: nowSec})).toString("base64url");
+  const sign = crypto.createSign("SHA256");
+  sign.update(`${header}.${claims}`);
+  const sig = sign.sign({key: APNS_P8_KEY, dsaEncoding: "ieee-p1363"}).toString("base64url");
+  cachedApnsJwt = `${header}.${claims}.${sig}`;
+  cachedApnsJwtIssuedAt = nowSec;
+  return cachedApnsJwt;
+}
+
+function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority = "10") {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (res) => {
+      if (!settled) {
+        settled = true;
+        resolve(res);
+      }
+    };
+    try {
+      const client = http2.connect(host);
+      client.on("error", (err) => {
+        try { client.close(); } catch (_) {}
+        finish({status: 0, reason: err.message});
+      });
+      client.setTimeout(6000, () => {
+        try { client.close(); } catch (_) {}
+        finish({status: 0, reason: "timeout"});
+      });
+      const headers = {
+        ":method": "POST",
+        ":path": `/3/device/${apnsToken}`,
+        "authorization": `bearer ${getApnsJwt()}`,
+        "apns-topic": APNS_BUNDLE_ID,
+        "apns-push-type": "alert",
+        "apns-priority": String(priority)
+      };
+      if (collapseId) {
+        headers["apns-collapse-id"] = String(collapseId).slice(0, 64);
+      }
+      const req = client.request(headers);
+      let status = 0;
+      let respBody = "";
+      req.on("response", (h) => { status = Number(h[":status"] || 0); });
+      req.on("data", (chunk) => { respBody += chunk; });
+      req.on("end", () => {
+        try { client.close(); } catch (_) {}
+        finish({status, body: respBody});
+      });
+      req.on("error", (err) => {
+        try { client.close(); } catch (_) {}
+        finish({status: 0, reason: err.message});
+      });
+      req.end(JSON.stringify(payloadObj));
+    } catch (err) {
+      finish({status: 0, reason: err.message});
+    }
+  });
+}
+
+async function sendDirectApnsToDevice(apnsToken, payloadObj, collapseId, priority = "10") {
+  const cleanHex = String(apnsToken || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(cleanHex)) return;
+  const prodRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority);
+  if (prodRes.status === 400 && String(prodRes.body || "").includes("BadDeviceToken")) {
+    await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority);
+  }
+}
+
+async function sendDirectApnsToIosUsers({
+  title,
+  body,
+  sound = "despacho.mp3",
+  category = "EMERGENCY_DISPATCH",
+  interruptionLevel = "time-sensitive",
+  relevanceScore = 1.0,
+  priority = "10",
+  collapseId = "",
+  data = {},
+  targetUserIds = null,
+  onlyConductors = false
+}) {
+  try {
+    const db = admin.firestore();
+    let docs = [];
+    if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
+      const snaps = await Promise.all(
+        targetUserIds.map((uid) => db.collection("personal").doc(String(uid).trim()).get().catch(() => null))
+      );
+      docs = snaps.filter((s) => s && s.exists);
+    } else {
+      const snap = await db.collection("personal").get();
+      docs = snap.docs;
+    }
+
+    const apnsTokens = new Set();
+    for (const d of docs) {
+      const p = d.data() || {};
+      if (p.modoAvion === true || p.silencioAbsoluto === true) continue;
+      if (onlyConductors && !p.conductor) continue;
+      const candidate = String(p.apnsToken || "").trim().toLowerCase();
+      if (/^[0-9a-f]{64}$/.test(candidate)) {
+        apnsTokens.add(candidate);
+      }
+    }
+
+    if (apnsTokens.size === 0) return;
+
+    const payloadObj = Object.assign({}, data, {
+      aps: {
+        alert: {
+          title: String(title || "SENTINEL ONE"),
+          body: String(body || "")
+        },
+        sound: String(sound || "default"),
+        badge: 1,
+        category: String(category || "EMERGENCY_DISPATCH"),
+        "interruption-level": String(interruptionLevel || "time-sensitive"),
+        "relevance-score": Number(relevanceScore || 1.0),
+        "content-available": 1,
+        "mutable-content": 1
+      }
+    });
+
+    await Promise.all(
+      Array.from(apnsTokens).map((tok) => sendDirectApnsToDevice(tok, payloadObj, collapseId, priority))
+    );
+  } catch (err) {
+    console.warn("APNs direct send warning:", err.message);
+  }
+}
 
 function resolveApnsSound(clave) {
   if (!clave) return "despacho.mp3";
@@ -187,7 +345,17 @@ exports.onNewDispatch = onDocumentCreated("despachos/{dispatchId}", async (event
     }
   };
 
-  await admin.messaging().send(message);
+  await Promise.all([
+    admin.messaging().send(message).catch((e) => console.warn("FCM onNewDispatch warning:", e.message)),
+    sendDirectApnsToIosUsers({
+      title: `🚨 DESPACHO: ${clave}`,
+      body: unidades ? `${direccion}\nUnidades: ${unidades}` : `${direccion}`,
+      sound: apnsSound,
+      category: "EMERGENCY_DISPATCH",
+      collapseId: `disp_${dispatchId}`,
+      data: message.data
+    })
+  ]);
 });
 
 // 2. ACTUALIZACIÓN DE DESPACHO (Escalamiento 10-0 -> 10-30, 10-2 -> FORESTAL y Solicitudes 12-10 / 6-6)
@@ -218,38 +386,49 @@ exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (e
       newClave.includes("FORESTAL") ||
       newClave.includes("9-0");
     if (isEscalation) {
-      await admin.messaging().send({
-        topic: "despachos",
-        data: {
-          type: "DISPATCH_UPDATE",
-          payloadId: String(dispatchId),
-          clave: newClave,
-          title: `CAMBIO DE CLAVE A ${newClave}`,
-          body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`,
-          fechaDespacho,
-          horaDespacho,
-          createdAt: String(createdAt)
-        },
-        android: {priority: "high", ttl: 300000},
-        apns: {
-          headers: {"apns-priority": "10", "apns-push-type": "alert"},
-          payload: {
-            aps: {
-              alert: {
-                title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
-                body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`
-              },
-              sound: resolveApnsSound(newClave),
-              badge: 1,
-              category: "EMERGENCY_DISPATCH",
-              "interruption-level": "time-sensitive",
-              "relevance-score": 1.0,
-              "content-available": 1,
-              "mutable-content": 1
+      const escData = {
+        type: "DISPATCH_UPDATE",
+        payloadId: String(dispatchId),
+        clave: newClave,
+        title: `CAMBIO DE CLAVE A ${newClave}`,
+        body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`,
+        fechaDespacho,
+        horaDespacho,
+        createdAt: String(createdAt)
+      };
+      await Promise.all([
+        admin.messaging().send({
+          topic: "despachos",
+          data: escData,
+          android: {priority: "high", ttl: 300000},
+          apns: {
+            headers: {"apns-priority": "10", "apns-push-type": "alert"},
+            payload: {
+              aps: {
+                alert: {
+                  title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
+                  body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`
+                },
+                sound: resolveApnsSound(newClave),
+                badge: 1,
+                category: "EMERGENCY_DISPATCH",
+                "interruption-level": "time-sensitive",
+                "relevance-score": 1.0,
+                "content-available": 1,
+                "mutable-content": 1
+              }
             }
           }
-        }
-      });
+        }).catch((e) => console.warn("FCM escalation warning:", e.message)),
+        sendDirectApnsToIosUsers({
+          title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
+          body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`,
+          sound: resolveApnsSound(newClave),
+          category: "EMERGENCY_DISPATCH",
+          collapseId: `esc_${dispatchId}_${newClave}`,
+          data: escData
+        })
+      ]);
     }
   }
 
@@ -264,75 +443,98 @@ exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (e
     const cTsBefore = Number(unitB.solicitudConductorTimestamp || 0);
     const cTsAfter = Number(unitA.solicitudConductorTimestamp || 0);
     if (cTsAfter > cTsBefore && cTsAfter > 0) {
-      await admin.messaging().send({
-        topic: "conductores",
-        data: {
-          type: "DISPATCH_UPDATE",
-          payloadId: String(dispatchId),
-          clave: String(clave),
-          title: `SOLICITUD 12-10 (${unitName})`,
-          body: `Se solicita conductor para unidad ${unitName} en ${direccion}`,
-          fechaDespacho,
-          horaDespacho,
-          createdAt: new Date().toISOString()
-        },
-        android: {priority: "high", ttl: 300000},
-        apns: {
-          headers: {"apns-priority": "10", "apns-push-type": "alert"},
-          payload: {
-            aps: {
-              alert: {
-                title: `🚨 SOLICITUD 12-10 (${unitName})`,
-                body: `Se solicita conductor para unidad ${unitName} en ${direccion}`
-              },
-              sound: "importante.mp3",
-              badge: 1,
-              category: "EMERGENCY_DISPATCH",
-              "interruption-level": "time-sensitive",
-              "relevance-score": 1.0,
-              "content-available": 1,
-              "mutable-content": 1
+      const req1210Data = {
+        type: "DISPATCH_UPDATE",
+        payloadId: String(dispatchId),
+        clave: String(clave),
+        title: `SOLICITUD 12-10 (${unitName})`,
+        body: `Se solicita conductor para unidad ${unitName} en ${direccion}`,
+        fechaDespacho,
+        horaDespacho,
+        createdAt: new Date().toISOString()
+      };
+      await Promise.all([
+        admin.messaging().send({
+          topic: "conductores",
+          data: req1210Data,
+          android: {priority: "high", ttl: 300000},
+          apns: {
+            headers: {"apns-priority": "10", "apns-push-type": "alert"},
+            payload: {
+              aps: {
+                alert: {
+                  title: `🚨 SOLICITUD 12-10 (${unitName})`,
+                  body: `Se solicita conductor para unidad ${unitName} en ${direccion}`
+                },
+                sound: "importante.mp3",
+                badge: 1,
+                category: "EMERGENCY_DISPATCH",
+                "interruption-level": "time-sensitive",
+                "relevance-score": 1.0,
+                "content-available": 1,
+                "mutable-content": 1
+              }
             }
           }
-        }
-      });
+        }).catch((e) => console.warn("FCM 12-10 warning:", e.message)),
+        sendDirectApnsToIosUsers({
+          title: `🚨 SOLICITUD 12-10 (${unitName})`,
+          body: `Se solicita conductor para unidad ${unitName} en ${direccion}`,
+          sound: "importante.mp3",
+          category: "EMERGENCY_DISPATCH",
+          collapseId: `req1210_${dispatchId}_${unitName}`,
+          onlyConductors: true,
+          data: req1210Data
+        })
+      ]);
     }
 
     const pTsBefore = Number(unitB.solicitudPersonalTimestamp || 0);
     const pTsAfter = Number(unitA.solicitudPersonalTimestamp || 0);
     if (pTsAfter > pTsBefore && pTsAfter > 0) {
-      await admin.messaging().send({
-        topic: "despachos",
-        data: {
-          type: "DISPATCH_UPDATE",
-          payloadId: String(dispatchId),
-          clave: String(clave),
-          title: `SOLICITUD 6-6 (${unitName})`,
-          body: `Se solicita personal para unidad ${unitName} en ${direccion}`,
-          fechaDespacho,
-          horaDespacho,
-          createdAt: new Date().toISOString()
-        },
-        android: {priority: "high", ttl: 300000},
-        apns: {
-          headers: {"apns-priority": "10", "apns-push-type": "alert"},
-          payload: {
-            aps: {
-              alert: {
-                title: `🚨 SOLICITUD 6-6 (${unitName})`,
-                body: `Se solicita personal para unidad ${unitName} en ${direccion}`
-              },
-              sound: "importante.mp3",
-              badge: 1,
-              category: "EMERGENCY_DISPATCH",
-              "interruption-level": "time-sensitive",
-              "relevance-score": 1.0,
-              "content-available": 1,
-              "mutable-content": 1
+      const req66Data = {
+        type: "DISPATCH_UPDATE",
+        payloadId: String(dispatchId),
+        clave: String(clave),
+        title: `SOLICITUD 6-6 (${unitName})`,
+        body: `Se solicita personal para unidad ${unitName} en ${direccion}`,
+        fechaDespacho,
+        horaDespacho,
+        createdAt: new Date().toISOString()
+      };
+      await Promise.all([
+        admin.messaging().send({
+          topic: "despachos",
+          data: req66Data,
+          android: {priority: "high", ttl: 300000},
+          apns: {
+            headers: {"apns-priority": "10", "apns-push-type": "alert"},
+            payload: {
+              aps: {
+                alert: {
+                  title: `🚨 SOLICITUD 6-6 (${unitName})`,
+                  body: `Se solicita personal para unidad ${unitName} en ${direccion}`
+                },
+                sound: "importante.mp3",
+                badge: 1,
+                category: "EMERGENCY_DISPATCH",
+                "interruption-level": "time-sensitive",
+                "relevance-score": 1.0,
+                "content-available": 1,
+                "mutable-content": 1
+              }
             }
           }
-        }
-      });
+        }).catch((e) => console.warn("FCM 6-6 warning:", e.message)),
+        sendDirectApnsToIosUsers({
+          title: `🚨 SOLICITUD 6-6 (${unitName})`,
+          body: `Se solicita personal para unidad ${unitName} en ${direccion}`,
+          sound: "importante.mp3",
+          category: "EMERGENCY_DISPATCH",
+          collapseId: `req66_${dispatchId}_${unitName}`,
+          data: req66Data
+        })
+      ]);
     }
   }
 });
@@ -408,8 +610,36 @@ exports.onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
         }
       }
     };
-    return admin.messaging().send(msg);
+    return admin.messaging().send(msg).catch((e) => console.warn("FCM alert warning:", e.message));
   });
+
+  const targetIds = (!destinatarios || destinatarios === "TODOS" || destinatarios === "TC")
+    ? null
+    : (Array.isArray(destinatarios)
+      ? destinatarios.map((id) => String(id).trim())
+      : String(destinatarios).split(",").map((id) => id.trim()).filter(Boolean));
+
+  promises.push(
+    sendDirectApnsToIosUsers({
+      title: isOrden ? `📋 ${titulo}` : `🔔 ALERTA GRADO ${grado}: ${titulo}`,
+      body: mensaje,
+      sound: (isG3 || isG2) ? "importante.mp3" : "alertas.mp3",
+      category: "GENERAL_ALERT",
+      interruptionLevel: (isG3 || isG2) ? "time-sensitive" : "active",
+      relevanceScore: isG3 ? 1.0 : 0.8,
+      priority: (isG3 || isG2) ? "10" : "5",
+      collapseId: `alert_${alertId}`,
+      targetUserIds: targetIds,
+      data: {
+        type: isOrden ? "ORDEN" : "ALERT",
+        payloadId: String(alertId),
+        gradoAlerta: String(grado),
+        senderId: String(senderId),
+        title: isOrden ? `📋 ${titulo}` : `ALERTA GRADO ${grado}: ${titulo}`,
+        body: mensaje
+      }
+    })
+  );
 
   await Promise.all(promises);
 });
@@ -429,39 +659,51 @@ exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event)
   const safeTopic = userId.replace(/\s+/g, "");
   const titleText = "ESTADO ACTUALIZADO";
   const bodyText = `Tu estado ha sido cambiado a ${estadoAfter} por la Central`;
+  const statusData = {
+    title: titleText,
+    body: bodyText,
+    type: "STATUS_CHANGE",
+    newStatus: String(estadoAfter),
+    idRegistro: String(userId)
+  };
 
-  await admin.messaging().send({
-    topic: `usuario_${safeTopic}`,
-    data: {
-      title: titleText,
-      body: bodyText,
-      type: "STATUS_CHANGE",
-      newStatus: String(estadoAfter),
-      idRegistro: String(userId)
-    },
-    android: {
-      priority: "high",
-      ttl: 300000
-    },
-    apns: {
-      headers: {
-        "apns-priority": "10",
-        "apns-push-type": "alert"
+  await Promise.all([
+    admin.messaging().send({
+      topic: `usuario_${safeTopic}`,
+      data: statusData,
+      android: {
+        priority: "high",
+        ttl: 300000
       },
-      payload: {
-        aps: {
-          alert: {
-            title: titleText,
-            body: bodyText
-          },
-          sound: "default",
-          category: "GENERAL_ALERT",
-          "interruption-level": "time-sensitive",
-          "content-available": 1
+      apns: {
+        headers: {
+          "apns-priority": "10",
+          "apns-push-type": "alert"
+        },
+        payload: {
+          aps: {
+            alert: {
+              title: titleText,
+              body: bodyText
+            },
+            sound: "default",
+            category: "GENERAL_ALERT",
+            "interruption-level": "time-sensitive",
+            "content-available": 1
+          }
         }
       }
-    }
-  });
+    }).catch((e) => console.warn("FCM status warning:", e.message)),
+    sendDirectApnsToIosUsers({
+      title: titleText,
+      body: bodyText,
+      sound: "default",
+      category: "GENERAL_ALERT",
+      collapseId: `status_${userId}`,
+      targetUserIds: [userId],
+      data: statusData
+    })
+  ]);
 });
 
 // 4B. SUSCRIPCIÓN AUTOMÁTICA DE TOKENS FCM A TÓPICOS EN CREACIÓN Y ACTUALIZACIÓN DE PERSONAL
@@ -665,7 +907,17 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
     }
   };
 
-  await admin.messaging().send(msg);
+  await Promise.all([
+    admin.messaging().send(msg).catch((e) => console.warn("FCM enviarDespacho warning:", e.message)),
+    sendDirectApnsToIosUsers({
+      title: `🚨 ${titleText}`,
+      body: String(bodyText),
+      sound: apnsSound,
+      category: "EMERGENCY_DISPATCH",
+      collapseId: `disp_${dispatchId}`,
+      data: msg.data
+    })
+  ]);
   await afterSnap.ref.update(Object.assign({}, backfillPatch, {
     pushSent: true,
     pushSentAt: Date.now()

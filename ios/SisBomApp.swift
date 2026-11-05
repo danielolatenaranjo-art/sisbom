@@ -1527,6 +1527,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Self.cachedApnsDeviceToken = deviceToken
+        let apnsHex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        if !apnsHex.isEmpty {
+            UserDefaults.standard.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
+        }
         guard FirebaseApp.app() != nil else { return }
         Messaging.messaging().apnsToken = deviceToken
         let userId = UserDefaults.standard.string(forKey: "USER_ID") ?? ""
@@ -1591,6 +1595,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             if !isCentral { Messaging.messaging().unsubscribe(fromTopic: "central_operador") }
         }
 
+        let apnsHex = cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
+            ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
+            ?? ""
+        if !apnsHex.isEmpty {
+            defaults.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
+            authenticateNativeApp(activeFirebaseApp()) {
+                let db = activeFirestore()
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                db.collection("personal").document(userId).setData([
+                    "apnsToken": apnsHex,
+                    "platform": "ios",
+                    "_metaTimestamp": nowMs
+                ], merge: true)
+            }
+        }
+
         let saveTokenToFirestore: (String) -> Void = { token in
             defaults.set(token, forKey: "FCM_TOKEN")
             if !activePid.isEmpty {
@@ -1601,13 +1621,17 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             authenticateNativeApp(activeFirebaseApp()) {
                 let db = activeFirestore()
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                db.collection("personal").document(userId).setData([
+                var patch: [String: Any] = [
                     "deviceId": token,
                     "tokenFcm": token,
                     "fcmToken": token,
                     "platform": "ios",
                     "_metaTimestamp": nowMs
-                ], merge: true)
+                ]
+                if !apnsHex.isEmpty {
+                    patch["apnsToken"] = apnsHex
+                }
+                db.collection("personal").document(userId).setData(patch, merge: true)
             }
         }
 
@@ -2075,6 +2099,8 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 AppDelegate.activeFirestore().collection("personal").document(oldId).setData([
                     "deviceId": "",
                     "tokenFcm": "",
+                    "fcmToken": "",
+                    "apnsToken": "",
                     "_metaTimestamp": nowMs
                 ], merge: true)
             }
