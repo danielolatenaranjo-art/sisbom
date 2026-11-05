@@ -276,90 +276,8 @@ function getChileDateTimeStrings(epochMs) {
   }
 }
 
-// 1. NUEVO DESPACHO (Dual-Read V2 + V3 Canónico + Retrocompatibilidad Total con V2.1.0, V2.2.5 y V3.0.4)
-exports.onNewDispatch = onDocumentCreated("despachos/{dispatchId}", async (event) => {
-  const snap = event.data;
-  if (!snap) return;
-  const data = snap.data() || {};
-  const dispatchId = event.params.dispatchId;
-
-  const estado = String(data.estado || "").toUpperCase().trim();
-  const finalizadoAt = Number(data.finalizadoAt || 0);
-  if ((data.operadorFinal && data.operadorFinal !== "") || finalizadoAt > 0 || estado === "CERRADO" || estado === "FINALIZADO") {
-    return;
-  }
-
-  const epochMs = Number(data.createdAt || data.timestamp || Date.now());
-  const clDt = getChileDateTimeStrings(epochMs);
-  const clave = data.clave || "Emergencia";
-  const direccion = data.direccion || data.lugar || (estado === "PRE-DESPACHO" ? "Pre-despacho en preparación..." : "Sin dirección");
-  const unidades = extractUnitsString(data);
-  const fechaDespacho = String(data.fechaDespacho || data.fecha || clDt.fechaDespacho);
-  const horaDespacho = String(data.horaDespacho || data.hora || clDt.horaDespacho);
-  const createdAt = String(epochMs);
-  const apnsSound = resolveApnsSound(clave);
-
-  const message = {
-    topic: "despachos",
-    data: {
-      type: "DISPATCH",
-      payloadId: String(dispatchId),
-      dispatchId: String(dispatchId),
-      idServicio: String(dispatchId),
-      clave: String(clave),
-      key: String(clave),
-      lugar: String(direccion),
-      direccion: String(direccion),
-      carrosTexto: String(unidades),
-      unidades: String(unidades),
-      title: `DESPACHO: ${clave}`,
-      body: unidades ? `${direccion}\nUnidades: ${unidades}` : `${direccion}`,
-      fechaDespacho,
-      horaDespacho,
-      createdAt: String(createdAt)
-    },
-    android: {
-      priority: "high",
-      ttl: 300000
-    },
-    apns: {
-      headers: {
-        "apns-priority": "10",
-        "apns-push-type": "alert"
-      },
-      payload: {
-        aps: {
-          alert: {
-            title: `🚨 DESPACHO: ${clave}`,
-            body: unidades ? `${direccion}\nUnidades: ${unidades}` : `${direccion}`
-          },
-          sound: apnsSound,
-          badge: 1,
-          category: "EMERGENCY_DISPATCH",
-          "interruption-level": "time-sensitive",
-          "relevance-score": 1.0,
-          "content-available": 1,
-          "mutable-content": 1
-        }
-      }
-    }
-  };
-
-  await Promise.all([
-    admin.messaging().send(message).catch((e) => console.warn("FCM onNewDispatch warning:", e.message)),
-    sendDirectApnsToIosUsers({
-      title: `🚨 DESPACHO: ${clave}`,
-      body: unidades ? `${direccion}\nUnidades: ${unidades}` : `${direccion}`,
-      sound: apnsSound,
-      category: "EMERGENCY_DISPATCH",
-      collapseId: `disp_${dispatchId}`,
-      data: message.data
-    })
-  ]);
-});
-
 // 2. ACTUALIZACIÓN DE DESPACHO (Escalamiento 10-0 -> 10-30, 10-2 -> FORESTAL y Solicitudes 12-10 / 6-6)
-exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (event) => {
+const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (event) => {
   const before = event.data.before.data() || {};
   const after = event.data.after.data() || {};
   const dispatchId = event.params.dispatchId;
@@ -540,7 +458,7 @@ exports.onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (e
 });
 
 // 3. NUEVA ALERTA U ORDEN DEL DÍA
-exports.onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
+const onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
   const snap = event.data;
   if (!snap) return;
   const data = snap.data() || {};
@@ -733,7 +651,7 @@ exports.syncTokenTopicsOnUpdate = onDocumentUpdated("personal/{userId}", async (
 });
 
 // 5. SOLICITUD DE APERTURA DE PUERTA (TIMBRE CUARTEL)
-exports.onDoorRequestCreated = onDocumentCreated("solicitudes_puerta/{requestId}", async (event) => {
+const onDoorRequestCreated = onDocumentCreated("solicitudes_puerta/{requestId}", async (event) => {
   const snap = event.data;
   if (!snap) return;
   const data = snap.data() || {};
@@ -758,7 +676,8 @@ exports.onDoorRequestCreated = onDocumentCreated("solicitudes_puerta/{requestId}
     apns: {
       headers: {
         "apns-priority": "10",
-        "apns-push-type": "alert"
+        "apns-push-type": "alert",
+        "apns-collapse-id": `door_${requestId}`.slice(0, 64)
       },
       payload: {
         aps: {
@@ -887,7 +806,8 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
     apns: {
       headers: {
         "apns-priority": "10",
-        "apns-push-type": "alert"
+        "apns-push-type": "alert",
+        "apns-collapse-id": `disp_${dispatchId}`.slice(0, 64)
       },
       payload: {
         aps: {
@@ -924,7 +844,7 @@ exports.enviarDespacho = onDocumentWritten("despachos/{dispatchId}", async (even
   }));
 });
 
-exports.actualizarDespacho = exports.onDispatchUpdated;
-exports.enviarAlerta = exports.onNewAlert;
+exports.actualizarDespacho = onDispatchUpdated;
+exports.enviarAlerta = onNewAlert;
 exports.actualizarEstadoPersonal = onDocumentUpdated("personal/{userId}", async () => {});
-exports.solicitarAperturaPuerta = exports.onDoorRequestCreated;
+exports.solicitarAperturaPuerta = onDoorRequestCreated;

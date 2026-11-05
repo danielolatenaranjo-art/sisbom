@@ -2595,6 +2595,64 @@ class MainActivity : ComponentActivity() {
             return "1:$senderId:android:99a442ea6ae05276beb072"
         }
 
+        @SuppressLint("HardwareIds")
+        fun getHardwareDeviceId(context: Context): String {
+            return try {
+                val aid = Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+                if (aid.isNotBlank()) "android-hw-$aid" else "android-hw-unknown"
+            } catch (_: Exception) {
+                "android-hw-unknown"
+            }
+        }
+
+        private fun unlinkPreviousProjectSessionAsync(prevPid: String, prevApiKey: String, prevUid: String) {
+            if (prevPid.isBlank() || prevApiKey.isBlank() || prevUid.isBlank()) return
+            Thread {
+                try {
+                    val authUrl = URL("https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=$prevApiKey")
+                    val authConn = (authUrl.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json")
+                        connectTimeout = 8000
+                        readTimeout = 8000
+                    }
+                    val authPayload = JSONObject().apply {
+                        put("email", "v304.app@sisbom.com")
+                        put("password", "SentinelOne_V304_Auth!2026")
+                        put("returnSecureToken", true)
+                    }
+                    authConn.outputStream.use { it.write(authPayload.toString().toByteArray(Charsets.UTF_8)) }
+                    if (authConn.responseCode !in 200..299) return@Thread
+                    val authResp = JSONObject(authConn.inputStream.bufferedReader().readText())
+                    val idToken = authResp.optString("idToken", "")
+                    if (idToken.isBlank()) return@Thread
+
+                    val encodedUid = Uri.encode(prevUid)
+                    val patchUrl = URL("https://firestore.googleapis.com/v1/projects/$prevPid/databases/(default)/documents/personal/$encodedUid?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=hardwareDeviceId&updateMask.fieldPaths=_metaTimestamp")
+                    val patchConn = (patchUrl.openConnection() as HttpURLConnection).apply {
+                        requestMethod = "PATCH"
+                        doOutput = true
+                        setRequestProperty("Authorization", "Bearer $idToken")
+                        setRequestProperty("Content-Type", "application/json")
+                        connectTimeout = 8000
+                        readTimeout = 8000
+                    }
+                    val nowMs = System.currentTimeMillis()
+                    val fieldsObj = JSONObject().apply {
+                        put("deviceId", JSONObject().put("stringValue", ""))
+                        put("tokenFcm", JSONObject().put("stringValue", ""))
+                        put("fcmToken", JSONObject().put("stringValue", ""))
+                        put("hardwareDeviceId", JSONObject().put("stringValue", ""))
+                        put("_metaTimestamp", JSONObject().put("integerValue", nowMs.toString()))
+                    }
+                    val patchBody = JSONObject().put("fields", fieldsObj)
+                    patchConn.outputStream.use { it.write(patchBody.toString().toByteArray(Charsets.UTF_8)) }
+                    patchConn.responseCode
+                } catch (_: Exception) {}
+            }.start()
+        }
+
         fun initializeDynamicFirebase(context: Context, configJsonStr: String? = null) {
             try {
                 val appContext = context.applicationContext
@@ -2632,6 +2690,18 @@ class MainActivity : ComponentActivity() {
                 val apiKey = json.optString("apiKey", "")
                 val projectId = json.optString("projectId", "")
                 if (apiKey.isBlank() || projectId.isBlank()) return
+
+                val prevPid = prefs.getString("LAST_TENANT_PROJECT_ID", "") ?: ""
+                val prevApiKey = prefs.getString("LAST_TENANT_API_KEY", "") ?: ""
+                val prevUid = prefs.getString("LAST_TENANT_USER_ID", "") ?: ""
+                if (prevPid.isNotBlank() && prevPid != projectId && prevApiKey.isNotBlank() && prevUid.isNotBlank()) {
+                    unlinkPreviousProjectSessionAsync(prevPid, prevApiKey, prevUid)
+                    prefs.edit().remove("LAST_TENANT_USER_ID").apply()
+                }
+                prefs.edit()
+                    .putString("LAST_TENANT_PROJECT_ID", projectId)
+                    .putString("LAST_TENANT_API_KEY", apiKey)
+                    .apply()
 
                 val applicationId = resolveValidAndroidAppId(projectId, json)
                 val messagingSenderId = json.optString("messagingSenderId", "306101642399")
@@ -2717,9 +2787,13 @@ class MainActivity : ComponentActivity() {
             val activePid = currentTenantProjectId ?: try { FirebaseApp.getInstance().options.projectId ?: "" } catch (_: Exception) { "" }
 
             val applyToken: (String) -> Unit = { token ->
-                val edit = prefs.edit().putString("FCM_TOKEN", token)
+                val hwId = getHardwareDeviceId(appContext)
+                val edit = prefs.edit()
+                    .putString("FCM_TOKEN", token)
+                    .putString("LAST_TENANT_USER_ID", userId)
                 if (activePid.isNotBlank()) {
                     edit.putString("FCM_TOKEN_PROJECT_ID", activePid)
+                    edit.putString("LAST_TENANT_PROJECT_ID", activePid)
                 }
                 edit.apply()
 
@@ -2746,6 +2820,7 @@ class MainActivity : ComponentActivity() {
                             "deviceId" to token,
                             "tokenFcm" to token,
                             "fcmToken" to token,
+                            "hardwareDeviceId" to hwId,
                             "platform" to "android",
                             "_metaTimestamp" to System.currentTimeMillis()
                         ),
@@ -2990,6 +3065,12 @@ class MainActivity : ComponentActivity() {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
+                    val hwId = getHardwareDeviceId(this@MainActivity)
+                    val fcmTok = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE).getString("FCM_TOKEN", "") ?: ""
+                    view?.evaluateJavascript(
+                        "try { window.__SENTINEL_HW_DEVICE_ID__ = '$hwId'; if ('$fcmTok') window.__SENTINEL_FCM_TOKEN__ = '$fcmTok'; } catch(e) {}",
+                        null
+                    )
                     dispatchPendingIntentToWebView()
                 }
             }
@@ -3564,6 +3645,7 @@ class MainActivity : ComponentActivity() {
                 val oldUserId = prefs.getString("USER_ID", null)
                 prefs.edit()
                     .remove("USER_ID")
+                    .remove("LAST_TENANT_USER_ID")
                     .remove("USER_NOMBRE")
                     .remove("USER_RANGO")
                     .remove("USER_ESTADO")
@@ -3581,6 +3663,9 @@ class MainActivity : ComponentActivity() {
                         db.collection("personal").document(oldUserId).set(
                             mapOf(
                                 "deviceId" to "",
+                                "tokenFcm" to "",
+                                "fcmToken" to "",
+                                "hardwareDeviceId" to "",
                                 "_metaTimestamp" to System.currentTimeMillis()
                             ),
                             SetOptions.merge()

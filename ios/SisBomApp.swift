@@ -6,11 +6,66 @@ import AVFoundation
 import AudioToolbox
 import MediaPlayer
 import CoreLocation
+import Security
 import FirebaseCore
 import FirebaseAuth
 import FirebaseFirestore
 import FirebaseMessaging
 import FirebaseDatabase
+
+// ============================================================================
+// 0. KEYCHAIN PERSISTENTE (SOBREVIVE A DESINSTALACIÓN Y REINSTALACIÓN EN iOS)
+// ============================================================================
+enum SentinelKeychain {
+    private static let service = "com.misisbom.sisbom.v3.keychain"
+
+    static func get(_ key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func set(_ key: String, value: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+
+    static func remove(_ key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
+    static func getOrCreateDeviceId() -> String {
+        if let existing = get("hw_device_id"), !existing.isEmpty {
+            return existing
+        }
+        let vendorId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
+        let newId = "ios-hw-\(vendorId)"
+        set("hw_device_id", value: newId)
+        return newId
+    }
+}
 
 // ============================================================================
 // 1. GESTOR DE UBICACIÓN GPS EN SEGUNDO PLANO EN iOS -> EXCLUSIVAMENTE A RTDB
@@ -1143,11 +1198,64 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         return "1:\(senderId):ios:a2be8d98704f46d5beb072"
     }
 
+    static func unlinkPreviousProjectSessionIfNeeded(newProjectId: String) {
+        let prevPid = SentinelKeychain.get("last_project_id") ?? ""
+        let prevApiKey = SentinelKeychain.get("last_api_key") ?? ""
+        let prevUid = SentinelKeychain.get("last_user_id") ?? ""
+        guard !prevPid.isEmpty, !prevApiKey.isEmpty, !prevUid.isEmpty, prevPid != newProjectId else {
+            return
+        }
+        // Al desinstalar/reinstalar e ingresar a OTRA licencia distinta, desvincular automáticamente el usuario del proyecto anterior vía REST
+        let authUrlStr = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=\(prevApiKey)"
+        guard let authUrl = URL(string: authUrlStr) else { return }
+        var authReq = URLRequest(url: authUrl)
+        authReq.httpMethod = "POST"
+        authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let authBody: [String: Any] = [
+            "email": "v304.app@sisbom.com",
+            "password": "SentinelOne_V304_Auth!2026",
+            "returnSecureToken": true
+        ]
+        authReq.httpBody = try? JSONSerialization.data(withJSONObject: authBody)
+        URLSession.shared.dataTask(with: authReq) { data, _, error in
+            guard let data = data, error == nil,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let idToken = json["idToken"] as? String, !idToken.isEmpty else {
+                return
+            }
+            let encodedUid = prevUid.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? prevUid
+            let patchUrlStr = "https://firestore.googleapis.com/v1/projects/\(prevPid)/databases/(default)/documents/personal/\(encodedUid)?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=tokenFcm&updateMask.fieldPaths=fcmToken&updateMask.fieldPaths=apnsToken&updateMask.fieldPaths=hardwareDeviceId&updateMask.fieldPaths=_metaTimestamp"
+            guard let patchUrl = URL(string: patchUrlStr) else { return }
+            var patchReq = URLRequest(url: patchUrl)
+            patchReq.httpMethod = "PATCH"
+            patchReq.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+            patchReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            let patchPayload: [String: Any] = [
+                "fields": [
+                    "deviceId": ["stringValue": ""],
+                    "tokenFcm": ["stringValue": ""],
+                    "fcmToken": ["stringValue": ""],
+                    "apnsToken": ["stringValue": ""],
+                    "hardwareDeviceId": ["stringValue": ""],
+                    "_metaTimestamp": ["integerValue": "\(nowMs)"]
+                ]
+            ]
+            patchReq.httpBody = try? JSONSerialization.data(withJSONObject: patchPayload)
+            URLSession.shared.dataTask(with: patchReq) { _, _, _ in
+                SentinelKeychain.remove("last_user_id")
+            }.resume()
+        }.resume()
+    }
+
     static func configureDynamicFirebase(configDict: [String: Any]) {
         guard let apiKey = configDict["apiKey"] as? String, !apiKey.isEmpty,
               let projectId = configDict["projectId"] as? String, !projectId.isEmpty else {
             return
         }
+        unlinkPreviousProjectSessionIfNeeded(newProjectId: projectId)
+        SentinelKeychain.set("last_project_id", value: projectId)
+        SentinelKeychain.set("last_api_key", value: apiKey)
         let iosAppId = resolveValidIosAppId(projectId: projectId, configDict: configDict)
         let senderId = (configDict["messagingSenderId"] as? String) ?? "306101642399"
         let storageBucket = (configDict["storageBucket"] as? String) ?? "\(projectId).firebasestorage.app"
@@ -1530,6 +1638,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let apnsHex = deviceToken.map { String(format: "%02x", $0) }.joined()
         if !apnsHex.isEmpty {
             UserDefaults.standard.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
+            SentinelKeychain.set("apns_token_hex", value: apnsHex)
+            DispatchQueue.main.async {
+                if let wv = Self.sharedWebView {
+                    let js = "try { window.__SENTINEL_APNS_TOKEN__ = '\(apnsHex)'; } catch(e) {}"
+                    wv.evaluateJavaScript(js, completionHandler: nil)
+                }
+            }
         }
         guard FirebaseApp.app() != nil else { return }
         Messaging.messaging().apnsToken = deviceToken
@@ -1595,16 +1710,24 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             if !isCentral { Messaging.messaging().unsubscribe(fromTopic: "central_operador") }
         }
 
+        let hwId = SentinelKeychain.getOrCreateDeviceId()
         let apnsHex = cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
             ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
             ?? ""
         if !apnsHex.isEmpty {
             defaults.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
+            DispatchQueue.main.async {
+                if let wv = sharedWebView {
+                    let js = "try { window.__SENTINEL_APNS_TOKEN__ = '\(apnsHex)'; } catch(e) {}"
+                    wv.evaluateJavaScript(js, completionHandler: nil)
+                }
+            }
             authenticateNativeApp(activeFirebaseApp()) {
                 let db = activeFirestore()
                 let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                 db.collection("personal").document(userId).setData([
                     "apnsToken": apnsHex,
+                    "hardwareDeviceId": hwId,
                     "platform": "ios",
                     "_metaTimestamp": nowMs
                 ], merge: true)
@@ -1615,7 +1738,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             defaults.set(token, forKey: "FCM_TOKEN")
             if !activePid.isEmpty {
                 defaults.set(activePid, forKey: "FCM_TOKEN_PROJECT_ID")
+                SentinelKeychain.set("last_project_id", value: activePid)
             }
+            SentinelKeychain.set("last_user_id", value: userId)
             emitFcmTokenToWebView(token)
             subscribeAllTopics()
             authenticateNativeApp(activeFirebaseApp()) {
@@ -1625,6 +1750,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     "deviceId": token,
                     "tokenFcm": token,
                     "fcmToken": token,
+                    "hardwareDeviceId": hwId,
                     "platform": "ios",
                     "_metaTimestamp": nowMs
                 ]
@@ -2076,6 +2202,13 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 defaults.set(estadoEspecial, forKey: "USER_ESTADO_ESPECIAL")
                 defaults.set(enServicio, forKey: "USER_EN_SERVICIO")
 
+                if !userId.isEmpty {
+                    SentinelKeychain.set("last_user_id", value: userId)
+                    if let pid = AppDelegate.currentTenantProjectId, !pid.isEmpty {
+                        SentinelKeychain.set("last_project_id", value: pid)
+                    }
+                }
+
                 AppDelegate.syncFcmTopicsAndToken(userId: userId)
                 AppDelegate.scheduleDailyReminders()
                 IOSSoundPlayer.shared.updateBackgroundKeepAlive()
@@ -2089,7 +2222,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 )
             }
         case "clearUserSession":
-            let oldId = defaults.string(forKey: "USER_ID") ?? ""
+            let oldId = defaults.string(forKey: "USER_ID") ?? SentinelKeychain.get("last_user_id") ?? ""
             if !oldId.isEmpty {
                 Messaging.messaging().unsubscribe(fromTopic: "usuario_\(oldId)")
                 Messaging.messaging().unsubscribe(fromTopic: "personal_\(oldId)")
@@ -2101,9 +2234,11 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                     "tokenFcm": "",
                     "fcmToken": "",
                     "apnsToken": "",
+                    "hardwareDeviceId": "",
                     "_metaTimestamp": nowMs
                 ], merge: true)
             }
+            SentinelKeychain.remove("last_user_id")
             defaults.removeObject(forKey: "USER_ID")
             IOSSoundPlayer.shared.stop()
             IOSSoundPlayer.shared.stopBackgroundKeepAlive()
@@ -2361,10 +2496,22 @@ struct SentinelWebViewContainer: UIViewRepresentable {
             storageJson = "{}"
         }
 
+        let hwId = SentinelKeychain.getOrCreateDeviceId()
+        let apnsHex = AppDelegate.cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
+            ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
+            ?? SentinelKeychain.get("apns_token_hex")
+            ?? ""
+        let lastKeychainPid = SentinelKeychain.get("last_project_id") ?? ""
+        let lastKeychainUid = SentinelKeychain.get("last_user_id") ?? ""
+        let lastSessionStr = (!lastKeychainPid.isEmpty && !lastKeychainUid.isEmpty) ? "\(lastKeychainPid):\(lastKeychainUid)" : ""
+
         let bootJs = """
         (function() {
             try {
                 window.__SENTINEL_PLATFORM__ = 'ios';
+                window.__SENTINEL_HW_DEVICE_ID__ = "\(hwId)";
+                window.__SENTINEL_APNS_TOKEN__ = "\(apnsHex)";
+                window.__SENTINEL_KEYCHAIN_LAST_SESSION__ = "\(lastSessionStr)";
                 window.__SENTINEL_IOS_PERMS__ = {
                     fineLocation: \(syncPerms.fine ? "true" : "false"),
                     backgroundLocation: \(syncPerms.bg ? "true" : "false"),
