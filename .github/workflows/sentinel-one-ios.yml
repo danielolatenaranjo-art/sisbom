@@ -176,7 +176,7 @@ jobs:
             -t ios \
             --apiKey "$APPSTORE_KEY_ID" \
             --apiIssuer "$APPSTORE_ISSUER_ID" \
-            --show-progress || true
+            --show-progress
 
       - name: Configurar Versión 3.0.4 y Enviar a Producción en App Store Connect
         if: github.event.inputs.upload_appstore != 'false'
