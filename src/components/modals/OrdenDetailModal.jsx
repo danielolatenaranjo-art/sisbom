@@ -2,42 +2,13 @@ import React from 'react';
 import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, Image } from 'react-native';
 import { FileText, X } from 'lucide-react-native';
 import { useLicenseStore } from '../../store/useLicenseStore';
-import { useAuthStore } from '../../store/useAuthStore';
-import { useDispatchStore } from '../../store/useDispatchStore';
 
 export const OrdenDetailModal = ({ visible, orden, onClose }) => {
   const { clientName, nombreMostrar, comuna, logoUrl } = useLicenseStore();
-  const { user } = useAuthStore();
-  const { interCorpsAlert, isRespondingInterCorps, respondToInterCorpsAlert } = useDispatchStore();
 
   if (!orden) return null;
 
   const isAlerta = Boolean(orden.isAlertaComunicado);
-  const myRadial = String(user?.idRadial || '').trim();
-  const myIdReg = String(user?.idRegistro || '').trim();
-  const isComandante = myRadial === '1' || String(user?.cargo || '').toUpperCase().includes('COMANDANTE');
-  const grado = String(orden.gradoAlerta || '1').trim();
-  const aQuienList = String(orden.aQuienAlerta || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const isSupportAlert = Boolean(
-    isAlerta &&
-      isComandante &&
-      (orden.tipoSolicitud ||
-        orden.licenciaSolicitante ||
-        orden.estadoApoyo ||
-        String(orden.razonAlerta || '').toUpperCase().includes('APOYO') ||
-        String(orden.razonAlerta || '').toUpperCase().includes('SOLICITUD DE ALERTA') ||
-        (grado === '3' && myIdReg && aQuienList.includes(myIdReg)))
-  );
-  const currentResp = String(
-    orden.estadoApoyo ||
-      (interCorpsAlert && String(interCorpsAlert.idAlerta) === String(orden.idAlerta)
-        ? interCorpsAlert.estado
-        : '') ||
-      ''
-  ).toUpperCase();
   const ordenNum = orden.numeroOrden || orden.numero || '13/2026';
   const fechaDoc = String(orden.fechaOrden || orden.fechaAlerta || orden.fechaDocumento || orden.fecha || '').replace(/^'+/, '');
   const horaDoc = String(orden.horaAlerta || orden.hora || '').replace(/^'+/, '');
@@ -119,116 +90,6 @@ export const OrdenDetailModal = ({ visible, orden, onClose }) => {
                       EMITIDO POR: {String(orden.quienAlerta).toUpperCase()}
                     </Text>
                   </>
-                ) : null}
-
-                {isSupportAlert ? (
-                  <View
-                    style={{
-                      marginTop: 16,
-                      paddingTop: 14,
-                      borderTopWidth: 1.5,
-                      borderTopColor: '#cbd5e1'
-                    }}
-                  >
-                    <Text
-                      style={{
-                        fontSize: 11,
-                        fontWeight: '900',
-                        color: '#0f172a',
-                        textAlign: 'center',
-                        marginBottom: 10,
-                        letterSpacing: 0.4
-                      }}
-                    >
-                      RESPUESTA DE COMANDANCIA — RED DE APOYO INTER-CUERPOS SCI
-                    </Text>
-
-                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                      <TouchableOpacity
-                        disabled={isRespondingInterCorps}
-                        onPress={async () => {
-                          await respondToInterCorpsAlert('CONFIRMADA', orden);
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '47%',
-                          backgroundColor: currentResp === 'CONFIRMADA' ? '#047857' : '#10B981',
-                          borderRadius: 10,
-                          paddingVertical: 11,
-                          paddingHorizontal: 10,
-                          alignItems: 'center'
-                        }}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
-                          ✓ CONFIRMAR APOYO
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        disabled={isRespondingInterCorps}
-                        onPress={async () => {
-                          await respondToInterCorpsAlert('EN_ESPERA', orden);
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '47%',
-                          backgroundColor: currentResp === 'EN_ESPERA' ? '#B45309' : '#F59E0B',
-                          borderRadius: 10,
-                          paddingVertical: 11,
-                          paddingHorizontal: 10,
-                          alignItems: 'center'
-                        }}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
-                          ⏳ ESPERAR
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        disabled={isRespondingInterCorps}
-                        onPress={async () => {
-                          await respondToInterCorpsAlert('RECHAZADA', orden);
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '47%',
-                          backgroundColor: currentResp === 'RECHAZADA' ? '#991B1B' : '#EF4444',
-                          borderRadius: 10,
-                          paddingVertical: 11,
-                          paddingHorizontal: 10,
-                          alignItems: 'center'
-                        }}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
-                          ✕ RECHAZAR
-                        </Text>
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        disabled={isRespondingInterCorps}
-                        onPress={async () => {
-                          await respondToInterCorpsAlert('APOYO_OFRECIDO', orden);
-                        }}
-                        style={{
-                          flex: 1,
-                          minWidth: '47%',
-                          backgroundColor: currentResp === 'APOYO_OFRECIDO' ? '#0369A1' : '#0EA5E9',
-                          borderRadius: 10,
-                          paddingVertical: 11,
-                          paddingHorizontal: 10,
-                          alignItems: 'center'
-                        }}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
-                          🚒 OFRECER APOYO
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
                 ) : null}
               </>
             ) : (

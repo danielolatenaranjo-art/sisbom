@@ -596,6 +596,7 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
       Number(localUnit.solicitudPersonalTimestamp || 0),
       Number(remoteUnit.solicitudPersonalTimestamp || 0)
     ) || null,
+    dirigirse: pickField('dirigirse') || null,
     _metaTimestamp: Math.max(localTs, remoteTs, Date.now()),
     _fieldTimestamps: mergedFieldTimestamps
   };
@@ -773,6 +774,20 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
 
   const maxTs = Math.max(h68 || 0, h610 || 0, h69 || 0, h63 || 0, h60 || 0, h615 || 0, Number(raw._metaTimestamp || 0));
 
+  const rawDirigirse = raw.dirigirse && typeof raw.dirigirse === 'object' ? raw.dirigirse : null;
+  const dirLat = Number(rawDirigirse?.lat ?? rawDirigirse?.latitude ?? 0);
+  const dirLng = Number(rawDirigirse?.long ?? rawDirigirse?.lng ?? rawDirigirse?.lon ?? rawDirigirse?.longitude ?? 0);
+  const dirigirse =
+    !isNaN(dirLat) && !isNaN(dirLng) && (dirLat !== 0 || dirLng !== 0)
+      ? {
+          lat: dirLat,
+          long: dirLng,
+          lng: dirLng,
+          lado: String(rawDirigirse?.lado || rawDirigirse?.sector || '').trim().toUpperCase(),
+          instruccion: String(rawDirigirse?.instruccion || rawDirigirse?.tarea || '').trim()
+        }
+      : null;
+
   return {
     idSalida,
     idServicio,
@@ -801,6 +816,7 @@ export function normalizeBitacoraDoc(docId, raw = {}) {
     preinforme,
     informe63,
     observacion,
+    dirigirse,
     hora60,
     hora63,
     hora615,
@@ -874,6 +890,7 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
     is615: status === '6-15' || Boolean((b.tiempos?.h615 || ex.is615) && !time69 && !time610 && !time68),
     solicitudConductorTimestamp: meta.solicitudConductorTimestamp || ex.solicitudConductorTimestamp || null,
     solicitudPersonalTimestamp: meta.solicitudPersonalTimestamp || ex.solicitudPersonalTimestamp || null,
+    dirigirse: b.dirigirse || meta.dirigirse || ex.dirigirse || null,
     _metaTimestamp: b._metaTimestamp || 0
   };
 
@@ -936,6 +953,9 @@ export function sanitizeCanonicalUnidadesMap(unidadesInput = {}, unitsArray = []
       if (uObj.solicitudPersonalTimestamp !== undefined) {
         entry.solicitudPersonalTimestamp = uObj.solicitudPersonalTimestamp ? Number(uObj.solicitudPersonalTimestamp) : null;
       }
+      if (uObj.dirigirse && typeof uObj.dirigirse === 'object') {
+        entry.dirigirse = uObj.dirigirse;
+      }
       cleanMap[carro] = entry;
     });
   }
@@ -950,8 +970,10 @@ export function sanitizeCanonicalUnidadesMap(unidadesInput = {}, unitsArray = []
       };
       const condTs = (typeof u === 'object' ? u.solicitudConductorTimestamp : null) || existing.solicitudConductorTimestamp;
       const persTs = (typeof u === 'object' ? u.solicitudPersonalTimestamp : null) || existing.solicitudPersonalTimestamp;
+      const dirObj = (typeof u === 'object' ? u.dirigirse : null) || existing.dirigirse;
       if (condTs) entry.solicitudConductorTimestamp = Number(condTs);
       if (persTs) entry.solicitudPersonalTimestamp = Number(persTs);
+      if (dirObj && typeof dirObj === 'object') entry.dirigirse = dirObj;
       cleanMap[name] = entry;
     });
   }
@@ -1122,7 +1144,8 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
     },
     observacion: String(sourceUnit.observation ?? sourceUnit.observacion ?? sourceUnit.observaciones ?? '').trim(),
     preinforme: String(sourceUnit.tripInfo ?? sourceUnit.preinforme ?? sourceUnit.preinformeUnidad ?? '').trim(),
-    informe63: String(sourceUnit.report ?? sourceUnit.informe63 ?? '').trim()
+    informe63: String(sourceUnit.report ?? sourceUnit.informe63 ?? '').trim(),
+    ...(sourceUnit.dirigirse && typeof sourceUnit.dirigirse === 'object' ? { dirigirse: sourceUnit.dirigirse } : {})
   };
 }
 
@@ -2856,12 +2879,12 @@ export function buildCanonicalSciTacticalOrderDoc(raw = {}) {
   const idCarro = String(raw.idCarro || raw.unidad || raw.unitName || '').trim().toUpperCase();
   const origenCuerpo = String(raw.origenCuerpo || raw.clientName || 'LOCAL').trim().toUpperCase();
   const licenciaOrigen = String(raw.licenciaOrigen || raw.licenseKey || '').trim().toUpperCase();
-  const sectorAsignado = String(raw.sectorAsignado || raw.sector || 'ALFA').trim().toUpperCase();
+  const sectorAsignado = String(raw.sectorAsignado ?? raw.sector ?? '').trim().toUpperCase();
   const instruccionTactica = String(raw.instruccionTactica || raw.instruccion || '').trim();
   const lat = Number(raw.lat ?? raw.destinoTactico?.lat ?? 0);
   const lng = Number(raw.lng ?? raw.destinoTactico?.lng ?? 0);
   const etiqueta = String(
-    raw.etiqueta || raw.destinoTactico?.etiqueta || `POSICIÓN ${idCarro} (${sectorAsignado})`
+    raw.etiqueta || raw.destinoTactico?.etiqueta || `POSICIÓN ${idCarro}${sectorAsignado ? ` (${sectorAsignado})` : ''}`
   ).trim().toUpperCase();
 
   return {
@@ -2871,6 +2894,8 @@ export function buildCanonicalSciTacticalOrderDoc(raw = {}) {
     idServicio: String(raw.idServicio || raw.serviceId || '').trim(),
     claveServicio: String(raw.claveServicio || raw.clave || '10-0').trim().toUpperCase(),
     sectorAsignado,
+    lat: !isNaN(lat) && (lat !== 0 || lng !== 0) ? lat : null,
+    lng: !isNaN(lng) && (lat !== 0 || lng !== 0) ? lng : null,
     destinoTactico: !isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)
       ? { lat, lng, etiqueta }
       : null,
@@ -3157,6 +3182,53 @@ export function parseCanonicalChatMessages(
     .filter(Boolean);
 
   return rawParts.map((msg, idx) => {
+    // 1. Formato canónico estándar: DD-MM-YYYY/HH:MM/idRegistro: mensaje (ej. "05-11-2026/12:18/224 ([23] DANIEL OLATE - NANCAGUA): comandante")
+    const match1 = msg.match(/^(\d{2}-\d{2}-\d{4})\/(\d{2}:\d{2})\/(.*?):\s*([\s\S]*)$/);
+    if (match1) {
+      const dateStr = match1[1].trim();
+      const timeStr = match1[2].trim();
+      const senderId = match1[3].trim();
+      const textPart = match1[4].trim();
+      return {
+        id: `${dateStr}-${timeStr}-${senderId}-${idx}`,
+        fecha: dateStr,
+        hora: timeStr,
+        senderId,
+        texto: textPart
+      };
+    }
+
+    // 2. Formato con corchetes: [DD-MM-YYYY/HH:MM/idRegistro]: mensaje
+    const match2 = msg.match(/^\[([^/]+)\/([^/]+)\/([^\]]+)\]:\s*([\s\S]*)$/);
+    if (match2) {
+      const dateStr = match2[1].trim();
+      const timeStr = match2[2].trim();
+      const senderId = match2[3].trim();
+      const textPart = match2[4].trim();
+      return {
+        id: `${dateStr}-${timeStr}-${senderId}-${idx}`,
+        fecha: dateStr,
+        hora: timeStr,
+        senderId,
+        texto: textPart
+      };
+    }
+
+    // 3. Formato corto: HH:MM/idRegistro: mensaje
+    const match3 = msg.match(/^(\d{2}:\d{2})\/(.*?):\s*([\s\S]*)$/);
+    if (match3) {
+      const timeStr = match3[1].trim();
+      const senderId = match3[2].trim();
+      const textPart = match3[3].trim();
+      return {
+        id: `${timeStr}-${senderId}-${idx}`,
+        fecha: fallbackDate,
+        hora: timeStr,
+        senderId,
+        texto: textPart
+      };
+    }
+
     const firstColon = msg.indexOf(':');
     if (firstColon !== -1 && msg.includes('/')) {
       const metaPart = msg.substring(0, firstColon).trim();
@@ -3232,6 +3304,232 @@ export function buildCanonicalPersonStatusHistoryDoc(raw = {}) {
     _metaTimestamp: nowMs
   };
 }
+
+/**
+ * Calcula el siguiente ID correlativo oficial para una Solicitud de Apoyo SCI:
+ * Formato: `SCI-AAAA-000X` (ej. `SCI-2026-0001`, `SCI-2026-0002`).
+ * Recibe una lista de documentos o IDs existentes para encontrar el mayor correlativo del año actual.
+ */
+export function calculateNextCanonicalSciRequestId(existingDocsOrIds = [], yearOverride = null) {
+  const year = Number(yearOverride || new Date().getFullYear());
+  const prefix = `SCI-${year}-`;
+  let maxSeq = 0;
+
+  (Array.isArray(existingDocsOrIds) ? existingDocsOrIds : []).forEach((item) => {
+    const rawId =
+      typeof item === 'string'
+        ? item.trim().toUpperCase()
+        : String(item?.idSolicitud || item?.idAlerta || item?.id || '').trim().toUpperCase();
+    if (rawId.startsWith(prefix)) {
+      const seqPart = rawId.slice(prefix.length).replace(/\D/g, '');
+      const num = parseInt(seqPart, 10);
+      if (!isNaN(num) && num > maxSeq) {
+        maxSeq = num;
+      }
+    }
+  });
+
+  const nextSeq = String(maxSeq + 1).padStart(4, '0');
+  return `${prefix}${nextSeq}`;
+}
+
+/**
+ * Construye el documento canónico de una Solicitud de Apoyo en la subcolección
+ * `sisbom-central/saas_clientes/{licenciaSolicitante}/sci_solicitudes/{idSolicitud}`
+ * (también replicado en `sisbom-central/saas_clientes/{licenciaApoyo}/sci_solicitudes/{idSolicitud}`).
+ * - `idSolicitud` lleva siempre el formato correlativo `SCI-AAAA-000X` (ej. `SCI-2026-0001`).
+ * - Visible única y exclusivamente para el Comandante (`idRadial == "1"`) en la pestaña `SCI` de `SENTINEL ONE` (sin mezclarse con `alertas`).
+ */
+export function buildCanonicalCentralSciRequestDoc(raw = {}) {
+  const nowMs = Number(raw.timestamp || raw.updatedAt || Date.now()) || Date.now();
+  const dObj = new Date(nowMs);
+  const year = dObj.getFullYear();
+
+  const rawId = String(raw.idSolicitud || raw.id || '').trim().toUpperCase();
+  const idSolicitud = /^SCI-\d{4}-\d{4,}$/.test(rawId)
+    ? rawId
+    : `SCI-${year}-${String(raw.correlativo || 1).padStart(4, '0')}`;
+
+  return {
+    id: idSolicitud,
+    idSolicitud,
+    sciActivo: raw.sciActivo !== undefined ? Boolean(raw.sciActivo) : true,
+    soloComandante: true,
+    idRadialDestinatario: '1', // Exclusivo Comandante (idRadial == "1")
+    tipoSolicitud: String(raw.tipoSolicitud || 'ALERTA_PREVENTIVA').trim().toUpperCase(), // 'ALERTA_PREVENTIVA' | 'SOLICITUD_UNIDAD' | 'APOYO_OFRECIDO'
+    licenciaSolicitante: String(raw.licenciaSolicitante || '').trim().toUpperCase(),
+    cuerpoSolicitante: String(raw.cuerpoSolicitante || '').trim().toUpperCase(),
+    comunaSolicitante: String(raw.comunaSolicitante || '').trim().toUpperCase(),
+    logoSolicitante: String(raw.logoSolicitante || '').trim(),
+    licenciaApoyo: String(raw.licenciaApoyo || '').trim().toUpperCase(),
+    cuerpoApoyo: String(raw.cuerpoApoyo || '').trim().toUpperCase(),
+    comunaApoyo: String(raw.comunaApoyo || '').trim().toUpperCase(),
+    idServicioOrigen: String(raw.idServicioOrigen || '').trim(),
+    claveEmergencia: String(raw.claveEmergencia || '10-0').trim().toUpperCase(),
+    direccionEmergencia: String(raw.direccionEmergencia || '').trim().toUpperCase(),
+    geoEmergencia:
+      raw.geoEmergencia &&
+      typeof raw.geoEmergencia === 'object' &&
+      !isNaN(Number(raw.geoEmergencia.lat)) &&
+      !isNaN(Number(raw.geoEmergencia.lng ?? raw.geoEmergencia.long))
+        ? {
+            lat: Number(raw.geoEmergencia.lat),
+            lng: Number(raw.geoEmergencia.lng ?? raw.geoEmergencia.long),
+            long: Number(raw.geoEmergencia.long ?? raw.geoEmergencia.lng)
+          }
+        : null,
+    idCarroSolicitado: String(raw.idCarroSolicitado || '').trim().toUpperCase(),
+    sectorDestino: String(raw.sectorDestino || '').trim().toUpperCase(),
+    instruccionTactica: String(raw.instruccionTactica || '').trim(),
+    dirigirse:
+      raw.dirigirse &&
+      typeof raw.dirigirse === 'object' &&
+      !isNaN(Number(raw.dirigirse.lat)) &&
+      !isNaN(Number(raw.dirigirse.lng ?? raw.dirigirse.long))
+        ? {
+            lat: Number(raw.dirigirse.lat),
+            long: Number(raw.dirigirse.long ?? raw.dirigirse.lng),
+            lng: Number(raw.dirigirse.lng ?? raw.dirigirse.long),
+            lado: String(raw.dirigirse.lado || raw.sectorDestino || '').trim().toUpperCase(),
+            instruccion: String(raw.dirigirse.instruccion || raw.instruccionTactica || '').trim()
+          }
+        : null,
+    comandanteSolicitante: String(raw.comandanteSolicitante || '').trim().toUpperCase(),
+    estado: String(raw.estado || 'PENDIENTE').trim().toUpperCase(), // 'PENDIENTE' | 'CONFIRMADA' | 'OFRECIDA' | 'EN_CAMINO' | 'EN_LUGAR' | 'RECHAZADA' | 'CANCELADA' | 'FINALIZADA'
+    confirmadoPor: String(raw.confirmadoPor || '').trim().toUpperCase(),
+    confirmadoAt: Number(raw.confirmadoAt || 0) || null,
+    unidadesDisponibles: Array.isArray(raw.unidadesDisponibles) ? raw.unidadesDisponibles : [],
+    commanderToken: String(raw.commanderToken || '').trim(),
+    commanderAuth:
+      raw.commanderAuth && typeof raw.commanderAuth === 'object'
+        ? {
+            email: String(raw.commanderAuth.email || '').trim(),
+            password: String(raw.commanderAuth.password || '').trim(),
+            idRadial: '1'
+          }
+        : null,
+    mensajesChat: String(raw.mensajesChat || '').trim(),
+    evacuationAlert:
+      raw.evacuationAlert && typeof raw.evacuationAlert === 'object'
+        ? {
+            active: Boolean(raw.evacuationAlert.active),
+            targetSector: String(raw.evacuationAlert.targetSector || 'TODOS').trim().toUpperCase(),
+            motivo: String(raw.evacuationAlert.motivo || '').trim(),
+            triggeredAt: Number(raw.evacuationAlert.triggeredAt || 0) || null,
+            emitidoPor: String(raw.evacuationAlert.emitidoPor || '').trim().toUpperCase()
+          }
+        : null,
+    fechaSolicitud: String(raw.fechaSolicitud || getLocalDateString(dObj)).replace(/^['"]+|['"]+$/g, ''),
+    horaSolicitud: String(raw.horaSolicitud || getLocalTimeString(dObj)).replace(/^['"]+|['"]+$/g, ''),
+    createdAt: Number(raw.createdAt || nowMs),
+    updatedAt: nowMs,
+    _metaTimestamp: nowMs
+  };
+}
+
+/**
+ * Calcula el ID canónico del documento de Incidente SCI activo en `sisbom-central/sci_incidentes/{docId}` (Opción B):
+ * Formato: `{LICENCIA_SOLICITANTE}_{idServicio}` (ej. `SB-CBNC-OH_2026-00012` o `PRUEBA_SIM-SCI-17939...`).
+ */
+export function buildCanonicalCentralSciIncidentId(licenciaSolicitante = '', idServicio = '') {
+  const cleanLic = String(licenciaSolicitante || 'SCI')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_-]/g, '_');
+  const cleanSvc = String(idServicio || 'ACTIVO')
+    .trim()
+    .replace(/[^A-Za-z0-9_-]/g, '_');
+  return `${cleanLic}_${cleanSvc}`;
+}
+
+/**
+ * Construye el documento canónico de la Colección Raíz `sci_incidentes/{LICENCIA_SOLICITANTE}_{idServicio}`
+ * en `sisbom-central` (Opción B — Arquitectura dedicada con subcolecciones `solicitudes` y `mensajes`).
+ * Incluye estado `evacuationAlert` y `maydayState` para alertar en tiempo real a `SENTINEL NAV` y `SENTINEL ONE`
+ * tanto del propio Cuerpo como de los Cuerpos de Bomberos externos que trabajan en el servicio.
+ */
+export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
+  const nowMs = Number(raw.updatedAt || raw.timestamp || Date.now()) || Date.now();
+  const cleanLic = String(raw.licenciaSolicitante || '').trim().toUpperCase();
+  const cleanSvc = String(raw.idServicio || raw.id || 'SCI-ACTIVO').trim();
+  const docId =
+    raw.idIncidenteSci && String(raw.idIncidenteSci).includes('_')
+      ? String(raw.idIncidenteSci).trim()
+      : buildCanonicalCentralSciIncidentId(cleanLic, cleanSvc);
+
+  const geoRaw = raw.geo || raw.geoEmergencia || null;
+  const geo =
+    geoRaw &&
+    typeof geoRaw === 'object' &&
+    !isNaN(Number(geoRaw.lat)) &&
+    !isNaN(Number(geoRaw.lng ?? geoRaw.long))
+      ? {
+          lat: Number(geoRaw.lat),
+          lng: Number(geoRaw.lng ?? geoRaw.long),
+          long: Number(geoRaw.long ?? geoRaw.lng)
+        }
+      : null;
+
+  const evacRaw = raw.evacuationAlert && typeof raw.evacuationAlert === 'object' ? raw.evacuationAlert : {};
+  const maydayRaw = raw.maydayState && typeof raw.maydayState === 'object' ? raw.maydayState : {};
+
+  return {
+    id: docId,
+    idIncidenteSci: docId,
+    activo: raw.activo !== undefined ? Boolean(raw.activo) : true,
+    soloComandante: true,
+    idRadialDestinatario: '1',
+    licenciaSolicitante: cleanLic,
+    cuerpoSolicitante: String(raw.cuerpoSolicitante || cleanLic).trim().toUpperCase(),
+    comunaSolicitante: String(raw.comunaSolicitante || '').trim().toUpperCase(),
+    logoSolicitante: String(raw.logoSolicitante || '').trim(),
+    idServicio: cleanSvc,
+    clave: String(raw.clave || raw.claveEmergencia || '10-0').trim().toUpperCase(),
+    claveEmergencia: String(raw.claveEmergencia || raw.clave || '10-0').trim().toUpperCase(),
+    lugar: String(raw.lugar || raw.direccionEmergencia || raw.direccion || '').trim().toUpperCase(),
+    direccionEmergencia: String(raw.direccionEmergencia || raw.lugar || raw.direccion || '').trim().toUpperCase(),
+    geo,
+    geoEmergencia: geo,
+    comandanteSci: String(raw.comandanteSci || 'CI SCI').trim().toUpperCase(),
+    cuerposAlertados: Array.isArray(raw.cuerposAlertados)
+      ? Array.from(
+          new Set(raw.cuerposAlertados.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))
+        )
+      : [],
+    unidadesEnServicio: Array.isArray(raw.unidadesEnServicio)
+      ? Array.from(
+          new Set(raw.unidadesEnServicio.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))
+        )
+      : [],
+    evacuationAlert: {
+      active: Boolean(evacRaw.active),
+      targetSector: String(evacRaw.targetSector || 'TODOS').trim().toUpperCase(),
+      motivo: String(evacRaw.motivo || '').trim(),
+      triggeredAt: evacRaw.active ? Number(evacRaw.triggeredAt || nowMs) : null,
+      emitidoPor: String(evacRaw.emitidoPor || raw.comandanteSci || 'CI SCI').trim().toUpperCase(),
+      claveEmergencia: String(raw.clave || raw.claveEmergencia || '10-0').trim().toUpperCase(),
+      direccionEmergencia: String(raw.lugar || raw.direccionEmergencia || '').trim().toUpperCase(),
+      cuerpoSolicitante: String(raw.cuerpoSolicitante || cleanLic).trim().toUpperCase()
+    },
+    maydayState: {
+      active: Boolean(maydayRaw.active),
+      triggeredAt: maydayRaw.active ? Number(maydayRaw.triggeredAt || nowMs) : null,
+      bomberoRadial: String(maydayRaw.bomberoRadial || '').trim().toUpperCase(),
+      bomberoNombre: String(maydayRaw.bomberoNombre || maydayRaw.firefighterName || '').trim().toUpperCase(),
+      sector: String(maydayRaw.sector || 'ZONA CALIENTE').trim().toUpperCase(),
+      motivo: String(maydayRaw.motivo || maydayRaw.reason || '').trim()
+    },
+    exclusionZones: raw.exclusionZones && typeof raw.exclusionZones === 'object' ? raw.exclusionZones : null,
+    sectorSides: raw.sectorSides && typeof raw.sectorSides === 'object' ? raw.sectorSides : {},
+    mapAnnotations: Array.isArray(raw.mapAnnotations) ? raw.mapAnnotations : [],
+    unitTacticalOrders:
+      raw.unitTacticalOrders && typeof raw.unitTacticalOrders === 'object' ? raw.unitTacticalOrders : {},
+    updatedAt: nowMs,
+    _metaTimestamp: nowMs
+  };
+}
+
+
 
 
 

@@ -8,90 +8,241 @@ import {
   ScrollView,
   TextInput,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Image
 } from 'react-native';
 import { MessageSquare, Send, X } from 'lucide-react-native';
 import { useAuthStore } from '../../store/useAuthStore';
+import { useLicenseStore } from '../../store/useLicenseStore';
 import { useDispatchStore } from '../../store/useDispatchStore';
+import { SentinelBackground } from '../common/SentinelBackground';
+import {
+  parseCanonicalChatMessages,
+  formatShortPersonName
+} from '../../shared/sentinelCore';
 
-// Parser Dual-Read de mensajes de chat (soporta DD-MM-YYYY/HH:MM/idRegistro: texto y [DD-MM-YYYY/HH:MM/idRegistro]: texto)
-export function parseChatMessages(rawMensaje = '') {
-  if (!rawMensaje || !String(rawMensaje).trim()) return [];
-  const entries = String(rawMensaje)
-    .split('|')
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  return entries.map((entry, idx) => {
-    // 1. Formato canónico V2/V3 (alertas.html / TabScreens.kt): DD-MM-YYYY/HH:MM/idRegistro: mensaje
-    const matchStandard = entry.match(/^(\d{2}-\d{2}-\d{4})\/(\d{2}:\d{2})\/([^:]+):\s*([\s\S]*)$/);
-    if (matchStandard) {
-      return {
-        id: `${idx}-${matchStandard[1]}-${matchStandard[2]}`,
-        fecha: matchStandard[1].trim(),
-        hora: matchStandard[2].trim(),
-        senderId: matchStandard[3].trim(),
-        texto: matchStandard[4].trim()
-      };
-    }
-
-    // 2. Fallback con corchetes: [DD-MM-YYYY/HH:MM/idRegistro]: mensaje
-    const matchBracket = entry.match(/^\[([^/]+)\/([^/]+)\/([^\]]+)\]:\s*([\s\S]*)$/);
-    if (matchBracket) {
-      return {
-        id: `${idx}-${matchBracket[1]}-${matchBracket[2]}`,
-        fecha: matchBracket[1].trim(),
-        hora: matchBracket[2].trim(),
-        senderId: matchBracket[3].trim(),
-        texto: matchBracket[4].trim()
-      };
-    }
-
-    return {
-      id: `raw-${idx}`,
-      fecha: '',
-      hora: '',
-      senderId: '0',
-      texto: entry
-    };
-  });
+// Parser Dual-Read de mensajes de chat sincronizado con SHARED/sentinelCore.js
+export function parseChatMessages(rawMensaje = '', fallbackSender = 'COMANDANCIA') {
+  return parseCanonicalChatMessages(rawMensaje, fallbackSender);
 }
 
-function resolveRecipientsLabel(aQuien = 'TC', firefightersList = []) {
+/**
+ * Resuelve la identidad visual de un remitente de mensaje de chat ocultando SIEMPRE el idRegistro.
+ * Soporta tanto el formato de SENTINEL SCI ("224 ([23] DANIEL OLATE - NANCAGUA)") como idRegistro local ("100").
+ */
+export function resolveChatSenderIdentity({
+  rawSenderId = '',
+  firefightersList = [],
+  user = null,
+  ownCorpShort = '',
+  fallbackSenderLabel = 'COMANDANCIA'
+} = {}) {
+  const raw = String(rawSenderId || '').trim();
+  const myRegId = String(user?.idRegistro || '').trim();
+  const myRadialId = String(user?.idRadial || '1').trim();
+  const ownUpper = String(ownCorpShort || '')
+    .replace(/^CUERPO\s+DE\s+BOMBEROS\s+DE\s+/i, '')
+    .trim()
+    .toUpperCase();
+
+  let cleanRegOrToken = raw;
+  let insideParen = '';
+
+  // Detectar formato SENTINEL SCI: "224 ([23] DANIEL OLATE - NANCAGUA)" o "([23] DANIEL OLATE - NANCAGUA)"
+  const parenMatch = raw.match(/^(\S*?)\s*\((.+)\)$/);
+  if (parenMatch) {
+    cleanRegOrToken = String(parenMatch[1] || '').trim();
+    insideParen = String(parenMatch[2] || '').trim();
+  }
+
+  let extractedRadial = '';
+  let extractedName = '';
+  if (insideParen) {
+    const bracketMatch = insideParen.match(/^\[([^\]]+)\]\s*(.+)$/);
+    if (bracketMatch) {
+      extractedRadial = String(bracketMatch[1] || '').trim();
+      extractedName = String(bracketMatch[2] || '').trim();
+    } else {
+      extractedName = insideParen;
+    }
+  } else {
+    const directBracket = raw.match(/^\[([^\]]+)\]\s*(.+)$/);
+    if (directBracket) {
+      extractedRadial = String(directBracket[1] || '').trim();
+      extractedName = String(directBracket[2] || '').trim();
+    }
+  }
+
+  // Si el mensaje trae etiqueta de otro Cuerpo de Bomberos (ej. "- NANCAGUA") distinto al nuestro, no es "isMe" aunque coincida el idRegistro numérico
+  const hasOtherCorpTag =
+    Boolean(insideParen && insideParen.includes(' - ') && ownUpper) &&
+    !insideParen.toUpperCase().includes(ownUpper);
+
+  const senderObj = !hasOtherCorpTag
+    ? (firefightersList || []).find(
+        (f) => String(f.idRegistro || '').trim() === cleanRegOrToken
+      ) ||
+      (firefightersList || []).find(
+        (f) => String(f.idRadial || '').trim() === cleanRegOrToken
+      )
+    : null;
+
+  const isMe =
+    !hasOtherCorpTag &&
+    ((myRegId && cleanRegOrToken === myRegId) ||
+      (senderObj && myRegId && String(senderObj.idRegistro || '').trim() === myRegId) ||
+      (!senderObj && !insideParen && myRadialId && cleanRegOrToken === myRadialId));
+
+  if (isMe) {
+    return {
+      isMe: true,
+      radial: myRadialId || '1',
+      name: 'Tú',
+      cargo: '',
+      previewLabel: 'Tú'
+    };
+  }
+
+  if (extractedName) {
+    const cleanNameNoId = extractedName.replace(/^\d+\s+/, '').trim();
+    const rad = extractedRadial || 'SCI';
+    return {
+      isMe: false,
+      radial: rad,
+      name: cleanNameNoId,
+      cargo: '',
+      previewLabel: `[${rad}] ${cleanNameNoId}`
+    };
+  }
+
+  if (senderObj) {
+    const rad = String(senderObj.idRadial || '1').trim();
+    const shortName = formatShortPersonName(senderObj.nombre || senderObj.nombreBombero || 'BOMBERO');
+    return {
+      isMe: false,
+      radial: rad,
+      name: shortName,
+      cargo: String(senderObj.cargo || '').trim(),
+      previewLabel: `[${rad}] ${shortName}`
+    };
+  }
+
+  // Nunca mostrar "ID #224" ni el idRegistro numérico crudo
+  const safeFallback = String(fallbackSenderLabel || 'COMANDANCIA')
+    .replace(/^COMANDANCIA\s+SCI\s*-\s*/i, '')
+    .trim();
+  const nonNumericLabel = /^\d+$/.test(cleanRegOrToken)
+    ? safeFallback || 'COMANDANCIA'
+    : cleanRegOrToken.replace(/^\d+\s*/, '').trim() || safeFallback || 'COMANDANCIA';
+
+  return {
+    isMe: false,
+    radial: extractedRadial || '1',
+    name: nonNumericLabel,
+    cargo: '',
+    previewLabel: nonNumericLabel
+  };
+}
+
+function resolveRecipientsLabel(aQuien = 'TC', firefightersList = [], user = null) {
   const clean = String(aQuien || 'TC').trim();
-  if (!clean || clean.toUpperCase() === 'TC' || clean.toUpperCase() === 'SC' || clean === '1') {
+  if (!clean || clean.toUpperCase() === 'TC' || clean.toUpperCase() === 'SC') {
     return 'Toda la Compañía';
   }
   const ids = clean.split(',').map((s) => s.trim()).filter(Boolean);
   const names = ids.map((id) => {
-    const byReg = (firefightersList || []).find((p) => String(p.idRegistro).trim() === id);
-    if (byReg) return `[${byReg.idRadial}] ${byReg.nombre || byReg.nombreBombero}`;
-    const byRad = (firefightersList || []).find((p) => String(p.idRadial).trim() === id);
-    if (byRad) return `[${byRad.idRadial}] ${byRad.nombre || byRad.nombreBombero}`;
-    return `ID #${id}`;
+    const byReg = (firefightersList || []).find((p) => String(p.idRegistro || '').trim() === id);
+    if (byReg) {
+      return `[${byReg.idRadial || '1'}] ${formatShortPersonName(byReg.nombre || byReg.nombreBombero)}`;
+    }
+    const byRad = (firefightersList || []).find((p) => String(p.idRadial || '').trim() === id);
+    if (byRad) {
+      return `[${byRad.idRadial || '1'}] ${formatShortPersonName(byRad.nombre || byRad.nombreBombero)}`;
+    }
+    if (user && (String(user.idRegistro || '').trim() === id || String(user.idRadial || '').trim() === id)) {
+      return `[${user.idRadial || '1'}] ${formatShortPersonName(user.nombreBombero || user.nombre || 'COMANDANTE')}`;
+    }
+    if (id === '1') return 'Comandante';
+    return 'Comandancia';
   });
   return names.join(', ');
 }
 
+export function formatChatTimestampDisplay(fecha = '', hora = '') {
+  const f = String(fecha || '').replace(/^['"]+|['"]+$/g, '').trim();
+  const h = String(hora || '').replace(/^['"]+|['"]+$/g, '').trim();
+  if (f && h) {
+    const parts = f.split('-');
+    if (parts.length === 3) {
+      return `${parts[0]}-${parts[1]}-${parts[2]} ${h}`;
+    }
+    return `${f} ${h}`;
+  }
+  return h || f || '';
+}
+
 export const ChatModal = ({ visible, onClose }) => {
   const { user, isDarkMode = true } = useAuthStore();
+  const { comuna, nombreMostrar, clientName } = useLicenseStore();
   const {
     chatAlert,
     activeChatAlert,
     firefightersList,
     sendChatMessage,
+    sendSciChatMessage,
     registerConforme
   } = useDispatchStore();
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const scrollRef = useRef(null);
 
   const currentChat = activeChatAlert || chatAlert;
-  const messages = parseChatMessages(currentChat?.mensajeAlerta || '');
+  const isSciChat = Boolean(
+    currentChat?.isSciChat ||
+      String(currentChat?.idAlerta || '').startsWith('SCI') ||
+      String(currentChat?.idSolicitud || '').startsWith('SCI')
+  );
+  const rawChatText = currentChat?.mensajesChat ?? currentChat?.mensajeAlerta ?? '';
+  const messages = parseChatMessages(
+    rawChatText,
+    currentChat?.cuerpoSolicitante || currentChat?.razonAlerta || 'COMANDANCIA'
+  );
 
-  // Al abrir el chat, registrar conforme automáticamente igual que alertas.html línea 1815
+  // Detectar apertura y altura del teclado en WebView Android/iOS (visualViewport) para que siempre se vea lo que se escribe
   useEffect(() => {
-    if (visible && currentChat?.idAlerta && user?.idRadial) {
+    if (!visible || typeof window === 'undefined') {
+      setKeyboardOffset(0);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const handleViewportChange = () => {
+      const fullH = window.innerHeight || document.documentElement?.clientHeight || vv.height;
+      const diff = Math.max(0, Math.round(fullH - vv.height - (vv.offsetTop || 0)));
+      setKeyboardOffset(diff > 40 ? diff : 0);
+      if (diff > 40) {
+        setTimeout(() => {
+          scrollRef.current?.scrollToEnd({ animated: true });
+        }, 80);
+      }
+    };
+
+    vv.addEventListener('resize', handleViewportChange);
+    vv.addEventListener('scroll', handleViewportChange);
+    handleViewportChange();
+
+    return () => {
+      vv.removeEventListener('resize', handleViewportChange);
+      vv.removeEventListener('scroll', handleViewportChange);
+    };
+  }, [visible]);
+
+  // Al abrir el chat interno, registrar conforme automáticamente
+  useEffect(() => {
+    if (visible && !isSciChat && currentChat?.idAlerta && user?.idRadial) {
       const confList = String(currentChat.conforme || '')
         .split(',')
         .map((s) => s.trim().toUpperCase())
@@ -101,7 +252,7 @@ export const ChatModal = ({ visible, onClose }) => {
         registerConforme(currentChat.idAlerta, myRad);
       }
     }
-  }, [visible, currentChat?.idAlerta, currentChat?.mensajeAlerta]);
+  }, [visible, isSciChat, currentChat?.idAlerta, currentChat?.mensajeAlerta]);
 
   useEffect(() => {
     if (visible && scrollRef.current) {
@@ -109,7 +260,7 @@ export const ChatModal = ({ visible, onClose }) => {
         scrollRef.current?.scrollToEnd({ animated: true });
       }, 180);
     }
-  }, [visible, messages.length]);
+  }, [visible, messages.length, isInputFocused]);
 
   const handleSend = async () => {
     if (!inputText.trim() || sending) return;
@@ -117,7 +268,11 @@ export const ChatModal = ({ visible, onClose }) => {
     setInputText('');
     setSending(true);
     try {
-      await sendChatMessage(currentChat, msg);
+      if (isSciChat && typeof sendSciChatMessage === 'function') {
+        await sendSciChatMessage(msg, currentChat);
+      } else {
+        await sendChatMessage(currentChat, msg);
+      }
       setTimeout(() => {
         scrollRef.current?.scrollToEnd({ animated: true });
       }, 150);
@@ -128,31 +283,41 @@ export const ChatModal = ({ visible, onClose }) => {
 
   if (!visible) return null;
 
-  const myRegId = String(user?.idRegistro || '').trim();
-  const myRadialId = String(user?.idRadial || '').trim();
-  const recipientsLabel = resolveRecipientsLabel(currentChat?.aQuienAlerta, firefightersList);
+  const ownCorpShort = comuna || nombreMostrar || clientName || '';
+  const recipientsLabel = isSciChat
+    ? `Red SCI • [${user?.idRadial || '1'}] ${formatShortPersonName(user?.nombreBombero || user?.nombre || 'COMANDANTE')}`
+    : resolveRecipientsLabel(currentChat?.aQuienAlerta, firefightersList, user);
+  const isKeyboardOpen = keyboardOffset > 0 || isInputFocused;
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <KeyboardAvoidingView
-        style={styles.overlay}
+        style={[
+          styles.overlay,
+          keyboardOffset > 0 ? { paddingBottom: keyboardOffset } : null
+        ]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View
           style={[
             styles.container,
             {
-              backgroundColor: isDarkMode ? '#090d16' : '#f8fafc',
+              backgroundColor: isDarkMode ? '#060911' : '#f8fafc',
               borderColor: isDarkMode ? '#1e293b' : '#cbd5e1'
             }
           ]}
         >
-          {/* Header idéntico a alertas.html (Título de la conversación + Destinatarios) */}
+          {/* Fondo de cenizas incandescentes de SENTINEL */}
+          <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <SentinelBackground stage="login" theme={isDarkMode ? 'dark' : 'light'} />
+          </View>
+
+          {/* Header del Chat */}
           <View
             style={[
               styles.header,
               {
-                backgroundColor: isDarkMode ? '#0f172a' : '#ffffff',
+                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)',
                 borderBottomColor: isDarkMode ? '#1e293b' : '#e2e8f0'
               }
             ]}
@@ -169,7 +334,7 @@ export const ChatModal = ({ visible, onClose }) => {
                   ]}
                   numberOfLines={1}
                 >
-                  {currentChat?.razonAlerta || 'CONVERSACIÓN OPERACIONAL'}
+                  {currentChat?.razonAlerta || currentChat?.cuerpoSolicitante || 'CONVERSACIÓN OPERACIONAL'}
                 </Text>
                 <Text style={styles.headerSub} numberOfLines={1}>
                   Para: {recipientsLabel}
@@ -187,38 +352,44 @@ export const ChatModal = ({ visible, onClose }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Lista de Mensajes */}
+          {/* Lista de Mensajes con el Logo de SENTINEL estático que se desplaza al correr la conversación */}
           <ScrollView
             ref={scrollRef}
             style={styles.messagesScroll}
             contentContainerStyle={styles.messagesContent}
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
           >
+            <View style={styles.scrollingWatermarkWrap} pointerEvents="none">
+              <Image
+                source={require('../../../assets/LOGO_SENTINEL.png')}
+                style={[
+                  styles.scrollingWatermarkImg,
+                  { opacity: isDarkMode ? 0.13 : 0.09 }
+                ]}
+                resizeMode="contain"
+              />
+            </View>
+
             {messages.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Text style={styles.emptyText}>No hay mensajes en esta conversación.</Text>
               </View>
             ) : (
               messages.map((m) => {
-                // Identificar por idRegistro permanente (con fallback a idRadial en mensajes antiguos)
-                const senderObj = (firefightersList || []).find(
-                  (f) => String(f.idRegistro).trim() === String(m.senderId).trim()
-                ) || (firefightersList || []).find(
-                  (f) => String(f.idRadial).trim() === String(m.senderId).trim()
-                );
-
-                const isMe =
-                  (myRegId && String(m.senderId).trim() === myRegId) ||
-                  (senderObj && myRegId && String(senderObj.idRegistro).trim() === myRegId) ||
-                  (!senderObj && myRadialId && String(m.senderId).trim() === myRadialId);
-
-                const senderName = isMe
-                  ? 'Tú'
-                  : senderObj?.nombre || senderObj?.nombreBombero || `ID #${m.senderId}`;
-                const senderCargo = senderObj?.cargo || '';
-                const senderRadial = isMe
-                  ? myRadialId || myRegId
-                  : senderObj?.idRadial || m.senderId;
+                const senderInfo = resolveChatSenderIdentity({
+                  rawSenderId: m.senderId,
+                  firefightersList,
+                  user,
+                  ownCorpShort,
+                  fallbackSenderLabel:
+                    currentChat?.cuerpoSolicitante ||
+                    currentChat?.razonAlerta ||
+                    currentChat?.quienAlerta ||
+                    'COMANDANCIA'
+                });
+                const isMe = senderInfo.isMe;
+                const timeStr = formatChatTimestampDisplay(m.fecha, m.hora);
 
                 return (
                   <View
@@ -234,7 +405,9 @@ export const ChatModal = ({ visible, onClose }) => {
                         isMe
                           ? styles.bubbleMe
                           : {
-                              backgroundColor: isDarkMode ? '#151c2c' : '#ffffff',
+                              backgroundColor: isDarkMode
+                                ? 'rgba(21, 28, 44, 0.92)'
+                                : 'rgba(255, 255, 255, 0.95)',
                               borderColor: isDarkMode ? '#334155' : '#cbd5e1',
                               borderBottomLeftRadius: 4
                             }
@@ -247,7 +420,7 @@ export const ChatModal = ({ visible, onClose }) => {
                             isMe ? styles.radialPillMe : styles.radialPillOther
                           ]}
                         >
-                          <Text style={styles.radialPillText}>{senderRadial}</Text>
+                          <Text style={styles.radialPillText}>{senderInfo.radial}</Text>
                         </View>
                         <Text
                           style={[
@@ -262,8 +435,8 @@ export const ChatModal = ({ visible, onClose }) => {
                           ]}
                           numberOfLines={1}
                         >
-                          {senderName}
-                          {!isMe && senderCargo ? ` • ${senderCargo}` : ''}
+                          {senderInfo.name}
+                          {!isMe && senderInfo.cargo ? ` • ${senderInfo.cargo}` : ''}
                         </Text>
                       </View>
 
@@ -276,14 +449,16 @@ export const ChatModal = ({ visible, onClose }) => {
                         {m.texto}
                       </Text>
 
-                      <Text
-                        style={[
-                          styles.timeText,
-                          { color: isMe ? 'rgba(255,255,255,0.7)' : '#94a3b8' }
-                        ]}
-                      >
-                        {m.fecha ? `${m.fecha} ` : ''}{m.hora}
-                      </Text>
+                      {timeStr ? (
+                        <Text
+                          style={[
+                            styles.timeText,
+                            { color: isMe ? 'rgba(255,255,255,0.75)' : '#94a3b8' }
+                          ]}
+                        >
+                          {timeStr}
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 );
@@ -291,13 +466,15 @@ export const ChatModal = ({ visible, onClose }) => {
             )}
           </ScrollView>
 
-          {/* Barra de Entrada */}
+          {/* Barra de Entrada con margen inferior holgado para no pegarse al borde inferior y visible sobre el teclado */}
           <View
             style={[
               styles.inputBar,
               {
-                backgroundColor: isDarkMode ? '#0f172a' : '#ffffff',
-                borderTopColor: isDarkMode ? '#1e293b' : '#e2e8f0'
+                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.96)',
+                borderTopColor: isDarkMode ? '#1e293b' : '#e2e8f0',
+                paddingTop: 12,
+                paddingBottom: isKeyboardOpen ? 12 : 30
               }
             ]}
           >
@@ -312,6 +489,13 @@ export const ChatModal = ({ visible, onClose }) => {
               ]}
               value={inputText}
               onChangeText={setInputText}
+              onFocus={() => {
+                setIsInputFocused(true);
+                setTimeout(() => {
+                  scrollRef.current?.scrollToEnd({ animated: true });
+                }, 150);
+              }}
+              onBlur={() => setIsInputFocused(false)}
               placeholder="Escribe un mensaje aquí..."
               placeholderTextColor="#64748b"
               onSubmitEditing={handleSend}
@@ -335,15 +519,16 @@ export const ChatModal = ({ visible, onClose }) => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(4, 7, 15, 0.92)',
-    paddingTop: Platform.OS === 'ios' ? 44 : 24
+    backgroundColor: 'rgba(4, 7, 15, 0.94)',
+    paddingTop: 50
   },
   container: {
     flex: 1,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     borderWidth: 1,
-    overflow: 'hidden'
+    overflow: 'hidden',
+    position: 'relative'
   },
   header: {
     flexDirection: 'row',
@@ -351,7 +536,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    borderBottomWidth: 1
+    borderBottomWidth: 1,
+    zIndex: 2
   },
   headerLeft: {
     flexDirection: 'row',
@@ -378,7 +564,7 @@ const styles = StyleSheet.create({
   headerSub: {
     fontSize: 10.5,
     fontWeight: '700',
-    color: '#64748b',
+    color: '#94a3b8',
     marginTop: 1
   },
   closeBtn: {
@@ -389,16 +575,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   messagesScroll: {
-    flex: 1
+    flex: 1,
+    zIndex: 1
   },
   messagesContent: {
     padding: 14,
-    paddingBottom: 24,
-    gap: 10
+    paddingBottom: 28,
+    minHeight: '100%',
+    gap: 10,
+    position: 'relative'
+  },
+  scrollingWatermarkWrap: {
+    position: 'absolute',
+    top: 40,
+    left: 0,
+    right: 0,
+    bottom: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 0
+  },
+  scrollingWatermarkImg: {
+    width: 240,
+    height: 240
   },
   emptyBox: {
     paddingVertical: 40,
-    alignItems: 'center'
+    alignItems: 'center',
+    zIndex: 1
   },
   emptyText: {
     color: '#64748b',
@@ -407,7 +611,8 @@ const styles = StyleSheet.create({
   },
   messageRow: {
     width: '100%',
-    flexDirection: 'row'
+    flexDirection: 'row',
+    zIndex: 1
   },
   messageRowMe: {
     justifyContent: 'flex-end'
@@ -416,7 +621,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start'
   },
   bubble: {
-    maxWidth: '82%',
+    maxWidth: '84%',
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -468,23 +673,23 @@ const styles = StyleSheet.create({
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
     borderTopWidth: 1,
-    gap: 8
+    gap: 8,
+    zIndex: 2
   },
   textInput: {
     flex: 1,
     borderWidth: 1,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    fontSize: 13,
+    paddingVertical: 11,
+    fontSize: 13.5,
     outlineStyle: 'none'
   },
   sendBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 14,
     backgroundColor: '#dc2626',
     alignItems: 'center',

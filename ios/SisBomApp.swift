@@ -465,6 +465,44 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         return "despacho"
     }
 
+    private static func makeSilentWavData() -> Data {
+        let sampleRate: UInt32 = 8000
+        let numSamples: UInt32 = 8000 // 1 segundo de silencio digital puro (muestras PCM = 0)
+        let bytesPerSample: UInt16 = 2
+        let numChannels: UInt16 = 1
+        let dataSize: UInt32 = numSamples * UInt32(bytesPerSample)
+        let riffChunkSize: UInt32 = 36 + dataSize
+        let byteRate: UInt32 = sampleRate * UInt32(numChannels) * UInt32(bytesPerSample)
+        let blockAlign: UInt16 = numChannels * bytesPerSample
+        let bitsPerSample: UInt16 = 16
+
+        var data = Data(capacity: Int(44 + dataSize))
+        data.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        var leRiff = riffChunkSize.littleEndian
+        withUnsafeBytes(of: &leRiff) { data.append(contentsOf: $0) }
+        data.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+        data.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        var subchunk1Size: UInt32 = 16
+        withUnsafeBytes(of: &subchunk1Size) { data.append(contentsOf: $0) }
+        var audioFormat: UInt16 = 1 // PCM
+        withUnsafeBytes(of: &audioFormat) { data.append(contentsOf: $0) }
+        var leChannels = numChannels.littleEndian
+        withUnsafeBytes(of: &leChannels) { data.append(contentsOf: $0) }
+        var leSampleRate = sampleRate.littleEndian
+        withUnsafeBytes(of: &leSampleRate) { data.append(contentsOf: $0) }
+        var leByteRate = byteRate.littleEndian
+        withUnsafeBytes(of: &leByteRate) { data.append(contentsOf: $0) }
+        var leBlockAlign = blockAlign.littleEndian
+        withUnsafeBytes(of: &leBlockAlign) { data.append(contentsOf: $0) }
+        var leBits = bitsPerSample.littleEndian
+        withUnsafeBytes(of: &leBits) { data.append(contentsOf: $0) }
+        data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        var leDataSize = dataSize.littleEndian
+        withUnsafeBytes(of: &leDataSize) { data.append(contentsOf: $0) }
+        data.append(Data(count: Int(dataSize))) // 100% muestras en 0 (silencio absoluto)
+        return data
+    }
+
     func updateBackgroundKeepAlive() {
         let defaults = UserDefaults.standard
         let isAirplane = defaults.bool(forKey: "MODO_AVION")
@@ -476,17 +514,18 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             return
         }
 
-        // Si ya está sonando la alarma real o ya está corriendo el keep-alive, mantener activo
+        // En primer plano NO necesitamos reproducir ningún stream keep-alive
+        if AppDelegate.isAppInForeground {
+            stopBackgroundKeepAlive()
+            return
+        }
+
+        // Si ya está sonando la alarma real o ya está corriendo el keep-alive silencioso, mantener activo
         if let active = audioPlayer, active.isPlaying {
             return
         }
         if let ka = keepAlivePlayer, ka.isPlaying {
-            ka.volume = 0.002
-            return
-        }
-
-        guard let url = Bundle.main.url(forResource: "despacho", withExtension: "mp3")
-                ?? Bundle.main.url(forResource: "alertas", withExtension: "mp3") else {
+            ka.volume = 0.0
             return
         }
 
@@ -494,9 +533,10 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             let session = AVAudioSession.sharedInstance()
             try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
             try? session.setActive(true)
-            let player = try AVAudioPlayer(contentsOf: url)
-            // Volumen 0.002 (-54dB, inaudible al oído humano pero evita que CoreAudio suspenda el stream por volumen 0.0)
-            player.volume = 0.002
+            let silentWav = Self.makeSilentWavData()
+            let player = try AVAudioPlayer(data: silentWav, fileTypeHint: AVFileType.wav.rawValue)
+            // Silencio PCM puro (muestras = 0) + volumen 0.0: jamás emite ningún tono ni ruido por el parlante
+            player.volume = 0.0
             player.numberOfLoops = -1
             player.prepareToPlay()
             player.play()

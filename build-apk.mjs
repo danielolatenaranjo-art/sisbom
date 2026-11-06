@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const args = process.argv.slice(2).map(a => a.toLowerCase());
 const onlyPrepareWww = args.includes('--prepare-only') || args.includes('--sync-www') || args.includes('--both-www');
+const shouldUploadPlayStore = args.includes('--upload-playstore') || args.includes('--playstore');
 
 const distDir = path.join(__dirname, 'dist');
 const androidDir = path.join(__dirname, 'android');
@@ -231,6 +232,14 @@ try {
   console.log(` Archivo APK (FINAL):      ${destApk}`);
   console.log(` Tamaño APK: ${sizeMb} MB`);
   console.log('====================================================');
+
+  if (shouldUploadPlayStore) {
+    console.log('\n[5/5] Subiendo AAB directo a Google Play Console...');
+    execSync('node publish-playstore.mjs', {
+      cwd: __dirname,
+      stdio: 'inherit'
+    });
+  }
 } catch (err) {
   console.error('\n[ERROR DE COMPILACIÓN]:', err.message);
   process.exit(1);

@@ -50,14 +50,21 @@ import {
   getInstitutionCompanies,
   resolveCompanyFromVehicleId,
   formatShortPersonName,
-  resolveCoreUnitStatusInfo
+  resolveCoreUnitStatusInfo,
+  isCanonicalCommander,
+  parseCanonicalChatMessages
 } from '../shared/sentinelCore';
 import { TacticalDispatchMap } from '../components/dispatch/TacticalDispatchMap';
 import { ProfileDrawer } from '../components/modals/ProfileDrawer';
 import { FirefighterModal } from '../components/modals/FirefighterModal';
 import { AttendanceDetailModal } from '../components/modals/AttendanceDetailModal';
 import { OrdenDetailModal } from '../components/modals/OrdenDetailModal';
-import { ChatModal, parseChatMessages } from '../components/modals/ChatModal';
+import {
+  ChatModal,
+  parseChatMessages,
+  resolveChatSenderIdentity,
+  formatChatTimestampDisplay
+} from '../components/modals/ChatModal';
 import { CreateAlertOrderModal } from '../components/modals/CreateAlertOrderModal';
 
 function cleanSheetPrefix(s = '') {
@@ -411,11 +418,20 @@ export const MainHomeView = ({ onLogout }) => {
     clearUrgentBanner,
     stopDispatchSound,
     interCorpsAlert,
+    sciRequestsList,
+    activeSciNeighborCorps,
+    sciChatMessagesRaw,
+    sciUnreadCount,
+    isSciTabActive,
+    markSciAsRead,
     isRespondingInterCorps,
-    respondToInterCorpsAlert
+    respondToInterCorpsAlert,
+    offerVoluntarySciSupport,
+    sendSciChatMessage
   } = useDispatchStore();
 
-  const [currentTab, setCurrentTab] = useState('actividad'); // 'actividad' | 'ordenes' | 'alertas' | 'asistencia' | 'disponibles'
+  const [currentTab, setCurrentTab] = useState('actividad'); // 'actividad' | 'ordenes' | 'alertas' | 'sci' | 'asistencia' | 'disponibles'
+  const [sciChatInputText, setSciChatInputText] = useState('');
   const [attendanceHistoryFilter, setAttendanceHistoryFilter] = useState('aprobados'); // 'aprobados' | 'por_aprobar'
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('TODAS');
   const [selectedBomberoModal, setSelectedBomberoModal] = useState(null);
@@ -658,11 +674,24 @@ export const MainHomeView = ({ onLogout }) => {
     };
   }, [cadDraftId, sentinelLinkPhoneDigits, formCallerPhone]);
 
-  // Visibilidad de pestañas idéntica a getVisibleTabs en MainScreen.kt
+  // Visibilidad de pestañas: Pestaña dinámica SCI exclusiva para Comandante (idRadial == "1") cuando hay un SCI activo
+  const isStrictCommander = isCanonicalCommander(user) || myRadial === '1';
+  const showSciTab = Boolean(isStrictCommander && isSciTabActive);
   const showDisponiblesTab = Boolean(isMeCentralOperator || myRadial === '1');
-  const visibleTabs = showDisponiblesTab
-    ? ['actividad', 'ordenes', 'alertas', 'asistencia', 'disponibles']
-    : ['actividad', 'ordenes', 'alertas', 'asistencia'];
+  const visibleTabs = [
+    'actividad',
+    'ordenes',
+    'alertas',
+    ...(showSciTab ? ['sci'] : []),
+    'asistencia',
+    ...(showDisponiblesTab ? ['disponibles'] : [])
+  ];
+
+  useEffect(() => {
+    if (currentTab === 'sci' && !showSciTab) {
+      setCurrentTab('actividad');
+    }
+  }, [currentTab, showSciTab]);
 
   const triggerHaptic = (style = 'medium') => {
     try {
@@ -681,6 +710,9 @@ export const MainHomeView = ({ onLogout }) => {
     const dir = nextIdx >= prevIdx ? 1 : -1;
 
     triggerHaptic('medium');
+    if (targetTab === 'sci' && typeof markSciAsRead === 'function') {
+      markSciAsRead();
+    }
 
     // Al entrar a Asistencia, montar primero las primeras 24 tarjetas visibles durante los 230ms
     // de la animación para que la transición sea igual de rápida y fluida que las demás pestañas
@@ -1733,6 +1765,10 @@ export const MainHomeView = ({ onLogout }) => {
         prefix = 'MURO ';
         highlight = 'DE COMUNICACIONES';
         break;
+      case 'sci':
+        prefix = 'COMANDO DE ';
+        highlight = 'INCIDENTES SCI';
+        break;
       case 'asistencia':
         prefix = 'HISTORIAL ';
         highlight = 'DE ASISTENCIAS';
@@ -1933,9 +1969,11 @@ export const MainHomeView = ({ onLogout }) => {
 
     return (
       <View style={styles.tabScrollContainer}>
-        {/* TARJETA TÁCTICA DE ALERTA INTER-CUERPOS PARA EL COMANDANTE (idRadial == 1) */}
-        {isComandante && interCorpsAlert && interCorpsAlert.estado ? (
-          <View
+        {/* TARJETA TÁCTICA DE AVISO SCI PARA EL COMANDANTE (idRadial == 1) */}
+        {showSciTab && interCorpsAlert && interCorpsAlert.estado ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => switchTabAnimated('sci')}
             style={[
               styles.glassCard,
               {
@@ -1947,7 +1985,7 @@ export const MainHomeView = ({ onLogout }) => {
                       ? '#F59E0B'
                       : interCorpsAlert.estado === 'RECHAZADA'
                         ? '#EF4444'
-                        : '#F87171',
+                        : '#0EA5E9',
                 borderWidth: 1.5,
                 padding: 14,
                 marginBottom: 14
@@ -1958,16 +1996,16 @@ export const MainHomeView = ({ onLogout }) => {
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: 1 }}>
                 <View
                   style={{
-                    backgroundColor: 'rgba(239, 68, 68, 0.22)',
-                    borderColor: '#EF4444',
+                    backgroundColor: 'rgba(14, 165, 233, 0.22)',
+                    borderColor: '#0EA5E9',
                     borderWidth: 1,
                     paddingHorizontal: 7,
                     paddingVertical: 2,
                     borderRadius: 6
                   }}
                 >
-                  <Text style={{ color: '#FCA5A5', fontSize: 9, fontWeight: '900' }}>
-                    GRADO 3 • RED INTER-CUERPOS SCI
+                  <Text style={{ color: '#7DD3FC', fontSize: 9.5, fontWeight: '900' }}>
+                    {interCorpsAlert.idSolicitud || interCorpsAlert.idAlerta || 'SCI-2026-0001'}
                   </Text>
                 </View>
                 <View
@@ -2007,142 +2045,47 @@ export const MainHomeView = ({ onLogout }) => {
                           ? '⏳ EN ESPERA'
                           : interCorpsAlert.estado === 'RECHAZADA'
                             ? '✕ RECHAZADO'
-                            : '🚨 SOLICITUD PENDIENTE'}
+                            : '🚨 SOLICITUD SCI PENDIENTE'}
                   </Text>
                 </View>
+              </View>
+
+              <View
+                style={{
+                  backgroundColor: '#0284C7',
+                  paddingHorizontal: 9,
+                  paddingVertical: 4,
+                  borderRadius: 8
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 9.5, fontWeight: '900' }}>
+                  ABRIR SCI →
+                </Text>
               </View>
             </View>
 
             <Text
               style={{
                 color: isDarkMode ? '#FFFFFF' : '#0F172A',
-                fontSize: 13.5,
+                fontSize: 13,
                 fontWeight: '900',
-                marginBottom: 4
+                marginBottom: 2
               }}
             >
-              {interCorpsAlert.razonAlerta ||
-                `SOLICITUD DE ALERTA POR CLAVE ${interCorpsAlert.claveEmergencia || '10-12'} PARA UNIDADES EN APOYO`}
+              {interCorpsAlert.cuerpoSolicitante || 'RED INTER-CUERPOS SCI'} • CLAVE {interCorpsAlert.claveEmergencia || '10-12'}
             </Text>
-
-            <Text
-              style={{
-                color: isDarkMode ? '#CBD5E1' : '#334155',
-                fontSize: 11.5,
-                lineHeight: 16,
-                marginBottom: 10
-              }}
-            >
-              {String(
-                interCorpsAlert.mensajeAlerta ||
-                  interCorpsAlert.mensajeSolicitud ||
-                  `Solicitud desde ${interCorpsAlert.nombreCuerpoSolicitante || 'Cuerpo de Bomberos Vecino'}`
-              ).replace(/\|/g, '\n')}
-            </Text>
-
-            {/* 4 BOTONES TÁCTICOS DE RESPUESTA DEL COMANDANTE */}
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('heavy');
-                  await respondToInterCorpsAlert('CONFIRMADA', interCorpsAlert);
-                }}
+            {interCorpsAlert.direccionEmergencia ? (
+              <Text
                 style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert.estado === 'CONFIRMADA' ? '#059669' : 'rgba(16, 185, 129, 0.22)',
-                  borderColor: '#10B981',
-                  borderWidth: 1,
-                  borderRadius: 9,
-                  paddingVertical: 9,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
+                  color: isDarkMode ? '#CBD5E1' : '#334155',
+                  fontSize: 11.5,
+                  fontWeight: '600'
                 }}
-                activeOpacity={0.85}
               >
-                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                  ✓ CONFIRMAR APOYO
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('medium');
-                  await respondToInterCorpsAlert('EN_ESPERA', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert.estado === 'EN_ESPERA' ? '#D97706' : 'rgba(245, 158, 11, 0.20)',
-                  borderColor: '#F59E0B',
-                  borderWidth: 1,
-                  borderRadius: 9,
-                  paddingVertical: 9,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                  ⏳ ESPERAR
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('medium');
-                  await respondToInterCorpsAlert('RECHAZADA', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert.estado === 'RECHAZADA' ? '#DC2626' : 'rgba(239, 68, 68, 0.20)',
-                  borderColor: '#EF4444',
-                  borderWidth: 1,
-                  borderRadius: 9,
-                  paddingVertical: 9,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                  ✕ RECHAZAR
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('heavy');
-                  await respondToInterCorpsAlert('APOYO_OFRECIDO', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert.estado === 'APOYO_OFRECIDO' ? '#0284C7' : 'rgba(14, 165, 233, 0.22)',
-                  borderColor: '#0EA5E9',
-                  borderWidth: 1,
-                  borderRadius: 9,
-                  paddingVertical: 9,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                  🚒 OFRECER APOYO
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+                📍 {interCorpsAlert.direccionEmergencia}
+              </Text>
+            ) : null}
+          </TouchableOpacity>
         ) : null}
 
         {/* Operador CAD Info Card (Solo visible si el usuario NO es el propio Operador CAD) */}
@@ -4307,171 +4250,6 @@ export const MainHomeView = ({ onLogout }) => {
 
     return (
       <View style={styles.tabScrollContainer}>
-        {/* BARRA RÁPIDA DE COMANDANCIA PARA OFRECER / RESPONDER APOYO INTER-CUERPOS EN RED SCI */}
-        {isComandante ? (
-          <View
-            style={[
-              styles.glassCard,
-              {
-                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.94)' : '#F8FAFC',
-                borderColor: 'rgba(14, 165, 233, 0.35)',
-                padding: 12,
-                marginBottom: 12
-              }
-            ]}
-          >
-            <View
-              style={{
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: 8
-              }}
-            >
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text
-                  style={{
-                    color: '#38BDF8',
-                    fontSize: 9.5,
-                    fontWeight: '900',
-                    letterSpacing: 0.6
-                  }}
-                >
-                  RED DE APOYO INTER-CUERPOS SENTINEL SCI (ID RADIAL 1)
-                </Text>
-                <Text
-                  style={{
-                    color: isDarkMode ? '#E2E8F0' : '#1E293B',
-                    fontSize: 11.5,
-                    fontWeight: '700',
-                    marginTop: 2
-                  }}
-                >
-                  {interCorpsAlert?.estado === 'CONFIRMADA'
-                    ? '✓ Apoyo confirmado — Unidades disponibles (0-9) conectadas a SCI'
-                    : interCorpsAlert?.estado === 'APOYO_OFRECIDO'
-                      ? '🚒 Apoyo ofrecido — Unidades disponibles (0-9) habilitadas en Red SCI'
-                      : interCorpsAlert?.estado === 'EN_ESPERA'
-                        ? '⏳ En espera de evaluación de Comandancia'
-                        : interCorpsAlert?.estado === 'RECHAZADA'
-                          ? '✕ Solicitud de apoyo rechazada'
-                          : 'Responda a alertas de apoyo o habilite sus unidades disponibles (0-9)'}
-                </Text>
-              </View>
-            </View>
-
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('heavy');
-                  await respondToInterCorpsAlert('CONFIRMADA', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert?.estado === 'CONFIRMADA'
-                      ? '#059669'
-                      : 'rgba(16, 185, 129, 0.20)',
-                  borderColor: '#10B981',
-                  borderWidth: 1,
-                  borderRadius: 8,
-                  paddingVertical: 8,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                  ✓ CONFIRMAR APOYO
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('medium');
-                  await respondToInterCorpsAlert('EN_ESPERA', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert?.estado === 'EN_ESPERA'
-                      ? '#D97706'
-                      : 'rgba(245, 158, 11, 0.20)',
-                  borderColor: '#F59E0B',
-                  borderWidth: 1,
-                  borderRadius: 8,
-                  paddingVertical: 8,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                  ⏳ ESPERAR
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('medium');
-                  await respondToInterCorpsAlert('RECHAZADA', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert?.estado === 'RECHAZADA'
-                      ? '#DC2626'
-                      : 'rgba(239, 68, 68, 0.20)',
-                  borderColor: '#EF4444',
-                  borderWidth: 1,
-                  borderRadius: 8,
-                  paddingVertical: 8,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                  ✕ RECHAZAR
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                disabled={isRespondingInterCorps}
-                onPress={async () => {
-                  triggerHaptic('heavy');
-                  await respondToInterCorpsAlert('APOYO_OFRECIDO', interCorpsAlert);
-                }}
-                style={{
-                  flex: 1,
-                  minWidth: '47%',
-                  backgroundColor:
-                    interCorpsAlert?.estado === 'APOYO_OFRECIDO'
-                      ? '#0284C7'
-                      : 'rgba(14, 165, 233, 0.22)',
-                  borderColor: '#0EA5E9',
-                  borderWidth: 1,
-                  borderRadius: 8,
-                  paddingVertical: 8,
-                  paddingHorizontal: 8,
-                  alignItems: 'center'
-                }}
-                activeOpacity={0.85}
-              >
-                <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                  🚒 OFRECER APOYO
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : null}
-
         {visibleAlerts.length === 0 ? (
           <View
             style={[
@@ -4522,22 +4300,16 @@ export const MainHomeView = ({ onLogout }) => {
               const lastMsg = parsedMsgs.length > 0 ? parsedMsgs[parsedMsgs.length - 1] : null;
               let lastSenderName = '';
               if (lastMsg) {
-                const senderObj =
-                  (firefightersList || []).find(
-                    (f) => String(f.idRegistro).trim() === String(lastMsg.senderId).trim()
-                  ) ||
-                  (firefightersList || []).find(
-                    (f) => String(f.idRadial).trim() === String(lastMsg.senderId).trim()
-                  );
-                const isLastMe =
-                  (myIdReg && String(lastMsg.senderId).trim() === myIdReg) ||
-                  (senderObj && myIdReg && String(senderObj.idRegistro).trim() === myIdReg) ||
-                  (!senderObj && String(lastMsg.senderId).trim().toUpperCase() === myRadialUpper);
-                lastSenderName = isLastMe
+                const resolvedSender = resolveChatSenderIdentity(
+                  lastMsg.senderId,
+                  firefightersList,
+                  user
+                );
+                lastSenderName = resolvedSender.isMe
                   ? 'Tú'
-                  : senderObj
-                    ? `[${senderObj.idRadial}] ${formatFirefighterName(senderObj.nombre || senderObj.nombreBombero)}`
-                    : `Vol. #${lastMsg.senderId}`;
+                  : resolvedSender.radial
+                    ? `[${resolvedSender.radial}] ${resolvedSender.name}`
+                    : resolvedSender.name;
               }
 
               const openThisChat = () => {
@@ -4904,197 +4676,6 @@ export const MainHomeView = ({ onLogout }) => {
                   </Text>
                 ) : null}
 
-                {/* BOTONES DE RESPUESTA DE APOYO INTER-CUERPOS EN TARJETA DE ALERTA (Confirmar Apoyo, Esperar, Rechazar, Ofrecer Apoyo) */}
-                {(() => {
-                  const cmdPerson = (firefightersList || []).find((p) => String(p.idRadial).trim() === '1');
-                  const cmdReg = String(cmdPerson?.idRegistro || myIdReg || '').trim();
-                  const aQuienTokens = String(alerta.aQuienAlerta || '')
-                    .split(',')
-                    .map((s) => s.trim())
-                    .filter(Boolean);
-                  const isTargetedToCommander = Boolean(
-                    (cmdReg && aQuienTokens.includes(cmdReg)) ||
-                      (myIdReg && isComandante && aQuienTokens.includes(myIdReg))
-                  );
-                  const isSupportAlert = Boolean(
-                    alerta.tipoSolicitud ||
-                      alerta.licenciaSolicitante ||
-                      alerta.estadoApoyo ||
-                      String(alerta.razonAlerta || '').toUpperCase().includes('APOYO') ||
-                      String(alerta.razonAlerta || '').toUpperCase().includes('SOLICITUD DE ALERTA') ||
-                      (grado === '3' && isTargetedToCommander)
-                  );
-                  if (!isSupportAlert || !isComandante) return null;
-
-                  const currentResp = String(
-                    alerta.estadoApoyo ||
-                      (interCorpsAlert && String(interCorpsAlert.idAlerta) === String(alerta.idAlerta)
-                        ? interCorpsAlert.estado
-                        : '') ||
-                      ''
-                  ).toUpperCase();
-
-                  return (
-                    <View
-                      style={{
-                        marginTop: 4,
-                        marginBottom: 8,
-                        paddingTop: 8,
-                        borderTopWidth: 1,
-                        borderTopColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)'
-                      }}
-                    >
-                      {currentResp && currentResp !== 'PENDIENTE' ? (
-                        <View
-                          style={{
-                            marginBottom: 8,
-                            paddingVertical: 4,
-                            paddingHorizontal: 8,
-                            borderRadius: 6,
-                            backgroundColor:
-                              currentResp === 'CONFIRMADA' || currentResp === 'APOYO_OFRECIDO'
-                                ? 'rgba(16, 185, 129, 0.16)'
-                                : currentResp === 'EN_ESPERA'
-                                  ? 'rgba(245, 158, 11, 0.16)'
-                                  : 'rgba(239, 68, 68, 0.16)',
-                            borderWidth: 1,
-                            borderColor:
-                              currentResp === 'CONFIRMADA' || currentResp === 'APOYO_OFRECIDO'
-                                ? 'rgba(16, 185, 129, 0.45)'
-                                : currentResp === 'EN_ESPERA'
-                                  ? 'rgba(245, 158, 11, 0.45)'
-                                  : 'rgba(239, 68, 68, 0.45)',
-                            alignSelf: 'flex-start'
-                          }}
-                        >
-                          <Text
-                            style={{
-                              color:
-                                currentResp === 'CONFIRMADA' || currentResp === 'APOYO_OFRECIDO'
-                                  ? '#34D399'
-                                  : currentResp === 'EN_ESPERA'
-                                    ? '#FBBF24'
-                                    : '#F87171',
-                              fontSize: 9.5,
-                              fontWeight: '900'
-                            }}
-                          >
-                            {currentResp === 'CONFIRMADA'
-                              ? '✓ APOYO CONFIRMADO — UNIDADES DISPONIBLES CONECTADAS'
-                              : currentResp === 'APOYO_OFRECIDO'
-                                ? '🚒 APOYO OFRECIDO EN RED SCI'
-                                : currentResp === 'EN_ESPERA'
-                                  ? '⏳ EN ESPERA DE CONFIRMACIÓN'
-                                  : '✕ APOYO RECHAZADO'}
-                          </Text>
-                        </View>
-                      ) : null}
-
-                      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                        <TouchableOpacity
-                          disabled={isRespondingInterCorps}
-                          onPress={async () => {
-                            triggerHaptic('heavy');
-                            await respondToInterCorpsAlert('CONFIRMADA', alerta);
-                          }}
-                          style={{
-                            flex: 1,
-                            minWidth: '47%',
-                            backgroundColor:
-                              currentResp === 'CONFIRMADA' ? '#059669' : 'rgba(16, 185, 129, 0.22)',
-                            borderColor: '#10B981',
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            paddingVertical: 7,
-                            paddingHorizontal: 6,
-                            alignItems: 'center'
-                          }}
-                          activeOpacity={0.85}
-                        >
-                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                            ✓ CONFIRMAR APOYO
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          disabled={isRespondingInterCorps}
-                          onPress={async () => {
-                            triggerHaptic('medium');
-                            await respondToInterCorpsAlert('EN_ESPERA', alerta);
-                          }}
-                          style={{
-                            flex: 1,
-                            minWidth: '47%',
-                            backgroundColor:
-                              currentResp === 'EN_ESPERA' ? '#D97706' : 'rgba(245, 158, 11, 0.20)',
-                            borderColor: '#F59E0B',
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            paddingVertical: 7,
-                            paddingHorizontal: 6,
-                            alignItems: 'center'
-                          }}
-                          activeOpacity={0.85}
-                        >
-                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                            ⏳ ESPERAR
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          disabled={isRespondingInterCorps}
-                          onPress={async () => {
-                            triggerHaptic('medium');
-                            await respondToInterCorpsAlert('RECHAZADA', alerta);
-                          }}
-                          style={{
-                            flex: 1,
-                            minWidth: '47%',
-                            backgroundColor:
-                              currentResp === 'RECHAZADA' ? '#DC2626' : 'rgba(239, 68, 68, 0.20)',
-                            borderColor: '#EF4444',
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            paddingVertical: 7,
-                            paddingHorizontal: 6,
-                            alignItems: 'center'
-                          }}
-                          activeOpacity={0.85}
-                        >
-                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                            ✕ RECHAZAR
-                          </Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          disabled={isRespondingInterCorps}
-                          onPress={async () => {
-                            triggerHaptic('heavy');
-                            await respondToInterCorpsAlert('APOYO_OFRECIDO', alerta);
-                          }}
-                          style={{
-                            flex: 1,
-                            minWidth: '47%',
-                            backgroundColor:
-                              currentResp === 'APOYO_OFRECIDO' ? '#0284C7' : 'rgba(14, 165, 233, 0.22)',
-                            borderColor: '#0EA5E9',
-                            borderWidth: 1,
-                            borderRadius: 8,
-                            paddingVertical: 7,
-                            paddingHorizontal: 6,
-                            alignItems: 'center'
-                          }}
-                          activeOpacity={0.85}
-                        >
-                          <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '900' }}>
-                            🚒 OFRECER APOYO
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  );
-                })()}
-
                 <View
                   style={[
                     styles.cardThinDivider,
@@ -5169,6 +4750,676 @@ export const MainHomeView = ({ onLogout }) => {
             );
           })
         )}
+      </View>
+    );
+  };
+
+  // =========================================================================
+  // 3B. PESTAÑA EXCLUSIVA SCI (Solo Comandante idRadial == "1" cuando hay SCI activo)
+  // =========================================================================
+  const renderSciTab = () => {
+    if (!isStrictCommander) return null;
+
+    const activeRequests = Array.isArray(sciRequestsList) ? sciRequestsList : [];
+    const neighborCorps = Array.isArray(activeSciNeighborCorps) ? activeSciNeighborCorps : [];
+    const parsedSciChat = parseCanonicalChatMessages(sciChatMessagesRaw || '');
+    const primaryReq = activeRequests.length > 0 ? activeRequests[0] : interCorpsAlert || null;
+
+    const handleSendInlineSciChat = async () => {
+      if (!sciChatInputText.trim() || sendingSciChat) return;
+      setSendingSciChat(true);
+      const textToSend = sciChatInputText.trim();
+      setSciChatInputText('');
+      triggerHaptic('medium');
+      await sendSciChatMessage(textToSend, primaryReq);
+      setSendingSciChat(false);
+    };
+
+    const handleOpenFullSciChatModal = () => {
+      triggerHaptic('medium');
+      const targetReq = primaryReq || {};
+      setActiveChatAlert({
+        id: targetReq.idSolicitud || targetReq.idAlerta || 'SCI-CHAT-INTERCUERPOS',
+        idSolicitud: targetReq.idSolicitud || targetReq.idAlerta || '',
+        idAlerta: targetReq.idSolicitud || targetReq.idAlerta || 'SCI-CHAT-INTERCUERPOS',
+        isSciCentralChat: true,
+        licenciaSolicitante: targetReq.licenciaSolicitante || '',
+        licenciaDestino: targetReq.licenciaDestino || '',
+        razonAlerta:
+          targetReq.cuerpoSolicitante ||
+          targetReq.razonAlerta ||
+          'COMANDO DE INCIDENTES (SCI)',
+        aQuienAlerta: '1',
+        duracion: 'C',
+        mensajeAlerta: sciChatMessagesRaw || targetReq.mensajesChat || ''
+      });
+      setChatModalVisible(true);
+    };
+
+    return (
+      <View style={styles.tabScrollContainer}>
+        {/* 1. TARJETAS DE SOLICITUDES DE APOYO INTER-CUERPOS (SCI-AAAA-000X) */}
+        {activeRequests.length > 0 ? (
+          activeRequests.map((req) => {
+            const reqId = String(req.idSolicitud || req.idAlerta || req.id || 'SCI-2026-0001').trim();
+            const tipoSol = String(req.tipoSolicitud || 'ALERTA_PREVENTIVA')
+              .trim()
+              .toUpperCase();
+            const isUnitRequest = tipoSol === 'SOLICITUD_UNIDAD' || Boolean(req.idCarroSolicitado);
+            const estadoUpper = String(req.estado || 'PENDIENTE')
+              .trim()
+              .toUpperCase();
+            const isConfirmed =
+              estadoUpper === 'CONFIRMADA' ||
+              estadoUpper === 'OFRECIDA' ||
+              estadoUpper === 'APOYO_OFRECIDO';
+            const isWaiting = estadoUpper === 'EN_ESPERA';
+            const isRejected = estadoUpper === 'RECHAZADA';
+
+            return (
+              <View
+                key={reqId}
+                style={[
+                  styles.glassCard,
+                  {
+                    backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.95)' : '#FFFFFF',
+                    borderColor: isUnitRequest
+                      ? '#F59E0B'
+                      : isConfirmed
+                        ? '#10B981'
+                        : '#0EA5E9',
+                    borderWidth: 1.5,
+                    padding: 14,
+                    marginBottom: 12
+                  }
+                ]}
+              >
+                {/* Encabezado: Folio SCI-AAAA-000X + Tipo + Estado */}
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: 8,
+                    flexWrap: 'wrap',
+                    gap: 6
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View
+                      style={{
+                        backgroundColor: isUnitRequest ? '#D97706' : '#0284C7',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 6
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: '#FFFFFF',
+                          fontSize: 10.5,
+                          fontWeight: '900',
+                          letterSpacing: 0.5
+                        }}
+                      >
+                        {reqId}
+                      </Text>
+                    </View>
+                    <View
+                      style={{
+                        backgroundColor: isUnitRequest
+                          ? 'rgba(245, 158, 11, 0.16)'
+                          : 'rgba(14, 165, 233, 0.16)',
+                        borderColor: isUnitRequest
+                          ? 'rgba(245, 158, 11, 0.45)'
+                          : 'rgba(14, 165, 233, 0.45)',
+                        borderWidth: 1,
+                        paddingHorizontal: 7,
+                        paddingVertical: 2.5,
+                        borderRadius: 6
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: isUnitRequest ? '#FBBF24' : '#38BDF8',
+                          fontSize: 9.5,
+                          fontWeight: '900'
+                        }}
+                      >
+                        {isUnitRequest ? '🚒 SOLICITUD DE UNIDAD' : '📡 ALERTA PREVENTIVA SCI'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View
+                    style={{
+                      backgroundColor: isConfirmed
+                        ? 'rgba(16, 185, 129, 0.18)'
+                        : isWaiting
+                          ? 'rgba(245, 158, 11, 0.18)'
+                          : isRejected
+                            ? 'rgba(239, 68, 68, 0.18)'
+                            : 'rgba(239, 68, 68, 0.24)',
+                      borderColor: isConfirmed
+                        ? '#10B981'
+                        : isWaiting
+                          ? '#F59E0B'
+                          : '#EF4444',
+                      borderWidth: 1,
+                      paddingHorizontal: 8,
+                      paddingVertical: 3,
+                      borderRadius: 6
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: isConfirmed
+                          ? '#34D399'
+                          : isWaiting
+                            ? '#FBBF24'
+                            : '#F87171',
+                        fontSize: 9.5,
+                        fontWeight: '900'
+                      }}
+                    >
+                      {estadoUpper}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Cuerpo Solicitante + Clave + Dirección + Comandante + Hora */}
+                <Text
+                  style={{
+                    color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                    fontSize: 14,
+                    fontWeight: '900',
+                    marginBottom: 4
+                  }}
+                >
+                  {req.cuerpoSolicitante || 'CUERPO DE BOMBEROS SOLICITANTE'}
+                </Text>
+
+                <View style={{ marginBottom: 8, gap: 3 }}>
+                  {req.claveEmergencia ? (
+                    <Text
+                      style={{
+                        color: '#F87171',
+                        fontSize: 12,
+                        fontWeight: '800'
+                      }}
+                    >
+                      🚨 Clave: {req.claveEmergencia}
+                    </Text>
+                  ) : null}
+                  {req.direccionEmergencia ? (
+                    <Text
+                      style={{
+                        color: isDarkMode ? '#CBD5E1' : '#334155',
+                        fontSize: 11.5,
+                        fontWeight: '700'
+                      }}
+                    >
+                      📍 Ubicación: {req.direccionEmergencia}
+                    </Text>
+                  ) : null}
+                  {req.comandanteSolicitante ? (
+                    <Text
+                      style={{
+                        color: isDarkMode ? '#94A3B8' : '#475569',
+                        fontSize: 11,
+                        fontWeight: '700'
+                      }}
+                    >
+                      👨‍🚒 Comandante Solicitante: {req.comandanteSolicitante}
+                    </Text>
+                  ) : null}
+                  {req.fechaSolicitud || req.horaSolicitud ? (
+                    <Text style={{ color: '#64748B', fontSize: 10.5, fontWeight: '600' }}>
+                      🕒 {req.fechaSolicitud || ''} {req.horaSolicitud ? `• ${req.horaSolicitud}` : ''}
+                    </Text>
+                  ) : null}
+                </View>
+
+                {/* Si es SOLICITUD_UNIDAD, destacar carro solicitado y misión táctica */}
+                {isUnitRequest ? (
+                  <View
+                    style={{
+                      backgroundColor: isDarkMode
+                        ? 'rgba(245, 158, 11, 0.12)'
+                        : 'rgba(245, 158, 11, 0.08)',
+                      borderColor: 'rgba(245, 158, 11, 0.4)',
+                      borderWidth: 1,
+                      borderRadius: 10,
+                      padding: 10,
+                      marginBottom: 10
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: '#FBBF24',
+                        fontSize: 12.5,
+                        fontWeight: '900',
+                        marginBottom: 3
+                      }}
+                    >
+                      🚒 UNIDAD REQUERIDA: {req.idCarroSolicitado || 'UNIDAD EN APOYO'}
+                    </Text>
+                    {req.sectorDestino || req.dirigirse?.lado ? (
+                      <Text
+                        style={{
+                          color: isDarkMode ? '#FDE68A' : '#92400E',
+                          fontSize: 11,
+                          fontWeight: '800'
+                        }}
+                      >
+                        🎯 Sector / Flanco: {req.sectorDestino || req.dirigirse?.lado}
+                      </Text>
+                    ) : null}
+                    {req.instruccionTactica || req.dirigirse?.instruccion ? (
+                      <Text
+                        style={{
+                          color: isDarkMode ? '#E2E8F0' : '#1E293B',
+                          fontSize: 11,
+                          fontWeight: '600',
+                          marginTop: 2
+                        }}
+                      >
+                        📋 Misión: {req.instruccionTactica || req.dirigirse?.instruccion}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+
+                {req.mensajeAlerta ? (
+                  <Text
+                    style={{
+                      color: isDarkMode ? '#CBD5E1' : '#334155',
+                      fontSize: 11.5,
+                      lineHeight: 16,
+                      marginBottom: 10
+                    }}
+                  >
+                    {String(req.mensajeAlerta).replace(/\|/g, '\n')}
+                  </Text>
+                ) : null}
+
+                {/* Botones de Acción de Comandancia */}
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                  <TouchableOpacity
+                    disabled={isRespondingInterCorps}
+                    onPress={async () => {
+                      triggerHaptic('heavy');
+                      await respondToInterCorpsAlert('CONFIRMADA', req);
+                    }}
+                    style={{
+                      flex: 1,
+                      minWidth: '100%',
+                      backgroundColor: isConfirmed ? '#059669' : '#10B981',
+                      borderColor: '#34D399',
+                      borderWidth: 1,
+                      borderRadius: 10,
+                      paddingVertical: 10,
+                      paddingHorizontal: 12,
+                      alignItems: 'center'
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
+                      {isUnitRequest
+                        ? `✓ AUTORIZAR / DESPACHAR ${req.idCarroSolicitado || 'UNIDAD'} EN APOYO`
+                        : '✓ CONFIRMAR APOYO / PONER UNIDADES 0-9 A DISPOSICIÓN'}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    disabled={isRespondingInterCorps}
+                    onPress={async () => {
+                      triggerHaptic('medium');
+                      await respondToInterCorpsAlert('EN_ESPERA', req);
+                    }}
+                    style={{
+                      flex: 1,
+                      backgroundColor: isWaiting ? '#D97706' : 'rgba(245, 158, 11, 0.20)',
+                      borderColor: '#F59E0B',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingVertical: 8,
+                      alignItems: 'center'
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                      ⏳ EN ESPERA
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    disabled={isRespondingInterCorps}
+                    onPress={async () => {
+                      triggerHaptic('medium');
+                      await respondToInterCorpsAlert('RECHAZADA', req);
+                    }}
+                    style={{
+                      flex: 1,
+                      backgroundColor: isRejected ? '#DC2626' : 'rgba(239, 68, 68, 0.20)',
+                      borderColor: '#EF4444',
+                      borderWidth: 1,
+                      borderRadius: 8,
+                      paddingVertical: 8,
+                      alignItems: 'center'
+                    }}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                      ✕ RECHAZAR
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        ) : null}
+
+        {/* 2. OFRECER APOYO VOLUNTARIO A CUERPOS VECINOS CON SCI ACTIVO */}
+        {neighborCorps.length > 0 ? (
+          <View
+            style={[
+              styles.glassCard,
+              {
+                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.92)' : '#F8FAFC',
+                borderColor: 'rgba(14, 165, 233, 0.4)',
+                borderWidth: 1.2,
+                padding: 14,
+                marginBottom: 12
+              }
+            ]}
+          >
+            <Text
+              style={{
+                color: '#38BDF8',
+                fontSize: 10.5,
+                fontWeight: '900',
+                letterSpacing: 0.6,
+                marginBottom: 8
+              }}
+            >
+              📡 PUESTO DE COMANDO SCI ACTIVO EN CUERPOS VECINOS
+            </Text>
+            {neighborCorps.map((corps) => (
+              <View
+                key={corps.licencia}
+                style={{
+                  paddingVertical: 8,
+                  borderTopWidth: 1,
+                  borderTopColor: 'rgba(255,255,255,0.08)',
+                  gap: 6
+                }}
+              >
+                <Text
+                  style={{
+                    color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                    fontSize: 13,
+                    fontWeight: '900'
+                  }}
+                >
+                  {corps.nombreCuerpo}
+                </Text>
+                <Text
+                  style={{
+                    color: '#F87171',
+                    fontSize: 11.5,
+                    fontWeight: '800'
+                  }}
+                >
+                  🚨 {corps.claveEmergencia}{' '}
+                  {corps.direccionEmergencia ? `• ${corps.direccionEmergencia}` : ''}
+                </Text>
+                {corps.comandanteIncidente ? (
+                  <Text style={{ color: '#94A3B8', fontSize: 10.5, fontWeight: '700' }}>
+                    Comandante CI: {corps.comandanteIncidente}
+                  </Text>
+                ) : null}
+                <TouchableOpacity
+                  disabled={isRespondingInterCorps}
+                  onPress={async () => {
+                    triggerHaptic('heavy');
+                    await offerVoluntarySciSupport(corps);
+                  }}
+                  style={{
+                    marginTop: 4,
+                    backgroundColor: '#0284C7',
+                    borderColor: '#38BDF8',
+                    borderWidth: 1,
+                    borderRadius: 9,
+                    paddingVertical: 9,
+                    paddingHorizontal: 12,
+                    alignItems: 'center'
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
+                    🚒 OFRECER APOYO VOLUNTARIO (HABILITAR UNIDADES 0-9)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* 3. CHAT DIRECTO SCI INTEGRADO (SIN idRegistro, CON HORA FORMATEADA) */}
+        <View
+          style={[
+            styles.glassCard,
+            {
+              backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.94)' : '#FFFFFF',
+              borderColor: 'rgba(239, 68, 68, 0.35)',
+              borderWidth: 1.2,
+              padding: 14,
+              marginBottom: 16
+            }
+          ]}
+        >
+          <View
+            style={{
+              flexDirection: 'row',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: 10
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MessageSquare size={17} color="#F87171" />
+              <View>
+                <Text
+                  style={{
+                    color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                    fontSize: 12.5,
+                    fontWeight: '900'
+                  }}
+                >
+                  CANAL DIRECTO COMANDANCIA SCI
+                </Text>
+                <Text style={{ color: '#94A3B8', fontSize: 10, fontWeight: '600' }}>
+                  Comunicación exclusiva Comandante (1) ↔ Puesto de Comando SCI
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              onPress={handleOpenFullSciChatModal}
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.16)',
+                borderColor: 'rgba(239, 68, 68, 0.45)',
+                borderWidth: 1,
+                borderRadius: 8,
+                paddingHorizontal: 9,
+                paddingVertical: 5
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={{ color: '#FCA5A5', fontSize: 10, fontWeight: '900' }}>
+                PANTALLA COMPLETA
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View
+            style={{
+              maxHeight: 260,
+              minHeight: 110,
+              backgroundColor: isDarkMode ? 'rgba(6, 9, 17, 0.75)' : '#F8FAFC',
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(15,23,42,0.08)',
+              padding: 10,
+              marginBottom: 10,
+              gap: 8
+            }}
+          >
+            {parsedSciChat.length === 0 ? (
+              <View style={{ paddingVertical: 24, alignItems: 'center' }}>
+                <Text style={{ color: '#64748B', fontSize: 11.5, fontWeight: '600' }}>
+                  Sin mensajes aún en el canal directo SCI.
+                </Text>
+              </View>
+            ) : (
+              parsedSciChat.slice(-8).map((msg, idx) => {
+                const resolved = resolveChatSenderIdentity(
+                  msg.senderId,
+                  firefightersList,
+                  user
+                );
+                const formattedTime = formatChatTimestampDisplay(msg.timestamp);
+                return (
+                  <View
+                    key={`${msg.timestamp}-${idx}`}
+                    style={{
+                      alignSelf: resolved.isMe ? 'flex-end' : 'flex-start',
+                      maxWidth: '86%',
+                      backgroundColor: resolved.isMe
+                        ? '#DC2626'
+                        : isDarkMode
+                          ? '#1E293B'
+                          : '#E2E8F0',
+                      borderRadius: 12,
+                      paddingHorizontal: 10,
+                      paddingVertical: 7
+                    }}
+                  >
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 5,
+                        marginBottom: 2
+                      }}
+                    >
+                      {resolved.radial ? (
+                        <View
+                          style={{
+                            backgroundColor: resolved.isMe
+                              ? 'rgba(0,0,0,0.28)'
+                              : '#2563EB',
+                            borderRadius: 4,
+                            paddingHorizontal: 4,
+                            paddingVertical: 1
+                          }}
+                        >
+                          <Text
+                            style={{
+                              color: '#FFFFFF',
+                              fontSize: 9,
+                              fontWeight: '900'
+                            }}
+                          >
+                            {resolved.radial}
+                          </Text>
+                        </View>
+                      ) : null}
+                      <Text
+                        style={{
+                          color: resolved.isMe
+                            ? 'rgba(255,255,255,0.92)'
+                            : isDarkMode
+                              ? '#93C5FD'
+                              : '#1E40AF',
+                          fontSize: 10,
+                          fontWeight: '800'
+                        }}
+                      >
+                        {resolved.name}
+                      </Text>
+                    </View>
+                    <Text
+                      style={{
+                        color: resolved.isMe
+                          ? '#FFFFFF'
+                          : isDarkMode
+                            ? '#F8FAFC'
+                            : '#0F172A',
+                        fontSize: 12.5,
+                        lineHeight: 17
+                      }}
+                    >
+                      {msg.text}
+                    </Text>
+                    {formattedTime ? (
+                      <Text
+                        style={{
+                          color: resolved.isMe
+                            ? 'rgba(255,255,255,0.75)'
+                            : '#64748B',
+                          fontSize: 9,
+                          fontWeight: '700',
+                          alignSelf: 'flex-end',
+                          marginTop: 2
+                        }}
+                      >
+                        {formattedTime}
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TextInput
+              style={{
+                flex: 1,
+                minHeight: 40,
+                backgroundColor: isDarkMode ? '#0F172A' : '#F1F5F9',
+                borderColor: isDarkMode ? 'rgba(255,255,255,0.14)' : '#CBD5E1',
+                borderWidth: 1,
+                borderRadius: 20,
+                paddingHorizontal: 14,
+                paddingVertical: 8,
+                color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                fontSize: 13
+              }}
+              placeholder="Escribir mensaje al Comando SCI..."
+              placeholderTextColor="#64748B"
+              value={sciChatInputText}
+              onChangeText={setSciChatInputText}
+            />
+            <TouchableOpacity
+              disabled={!sciChatInputText.trim() || sendingSciChat}
+              onPress={handleSendInlineSciChat}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: sciChatInputText.trim() ? '#DC2626' : '#334155',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+              activeOpacity={0.85}
+            >
+              <Send size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
     );
   };
@@ -6282,6 +6533,7 @@ export const MainHomeView = ({ onLogout }) => {
           {currentTab === 'actividad' && renderActividadTab()}
           {currentTab === 'ordenes' && renderOrdenesTab()}
           {currentTab === 'alertas' && renderAlertasTab()}
+          {currentTab === 'sci' && renderSciTab()}
           {currentTab === 'asistencia' && renderAsistenciaTab()}
           {currentTab === 'disponibles' && renderDisponiblesTab()}
         </Animated.View>
@@ -6384,11 +6636,12 @@ export const MainHomeView = ({ onLogout }) => {
               ]}
             >
               <Flame
-                size={21}
+                size={20}
                 color={currentTab === 'actividad' ? '#F87171' : '#94A3B8'}
                 fill={currentTab === 'actividad' ? '#F87171' : 'transparent'}
               />
               <Text
+                numberOfLines={1}
                 style={[
                   styles.v2TabLabel,
                   currentTab === 'actividad' && {
@@ -6417,11 +6670,19 @@ export const MainHomeView = ({ onLogout }) => {
                 currentTab === 'ordenes' && styles.v2TabPillActive
               ]}
             >
-              <FileText
-                size={21}
-                color={currentTab === 'ordenes' ? '#F87171' : '#94A3B8'}
-              />
+              <View style={{ position: 'relative' }}>
+                <FileText
+                  size={20}
+                  color={currentTab === 'ordenes' ? '#F87171' : '#94A3B8'}
+                />
+                {unreadOrdersCount > 0 ? (
+                  <View style={styles.tabBadgeDot}>
+                    <Text style={styles.tabBadgeText}>{unreadOrdersCount}</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text
+                numberOfLines={1}
                 style={[
                   styles.v2TabLabel,
                   currentTab === 'ordenes' && {
@@ -6450,12 +6711,20 @@ export const MainHomeView = ({ onLogout }) => {
                 currentTab === 'alertas' && styles.v2TabPillActive
               ]}
             >
-              <Bell
-                size={21}
-                color={currentTab === 'alertas' ? '#F87171' : '#94A3B8'}
-                fill={currentTab === 'alertas' ? '#F87171' : '#94A3B8'}
-              />
+              <View style={{ position: 'relative' }}>
+                <Bell
+                  size={20}
+                  color={currentTab === 'alertas' ? '#F87171' : '#94A3B8'}
+                  fill={currentTab === 'alertas' ? '#F87171' : '#94A3B8'}
+                />
+                {unreadAlertsCount > 0 ? (
+                  <View style={styles.tabBadgeDot}>
+                    <Text style={styles.tabBadgeText}>{unreadAlertsCount}</Text>
+                  </View>
+                ) : null}
+              </View>
               <Text
+                numberOfLines={1}
                 style={[
                   styles.v2TabLabel,
                   currentTab === 'alertas' && {
@@ -6468,6 +6737,49 @@ export const MainHomeView = ({ onLogout }) => {
               </Text>
             </View>
           </TouchableOpacity>
+
+          {/* 3B. SCI (Exclusivo Comandante idRadial == "1" y solo cuando hay un SCI activo) */}
+          {showSciTab ? (
+            <TouchableOpacity
+              style={styles.v2TabTouchArea}
+              onPress={() => {
+                triggerHaptic('medium');
+                markSciAsRead();
+                switchTabAnimated('sci');
+              }}
+              activeOpacity={0.8}
+            >
+              <View
+                style={[
+                  styles.v2TabPill,
+                  currentTab === 'sci' && styles.v2TabPillActive
+                ]}
+              >
+                <View style={{ position: 'relative' }}>
+                  <Satellite
+                    size={20}
+                    color={currentTab === 'sci' ? '#38BDF8' : '#F87171'}
+                  />
+                  {sciUnreadCount > 0 ? (
+                    <View style={styles.tabBadgeDot}>
+                      <Text style={styles.tabBadgeText}>{sciUnreadCount}</Text>
+                    </View>
+                  ) : null}
+                </View>
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.v2TabLabel,
+                    currentTab === 'sci'
+                      ? { color: '#38BDF8', fontWeight: '800' }
+                      : { color: '#F87171', fontWeight: '700' }
+                  ]}
+                >
+                  SCI
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ) : null}
 
           {/* 4. Asistencia */}
           <TouchableOpacity
@@ -6485,10 +6797,11 @@ export const MainHomeView = ({ onLogout }) => {
               ]}
             >
               <Calendar
-                size={21}
+                size={20}
                 color={currentTab === 'asistencia' ? '#F87171' : '#94A3B8'}
               />
               <Text
+                numberOfLines={1}
                 style={[
                   styles.v2TabLabel,
                   currentTab === 'asistencia' && {
@@ -6519,10 +6832,11 @@ export const MainHomeView = ({ onLogout }) => {
                 ]}
               >
                 <Users
-                  size={21}
+                  size={20}
                   color={currentTab === 'disponibles' ? '#F87171' : '#94A3B8'}
                 />
                 <Text
+                  numberOfLines={1}
                   style={[
                     styles.v2TabLabel,
                     currentTab === 'disponibles' && {
@@ -7474,23 +7788,23 @@ const styles = StyleSheet.create({
   // Barra Inferior de Navegación (BottomNavigationBarView MainScreen.kt líneas 767-948)
   v2BottomBarContainer: {
     position: 'absolute',
-    bottom: 14,
+    bottom: Platform.OS === 'ios' ? 14 : 18,
     left: 0,
     right: 0,
     zIndex: 50,
     elevation: 20,
-    paddingHorizontal: 14,
-    paddingTop: 6,
-    paddingBottom: Platform.OS === 'ios' ? 20 : 10
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: Platform.OS === 'ios' ? 18 : 12
   },
   v2BottomBar: {
-    height: 70,
-    borderRadius: 28,
+    height: 68,
+    borderRadius: 26,
     borderWidth: 1.2,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-around',
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.5,
@@ -7504,10 +7818,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center'
   },
   v2TabPill: {
-    minWidth: 66,
-    height: 54,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    minWidth: 0,
+    width: '94%',
+    height: 52,
+    paddingHorizontal: 4,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center'
   },
@@ -7517,7 +7832,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239, 68, 68, 0.35)'
   },
   v2TabLabel: {
-    fontSize: 10.5,
+    fontSize: 9.5,
     color: '#94A3B8',
     fontWeight: '600',
     marginTop: 2

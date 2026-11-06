@@ -40,8 +40,15 @@ import {
   resolveCoreUnitStatusInfo,
   buildCanonicalCadAlertDoc,
   resolveCommanderIdRegistroFromPersonal,
+  isCanonicalCommander,
+  formatShortPersonName,
   formatCanonicalChatEntry,
   appendCanonicalChatMessage,
+  parseCanonicalChatMessages,
+  calculateNextCanonicalSciRequestId,
+  buildCanonicalCentralSciRequestDoc,
+  buildCanonicalCentralSciIncidentId,
+  buildCanonicalCentralSciIncidentDoc,
   normalizeSaasClientDoc,
   getEntityMaxTimestamp,
   mergeServiceUnitByHigherTimestamp
@@ -229,7 +236,18 @@ let unsubCentral = null;
 let unsubAsistencia = null;
 let unsubProtocols = null;
 let unsubCentralInterCorps = null;
+let unsubCentralSciRequests = null;
+let unsubCentralSciIncidents = null;
+let unsubSciIncidentSubcols = new Map(); // idIncidenteSci -> [unsubSolicitudes, unsubMensajes]
 let lastInterCorpsAlertTs = 0;
+let notifiedSciRequestIds = new Set();
+let isFirstSciSnapshot = true;
+let lastSciChatMsgCount = -1;
+let latestCentralClientsMap = {};
+let latestOwnSciSubcolMap = {};
+let latestCentralSciIncidentsMap = {};
+let latestSciIncidentSolicitudesByInc = {};
+let latestSciIncidentMensajesByInc = {};
 
 let isFirstDispatchesSnapshot = true;
 let notifiedDispatchIds = new Set();
@@ -717,18 +735,31 @@ function normalizeAttendanceSheetDoc(docId, raw = {}) {
   };
 }
 
-// Helper para separar órdenes, alertas y canal de chat activo
+// Identifica cualquier documento legado/residual de SCI para NO mezclarlo jamás en la colección local `alertas`
+function isResidualSciAlertDoc(a) {
+  if (!a || typeof a !== 'object') return false;
+  const id = String(a.idAlerta || a.id || '').trim().toUpperCase();
+  if (/^SCI-\d{4}-\d+/.test(id)) return true;
+  if (id.startsWith('SCI_ALERTA_') || id.startsWith('SCI_CHAT_')) return true;
+  if (Boolean(a.tipoSolicitud || a.licenciaSolicitante)) return true;
+  return false;
+}
+
+// Helper para separar órdenes, alertas y canal de chat activo (100% libre de documentos SCI)
 function splitAlertsAndOrders(allList = [], currentChat = null) {
-  const ordersList = allList.filter(a => a.tipo === 'orden');
-  const alertsList = allList.filter(a => a.tipo !== 'orden');
-  const foundChat =
-    (currentChat && allList.find(a => a.idAlerta === currentChat.idAlerta)) ||
-    allList.find(a => String(a.duracion || '').toUpperCase() === 'C') ||
-    alertsList[0] ||
-    null;
+  const cleanAll = (Array.isArray(allList) ? allList : []).filter(a => !isResidualSciAlertDoc(a));
+  const ordersList = cleanAll.filter(a => a.tipo === 'orden');
+  const alertsList = cleanAll.filter(a => a.tipo !== 'orden');
+  const currentChatIsSci = currentChat && isResidualSciAlertDoc(currentChat);
+  const foundChat = currentChatIsSci
+    ? currentChat
+    : (currentChat && cleanAll.find(a => a.idAlerta === currentChat.idAlerta)) ||
+      cleanAll.find(a => String(a.duracion || '').toUpperCase() === 'C') ||
+      alertsList[0] ||
+      null;
 
   return {
-    allAlertsList: allList,
+    allAlertsList: cleanAll,
     ordersList,
     alertsList,
     activeChatAlert: foundChat,
@@ -823,6 +854,11 @@ export const useDispatchStore = create((set, get) => ({
   activeChatAlert: null,
   chatAlert: null,
   interCorpsAlert: null,
+  sciRequestsList: [],
+  activeSciNeighborCorps: [],
+  sciChatMessagesRaw: '',
+  sciUnreadCount: 0,
+  isSciTabActive: false,
   isRespondingInterCorps: false,
   isLoading: false,
   soundObject: null,
@@ -830,6 +866,15 @@ export const useDispatchStore = create((set, get) => ({
   isLiveConnected: false,
 
   setActiveChatAlert: (alertObj) => set({ activeChatAlert: alertObj, chatAlert: alertObj }),
+
+  markSciAsRead: () => {
+    const msgs = parseCanonicalChatMessages(get().sciChatMessagesRaw || '');
+    lastSciChatMsgCount = msgs.length;
+    const pendingReqs = (get().sciRequestsList || []).filter(
+      (r) => String(r.estado || '').toUpperCase() === 'PENDIENTE'
+    ).length;
+    set({ sciUnreadCount: pendingReqs });
+  },
 
   clearUrgentBanner: () => set({ urgentBannerMessage: null }),
 
@@ -1187,11 +1232,15 @@ export const useDispatchStore = create((set, get) => ({
               !isHonorario &&
               !isSilentSpecial &&
               !isPartialSpecial &&
-              is09 &&
-              !isDispatchTooOld(disp) &&
               !hasUserRespondedToDispatch(disp, currentUser)
             ) {
-              set({ fullscreenDispatchId: id });
+              if (isDispatchTooOld(disp)) {
+                set({
+                  urgentBannerMessage: '⚠️ NOTIFICACIÓN TARDÍA POR MALA COBERTURA TELEFÓNICA'
+                });
+              } else if (is09) {
+                set({ fullscreenDispatchId: id });
+              }
             }
           } else {
             // B. Detectar escalamiento (10-0 -> 10-30, 10-2 -> ALARMA FORESTAL)
@@ -1385,33 +1434,8 @@ export const useDispatchStore = create((set, get) => ({
     set({ firefightersList: list });
     useAuthStore.getState().syncUserFromPersonalList(list);
     get().recomputeCentralState();
+    get().recomputeSciState();
     const syncedUser = useAuthStore.getState().user;
-
-    // Asegurar que las alertas inter-cuerpos ya recibidas tengan en aQuienAlerta el idRegistro del Comandante (idRadial == "1")
-    const cmdIdReg = resolveCommanderIdRegistroFromPersonal(list, syncedUser);
-    if (cmdIdReg) {
-      const curInter = get().interCorpsAlert;
-      if (curInter && String(curInter.aQuienAlerta || '') !== cmdIdReg) {
-        set({ interCorpsAlert: { ...curInter, aQuienAlerta: cmdIdReg } });
-      }
-      const curAllAlerts = get().allAlertsList || [];
-      let changedAny = false;
-      const updatedAlerts = curAllAlerts.map((a) => {
-        const isSciAlert =
-          (curInter && String(a.idAlerta) === String(curInter.idAlerta)) ||
-          String(a.idAlerta || '').startsWith('SCI_ALERTA_') ||
-          String(a.idAlerta || '').startsWith('SCI_CHAT_') ||
-          Boolean(a.tipoSolicitud || a.licenciaSolicitante);
-        if (isSciAlert && String(a.aQuienAlerta || '') !== cmdIdReg) {
-          changedAny = true;
-          return { ...a, aQuienAlerta: cmdIdReg };
-        }
-        return a;
-      });
-      if (changedAny) {
-        set(splitAlertsAndOrders(updatedAlerts, get().activeChatAlert));
-      }
-    }
     const syncedId = String(syncedUser?.idRegistro || '').trim();
     if (syncedId && syncedId !== lastSubscribedAttendanceUserId) {
       get().subscribeAttendanceRealtime();
@@ -1490,6 +1514,10 @@ export const useDispatchStore = create((set, get) => ({
     const aList = [];
     rawDocsArray.forEach(({ id, data, hasPendingWrites }) => {
       const incomingNorm = normalizeAlertDoc(id, data || {});
+      if (isResidualSciAlertDoc(incomingNorm)) {
+        // Separación total: ninguna solicitud o chat de SCI se mezcla en `alertas`
+        return;
+      }
       const docId = String(incomingNorm.idAlerta || id).trim();
       const existing = existingById.get(docId);
 
@@ -1812,8 +1840,9 @@ export const useDispatchStore = create((set, get) => ({
       get().subscribeAttendanceRealtime();
 
       // =====================================================================
-      // 7. LISTENER EN TIEMPO REAL: RED DE APOYO INTER-CUERPOS (`sisbom-central/saas_clientes/{licenseKey}`)
-      //    Recibe alertas Grado 3 al Comandante (`idRadial == "1"`) desde SENTINEL SCI
+      // 7. LISTENER EN TIEMPO REAL: COLECCIÓN `sci_incidentes` Y SUBCOLECCIONES
+      //    (`solicitudes` y `mensajes`) EN `sisbom-central`.
+      //    Exclusivo para el Comandante (`idRadial == "1"`). 100% separado de `alertas`.
       // =====================================================================
       const ownLicKey = String(useLicenseStore.getState().licenseKey || '').trim().toUpperCase();
       const centralDb = getCentralDb();
@@ -1822,225 +1851,128 @@ export const useDispatchStore = create((set, get) => ({
           try { unsubCentralInterCorps(); } catch (_) {}
           unsubCentralInterCorps = null;
         }
+        if (unsubCentralSciRequests) {
+          try { unsubCentralSciRequests(); } catch (_) {}
+          unsubCentralSciRequests = null;
+        }
+        if (unsubCentralSciIncidents) {
+          try { unsubCentralSciIncidents(); } catch (_) {}
+          unsubCentralSciIncidents = null;
+        }
+        unsubSciIncidentSubcols.forEach((unsubsArr) => {
+          (unsubsArr || []).forEach((u) => {
+            try { u(); } catch (_) {}
+          });
+        });
+        unsubSciIncidentSubcols.clear();
+
+        // 7A. COLECCIÓN PRINCIPAL: `sisbom-central/sci_incidentes/{idIncidenteSci}`
+        //     y sus subcolecciones `solicitudes/{SCI-AAAA-000X}` y `mensajes/{canal}`
+        unsubCentralSciIncidents = onSnapshot(
+          collection(centralDb, 'sci_incidentes'),
+          (snap) => {
+            const nextIncMap = {};
+            const activeIncIds = new Set();
+
+            snap.forEach((d) => {
+              const data = d.data() || {};
+              const incId = String(d.id || data.idIncidenteSci || '').trim();
+              if (!incId || incId === 'init') return;
+              if (data.activo === false) return;
+              nextIncMap[incId] = { id: incId, idIncidenteSci: incId, ...data };
+              activeIncIds.add(incId);
+
+              // Suscribir dinámicamente a las subcolecciones `solicitudes` y `mensajes` de cada incidente activo
+              if (!unsubSciIncidentSubcols.has(incId)) {
+                const unsubSol = onSnapshot(
+                  collection(centralDb, 'sci_incidentes', incId, 'solicitudes'),
+                  (solSnap) => {
+                    const solMap = {};
+                    solSnap.forEach((sDoc) => {
+                      solMap[sDoc.id] = {
+                        id: sDoc.id,
+                        idSolicitud: sDoc.id,
+                        idIncidenteSci: incId,
+                        ...(sDoc.data() || {})
+                      };
+                    });
+                    latestSciIncidentSolicitudesByInc = {
+                      ...latestSciIncidentSolicitudesByInc,
+                      [incId]: solMap
+                    };
+                    get().recomputeSciState();
+                  },
+                  () => {}
+                );
+
+                const unsubMsg = onSnapshot(
+                  collection(centralDb, 'sci_incidentes', incId, 'mensajes'),
+                  (msgSnap) => {
+                    const msgMap = {};
+                    msgSnap.forEach((mDoc) => {
+                      msgMap[String(mDoc.id).trim().toUpperCase()] = {
+                        id: mDoc.id,
+                        idCanal: String(mDoc.id).trim().toUpperCase(),
+                        idIncidenteSci: incId,
+                        ...(mDoc.data() || {})
+                      };
+                    });
+                    latestSciIncidentMensajesByInc = {
+                      ...latestSciIncidentMensajesByInc,
+                      [incId]: msgMap
+                    };
+                    get().recomputeSciState();
+                  },
+                  () => {}
+                );
+
+                unsubSciIncidentSubcols.set(incId, [unsubSol, unsubMsg]);
+              }
+            });
+
+            // Desuscribir incidentes que ya no están activos
+            Array.from(unsubSciIncidentSubcols.keys()).forEach((oldIncId) => {
+              if (!activeIncIds.has(oldIncId)) {
+                const arr = unsubSciIncidentSubcols.get(oldIncId) || [];
+                arr.forEach((u) => {
+                  try { u(); } catch (_) {}
+                });
+                unsubSciIncidentSubcols.delete(oldIncId);
+                delete latestSciIncidentSolicitudesByInc[oldIncId];
+                delete latestSciIncidentMensajesByInc[oldIncId];
+              }
+            });
+
+            latestCentralSciIncidentsMap = nextIncMap;
+            get().recomputeSciState();
+          },
+          () => {}
+        );
+
+        // 7B. Espejo de respaldo: `saas_clientes/{ownLicKey}/sci_solicitudes` (`SCI-AAAA-000X`)
+        unsubCentralSciRequests = onSnapshot(
+          collection(centralDb, 'saas_clientes', ownLicKey, 'sci_solicitudes'),
+          (snap) => {
+            const subMap = {};
+            snap.forEach((d) => {
+              subMap[d.id] = { id: d.id, ...(d.data() || {}) };
+            });
+            latestOwnSciSubcolMap = subMap;
+            get().recomputeSciState();
+          },
+          () => {}
+        );
+
+        // 7C. Escuchar `saas_clientes` en `sisbom-central`
         unsubCentralInterCorps = onSnapshot(
-          doc(centralDb, 'saas_clientes', ownLicKey),
-          async (snap) => {
-            if (!snap.exists()) return;
-            const rawClient = snap.data() || {};
-            const normClient = normalizeSaasClientDoc(ownLicKey, rawClient);
-            const alertSci = normClient?.alertaIntercuerpoSci;
-            if (!alertSci || typeof alertSci !== 'object') {
-              set({ interCorpsAlert: null });
-              return;
-            }
-
-            const currentUser = useAuthStore.getState().user;
-            const myRad = String(currentUser?.idRadial || '').trim();
-            const isCmd = myRad === '1' || String(currentUser?.cargo || '').toUpperCase().includes('COMANDANTE');
-            const statusUp = String(alertSci.estado || 'PENDIENTE').toUpperCase();
-            const alertId = String(alertSci.idAlerta || alertSci.id || `SCI_ALERTA_${alertSci.timestamp || Date.now()}`);
-            const incomingTs = Number(alertSci.updatedAt || alertSci.timestamp || Date.now());
-            const isCancelledAlert =
-              statusUp === 'CANCELADA' ||
-              statusUp === 'CANCELADO' ||
-              String(alertSci.duracion ?? 'i').trim() === '';
-
-            // Buscar en personal por idRadial == "1" y obtener su idRegistro para ponerlo en aQuienAlerta
-            const commanderIdRegistro =
-              resolveCommanderIdRegistroFromPersonal(get().firefightersList, currentUser) ||
-              String(isCmd ? currentUser?.idRegistro || '' : '').trim();
-
-            if (isCancelledAlert) {
-              set({ interCorpsAlert: null });
-              const currentAllAfterCancel = (get().allAlertsList || []).filter(
-                (a) =>
-                  String(a.idAlerta) !== alertId &&
-                  !String(a.idAlerta || '').startsWith(`SCI_CHAT_${ownLicKey}`)
-              );
-              set(splitAlertsAndOrders(currentAllAfterCancel, get().activeChatAlert));
-              try {
-                const localDb = getDb();
-                if (localDb) {
-                  await updateDoc(doc(localDb, 'alertas', alertId), {
-                    duracion: '',
-                    _metaTimestamp: incomingTs
-                  }).catch(() => {});
-                }
-              } catch (_) {}
-              return;
-            }
-
-            set({
-              interCorpsAlert: {
-                ...alertSci,
-                idAlerta: alertId,
-                aQuienAlerta: commanderIdRegistro || String(alertSci.aQuienAlerta || '').trim(),
-                estado: statusUp
-              }
+          collection(centralDb, 'saas_clientes'),
+          (snap) => {
+            const cMap = {};
+            snap.forEach((d) => {
+              cMap[String(d.id).trim().toUpperCase()] = d.data() || {};
             });
-
-            // Reflejar la alerta Grado 3 en la lista local de alertas (formato canónico SENTINEL CAD con aQuienAlerta = idRegistro del Comandante)
-            const canonicalAlertObj = normalizeAlertDoc(alertId, {
-              idAlerta: alertId,
-              fechaAlerta: alertSci.fechaAlerta || `'${getLocalDateString()}`,
-              horaAlerta: alertSci.horaAlerta || `'${getLocalTimeString()}`,
-              razonAlerta:
-                alertSci.razonAlerta ||
-                `SOLICITUD DE ALERTA POR CLAVE ${alertSci.claveEmergencia || '10-12'} PARA UNIDADES EN APOYO`,
-              mensajeAlerta:
-                alertSci.mensajeAlerta ||
-                alertSci.mensajeSolicitud ||
-                `Solicitud de apoyo inter-cuerpo desde ${alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || 'Cuerpo Vecino'}.`,
-              quienAlerta:
-                alertSci.quienAlerta ||
-                `COMANDANTE SCI - ${alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || 'CUERPO VECINO'}`,
-              gradoAlerta: '3',
-              duracion: 'i',
-              aQuienAlerta: commanderIdRegistro,
-              conforme: statusUp !== 'PENDIENTE' ? (currentUser?.idRadial || '1') : '',
-              fijar: '1',
-              tipoSolicitud: alertSci.tipoSolicitud || 'ALERTA_PREVENTIVA',
-              licenciaSolicitante: alertSci.licenciaSolicitante || '',
-              nombreCuerpoSolicitante: alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || '',
-              claveEmergencia: alertSci.claveEmergencia || '10-12',
-              direccionEmergencia: alertSci.direccionEmergencia || '',
-              estadoApoyo: statusUp,
-              respondidoPor: alertSci.confirmadoPor || '',
-              respondidoAt: alertSci.confirmadoAt || null,
-              timestamp: incomingTs,
-              _metaTimestamp: incomingTs
-            });
-
-            let nextAll = [...(get().allAlertsList || [])];
-            const existsIdx = nextAll.findIndex((a) => String(a.idAlerta) === alertId);
-            if (existsIdx >= 0) {
-              nextAll = nextAll.map((a, idx) => (idx === existsIdx ? { ...a, ...canonicalAlertObj } : a));
-            } else {
-              nextAll = [canonicalAlertObj, ...nextAll];
-            }
-
-            // Si existe canal de chat directo (`chatDirecto`) o chat general inter-cuerpos (`chatIntercuerpos`) con duracion: 'C',
-            // reflejarlos en `alertas` con aQuienAlerta = idRegistro del Comandante (idRadial == 1)
-            const syncSciChatChannel = async (chatRaw, defaultChatId, defaultChatTitle) => {
-              if (!chatRaw || typeof chatRaw !== 'object') return;
-              const chatDur = String(chatRaw.duracion ?? 'C').trim();
-              const chatId = String(chatRaw.idAlerta || defaultChatId).trim();
-              if (!chatDur) {
-                nextAll = nextAll.filter((a) => String(a.idAlerta) !== chatId);
-                return;
-              }
-              const chatTs = Number(chatRaw.updatedAt || incomingTs || Date.now());
-              const chatAlertNorm = normalizeAlertDoc(chatId, {
-                idAlerta: chatId,
-                fechaAlerta: `'${getLocalDateString()}`,
-                horaAlerta: `'${getLocalTimeString()}`,
-                razonAlerta: String(chatRaw.razonAlerta || defaultChatTitle).trim().toUpperCase(),
-                mensajeAlerta: String(chatRaw.mensajeAlerta || '').trim(),
-                quienAlerta: String(chatRaw.quienAlerta || 'RED INTER-CUERPOS SCI').trim().toUpperCase(),
-                gradoAlerta: '3',
-                duracion: 'C',
-                aQuienAlerta: commanderIdRegistro,
-                conforme: String(chatRaw.conforme || '').trim(),
-                fijar: '1',
-                timestamp: chatTs,
-                _metaTimestamp: chatTs
-              });
-              const idxChat = nextAll.findIndex((a) => String(a.idAlerta) === chatId);
-              if (idxChat >= 0) {
-                nextAll[idxChat] = { ...nextAll[idxChat], ...chatAlertNorm };
-              } else {
-                nextAll = [chatAlertNorm, ...nextAll];
-              }
-              try {
-                const localDb = getDb();
-                if (localDb && commanderIdRegistro) {
-                  markLocalWrite('alertas', chatId, chatTs);
-                  await setDoc(
-                    doc(localDb, 'alertas', chatId),
-                    {
-                      idAlerta: chatId,
-                      fechaAlerta: chatAlertNorm.fechaAlerta,
-                      horaAlerta: chatAlertNorm.horaAlerta,
-                      razonAlerta: chatAlertNorm.razonAlerta,
-                      mensajeAlerta: chatAlertNorm.mensajeAlerta,
-                      quienAlerta: chatAlertNorm.quienAlerta,
-                      gradoAlerta: '3',
-                      duracion: 'C',
-                      aQuienAlerta: commanderIdRegistro,
-                      conforme: chatAlertNorm.conforme,
-                      fijar: '1',
-                      _metaTimestamp: chatTs
-                    },
-                    { merge: true }
-                  ).catch(() => {});
-                }
-              } catch (_) {}
-            };
-
-            if (alertSci.chatDirecto) {
-              const reqCorpTitle =
-                alertSci.cuerpoSolicitante ||
-                alertSci.nombreCuerpoSolicitante ||
-                useLicenseStore.getState().clientName ||
-                ownLicKey;
-              await syncSciChatChannel(
-                alertSci.chatDirecto,
-                `SCI_CHAT_${ownLicKey}`,
-                reqCorpTitle
-              );
-            }
-
-            if (alertSci.chatIntercuerpos) {
-              await syncSciChatChannel(
-                alertSci.chatIntercuerpos,
-                'SCI_CHAT_INTERCUERPOS',
-                'RED INTER-CUERPOS SCI'
-              );
-            }
-
-            set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
-
-            // Si es una alerta nueva en estado PENDIENTE y el usuario es el Comandante (idRadial == 1):
-            // reproducir tono de Alerta Grado 3 (`importante`) y sincronizar en `alertas` del tenant con aQuienAlerta = idRegistro del Comandante
-            if (statusUp === 'PENDIENTE' && incomingTs > lastInterCorpsAlertTs) {
-              lastInterCorpsAlertTs = incomingTs;
-              if (isCmd) {
-                get().playDispatchSound('importante', {
-                  forceMaxVolume: true,
-                  vibratePatternCsv: '0,1000,300,1000,300,1000'
-                });
-                set({
-                  urgentBannerMessage: `🚨 ${canonicalAlertObj.razonAlerta} (${alertSci.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || 'Red SCI'})`
-                });
-              }
-              try {
-                const localDb = getDb();
-                if (localDb && commanderIdRegistro && !knownAlertIds.has(alertId)) {
-                  knownAlertIds.add(alertId);
-                  markLocalWrite('alertas', alertId, incomingTs);
-                  await setDoc(doc(localDb, 'alertas', alertId), {
-                    idAlerta: alertId,
-                    fechaAlerta: canonicalAlertObj.fechaAlerta,
-                    horaAlerta: canonicalAlertObj.horaAlerta,
-                    razonAlerta: canonicalAlertObj.razonAlerta,
-                    mensajeAlerta: canonicalAlertObj.mensajeAlerta,
-                    quienAlerta: canonicalAlertObj.quienAlerta,
-                    gradoAlerta: '3',
-                    duracion: 'i',
-                    aQuienAlerta: commanderIdRegistro,
-                    conforme: '',
-                    fijar: '1',
-                    tipoSolicitud: canonicalAlertObj.tipoSolicitud,
-                    licenciaSolicitante: canonicalAlertObj.licenciaSolicitante,
-                    nombreCuerpoSolicitante: canonicalAlertObj.nombreCuerpoSolicitante,
-                    claveEmergencia: canonicalAlertObj.claveEmergencia,
-                    direccionEmergencia: canonicalAlertObj.direccionEmergencia,
-                    estadoApoyo: 'PENDIENTE',
-                    _metaTimestamp: incomingTs
-                  }, { merge: true });
-                }
-              } catch (_) {}
-            }
+            latestCentralClientsMap = cMap;
+            get().recomputeSciState();
           },
           () => {}
         );
@@ -2051,6 +1983,358 @@ export const useDispatchStore = create((set, get) => ({
       set({ isLoading: false });
       get().hydrateFromFirestoreRest(false);
     }
+  },
+
+  // Recalcula estado reactivo del SCI desde `sisbom-central/sci_incidentes` y sus subcolecciones (`solicitudes` y `mensajes`)
+  // (Exclusivo para Comandante `idRadial == "1"`, 100% separado de `alertas`)
+  recomputeSciState: () => {
+    const ownLicKey = String(useLicenseStore.getState().licenseKey || '').trim().toUpperCase();
+    const currentUser = useAuthStore.getState().user;
+    const isCmd = isCanonicalCommander(currentUser);
+
+    if (!ownLicKey || !isCmd) {
+      set({
+        interCorpsAlert: null,
+        sciRequestsList: [],
+        activeSciNeighborCorps: [],
+        sciChatMessagesRaw: '',
+        sciUnreadCount: 0,
+        isSciTabActive: false
+      });
+      return;
+    }
+
+    const rawOwnClient = latestCentralClientsMap[ownLicKey] || {};
+    const normOwnClient = normalizeSaasClientDoc(ownLicKey, rawOwnClient);
+    const alertSci = normOwnClient?.alertaIntercuerpoSci;
+
+    // 1. Consolidar solicitudes `SCI-AAAA-000X` desde `sci_incidentes/{idIncidenteSci}/solicitudes` (fuente primaria) + espejos
+    const requestsById = new Map();
+
+    const isRequestActive = (req) => {
+      if (!req || typeof req !== 'object') return false;
+      if (req.sciActivo === false) return false;
+      const st = String(req.estado || 'PENDIENTE').trim().toUpperCase();
+      if (['CANCELADA', 'CANCELADO', 'FINALIZADA', 'FINALIZADO'].includes(st)) return false;
+      if (req.duracion !== undefined && req.duracion !== null && String(req.duracion).trim() === '') return false;
+      return true;
+    };
+
+    const upsertRequest = (rawReq, fallbackId = '', explicitIncId = '') => {
+      if (!rawReq || typeof rawReq !== 'object') return;
+      if (!isRequestActive(rawReq)) return;
+      const rawId = String(rawReq.idSolicitud || rawReq.idAlerta || rawReq.id || fallbackId || '').trim().toUpperCase();
+      const canonicalId = /^SCI-\d{4}-\d+$/.test(rawId)
+        ? rawId
+        : calculateNextCanonicalSciRequestId(Array.from(requestsById.keys()), rawReq.createdAt || rawReq.timestamp || Date.now());
+
+      const existing = requestsById.get(canonicalId);
+      const incomingTs = Number(rawReq._metaTimestamp || rawReq.updatedAt || rawReq.timestamp || rawReq.createdAt || 0);
+      const existingTs = existing ? Number(existing._metaTimestamp || existing.updatedAt || existing.timestamp || existing.createdAt || 0) : -1;
+
+      if (!existing || incomingTs >= existingTs) {
+        const mergedChat = String(
+          rawReq.mensajesChat ||
+            rawReq.chatDirecto?.mensajeAlerta ||
+            existing?.mensajesChat ||
+            ''
+        ).trim();
+        const resolvedSolicitanteLic = String(
+          rawReq.licenciaSolicitante || existing?.licenciaSolicitante || ''
+        )
+          .trim()
+          .toUpperCase();
+        const resolvedSvcId = String(
+          rawReq.idServicioOrigen || rawReq.idServicio || existing?.idServicioOrigen || 'SCI-ACTIVO'
+        ).trim();
+        const resolvedIncId =
+          String(rawReq.idIncidenteSci || explicitIncId || existing?.idIncidenteSci || '').trim() ||
+          (resolvedSolicitanteLic
+            ? buildCanonicalCentralSciIncidentId(resolvedSolicitanteLic, resolvedSvcId)
+            : '');
+
+        requestsById.set(canonicalId, {
+          ...(existing || {}),
+          ...rawReq,
+          id: canonicalId,
+          idSolicitud: canonicalId,
+          idAlerta: canonicalId,
+          idIncidenteSci: resolvedIncId,
+          soloComandante: true,
+          idRadialDestinatario: '1',
+          sciActivo: true,
+          tipoSolicitud: String(rawReq.tipoSolicitud || existing?.tipoSolicitud || 'ALERTA_PREVENTIVA').trim().toUpperCase(),
+          estado: String(rawReq.estado || existing?.estado || 'PENDIENTE').trim().toUpperCase(),
+          licenciaSolicitante: resolvedSolicitanteLic,
+          cuerpoSolicitante: String(
+            rawReq.cuerpoSolicitante ||
+              rawReq.nombreCuerpoSolicitante ||
+              existing?.cuerpoSolicitante ||
+              'CUERPO DE BOMBEROS VECINO'
+          ).trim().toUpperCase(),
+          licenciaApoyo: String(rawReq.licenciaApoyo || rawReq.licenciaDestino || ownLicKey).trim().toUpperCase(),
+          cuerpoApoyo: String(
+            rawReq.cuerpoApoyo ||
+              rawReq.cuerpoDestino ||
+              rawReq.nombreCuerpoApoyo ||
+              useLicenseStore.getState().clientName ||
+              ownLicKey
+          ).trim().toUpperCase(),
+          idServicioOrigen: resolvedSvcId,
+          claveEmergencia: String(rawReq.claveEmergencia || existing?.claveEmergencia || '10-12').trim().toUpperCase(),
+          direccionEmergencia: String(rawReq.direccionEmergencia || existing?.direccionEmergencia || '').trim().toUpperCase(),
+          comandanteSolicitante: String(
+            rawReq.comandanteSolicitante ||
+              rawReq.quienAlerta ||
+              existing?.comandanteSolicitante ||
+              'COMANDANTE SCI'
+          ).trim().toUpperCase(),
+          fechaSolicitud: String(rawReq.fechaSolicitud || rawReq.fechaAlerta || existing?.fechaSolicitud || getLocalDateString()).replace(/^'+/, '').trim(),
+          horaSolicitud: String(rawReq.horaSolicitud || rawReq.horaAlerta || existing?.horaSolicitud || getLocalTimeString()).replace(/^'+/, '').trim(),
+          idCarroSolicitado: String(rawReq.idCarroSolicitado || existing?.idCarroSolicitado || '').trim().toUpperCase(),
+          sectorDestino: String(rawReq.sectorDestino || existing?.sectorDestino || '').trim().toUpperCase(),
+          instruccionTactica: String(rawReq.instruccionTactica || existing?.instruccionTactica || '').trim(),
+          dirigirse: rawReq.dirigirse && typeof rawReq.dirigirse === 'object' ? rawReq.dirigirse : (existing?.dirigirse || null),
+          mensajesChat: mergedChat,
+          updatedAt: incomingTs > 0 ? incomingTs : (existingTs > 0 ? existingTs : 0),
+          _metaTimestamp: incomingTs > 0 ? incomingTs : (existingTs > 0 ? existingTs : 0)
+        });
+      }
+    };
+
+    // 1A. Fuente Primaria: Subcolecciones `sci_incidentes/{incId}/solicitudes` en `sisbom-central`
+    Object.entries(latestSciIncidentSolicitudesByInc || {}).forEach(([incId, solMap]) => {
+      const parentInc = latestCentralSciIncidentsMap[incId] || {};
+      if (parentInc.activo === false) return;
+      Object.entries(solMap || {}).forEach(([solId, solData]) => {
+        if (!solData || typeof solData !== 'object') return;
+        const targetLic = String(solData.licenciaApoyo || solData.licenciaDestino || '').trim().toUpperCase();
+        const originLic = String(solData.licenciaSolicitante || parentInc.licenciaSolicitante || '').trim().toUpperCase();
+        if (targetLic === ownLicKey || originLic === ownLicKey) {
+          upsertRequest(
+            {
+              ...solData,
+              idIncidenteSci: incId,
+              licenciaSolicitante: originLic,
+              cuerpoSolicitante: solData.cuerpoSolicitante || parentInc.cuerpoSolicitante,
+              claveEmergencia: solData.claveEmergencia || parentInc.claveEmergencia || parentInc.clave,
+              direccionEmergencia: solData.direccionEmergencia || parentInc.direccionEmergencia || parentInc.lugar,
+              comandanteSolicitante: solData.comandanteSolicitante || parentInc.comandanteSci
+            },
+            solId,
+            incId
+          );
+        }
+      });
+    });
+
+    // 1B. Espejos de respaldo (`saas_clientes/{ownLicKey}/sci_solicitudes` y `alertaIntercuerpoSci`)
+    Object.entries(latestOwnSciSubcolMap || {}).forEach(([docId, docData]) => {
+      upsertRequest(docData, docId, docData?.idIncidenteSci || '');
+    });
+
+    if (alertSci && typeof alertSci === 'object' && isRequestActive(alertSci)) {
+      upsertRequest(alertSci, alertSci.idSolicitud || alertSci.idAlerta || 'SCI-2026-0001', alertSci.idIncidenteSci || '');
+      if (alertSci.solicitudesUnidades && typeof alertSci.solicitudesUnidades === 'object') {
+        Object.entries(alertSci.solicitudesUnidades).forEach(([uKey, uReq]) => {
+          if (uReq && typeof uReq === 'object') {
+            upsertRequest(
+              {
+                ...uReq,
+                tipoSolicitud: 'SOLICITUD_UNIDAD',
+                idCarroSolicitado: uReq.idCarroSolicitado || uKey,
+                licenciaSolicitante: uReq.licenciaSolicitante || alertSci.licenciaSolicitante,
+                cuerpoSolicitante: uReq.cuerpoSolicitante || uReq.nombreCuerpoSolicitante || alertSci.cuerpoSolicitante || alertSci.nombreCuerpoSolicitante,
+                claveEmergencia: uReq.claveEmergencia || alertSci.claveEmergencia,
+                direccionEmergencia: uReq.direccionEmergencia || alertSci.direccionEmergencia
+              },
+              uReq.idSolicitud || uReq.idAlerta,
+              uReq.idIncidenteSci || alertSci.idIncidenteSci || ''
+            );
+          }
+        });
+      }
+    }
+
+    const sortedRequests = Array.from(requestsById.values()).sort((a, b) =>
+      String(b.idSolicitud).localeCompare(String(a.idSolicitud))
+    );
+
+    // 2. Detectar incidentes activos en `sisbom-central/sci_incidentes` (fuente primaria) + `saas_clientes.sciActivo`
+    const neighborCorpsByLic = new Map();
+
+    Object.entries(latestCentralSciIncidentsMap || {}).forEach(([incId, incData]) => {
+      if (!incData || typeof incData !== 'object' || incData.activo === false) return;
+      const licKey = String(incData.licenciaSolicitante || '').trim().toUpperCase();
+      if (!licKey || licKey === ownLicKey) return;
+      const corpsName = String(incData.cuerpoSolicitante || licKey).trim().toUpperCase();
+      const cmdName = String(incData.comandanteSci || 'COMANDANTE SCI').trim().toUpperCase();
+      const svcId = String(incData.idServicio || 'SCI-ACTIVO').trim();
+      neighborCorpsByLic.set(licKey, {
+        idIncidenteSci: incId,
+        licencia: licKey,
+        licenciaSolicitante: licKey,
+        nombreCuerpo: corpsName,
+        cuerpoSolicitante: corpsName,
+        comunaSolicitante: String(incData.comunaSolicitante || '').trim().toUpperCase(),
+        logoSolicitante: String(incData.logoSolicitante || '').trim(),
+        idServicio: svcId,
+        claveEmergencia: String(incData.claveEmergencia || incData.clave || '10-12').trim().toUpperCase(),
+        direccionEmergencia: String(incData.direccionEmergencia || incData.lugar || '').trim().toUpperCase(),
+        comandanteSci: cmdName,
+        comandanteIncidente: cmdName,
+        geoEmergencia: incData.geoEmergencia || incData.geo || null,
+        updatedAt: Number(incData.updatedAt || Date.now())
+      });
+    });
+
+    Object.entries(latestCentralClientsMap || {}).forEach(([licKey, rawData]) => {
+      if (!licKey || licKey === ownLicKey || !rawData || typeof rawData !== 'object') return;
+      if (neighborCorpsByLic.has(licKey)) return;
+      const sciAct = rawData.sciActivo;
+      if (sciAct && typeof sciAct === 'object' && sciAct.activo === true) {
+        const normNeighbor = normalizeSaasClientDoc(licKey, rawData);
+        const corpsName = String(
+          sciAct.cuerpoSolicitante || normNeighbor?.clientName || normNeighbor?.nombreMostrar || licKey
+        ).trim().toUpperCase();
+        const cmdName = String(sciAct.comandanteSci || 'COMANDANTE SCI').trim().toUpperCase();
+        const svcId = String(sciAct.idServicio || 'SCI-ACTIVO').trim();
+        neighborCorpsByLic.set(licKey, {
+          idIncidenteSci:
+            String(sciAct.idIncidenteSci || '').trim() ||
+            buildCanonicalCentralSciIncidentId(licKey, svcId),
+          licencia: licKey,
+          licenciaSolicitante: licKey,
+          nombreCuerpo: corpsName,
+          cuerpoSolicitante: corpsName,
+          comunaSolicitante: String(sciAct.comunaSolicitante || normNeighbor?.comuna || '').trim().toUpperCase(),
+          logoSolicitante: String(sciAct.logoSolicitante || normNeighbor?.logoUrl || '').trim(),
+          idServicio: svcId,
+          claveEmergencia: String(sciAct.claveEmergencia || '10-12').trim().toUpperCase(),
+          direccionEmergencia: String(sciAct.direccionEmergencia || '').trim().toUpperCase(),
+          comandanteSci: cmdName,
+          comandanteIncidente: cmdName,
+          geoEmergencia: sciAct.geoEmergencia || null,
+          updatedAt: Number(sciAct.updatedAt || Date.now())
+        });
+      }
+    });
+
+    const neighborCorps = Array.from(neighborCorpsByLic.values());
+
+    // 3. Resolver mensajes del Chat Directo SCI desde `sci_incidentes/{idIncidenteSci}/mensajes/{ownLicKey}` (fuente primaria)
+    const primaryReq = sortedRequests[0] || (alertSci && isRequestActive(alertSci) ? alertSci : null);
+    const activeIncId =
+      primaryReq?.idIncidenteSci ||
+      neighborCorps[0]?.idIncidenteSci ||
+      Object.keys(latestSciIncidentMensajesByInc || {})[0] ||
+      '';
+    const incMsgMap = activeIncId ? (latestSciIncidentMensajesByInc[activeIncId] || {}) : {};
+    const directChannelDoc = incMsgMap[ownLicKey] || incMsgMap[`SCI_CHAT_${ownLicKey}`] || null;
+    const generalChannelDoc = incMsgMap.GENERAL || incMsgMap.SCI_CHAT_INTERCUERPOS || null;
+
+    const candidatesChat = [
+      String(directChannelDoc?.mensajesChat || directChannelDoc?.mensajeAlerta || '').trim(),
+      String(primaryReq?.mensajesChat || '').trim(),
+      String(alertSci?.chatDirecto?.mensajeAlerta || '').trim(),
+      String(generalChannelDoc?.mensajesChat || generalChannelDoc?.mensajeAlerta || '').trim(),
+      String(alertSci?.chatIntercuerpos?.mensajeAlerta || '').trim()
+    ].filter(Boolean);
+
+    // Elegir la cadena con más mensajes / más actualizada
+    let chatRaw = '';
+    let maxCount = -1;
+    candidatesChat.forEach((cStr) => {
+      const cLen = parseCanonicalChatMessages(cStr).length;
+      if (cLen > maxCount) {
+        maxCount = cLen;
+        chatRaw = cStr;
+      }
+    });
+
+    const parsedChatMsgs = parseCanonicalChatMessages(chatRaw);
+    if (lastSciChatMsgCount < 0) {
+      lastSciChatMsgCount = parsedChatMsgs.length;
+    }
+    const newChatMsgsCount = Math.max(0, parsedChatMsgs.length - lastSciChatMsgCount);
+
+    // Si el modal de chat está abierto sobre el canal SCI, mantenerlo sincronizado en vivo
+    const curActiveChat = get().activeChatAlert;
+    if (curActiveChat && isResidualSciAlertDoc(curActiveChat)) {
+      const updatedModalChat = {
+        ...curActiveChat,
+        idIncidenteSci: activeIncId || curActiveChat.idIncidenteSci || '',
+        mensajeAlerta: chatRaw,
+        _metaTimestamp: Date.now()
+      };
+      set({ activeChatAlert: updatedModalChat, chatAlert: updatedModalChat });
+    }
+
+    const pendingRequests = sortedRequests.filter((r) => String(r.estado || '').toUpperCase() === 'PENDIENTE');
+    const sciUnreadCount = pendingRequests.length + newChatMsgsCount;
+    const isSciTabActive = Boolean(sortedRequests.length > 0 || neighborCorps.length > 0);
+
+    // 4. Disparar sonido crítico `importante.mp3` y banner urgente SOLO al Comandante cuando entra nueva solicitud PENDIENTE o nuevo mensaje SCI
+    const latestChatMsg = parsedChatMsgs.length > 0 ? parsedChatMsgs[parsedChatMsgs.length - 1] : null;
+    const myReg = String(currentUser?.idRegistro || '').trim();
+    const myNameUp = String(currentUser?.nombreBombero || currentUser?.nombre || '').trim().toUpperCase();
+    const isLastMsgFromMe = latestChatMsg
+      ? (myReg && String(latestChatMsg.senderId).includes(myReg)) ||
+        (myNameUp && String(latestChatMsg.senderId).toUpperCase().includes(myNameUp))
+      : true;
+
+    const unnotifiedPending = pendingRequests.filter((r) => {
+      const rKey = `${r.idSolicitud || r.id}_${r.tipoSolicitud || 'ALERTA'}_${r.idCarroSolicitado || ''}`;
+      return !notifiedSciRequestIds.has(rKey);
+    });
+
+    if (isFirstSciSnapshot) {
+      if (
+        Object.keys(latestCentralClientsMap).length > 0 ||
+        Object.keys(latestCentralSciIncidentsMap).length > 0 ||
+        Object.keys(latestOwnSciSubcolMap).length > 0
+      ) {
+        isFirstSciSnapshot = false;
+        pendingRequests.forEach((r) => {
+          const rKey = `${r.idSolicitud || r.id}_${r.tipoSolicitud || 'ALERTA'}_${r.idCarroSolicitado || ''}`;
+          notifiedSciRequestIds.add(rKey);
+        });
+      }
+    } else if (unnotifiedPending.length > 0) {
+      unnotifiedPending.forEach((r) => {
+        const rKey = `${r.idSolicitud || r.id}_${r.tipoSolicitud || 'ALERTA'}_${r.idCarroSolicitado || ''}`;
+        notifiedSciRequestIds.add(rKey);
+      });
+      const topReq = unnotifiedPending[0];
+      get().playDispatchSound('importante', {
+        forceMaxVolume: true,
+        vibratePatternCsv: '0,1000,300,1000,300,1000'
+      });
+      set({
+        urgentBannerMessage:
+          topReq.tipoSolicitud === 'SOLICITUD_UNIDAD' && topReq.idCarroSolicitado
+            ? `🚨 [${topReq.idSolicitud}] SCI SOLICITA UNIDAD ${topReq.idCarroSolicitado} (${topReq.cuerpoSolicitante})`
+            : `🚨 [${topReq.idSolicitud}] SOLICITUD DE APOYO SCI — ${topReq.cuerpoSolicitante} (${topReq.claveEmergencia})`
+      });
+    } else if (newChatMsgsCount > 0 && !isLastMsgFromMe) {
+      lastSciChatMsgCount = parsedChatMsgs.length;
+      get().playDispatchSound('importante', {
+        forceMaxVolume: true,
+        vibratePatternCsv: '0,800,300,800'
+      });
+      set({
+        urgentBannerMessage: `💬 NUEVO MENSAJE SCI (${primaryReq?.cuerpoSolicitante || 'RED INTER-CUERPOS'}): ${latestChatMsg?.texto || ''}`
+      });
+    }
+
+    set({
+      interCorpsAlert: primaryReq || null,
+      sciRequestsList: sortedRequests,
+      activeSciNeighborCorps: neighborCorps,
+      sciChatMessagesRaw: chatRaw,
+      sciUnreadCount,
+      isSciTabActive
+    });
   },
 
   // Carga instantánea desde caché local al abrir la app + Sincronización incremental ("Delta Sync") al presionar "Sincronizar"
@@ -2835,6 +3119,12 @@ export const useDispatchStore = create((set, get) => ({
       ? alertOrMsg
       : (get().chatAlert || get().activeChatAlert);
 
+    // Si es un canal de chat SCI (`SCI-AAAA-000X` o `SCI_CHAT_*`), enviarlo exclusivamente a `sisbom-central` sin tocar `alertas`
+    if (targetAlert && isResidualSciAlertDoc(targetAlert)) {
+      await get().sendSciChatMessage(cleanMsg, targetAlert);
+      return;
+    }
+
     const user = useAuthStore.getState().user;
     // Se guarda siempre el idRegistro personal permanente del bombero
     const senderId = String(user?.idRegistro || user?.idRadial || '1').trim();
@@ -2892,39 +3182,6 @@ export const useDispatchStore = create((set, get) => ({
         conforme: senderRadial,
         _metaTimestamp: nowTs
       });
-
-      // Si es un canal de chat inter-cuerpos de SENTINEL SCI (`SCI_CHAT_*`), sincronizar también con sisbom-central
-      const targetIdStr = String(targetAlert.idAlerta || '').trim();
-      if (targetIdStr.startsWith('SCI_CHAT_')) {
-        const ownLicKey = String(useLicenseStore.getState().licenseKey || '').trim().toUpperCase();
-        const centralDb = getCentralDb();
-        if (centralDb && ownLicKey) {
-          const isGeneral = targetIdStr === 'SCI_CHAT_INTERCUERPOS';
-          const chatFieldKey = isGeneral ? 'chatIntercuerpos' : 'chatDirecto';
-          await setDoc(
-            doc(centralDb, 'saas_clientes', ownLicKey),
-            {
-              alertaIntercuerpoSci: {
-                [chatFieldKey]: {
-                  idAlerta: targetIdStr,
-                  razonAlerta: targetAlert.razonAlerta || (isGeneral ? 'RED INTER-CUERPOS SCI' : ownLicKey),
-                  mensajeAlerta: finalChatString,
-                  quienAlerta: targetAlert.quienAlerta || 'RED INTER-CUERPOS SCI',
-                  gradoAlerta: '3',
-                  duracion: 'C',
-                  aQuienAlerta: String(targetAlert.aQuienAlerta || senderId),
-                  conforme: senderRadial,
-                  fijar: '1',
-                  updatedAt: nowTs
-                },
-                updatedAt: nowTs
-              },
-              updatedAt: nowTs
-            },
-            { merge: true }
-          ).catch(() => {});
-        }
-      }
     } catch (e) {
       console.warn('Error enviando mensaje de chat:', e);
     }
@@ -3122,14 +3379,21 @@ export const useDispatchStore = create((set, get) => ({
     }
   },
 
-  // 11. Responder a Alerta de Apoyo Inter-Cuerpos (Confirmar Apoyo, Esperar, Rechazar, Ofrecer Apoyo)
+  // 11. Responder a Solicitud de Apoyo Inter-Cuerpos (`SCI-AAAA-000X`) exclusivamente en `sisbom-central`
   respondToInterCorpsAlert: async (decision = 'CONFIRMADA', targetAlert = null) => {
     const cleanDecision = String(decision || 'CONFIRMADA').trim().toUpperCase();
     const user = useAuthStore.getState().user;
+    if (!isCanonicalCommander(user)) {
+      return { success: false, error: 'Solo el Comandante (idRadial = 1) puede responder solicitudes SCI.' };
+    }
     const licState = useLicenseStore.getState();
     const ownLicKey = String(licState.licenseKey || '').trim().toUpperCase();
-    const myRadial = String(user?.idRadial || '1').trim();
-    const commanderLabel = `[${myRadial}] ${String(user?.nombreBombero || user?.nombre || 'COMANDANTE').toUpperCase()}`;
+    const shortCmdName = formatShortPersonName(user?.nombreBombero || user?.nombre || 'COMANDANTE');
+    const ownCorpShort = String(licState.nombreMostrar || licState.clientName || ownLicKey)
+      .replace(/^CUERPO DE BOMBEROS DE\s+/i, '')
+      .trim()
+      .toUpperCase();
+    const commanderLabel = `[1] ${shortCmdName}${ownCorpShort ? ` - ${ownCorpShort}` : ''}`;
     const nowTs = Date.now();
 
     set({ isRespondingInterCorps: true });
@@ -3147,7 +3411,10 @@ export const useDispatchStore = create((set, get) => ({
       } catch (_) {}
 
       const cachedCreds = resolveCachedUserAuthCredentials();
-      const isGrantingAccess = cleanDecision === 'CONFIRMADA' || cleanDecision === 'APOYO_OFRECIDO';
+      const isGrantingAccess =
+        cleanDecision === 'CONFIRMADA' ||
+        cleanDecision === 'APOYO_OFRECIDO' ||
+        cleanDecision === 'DESPACHADA';
 
       const commanderAuth = isGrantingAccess && cachedCreds?.email && cachedCreds?.password
         ? {
@@ -3181,93 +3448,234 @@ export const useDispatchStore = create((set, get) => ({
             }))
         : [];
 
-      const currentInterAlert = targetAlert || get().interCorpsAlert || {};
-      const alertId = String(
-        currentInterAlert.idAlerta ||
-          currentInterAlert.id ||
-          `SCI_ALERTA_${ownLicKey}_${nowTs}`
-      );
+      const currentReq = targetAlert || get().sciRequestsList?.[0] || get().interCorpsAlert || {};
+      const existingIds = (get().sciRequestsList || []).map((r) => r.idSolicitud || r.id);
+      const rawId = String(currentReq.idSolicitud || currentReq.idAlerta || currentReq.id || '').trim().toUpperCase();
+      const idSolicitud = /^SCI-\d{4}-\d+$/.test(rawId)
+        ? rawId
+        : calculateNextCanonicalSciRequestId(existingIds, nowTs);
 
-      // Buscar en personal por idRadial == "1" y obtener su idRegistro para ponerlo en aQuienAlerta
-      const commanderIdRegistro =
-        resolveCommanderIdRegistroFromPersonal(get().firefightersList, user) ||
-        String(user?.idRegistro || '').trim();
-
-      // Si el Comandante aprueba/ofrece apoyo (`CONFIRMADA` o `APOYO_OFRECIDO`), inicializar el canal de chat directo (`duracion: "C"`)
-      // cuyo título (`razonAlerta`) es el nombre del Cuerpo de Bomberos y `aQuienAlerta` es el `idRegistro` del Comandante (idRadial == 1)
-      const directChatId = `SCI_CHAT_${ownLicKey}`;
       const ownCorpFullTitle = String(
         licState.clientName || licState.nombreMostrar || ownLicKey
-      )
-        .trim()
-        .toUpperCase();
+      ).trim().toUpperCase();
+      const requestingLicKey = String(currentReq.licenciaSolicitante || '').trim().toUpperCase();
       const requestingCorpTitle = String(
-        currentInterAlert.cuerpoSolicitante ||
-          currentInterAlert.nombreCuerpoSolicitante ||
+        currentReq.cuerpoSolicitante ||
+          currentReq.nombreCuerpoSolicitante ||
           ownCorpFullTitle
-      )
-        .trim()
-        .toUpperCase();
-      const existingDirectChatMsg = String(
-        currentInterAlert.chatDirecto?.mensajeAlerta || ''
+      ).trim().toUpperCase();
+
+      const isUnitRequest =
+        String(currentReq.tipoSolicitud || '').trim().toUpperCase() === 'SOLICITUD_UNIDAD' &&
+        Boolean(currentReq.idCarroSolicitado);
+      const unitIdRequested = String(currentReq.idCarroSolicitado || '').trim().toUpperCase();
+
+      const existingChatMsg = String(
+        currentReq.mensajesChat ||
+          get().sciChatMessagesRaw ||
+          currentReq.chatDirecto?.mensajeAlerta ||
+          ''
       ).trim();
-      const initialChatEntry = isGrantingAccess
+
+      let autoReplyText = '';
+      if (isUnitRequest) {
+        autoReplyText = isGrantingAccess
+          ? `Unidad ${unitIdRequested} AUTORIZADA Y DESPACHADA en apoyo por ${commanderLabel} (${idSolicitud}).`
+          : `Solicitud de unidad ${unitIdRequested} (${idSolicitud}) marcada como ${cleanDecision} por ${commanderLabel}.`;
+      } else if (cleanDecision === 'APOYO_OFRECIDO') {
+        autoReplyText = `Apoyo inter-cuerpo ofrecido por ${ownCorpFullTitle} (${availableUnits.length} unidades 0-9 disponibles). Folio ${idSolicitud}.`;
+      } else if (cleanDecision === 'CONFIRMADA') {
+        autoReplyText = `Apoyo confirmado por ${ownCorpFullTitle} (${availableUnits.length} unidades 0-9 a disposición). Folio ${idSolicitud}.`;
+      } else if (cleanDecision === 'EN_ESPERA') {
+        autoReplyText = `Solicitud ${idSolicitud} en espera de evaluación por Comandancia de ${ownCorpFullTitle}.`;
+      } else if (cleanDecision === 'RECHAZADA') {
+        autoReplyText = `Solicitud ${idSolicitud} sin disponibilidad actual en ${ownCorpFullTitle}.`;
+      }
+
+      const updatedChatStr = autoReplyText
         ? appendCanonicalChatMessage(
-            existingDirectChatMsg,
+            existingChatMsg,
             formatCanonicalChatEntry({
-              senderId: commanderIdRegistro || user?.idRegistro || '1',
-              texto:
-                cleanDecision === 'APOYO_OFRECIDO'
-                  ? `Apoyo inter-cuerpo ofrecido por ${ownCorpFullTitle} (${availableUnits.length} unidades 0-9 disponibles). Canal directo habilitado.`
-                  : `Apoyo confirmado por ${ownCorpFullTitle} (${availableUnits.length} unidades 0-9 disponibles). Canal directo habilitado.`
+              senderId: commanderLabel,
+              texto: autoReplyText
             })
           )
-        : existingDirectChatMsg;
+        : existingChatMsg;
 
-      const chatDirectoObj = isGrantingAccess
-        ? {
-            idAlerta: directChatId,
-            razonAlerta: requestingCorpTitle,
-            mensajeAlerta: initialChatEntry,
-            quienAlerta: commanderLabel,
-            gradoAlerta: '3',
-            duracion: 'C',
-            aQuienAlerta: commanderIdRegistro,
-            conforme: myRadial,
-            fijar: '1',
-            updatedAt: nowTs
-          }
-        : currentInterAlert.chatDirecto || null;
-
-      const updatedInterAlert = {
-        ...currentInterAlert,
-        idAlerta: alertId,
-        id: alertId,
-        licenciaApoyo: ownLicKey,
-        nombreCuerpoApoyo: licState.clientName || licState.nombreMostrar || ownLicKey,
+      const directChatId = `SCI_CHAT_${ownLicKey}`;
+      const chatDirectoObj = {
+        idAlerta: directChatId,
+        razonAlerta: requestingCorpTitle,
+        mensajeAlerta: updatedChatStr,
+        quienAlerta: commanderLabel,
         gradoAlerta: '3',
-        aQuienAlerta: commanderIdRegistro,
-        estado: cleanDecision,
-        confirmadoPor: commanderLabel,
-        confirmadoAt: nowTs,
-        commanderToken: isGrantingAccess ? commanderToken : '',
-        commanderAuth: isGrantingAccess ? commanderAuth : null,
-        unidadesDisponibles: availableUnits,
-        companiasApoyo: licState.cuarteles || {},
-        totalCompaniasApoyo: Number(licState.totalCompanias || 1) || 1,
-        chatDirecto: chatDirectoObj,
+        duracion: 'C',
+        aQuienAlerta: '1',
+        conforme: '1',
+        fijar: '1',
         updatedAt: nowTs
       };
 
-      set({ interCorpsAlert: updatedInterAlert });
+      const svcIdForInc = String(
+        currentReq.idServicioOrigen || currentReq.idServicio || 'SCI-ACTIVO'
+      ).trim();
+      const matchedActiveInc = Object.values(latestCentralSciIncidentsMap || {}).find(
+        (inc) =>
+          inc &&
+          inc.activo !== false &&
+          String(inc.licenciaSolicitante || '').trim().toUpperCase() ===
+            (requestingLicKey || ownLicKey)
+      );
+      const idIncidenteSci =
+        String(currentReq.idIncidenteSci || matchedActiveInc?.idIncidenteSci || '').trim() ||
+        buildCanonicalCentralSciIncidentId(requestingLicKey || ownLicKey, svcIdForInc);
 
-      // 1. Actualizar en sisbom-central/saas_clientes/{ownLicKey} para que SENTINEL SCI reciba la respuesta al instante
+      const canonicalReqDoc = {
+        ...buildCanonicalCentralSciRequestDoc({
+          ...currentReq,
+          idSolicitud,
+          sciActivo: true,
+          soloComandante: true,
+          idRadialDestinatario: '1',
+          tipoSolicitud: isUnitRequest
+            ? 'SOLICITUD_UNIDAD'
+            : cleanDecision === 'APOYO_OFRECIDO'
+              ? 'APOYO_OFRECIDO'
+              : currentReq.tipoSolicitud || 'ALERTA_PREVENTIVA',
+          estado: cleanDecision,
+          licenciaSolicitante: requestingLicKey || ownLicKey,
+          cuerpoSolicitante: requestingCorpTitle,
+          comandanteSolicitante: currentReq.comandanteSolicitante || currentReq.quienAlerta || commanderLabel,
+          licenciaApoyo: ownLicKey,
+          cuerpoApoyo: ownCorpFullTitle,
+          idServicioOrigen: svcIdForInc,
+          claveEmergencia: currentReq.claveEmergencia || '10-12',
+          direccionEmergencia: currentReq.direccionEmergencia || '',
+          idCarroSolicitado: unitIdRequested,
+          sectorDestino: currentReq.sectorDestino || '',
+          instruccionTactica: currentReq.instruccionTactica || '',
+          dirigirse: currentReq.dirigirse || null,
+          confirmadoPor: commanderLabel,
+          confirmadoAt: nowTs,
+          unidadesDisponibles: availableUnits,
+          commanderToken: isGrantingAccess ? commanderToken : '',
+          commanderAuth: isGrantingAccess ? commanderAuth : null,
+          mensajesChat: updatedChatStr,
+          createdAt: currentReq.createdAt || currentReq.timestamp || nowTs,
+          updatedAt: nowTs
+        }),
+        idIncidenteSci,
+        licenciaDestino: ownLicKey,
+        cuerpoDestino: ownCorpFullTitle
+      };
+
+      // Actualizar optimistamente en memoria (`sci_incidentes/{idIncidenteSci}/solicitudes` + espejo)
+      if (idIncidenteSci) {
+        latestSciIncidentSolicitudesByInc = {
+          ...latestSciIncidentSolicitudesByInc,
+          [idIncidenteSci]: {
+            ...(latestSciIncidentSolicitudesByInc[idIncidenteSci] || {}),
+            [idSolicitud]: canonicalReqDoc
+          }
+        };
+      }
+      latestOwnSciSubcolMap = {
+        ...(latestOwnSciSubcolMap || {}),
+        [idSolicitud]: canonicalReqDoc
+      };
+      get().recomputeSciState();
+
       const centralDb = getCentralDb();
       if (centralDb && ownLicKey) {
+        // 1. COLECCIÓN PRINCIPAL: `sisbom-central/sci_incidentes/{idIncidenteSci}/solicitudes/{idSolicitud}` y `mensajes/{ownLicKey}`
+        if (idIncidenteSci) {
+          await setDoc(
+            doc(centralDb, 'sci_incidentes', idIncidenteSci, 'solicitudes', idSolicitud),
+            canonicalReqDoc,
+            { merge: true }
+          ).catch(() => {});
+
+          await setDoc(
+            doc(centralDb, 'sci_incidentes', idIncidenteSci, 'mensajes', ownLicKey),
+            {
+              idCanal: ownLicKey,
+              idAlerta: directChatId,
+              idIncidenteSci,
+              licenciaSolicitante: requestingLicKey || ownLicKey,
+              licenciaDestino: ownLicKey,
+              cuerpoDestino: ownCorpFullTitle,
+              razonAlerta: requestingCorpTitle,
+              mensajeAlerta: updatedChatStr,
+              mensajesChat: updatedChatStr,
+              quienAlerta: commanderLabel,
+              soloComandante: true,
+              idRadialDestinatario: '1',
+              updatedAt: nowTs,
+              _metaTimestamp: nowTs
+            },
+            { merge: true }
+          ).catch(() => {});
+        }
+
+        // 2. Espejos en `saas_clientes/{ownLicKey}/sci_solicitudes/{idSolicitud}` y `{requestingLicKey}/sci_solicitudes/{idSolicitud}`
+        await setDoc(
+          doc(centralDb, 'saas_clientes', ownLicKey, 'sci_solicitudes', idSolicitud),
+          canonicalReqDoc,
+          { merge: true }
+        ).catch(() => {});
+
+        if (requestingLicKey && requestingLicKey !== ownLicKey) {
+          await setDoc(
+            doc(centralDb, 'saas_clientes', requestingLicKey, 'sci_solicitudes', idSolicitud),
+            canonicalReqDoc,
+            { merge: true }
+          ).catch(() => {});
+        }
+
+        // 3. Documento raíz `saas_clientes/{ownLicKey}.alertaIntercuerpoSci` para lectura inmediata en SENTINEL SCI
+        const rootAlertUpdate = {
+          ...(latestCentralClientsMap[ownLicKey]?.alertaIntercuerpoSci || {}),
+          ...canonicalReqDoc,
+          idSolicitud,
+          idAlerta: idSolicitud,
+          idIncidenteSci,
+          licenciaApoyo: ownLicKey,
+          nombreCuerpoApoyo: ownCorpFullTitle,
+          estado: isUnitRequest
+            ? (latestCentralClientsMap[ownLicKey]?.alertaIntercuerpoSci?.estado || 'CONFIRMADA')
+            : cleanDecision,
+          confirmadoPor: commanderLabel,
+          confirmadoAt: nowTs,
+          commanderToken: isGrantingAccess ? commanderToken : '',
+          commanderAuth: isGrantingAccess ? commanderAuth : null,
+          unidadesDisponibles: availableUnits,
+          companiasApoyo: licState.cuarteles || {},
+          totalCompaniasApoyo: Number(licState.totalCompanias || 1) || 1,
+          chatDirecto: chatDirectoObj,
+          updatedAt: nowTs
+        };
+
+        if (isUnitRequest && unitIdRequested) {
+          rootAlertUpdate.solicitudesUnidades = {
+            ...(rootAlertUpdate.solicitudesUnidades || {}),
+            [unitIdRequested]: {
+              ...(rootAlertUpdate.solicitudesUnidades?.[unitIdRequested] || {}),
+              ...canonicalReqDoc,
+              idSolicitud,
+              idIncidenteSci,
+              idCarroSolicitado: unitIdRequested,
+              estado: cleanDecision,
+              confirmadoPor: commanderLabel,
+              confirmadoAt: nowTs,
+              updatedAt: nowTs
+            }
+          };
+        }
+
         await setDoc(
           doc(centralDb, 'saas_clientes', ownLicKey),
           {
-            alertaIntercuerpoSci: updatedInterAlert,
+            alertaIntercuerpoSci: rootAlertUpdate,
             updatedAt: nowTs
           },
           { merge: true }
@@ -3276,112 +3684,13 @@ export const useDispatchStore = create((set, get) => ({
         });
       }
 
-      // 2. Actualizar la alerta en la lista local y en la colección `alertas` de Firestore (con aQuienAlerta = idRegistro del Comandante)
-      let nextAll = [...(get().allAlertsList || [])];
-      const existingAlert = nextAll.find((a) => String(a.idAlerta || a.id) === alertId);
-
-      if (existingAlert) {
-        const currentConformes = String(existingAlert.conforme || '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean);
-        if (!currentConformes.includes(myRadial)) currentConformes.push(myRadial);
-        const newConforme = currentConformes.join(',');
-
-        markLocalWrite('alertas', alertId, nowTs);
-        nextAll = nextAll.map((a) =>
-          String(a.idAlerta || a.id) === alertId
-            ? {
-                ...a,
-                aQuienAlerta: commanderIdRegistro || a.aQuienAlerta,
-                conforme: newConforme,
-                estadoApoyo: cleanDecision,
-                respondidoPor: commanderLabel,
-                respondidoAt: nowTs,
-                _metaTimestamp: nowTs
-              }
-            : a
-        );
-
-        const db = getDb();
-        if (db) {
-          await setDoc(
-            doc(db, 'alertas', alertId),
-            {
-              aQuienAlerta: commanderIdRegistro || existingAlert.aQuienAlerta || '',
-              conforme: newConforme,
-              estadoApoyo: cleanDecision,
-              respondidoPor: commanderLabel,
-              respondidoAt: nowTs,
-              _metaTimestamp: nowTs
-            },
-            { merge: true }
-          ).catch(() => {});
-        }
-      } else if (cleanDecision === 'APOYO_OFRECIDO') {
-        // Si el Comandante ofreció apoyo proactivamente sin alerta previa, registrar el comunicado Grado 3 en el muro con aQuienAlerta = idRegistro
-        const offerAlertDoc = buildCanonicalCadAlertDoc({
-          idAlerta: alertId,
-          gradoAlerta: '3',
-          aQuienAlerta: commanderIdRegistro,
-          duracion: 'i',
-          quienAlerta: commanderLabel,
-          razonAlerta: `APOYO INTER-CUERPO OFRECIDO (${availableUnits.length} UNIDADES DISPONIBLES)`,
-          mensajeAlerta:
-            `El Comandante ${commanderLabel} ha habilitado y ofrecido apoyo inter-cuerpo en la Red SENTINEL SCI ` +
-            `con ${availableUnits.length} unidad(es) disponible(s) (${availableUnits.map((u) => u.idCarro).join(', ') || 'Sin carros 0-9'}).`,
-          conforme: myRadial,
-          fijar: '1',
-          timestamp: nowTs
-        });
-        const normOffer = normalizeAlertDoc(alertId, {
-          ...offerAlertDoc,
-          tipoSolicitud: 'APOYO_OFRECIDO',
-          estadoApoyo: 'APOYO_OFRECIDO',
-          respondidoPor: commanderLabel,
-          respondidoAt: nowTs,
-          _metaTimestamp: nowTs
-        });
-        markLocalWrite('alertas', alertId, nowTs);
-        nextAll = [normOffer, ...nextAll];
-
-        const db = getDb();
-        if (db) {
-          await setDoc(doc(db, 'alertas', alertId), normOffer, { merge: true }).catch(() => {});
-        }
-      }
-
-      // 3. Si el Comandante aprobó/ofreció apoyo, publicar también la alerta de conversación (`duracion: "C"`) en `alertas`
-      if (isGrantingAccess && chatDirectoObj) {
-        const chatAlertDoc = buildCanonicalCadAlertDoc({
-          idAlerta: directChatId,
-          razonAlerta: chatDirectoObj.razonAlerta,
-          mensajeAlerta: chatDirectoObj.mensajeAlerta,
-          quienAlerta: commanderLabel,
-          gradoAlerta: '3',
-          duracion: 'C',
-          aQuienAlerta: commanderIdRegistro,
-          conforme: myRadial,
-          fijar: '1',
-          timestamp: nowTs
-        });
-        const normChat = normalizeAlertDoc(directChatId, chatAlertDoc);
-        markLocalWrite('alertas', directChatId, nowTs);
-        const chatIdx = nextAll.findIndex((a) => String(a.idAlerta) === directChatId);
-        if (chatIdx >= 0) {
-          nextAll[chatIdx] = { ...nextAll[chatIdx], ...normChat };
-        } else {
-          nextAll = [normChat, ...nextAll];
-        }
-        const db = getDb();
-        if (db) {
-          await setDoc(doc(db, 'alertas', directChatId), chatAlertDoc, { merge: true }).catch(() => {});
-        }
-      }
-
-      set(splitAlertsAndOrders(nextAll, get().activeChatAlert));
-
-      return { success: true, estado: cleanDecision, availableUnitsCount: availableUnits.length };
+      return {
+        success: true,
+        idSolicitud,
+        idIncidenteSci,
+        estado: cleanDecision,
+        availableUnitsCount: availableUnits.length
+      };
     } catch (e) {
       console.warn('Error en respondToInterCorpsAlert:', e);
       return { success: false, error: e.message };
@@ -3390,13 +3699,261 @@ export const useDispatchStore = create((set, get) => ({
     }
   },
 
+  // 12. Ofrecer Apoyo Voluntario a un Cuerpo Vecino con SCI Activo (`sci_incidentes/{idIncidenteSci}/solicitudes/{SCI-AAAA-000X}`)
+  offerVoluntarySciSupport: async (neighborCorp = null) => {
+    const targetNeighbor = neighborCorp || get().activeSciNeighborCorps?.[0] || {};
+    const incId = String(targetNeighbor.idIncidenteSci || '').trim();
+    const knownIds = [
+      ...(get().sciRequestsList || []).map((r) => r.idSolicitud || r.id),
+      ...Object.keys((incId && latestSciIncidentSolicitudesByInc[incId]) || {})
+    ];
+    const nextId = calculateNextCanonicalSciRequestId(knownIds, Date.now());
+    return await get().respondToInterCorpsAlert('APOYO_OFRECIDO', {
+      idSolicitud: nextId,
+      idIncidenteSci: incId,
+      tipoSolicitud: 'APOYO_OFRECIDO',
+      licenciaSolicitante: targetNeighbor.licenciaSolicitante || targetNeighbor.licencia || '',
+      cuerpoSolicitante:
+        targetNeighbor.cuerpoSolicitante ||
+        targetNeighbor.nombreCuerpo ||
+        'RED INTER-CUERPOS SCI',
+      comandanteSolicitante:
+        targetNeighbor.comandanteSci ||
+        targetNeighbor.comandanteIncidente ||
+        'COMANDANTE SCI',
+      claveEmergencia: targetNeighbor.claveEmergencia || '10-12',
+      direccionEmergencia: targetNeighbor.direccionEmergencia || '',
+      idServicio: targetNeighbor.idServicio || '',
+      idServicioOrigen: targetNeighbor.idServicio || '',
+      geoEmergencia: targetNeighbor.geoEmergencia || null
+    });
+  },
+
+  // 13. Enviar Mensaje en el Chat Directo SCI (`sci_incidentes/{idIncidenteSci}/mensajes/{ownLicKey}`, SIN mostrar `idRegistro`)
+  sendSciChatMessage: async (messageText = '', targetRequest = null) => {
+    const cleanMsg = String(messageText || '').trim().replace(/\|/g, ' ');
+    if (!cleanMsg) return { success: false };
+
+    const user = useAuthStore.getState().user;
+    if (!isCanonicalCommander(user)) return { success: false };
+
+    const licState = useLicenseStore.getState();
+    const ownLicKey = String(licState.licenseKey || '').trim().toUpperCase();
+    const shortCmdName = formatShortPersonName(user?.nombreBombero || user?.nombre || 'COMANDANTE');
+    const ownCorpShort = String(licState.nombreMostrar || licState.clientName || ownLicKey)
+      .replace(/^CUERPO DE BOMBEROS DE\s+/i, '')
+      .trim()
+      .toUpperCase();
+    // REGLA ESTRICTA: Nunca guardar ni mostrar `idRegistro` en el nombre del remitente del chat SCI
+    const senderLabel = `[1] ${shortCmdName}${ownCorpShort ? ` - ${ownCorpShort}` : ''}`;
+    const nowTs = Date.now();
+
+    const primaryReq = targetRequest || get().sciRequestsList?.[0] || get().interCorpsAlert || {};
+    const existingIds = (get().sciRequestsList || []).map((r) => r.idSolicitud || r.id);
+    const rawId = String(primaryReq.idSolicitud || primaryReq.idAlerta || primaryReq.id || '').trim().toUpperCase();
+    const idSolicitud = /^SCI-\d{4}-\d+$/.test(rawId)
+      ? rawId
+      : calculateNextCanonicalSciRequestId(existingIds, nowTs);
+    const requestingLicKey = String(
+      primaryReq.licenciaSolicitante || get().activeSciNeighborCorps?.[0]?.licenciaSolicitante || ''
+    )
+      .trim()
+      .toUpperCase();
+    const svcIdForInc = String(
+      primaryReq.idServicioOrigen ||
+        primaryReq.idServicio ||
+        get().activeSciNeighborCorps?.[0]?.idServicio ||
+        'SCI-ACTIVO'
+    ).trim();
+    const matchedActiveInc = Object.values(latestCentralSciIncidentsMap || {}).find(
+      (inc) =>
+        inc &&
+        inc.activo !== false &&
+        String(inc.licenciaSolicitante || '').trim().toUpperCase() ===
+          (requestingLicKey || ownLicKey)
+    );
+    const idIncidenteSci =
+      String(
+        primaryReq.idIncidenteSci ||
+          matchedActiveInc?.idIncidenteSci ||
+          get().activeSciNeighborCorps?.[0]?.idIncidenteSci ||
+          ''
+      ).trim() ||
+      buildCanonicalCentralSciIncidentId(requestingLicKey || ownLicKey, svcIdForInc);
+
+    const currentChatStr = String(
+      get().sciChatMessagesRaw ||
+        primaryReq.mensajesChat ||
+        primaryReq.mensajeAlerta ||
+        ''
+    ).trim();
+
+    const updatedChatStr = appendCanonicalChatMessage(
+      currentChatStr,
+      formatCanonicalChatEntry({
+        senderId: senderLabel,
+        texto: cleanMsg
+      })
+    );
+
+    const parsedAfter = parseCanonicalChatMessages(updatedChatStr);
+    lastSciChatMsgCount = parsedAfter.length;
+
+    set({ sciChatMessagesRaw: updatedChatStr });
+    if (idIncidenteSci) {
+      latestSciIncidentMensajesByInc = {
+        ...latestSciIncidentMensajesByInc,
+        [idIncidenteSci]: {
+          ...(latestSciIncidentMensajesByInc[idIncidenteSci] || {}),
+          [ownLicKey]: {
+            ...(latestSciIncidentMensajesByInc[idIncidenteSci]?.[ownLicKey] || {}),
+            idCanal: ownLicKey,
+            mensajesChat: updatedChatStr,
+            mensajeAlerta: updatedChatStr,
+            updatedAt: nowTs,
+            _metaTimestamp: nowTs
+          }
+        }
+      };
+    }
+    if (latestOwnSciSubcolMap[idSolicitud]) {
+      latestOwnSciSubcolMap[idSolicitud] = {
+        ...latestOwnSciSubcolMap[idSolicitud],
+        mensajesChat: updatedChatStr,
+        updatedAt: nowTs,
+        _metaTimestamp: nowTs
+      };
+    }
+    get().recomputeSciState();
+
+    const centralDb = getCentralDb();
+    if (centralDb && ownLicKey) {
+      const directChatId = `SCI_CHAT_${ownLicKey}`;
+      const ownCorpFullTitle = String(
+        licState.clientName || licState.nombreMostrar || ownLicKey
+      ).trim().toUpperCase();
+      const requestingCorpTitle = String(
+        primaryReq.cuerpoSolicitante ||
+          primaryReq.nombreCuerpoSolicitante ||
+          ownCorpFullTitle
+      ).trim().toUpperCase();
+
+      await Promise.all([
+        // 1. Subcolecciones primarias en `sci_incidentes/{idIncidenteSci}/mensajes/{ownLicKey}` y `solicitudes/{idSolicitud}`
+        idIncidenteSci
+          ? setDoc(
+              doc(centralDb, 'sci_incidentes', idIncidenteSci, 'mensajes', ownLicKey),
+              {
+                idCanal: ownLicKey,
+                idAlerta: directChatId,
+                idIncidenteSci,
+                licenciaSolicitante: requestingLicKey || ownLicKey,
+                licenciaDestino: ownLicKey,
+                cuerpoDestino: ownCorpFullTitle,
+                razonAlerta: requestingCorpTitle,
+                mensajeAlerta: updatedChatStr,
+                mensajesChat: updatedChatStr,
+                quienAlerta: senderLabel,
+                soloComandante: true,
+                idRadialDestinatario: '1',
+                updatedAt: nowTs,
+                _metaTimestamp: nowTs
+              },
+              { merge: true }
+            ).catch(() => {})
+          : Promise.resolve(),
+        idIncidenteSci
+          ? setDoc(
+              doc(centralDb, 'sci_incidentes', idIncidenteSci, 'solicitudes', idSolicitud),
+              {
+                idSolicitud,
+                idIncidenteSci,
+                mensajesChat: updatedChatStr,
+                updatedAt: nowTs,
+                _metaTimestamp: nowTs
+              },
+              { merge: true }
+            ).catch(() => {})
+          : Promise.resolve(),
+        // 2. Espejos en `saas_clientes`
+        setDoc(
+          doc(centralDb, 'saas_clientes', ownLicKey, 'sci_solicitudes', idSolicitud),
+          {
+            idSolicitud,
+            idIncidenteSci,
+            mensajesChat: updatedChatStr,
+            updatedAt: nowTs,
+            _metaTimestamp: nowTs
+          },
+          { merge: true }
+        ).catch(() => {}),
+        requestingLicKey && requestingLicKey !== ownLicKey
+          ? setDoc(
+              doc(centralDb, 'saas_clientes', requestingLicKey, 'sci_solicitudes', idSolicitud),
+              {
+                idSolicitud,
+                idIncidenteSci,
+                mensajesChat: updatedChatStr,
+                updatedAt: nowTs,
+                _metaTimestamp: nowTs
+              },
+              { merge: true }
+            ).catch(() => {})
+          : Promise.resolve(),
+        setDoc(
+          doc(centralDb, 'saas_clientes', ownLicKey),
+          {
+            alertaIntercuerpoSci: {
+              idIncidenteSci,
+              chatDirecto: {
+                idAlerta: directChatId,
+                razonAlerta: requestingCorpTitle,
+                mensajeAlerta: updatedChatStr,
+                quienAlerta: senderLabel,
+                gradoAlerta: '3',
+                duracion: 'C',
+                aQuienAlerta: '1',
+                conforme: '1',
+                fijar: '1',
+                updatedAt: nowTs
+              },
+              mensajesChat: updatedChatStr,
+              updatedAt: nowTs
+            },
+            updatedAt: nowTs
+          },
+          { merge: true }
+        ).catch(() => {})
+      ]);
+    }
+
+    return { success: true, mensajesChat: updatedChatStr };
+  },
+
   // Desconectar listeners al salir o cambiar de vista
   unsubscribeRealtime: () => {
-    [unsubDespachos, unsubPersonal, unsubVehiculos, unsubProtocols, unsubAlertas, unsubCentral, unsubAsistencia, unsubCentralInterCorps].forEach(unsub => {
+    [
+      unsubDespachos,
+      unsubPersonal,
+      unsubVehiculos,
+      unsubProtocols,
+      unsubAlertas,
+      unsubCentral,
+      unsubAsistencia,
+      unsubCentralInterCorps,
+      unsubCentralSciRequests,
+      unsubCentralSciIncidents
+    ].forEach(unsub => {
       if (unsub) {
         try { unsub(); } catch (e) {}
       }
     });
+    unsubSciIncidentSubcols.forEach((arr) => {
+      (arr || []).forEach((u) => {
+        try { u(); } catch (_) {}
+      });
+    });
+    unsubSciIncidentSubcols.clear();
     unsubDespachos = null;
     unsubPersonal = null;
     unsubVehiculos = null;
@@ -3405,6 +3962,8 @@ export const useDispatchStore = create((set, get) => ({
     unsubCentral = null;
     unsubAsistencia = null;
     unsubCentralInterCorps = null;
+    unsubCentralSciRequests = null;
+    unsubCentralSciIncidents = null;
     activeSubscribedProjectId = '';
     lastRestHydrationTs = 0;
     set({ isLoading: false });
