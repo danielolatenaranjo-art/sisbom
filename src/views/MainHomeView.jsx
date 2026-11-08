@@ -33,7 +33,10 @@ import {
   Copy,
   Check,
   Satellite,
-  CheckCircle2
+  CheckCircle2,
+  Truck,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { setDoc } from '../config/firestoreMeta';
@@ -413,6 +416,7 @@ export const MainHomeView = ({ onLogout }) => {
     toggleAlertPin,
     deleteAlert,
     refreshAttendance,
+    activeChatAlert,
     setActiveChatAlert,
     dismissFullscreenDispatch,
     clearUrgentBanner,
@@ -432,6 +436,7 @@ export const MainHomeView = ({ onLogout }) => {
 
   const [currentTab, setCurrentTab] = useState('actividad'); // 'actividad' | 'ordenes' | 'alertas' | 'sci' | 'asistencia' | 'disponibles'
   const [sciChatInputText, setSciChatInputText] = useState('');
+  const [sendingSciChat, setSendingSciChat] = useState(false);
   const [attendanceHistoryFilter, setAttendanceHistoryFilter] = useState('aprobados'); // 'aprobados' | 'por_aprobar'
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState('TODAS');
   const [selectedBomberoModal, setSelectedBomberoModal] = useState(null);
@@ -441,6 +446,8 @@ export const MainHomeView = ({ onLogout }) => {
   const [createModalMode, setCreateModalMode] = useState(null); // null | 'orden' | 'alerta'
   const [gateState, setGateState] = useState('IDLE'); // 'IDLE' | 'TOCADO'
   const [profileDrawerVisible, setProfileDrawerVisible] = useState(false);
+  const [isCommanderFleetExpanded, setIsCommanderFleetExpanded] = useState(false);
+  const [expandedCommanderCompanyIds, setExpandedCommanderCompanyIds] = useState({});
 
   // Flujo Oficial de Despacho Táctico idéntico a SENTINEL CAD (KeySelector -> PreDispatchConfirmModal -> DispatchDetails + CompanyUnitsSelector)
   const [showCentralConsole, setShowCentralConsole] = useState(false);
@@ -688,10 +695,20 @@ export const MainHomeView = ({ onLogout }) => {
   ];
 
   useEffect(() => {
-    if (currentTab === 'sci' && !showSciTab) {
-      setCurrentTab('actividad');
+    if (!showSciTab) {
+      const timer = setTimeout(() => {
+        if (currentTab === 'sci') {
+          tabFadeAnim.setValue(1);
+          tabSlideAnim.setValue(0);
+          setCurrentTab('actividad');
+        }
+        if (chatModalVisible && !activeChatAlert) {
+          setChatModalVisible(false);
+        }
+      }, 600);
+      return () => clearTimeout(timer);
     }
-  }, [currentTab, showSciTab]);
+  }, [currentTab, showSciTab, chatModalVisible, activeChatAlert]);
 
   const triggerHaptic = (style = 'medium') => {
     try {
@@ -1805,6 +1822,409 @@ export const MainHomeView = ({ onLogout }) => {
   };
 
   // =========================================================================
+  // PANEL DE ESTADO DE MATERIAL MAYOR PARA COMANDANTE (idRadial == "1")
+  // Idéntico al botón desplegable "UNIDADES DISPONIBLES" del Mapa Táctico de SENTINEL CAD:
+  // - 1 sola Compañía: muestra todos los carros directamente en grilla de 3 columnas.
+  // - Multi-Compañía: muestra las compañías; al abrir una compañía muestra sus carros.
+  // =========================================================================
+  const renderCommanderUnitsStatusPanel = () => {
+    if (!isStrictCommander) return null;
+
+    const fleetList =
+      Array.isArray(vehiculosList) && vehiculosList.length > 0
+        ? vehiculosList
+        : [
+            { id: 'B-1', idCarro: 'B-1', nombre: 'B-1', tipo: 'BOMBA', compania: 1, estado: '0-9' },
+            { id: 'BX-1', idCarro: 'BX-1', nombre: 'BX-1', tipo: 'BOMBA', compania: 1, estado: '0-9' },
+            { id: 'R-1', idCarro: 'R-1', nombre: 'R-1', tipo: 'RESCATE', compania: 1, estado: '0-9' },
+            { id: 'Z-1', idCarro: 'Z-1', nombre: 'Z-1', tipo: 'CISTERNA', compania: 1, estado: '0-9' }
+          ];
+
+    const activeDispatchesExcludingDraft = allActiveDispatches.filter(
+      (d) => !cadDraftId || String(d.idServicio) !== String(cadDraftId)
+    );
+
+    const resolveUnitStatus = (v) => {
+      const statusInfo = resolveCoreUnitStatusInfo(v, activeDispatchesExcludingDraft, fleetList);
+      const isOut08 = Boolean(statusInfo.isOut08 || statusInfo.is08Unit);
+      const isBusy = Boolean(statusInfo.isInService || statusInfo.isBusy);
+      const isAvailable = Boolean(statusInfo.isAvailable && !isBusy && !isOut08);
+      const subLabel = isOut08
+        ? '0-8 F/S'
+        : isBusy
+          ? statusInfo.badgeLabel || 'EN SERVICIO'
+          : '0-9 DISP.';
+      return {
+        statusInfo,
+        isOut08,
+        isBusy,
+        isAvailable,
+        subLabel
+      };
+    };
+
+    const availTotalCount = fleetList.filter((v) => resolveUnitStatus(v).isAvailable).length;
+
+    const renderVehiclesThreeColGrid = (units) => {
+      if (!Array.isArray(units) || units.length === 0) {
+        return (
+          <View style={{ paddingVertical: 10, alignItems: 'center' }}>
+            <Text style={{ color: '#64748B', fontSize: 10.5, fontWeight: '700' }}>
+              Sin unidades registradas en esta compañía.
+            </Text>
+          </View>
+        );
+      }
+
+      return (
+        <View
+          style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 8
+          }}
+        >
+          {units.map((v, idx) => {
+            const uKey = String(v.idCarro || v.nombre || v.id || `U-${idx}`)
+              .trim()
+              .toUpperCase();
+            const { isOut08, isBusy, isAvailable, subLabel } = resolveUnitStatus(v);
+
+            const cardBg = isOut08
+              ? 'rgba(127, 29, 29, 0.25)'
+              : isBusy
+                ? 'rgba(37, 99, 235, 0.22)'
+                : isDarkMode
+                  ? 'rgba(30, 41, 59, 0.85)'
+                  : '#F8FAFC';
+
+            const cardBorder = isOut08
+              ? 'rgba(239, 68, 68, 0.42)'
+              : isBusy
+                ? 'rgba(59, 130, 246, 0.50)'
+                : 'rgba(16, 185, 129, 0.42)';
+
+            const titleColor = isOut08
+              ? '#FCA5A5'
+              : isBusy
+                ? '#93C5FD'
+                : isDarkMode
+                  ? '#FFFFFF'
+                  : '#0F172A';
+
+            const badgeColor = isOut08
+              ? '#F87171'
+              : isBusy
+                ? '#60A5FA'
+                : '#34D399';
+
+            return (
+              <View
+                key={uKey}
+                style={{
+                  width: '31.3%',
+                  backgroundColor: cardBg,
+                  borderColor: cardBorder,
+                  borderWidth: 1,
+                  borderRadius: 12,
+                  paddingVertical: 9,
+                  paddingHorizontal: 6,
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Text
+                  style={{
+                    color: titleColor,
+                    fontSize: 13.5,
+                    fontWeight: '900',
+                    letterSpacing: 0.3
+                  }}
+                  numberOfLines={1}
+                >
+                  {uKey}
+                </Text>
+                <Text
+                  style={{
+                    color: badgeColor,
+                    fontSize: 8.5,
+                    fontWeight: '900',
+                    marginTop: 2,
+                    letterSpacing: 0.2
+                  }}
+                  numberOfLines={1}
+                >
+                  {subLabel}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      );
+    };
+
+    if (!isCommanderFleetExpanded) {
+      return (
+        <TouchableOpacity
+          onPress={() => {
+            triggerHaptic('medium');
+            setIsCommanderFleetExpanded(true);
+          }}
+          activeOpacity={0.85}
+          style={[
+            styles.glassCard,
+            {
+              backgroundColor: isDarkMode ? 'rgba(9, 13, 22, 0.95)' : '#FFFFFF',
+              borderColor: isDarkMode
+                ? 'rgba(255, 255, 255, 0.15)'
+                : 'rgba(15, 23, 42, 0.14)',
+              borderRadius: 16,
+              paddingHorizontal: 14,
+              paddingVertical: 12,
+              marginBottom: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }
+          ]}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+            <Truck size={15} color="#EF4444" />
+            <Text
+              style={{
+                color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                fontSize: 11,
+                fontWeight: '900',
+                letterSpacing: 1.1
+              }}
+            >
+              UNIDADES DISPONIBLES
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.20)',
+                borderColor: 'rgba(239, 68, 68, 0.35)',
+                borderWidth: 1,
+                borderRadius: 8,
+                paddingHorizontal: 8,
+                paddingVertical: 2.5
+              }}
+            >
+              <Text style={{ color: '#F87171', fontSize: 10, fontWeight: '900' }}>
+                {availTotalCount}/{fleetList.length} DISP.
+              </Text>
+            </View>
+            <ChevronDown size={15} color="#94A3B8" />
+          </View>
+        </TouchableOpacity>
+      );
+    }
+
+    return (
+      <View
+        style={[
+          styles.glassCard,
+          {
+            backgroundColor: isDarkMode ? 'rgba(9, 13, 22, 0.95)' : '#FFFFFF',
+            borderColor: isDarkMode
+              ? 'rgba(255, 255, 255, 0.15)'
+              : 'rgba(15, 23, 42, 0.14)',
+            borderRadius: 16,
+            padding: 12,
+            marginBottom: 14
+          }
+        ]}
+      >
+        {/* Cabecera desplegada (Idéntica a TacticalEmergencyMapModal.jsx de SENTINEL CAD) */}
+        <TouchableOpacity
+          onPress={() => {
+            triggerHaptic('medium');
+            setIsCommanderFleetExpanded(false);
+          }}
+          activeOpacity={0.8}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingBottom: 9,
+            marginBottom: 10,
+            borderBottomWidth: 1,
+            borderBottomColor: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : '#E2E8F0'
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Truck size={14} color="#EF4444" />
+            <Text
+              style={{
+                color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                fontSize: 10.5,
+                fontWeight: '900',
+                letterSpacing: 1.0
+              }}
+            >
+              UNIDADES DISPONIBLES ({availTotalCount}/{fleetList.length})
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <Text
+              style={{
+                color: '#94A3B8',
+                fontSize: 9.5,
+                fontWeight: '800',
+                letterSpacing: 0.5
+              }}
+            >
+              MINIMIZAR
+            </Text>
+            <ChevronUp size={13} color="#94A3B8" />
+          </View>
+        </TouchableOpacity>
+
+        {isSingleCompanyInstitution ? (
+          /* MODO 1 COMPAÑÍA: Muestra todos los carros directamente en grilla de 3 columnas */
+          renderVehiclesThreeColGrid(fleetList)
+        ) : (
+          /* MODO MULTI-COMPAÑÍA: Lista por compañía; al abrir una compañía ve sus carros */
+          <View style={{ gap: 8 }}>
+            {institutionCompaniesList.map((comp) => {
+              const compIdStr = String(comp.id);
+              const isCompOpen = Boolean(expandedCommanderCompanyIds[compIdStr]);
+              const compUnits = fleetList.filter(
+                (v) =>
+                  String(resolveCompanyFromVehicleId(v.idCarro || v.id, v.compania)) === compIdStr
+              );
+              const compAvailCount = compUnits.filter((v) => resolveUnitStatus(v).isAvailable).length;
+
+              return (
+                <View
+                  key={compIdStr}
+                  style={{
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: isCompOpen
+                      ? 'rgba(239, 68, 68, 0.40)'
+                      : isDarkMode
+                        ? 'rgba(148, 163, 184, 0.18)'
+                        : '#CBD5E1',
+                    backgroundColor: isCompOpen
+                      ? isDarkMode
+                        ? 'rgba(15, 23, 42, 0.90)'
+                        : '#F8FAFC'
+                      : isDarkMode
+                        ? 'rgba(15, 23, 42, 0.55)'
+                        : '#FFFFFF',
+                    overflow: 'hidden'
+                  }}
+                >
+                  <TouchableOpacity
+                    onPress={() => {
+                      triggerHaptic('medium');
+                      setExpandedCommanderCompanyIds((prev) => ({
+                        ...prev,
+                        [compIdStr]: !prev[compIdStr]
+                      }));
+                    }}
+                    activeOpacity={0.82}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingHorizontal: 12,
+                      paddingVertical: 10
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <Truck size={13} color={isCompOpen ? '#EF4444' : '#94A3B8'} />
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={{
+                            color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                            fontSize: 11,
+                            fontWeight: '900',
+                            letterSpacing: 0.5
+                          }}
+                          numberOfLines={1}
+                        >
+                          {comp.name || `${compIdStr}ª COMPAÑÍA`}
+                        </Text>
+                        {comp.cuartel || comp.alias ? (
+                          <Text
+                            style={{
+                              color: '#64748B',
+                              fontSize: 9,
+                              fontWeight: '700',
+                              marginTop: 1
+                            }}
+                            numberOfLines={1}
+                          >
+                            {comp.cuartel || comp.alias}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 7 }}>
+                      <View
+                        style={{
+                          backgroundColor:
+                            compAvailCount > 0
+                              ? 'rgba(16, 185, 129, 0.16)'
+                              : 'rgba(239, 68, 68, 0.16)',
+                          borderColor:
+                            compAvailCount > 0
+                              ? 'rgba(16, 185, 129, 0.38)'
+                              : 'rgba(239, 68, 68, 0.38)',
+                          borderWidth: 1,
+                          borderRadius: 7,
+                          paddingHorizontal: 7,
+                          paddingVertical: 2
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: compAvailCount > 0 ? '#34D399' : '#F87171',
+                            fontSize: 9.5,
+                            fontWeight: '900'
+                          }}
+                        >
+                          {compAvailCount}/{compUnits.length} DISP.
+                        </Text>
+                      </View>
+                      {isCompOpen ? (
+                        <ChevronUp size={14} color="#F87171" />
+                      ) : (
+                        <ChevronDown size={14} color="#94A3B8" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+
+                  {isCompOpen ? (
+                    <View
+                      style={{
+                        paddingHorizontal: 10,
+                        paddingBottom: 10,
+                        paddingTop: 6,
+                        borderTopWidth: 1,
+                        borderTopColor: isDarkMode ? 'rgba(255, 255, 255, 0.08)' : '#E2E8F0'
+                      }}
+                    >
+                      {renderVehiclesThreeColGrid(compUnits)}
+                    </View>
+                  ) : null}
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // =========================================================================
   // 1. PESTAÑA ACTIVIDAD / DESPACHO (Con Flujo Oficial SENTINEL CAD + Múltiples Despachos)
   // =========================================================================
   const renderActividadTab = () => {
@@ -2160,6 +2580,9 @@ export const MainHomeView = ({ onLogout }) => {
             </View>
           </View>
         ) : null}
+
+        {/* Botón y Panel Desplegable de Estado de Carros para el Comandante (idRadial == "1") */}
+        {renderCommanderUnitsStatusPanel()}
 
         {/* =================================================================== */}
         {/* FLUJO OFICIAL DE DESPACHO SENTINEL CAD (CUANDO ES OPERADOR ACTIVO)  */}
@@ -4783,15 +5206,20 @@ export const MainHomeView = ({ onLogout }) => {
         idSolicitud: targetReq.idSolicitud || targetReq.idAlerta || '',
         idAlerta: targetReq.idSolicitud || targetReq.idAlerta || 'SCI-CHAT-INTERCUERPOS',
         isSciCentralChat: true,
-        licenciaSolicitante: targetReq.licenciaSolicitante || '',
+        isSciChat: true,
+        idIncidenteSci: targetReq.idIncidenteSci || neighborCorps[0]?.idIncidenteSci || '',
+        licenciaSolicitante: targetReq.licenciaSolicitante || neighborCorps[0]?.licenciaSolicitante || '',
         licenciaDestino: targetReq.licenciaDestino || '',
+        cuerpoSolicitante: targetReq.cuerpoSolicitante || neighborCorps[0]?.nombreCuerpo || '',
         razonAlerta:
           targetReq.cuerpoSolicitante ||
+          neighborCorps[0]?.nombreCuerpo ||
           targetReq.razonAlerta ||
           'COMANDO DE INCIDENTES (SCI)',
         aQuienAlerta: '1',
         duracion: 'C',
-        mensajeAlerta: sciChatMessagesRaw || targetReq.mensajesChat || ''
+        mensajeAlerta: sciChatMessagesRaw || targetReq.mensajesChat || '',
+        mensajesChat: sciChatMessagesRaw || targetReq.mensajesChat || ''
       });
       setChatModalVisible(true);
     };
@@ -4801,18 +5229,26 @@ export const MainHomeView = ({ onLogout }) => {
         {/* 1. TARJETAS DE SOLICITUDES DE APOYO INTER-CUERPOS (SCI-AAAA-000X) */}
         {activeRequests.length > 0 ? (
           activeRequests.map((req) => {
-            const reqId = String(req.idSolicitud || req.idAlerta || req.id || 'SCI-2026-0001').trim();
+            const reqId = String(req.idSolicitud || req.idAlerta || req.id || '').trim();
             const tipoSol = String(req.tipoSolicitud || 'ALERTA_PREVENTIVA')
               .trim()
               .toUpperCase();
-            const isUnitRequest = tipoSol === 'SOLICITUD_UNIDAD' || Boolean(req.idCarroSolicitado);
+            const rawCar = String(req.idCarroSolicitado || '').trim().toUpperCase();
+            const isUnitRequest =
+              tipoSol === 'SOLICITUD_UNIDAD' &&
+              Boolean(rawCar) &&
+              !['ALERTA GENERAL', 'CUALQUIERA', 'TODOS', 'NINGUNO'].includes(rawCar);
             const estadoUpper = String(req.estado || 'PENDIENTE')
               .trim()
               .toUpperCase();
-            const isConfirmed =
-              estadoUpper === 'CONFIRMADA' ||
-              estadoUpper === 'OFRECIDA' ||
-              estadoUpper === 'APOYO_OFRECIDO';
+            const isConfirmed = [
+              'CONFIRMADA',
+              'OFRECIDA',
+              'APOYO_OFRECIDO',
+              'DESPACHADA',
+              'ACEPTADO',
+              'ACEPTADA'
+            ].includes(estadoUpper);
             const isWaiting = estadoUpper === 'EN_ESPERA';
             const isRejected = estadoUpper === 'RECHAZADA';
 
@@ -5045,31 +5481,33 @@ export const MainHomeView = ({ onLogout }) => {
 
                 {/* Botones de Acción de Comandancia */}
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                  <TouchableOpacity
-                    disabled={isRespondingInterCorps}
-                    onPress={async () => {
-                      triggerHaptic('heavy');
-                      await respondToInterCorpsAlert('CONFIRMADA', req);
-                    }}
-                    style={{
-                      flex: 1,
-                      minWidth: '100%',
-                      backgroundColor: isConfirmed ? '#059669' : '#10B981',
-                      borderColor: '#34D399',
-                      borderWidth: 1,
-                      borderRadius: 10,
-                      paddingVertical: 10,
-                      paddingHorizontal: 12,
-                      alignItems: 'center'
-                    }}
-                    activeOpacity={0.85}
-                  >
-                    <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
-                      {isUnitRequest
-                        ? `✓ AUTORIZAR / DESPACHAR ${req.idCarroSolicitado || 'UNIDAD'} EN APOYO`
-                        : '✓ CONFIRMAR APOYO / PONER UNIDADES 0-9 A DISPOSICIÓN'}
-                    </Text>
-                  </TouchableOpacity>
+                  {!isConfirmed ? (
+                    <TouchableOpacity
+                      disabled={isRespondingInterCorps}
+                      onPress={async () => {
+                        triggerHaptic('heavy');
+                        await respondToInterCorpsAlert('CONFIRMADA', req);
+                      }}
+                      style={{
+                        flex: 1,
+                        minWidth: '100%',
+                        backgroundColor: '#10B981',
+                        borderColor: '#34D399',
+                        borderWidth: 1,
+                        borderRadius: 10,
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        alignItems: 'center'
+                      }}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '900' }}>
+                        {isUnitRequest
+                          ? `✅ CONFIRMAR APOYO (DESPACHAR ${req.idCarroSolicitado || 'UNIDAD'})`
+                          : '✅ CONFIRMAR APOYO'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
 
                   <TouchableOpacity
                     disabled={isRespondingInterCorps}
@@ -5089,7 +5527,7 @@ export const MainHomeView = ({ onLogout }) => {
                     activeOpacity={0.85}
                   >
                     <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                      ⏳ EN ESPERA
+                      {isUnitRequest ? '⏳ INDICAR QUE ESPEREN' : '⏳ EN ESPERA'}
                     </Text>
                   </TouchableOpacity>
 
@@ -5111,99 +5549,13 @@ export const MainHomeView = ({ onLogout }) => {
                     activeOpacity={0.85}
                   >
                     <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                      ✕ RECHAZAR
+                      ❌ RECHAZAR
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
             );
           })
-        ) : null}
-
-        {/* 2. OFRECER APOYO VOLUNTARIO A CUERPOS VECINOS CON SCI ACTIVO */}
-        {neighborCorps.length > 0 ? (
-          <View
-            style={[
-              styles.glassCard,
-              {
-                backgroundColor: isDarkMode ? 'rgba(15, 23, 42, 0.92)' : '#F8FAFC',
-                borderColor: 'rgba(14, 165, 233, 0.4)',
-                borderWidth: 1.2,
-                padding: 14,
-                marginBottom: 12
-              }
-            ]}
-          >
-            <Text
-              style={{
-                color: '#38BDF8',
-                fontSize: 10.5,
-                fontWeight: '900',
-                letterSpacing: 0.6,
-                marginBottom: 8
-              }}
-            >
-              📡 PUESTO DE COMANDO SCI ACTIVO EN CUERPOS VECINOS
-            </Text>
-            {neighborCorps.map((corps) => (
-              <View
-                key={corps.licencia}
-                style={{
-                  paddingVertical: 8,
-                  borderTopWidth: 1,
-                  borderTopColor: 'rgba(255,255,255,0.08)',
-                  gap: 6
-                }}
-              >
-                <Text
-                  style={{
-                    color: isDarkMode ? '#F8FAFC' : '#0F172A',
-                    fontSize: 13,
-                    fontWeight: '900'
-                  }}
-                >
-                  {corps.nombreCuerpo}
-                </Text>
-                <Text
-                  style={{
-                    color: '#F87171',
-                    fontSize: 11.5,
-                    fontWeight: '800'
-                  }}
-                >
-                  🚨 {corps.claveEmergencia}{' '}
-                  {corps.direccionEmergencia ? `• ${corps.direccionEmergencia}` : ''}
-                </Text>
-                {corps.comandanteIncidente ? (
-                  <Text style={{ color: '#94A3B8', fontSize: 10.5, fontWeight: '700' }}>
-                    Comandante CI: {corps.comandanteIncidente}
-                  </Text>
-                ) : null}
-                <TouchableOpacity
-                  disabled={isRespondingInterCorps}
-                  onPress={async () => {
-                    triggerHaptic('heavy');
-                    await offerVoluntarySciSupport(corps);
-                  }}
-                  style={{
-                    marginTop: 4,
-                    backgroundColor: '#0284C7',
-                    borderColor: '#38BDF8',
-                    borderWidth: 1,
-                    borderRadius: 9,
-                    paddingVertical: 9,
-                    paddingHorizontal: 12,
-                    alignItems: 'center'
-                  }}
-                  activeOpacity={0.85}
-                >
-                  <Text style={{ color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' }}>
-                    🚒 OFRECER APOYO VOLUNTARIO (HABILITAR UNIDADES 0-9)
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
         ) : null}
 
         {/* 3. CHAT DIRECTO SCI INTEGRADO (SIN idRegistro, CON HORA FORMATEADA) */}
@@ -5284,15 +5636,20 @@ export const MainHomeView = ({ onLogout }) => {
               </View>
             ) : (
               parsedSciChat.slice(-8).map((msg, idx) => {
-                const resolved = resolveChatSenderIdentity(
-                  msg.senderId,
+                const resolved = resolveChatSenderIdentity({
+                  rawSenderId: msg.senderId,
                   firefightersList,
-                  user
-                );
-                const formattedTime = formatChatTimestampDisplay(msg.timestamp);
+                  user,
+                  ownCorpShort: nombreMostrar || clientName || '',
+                  fallbackSenderLabel:
+                    primaryReq?.cuerpoSolicitante ||
+                    neighborCorps[0]?.nombreCuerpo ||
+                    'COMANDANCIA SCI'
+                });
+                const formattedTime = formatChatTimestampDisplay(msg.fecha, msg.hora);
                 return (
                   <View
-                    key={`${msg.timestamp}-${idx}`}
+                    key={`${msg.id || msg.hora || idx}-${idx}`}
                     style={{
                       alignSelf: resolved.isMe ? 'flex-end' : 'flex-start',
                       maxWidth: '86%',
@@ -5361,7 +5718,7 @@ export const MainHomeView = ({ onLogout }) => {
                         lineHeight: 17
                       }}
                     >
-                      {msg.text}
+                      {msg.texto || msg.text}
                     </Text>
                     {formattedTime ? (
                       <Text
@@ -6131,6 +6488,9 @@ export const MainHomeView = ({ onLogout }) => {
 
     return (
       <View style={styles.tabScrollContainer}>
+        {/* Panel Desplegable de Estado de Carros para el Comandante (idRadial == "1") */}
+        {renderCommanderUnitsStatusPanel()}
+
         {/* Selector de Compañía Dinámico (Oculto en Cuerpos de 1 sola compañía) */}
         {!isSingleCompanyInstitution && canViewAllCompanies ? (
           <View style={styles.companyFilterBar}>

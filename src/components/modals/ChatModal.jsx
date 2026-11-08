@@ -28,22 +28,38 @@ export function parseChatMessages(rawMensaje = '', fallbackSender = 'COMANDANCIA
 
 /**
  * Resuelve la identidad visual de un remitente de mensaje de chat ocultando SIEMPRE el idRegistro.
- * Soporta tanto el formato de SENTINEL SCI ("224 ([23] DANIEL OLATE - NANCAGUA)") como idRegistro local ("100").
+ * Soporta tanto llamada por objeto `{ rawSenderId, firefightersList, user, ownCorpShort, fallbackSenderLabel }`
+ * como llamada posicional `(rawSenderId, firefightersList, user, ownCorpShort, fallbackSenderLabel)`,
+ * y reconoce el formato SCI (`[1] NOMBRE APELLIDO - COMUNA` y `224 ([23] NOMBRE APELLIDO - COMUNA)`).
  */
-export function resolveChatSenderIdentity({
-  rawSenderId = '',
-  firefightersList = [],
-  user = null,
-  ownCorpShort = '',
-  fallbackSenderLabel = 'COMANDANCIA'
-} = {}) {
+export function resolveChatSenderIdentity(
+  arg1 = {},
+  arg2 = [],
+  arg3 = null,
+  arg4 = '',
+  arg5 = 'COMANDANCIA'
+) {
+  const isObjCall = arg1 && typeof arg1 === 'object' && !Array.isArray(arg1);
+  const rawSenderId = isObjCall ? (arg1.rawSenderId ?? '') : arg1;
+  const firefightersList = isObjCall ? (arg1.firefightersList ?? []) : arg2;
+  const user = isObjCall ? (arg1.user ?? null) : arg3;
+  const ownCorpShort = isObjCall ? (arg1.ownCorpShort ?? '') : arg4;
+  const fallbackSenderLabel = isObjCall ? (arg1.fallbackSenderLabel ?? 'COMANDANCIA') : arg5;
+
+  const normStr = (s) =>
+    String(s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .trim();
+
   const raw = String(rawSenderId || '').trim();
   const myRegId = String(user?.idRegistro || '').trim();
   const myRadialId = String(user?.idRadial || '1').trim();
-  const ownUpper = String(ownCorpShort || '')
+  const myShortNameNorm = normStr(formatShortPersonName(user?.nombreBombero || user?.nombre || ''));
+  const ownUpper = normStr(ownCorpShort)
     .replace(/^CUERPO\s+DE\s+BOMBEROS\s+DE\s+/i, '')
-    .trim()
-    .toUpperCase();
+    .trim();
 
   let cleanRegOrToken = raw;
   let insideParen = '';
@@ -73,10 +89,15 @@ export function resolveChatSenderIdentity({
     }
   }
 
-  // Si el mensaje trae etiqueta de otro Cuerpo de Bomberos (ej. "- NANCAGUA") distinto al nuestro, no es "isMe" aunque coincida el idRegistro numérico
+  const tagNorm = normStr(insideParen || extractedName || raw);
+
+  // Si el mensaje trae etiqueta de otro Cuerpo de Bomberos (ej. "- NANCAGUA") distinto al nuestro, no es "isMe"
   const hasOtherCorpTag =
-    Boolean(insideParen && insideParen.includes(' - ') && ownUpper) &&
-    !insideParen.toUpperCase().includes(ownUpper);
+    Boolean(tagNorm.includes(' - ') && ownUpper) &&
+    !tagNorm.includes(` - ${ownUpper}`);
+
+  const hasOwnCorpTag = Boolean(ownUpper && tagNorm.includes(` - ${ownUpper}`));
+  const matchesMyName = Boolean(myShortNameNorm && tagNorm.includes(myShortNameNorm));
 
   const senderObj = !hasOtherCorpTag
     ? (firefightersList || []).find(
@@ -91,15 +112,18 @@ export function resolveChatSenderIdentity({
     !hasOtherCorpTag &&
     ((myRegId && cleanRegOrToken === myRegId) ||
       (senderObj && myRegId && String(senderObj.idRegistro || '').trim() === myRegId) ||
-      (!senderObj && !insideParen && myRadialId && cleanRegOrToken === myRadialId));
+      (!senderObj && !insideParen && !extractedName && myRadialId && cleanRegOrToken === myRadialId) ||
+      (hasOwnCorpTag && (!extractedRadial || extractedRadial === myRadialId)) ||
+      (matchesMyName && (!extractedRadial || extractedRadial === myRadialId)));
 
   if (isMe) {
+    const cleanOwnName = extractedName ? extractedName.replace(/^\d+\s+/, '').trim() : 'Tú';
     return {
       isMe: true,
-      radial: myRadialId || '1',
-      name: 'Tú',
+      radial: extractedRadial || myRadialId || '1',
+      name: cleanOwnName,
       cargo: '',
-      previewLabel: 'Tú'
+      previewLabel: cleanOwnName
     };
   }
 
@@ -201,6 +225,7 @@ export const ChatModal = ({ visible, onClose }) => {
   const currentChat = activeChatAlert || chatAlert;
   const isSciChat = Boolean(
     currentChat?.isSciChat ||
+      currentChat?.isSciCentralChat ||
       String(currentChat?.idAlerta || '').startsWith('SCI') ||
       String(currentChat?.idSolicitud || '').startsWith('SCI')
   );

@@ -223,43 +223,39 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
     }
 
     func updateStandbyKeepAlive() {
-        if isTracking { return }
         let defaults = UserDefaults.standard
         let isAirplane = defaults.bool(forKey: "MODO_AVION")
-        let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
-        let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-8").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "0").trimmingCharacters(in: .whitespacesAndNewlines)
 
-        let status: CLAuthorizationStatus
-        if #available(iOS 14.0, *) {
-            status = manager.authorizationStatus
-        } else {
-            status = CLLocationManager.authorizationStatus()
-        }
-        let canBg = (status == .authorizedAlways || status == .authorizedWhenInUse)
-
-        guard canBg && !isAirplane && !isCentral && estado == "0-9" else {
+        // REGLA ESTRICTA GPS: Jamás activar GPS en standby ni si el bombero está 0-8, enServicio == "0" o "-X"
+        if isAirplane || estado != "0-9" || enServicio.isEmpty || enServicio == "0" || enServicio.hasPrefix("-") ||
+           enServicio == "EN EL CUARTEL" || enServicio == "EN LA COMPAÑIA" || enServicio == "EN LA COMPAÑÍA" ||
+           enServicio.hasPrefix("UNIDAD:") {
             if isStandbyKeepAlive {
                 isStandbyKeepAlive = false
-                manager.stopUpdatingLocation()
-                manager.stopMonitoringSignificantLocationChanges()
             }
+            stopTracking()
             return
         }
 
-        if !isStandbyKeepAlive {
-            isStandbyKeepAlive = true
-            manager.allowsBackgroundLocationUpdates = true
+        if !isTracking {
+            if isStandbyKeepAlive {
+                isStandbyKeepAlive = false
+            }
+            manager.stopUpdatingLocation()
+            manager.stopMonitoringSignificantLocationChanges()
             manager.showsBackgroundLocationIndicator = false
-            manager.desiredAccuracy = kCLLocationAccuracyThreeKilometers
-            manager.distanceFilter = 500.0
-            manager.startUpdatingLocation()
-            manager.startMonitoringSignificantLocationChanges()
         }
     }
 
     func startTracking(serviceId: String, userId: String, nombre: String, rango: String, compania: String) {
+        let defaults = UserDefaults.standard
+        let isAirplane = defaults.bool(forKey: "MODO_AVION")
+        let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-8").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let clean = serviceId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty, clean != "0", !clean.hasPrefix("-"),
+        guard !isAirplane, estado == "0-9",
+              !clean.isEmpty, clean != "0", !clean.hasPrefix("-"),
               clean != "EN EL CUARTEL", clean != "EN LA COMPAÑIA", clean != "EN LA COMPAÑÍA",
               !clean.hasPrefix("UNIDAD:") else {
             stopTracking()
@@ -283,22 +279,30 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
     }
 
     func stopTracking() {
-        let oldUserId = activeUserId
-        if isTracking {
-            isTracking = false
-            activeServiceId = nil
-            activeUserId = nil
-            manager.stopUpdatingLocation()
-            manager.showsBackgroundLocationIndicator = false
-            if let uid = oldUserId, !uid.isEmpty {
-                removeFromRtdb(userId: uid)
-            }
+        let oldUserId = activeUserId ?? UserDefaults.standard.string(forKey: "USER_ID")
+        isTracking = false
+        isStandbyKeepAlive = false
+        activeServiceId = nil
+        activeUserId = nil
+        manager.stopUpdatingLocation()
+        manager.stopMonitoringSignificantLocationChanges()
+        manager.showsBackgroundLocationIndicator = false
+        if let uid = oldUserId, !uid.isEmpty {
+            removeFromRtdb(userId: uid)
         }
-        updateStandbyKeepAlive()
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        guard isTracking, let loc = locations.last, let userId = activeUserId, !userId.isEmpty else { return }
+        let defaults = UserDefaults.standard
+        let isAirplane = defaults.bool(forKey: "MODO_AVION")
+        let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-8").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "0").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isTracking, !isAirplane, estado == "0-9",
+              !enServicio.isEmpty, enServicio != "0", !enServicio.hasPrefix("-"),
+              let loc = locations.last, let userId = activeUserId, !userId.isEmpty else {
+            stopTracking()
+            return
+        }
         sendTelemetryToRtdbOnly(location: loc, userId: userId)
     }
 
@@ -331,7 +335,7 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
     }
 
-    private func removeFromRtdb(userId: String) {
+    func removeFromRtdb(userId: String) {
         guard let projectId = UserDefaults.standard.string(forKey: "saas_project_id"), !projectId.isEmpty else { return }
         let dbUrl = UserDefaults.standard.string(forKey: "saas_database_url") ?? "https://\(projectId)-default-rtdb.firebaseio.com"
         let cleanBase = dbUrl.hasSuffix("/") ? String(dbUrl.dropLast()) : dbUrl
@@ -340,6 +344,19 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
         URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+    }
+
+    func clearFinishedServiceNodesInRtdb() {
+        guard let projectId = UserDefaults.standard.string(forKey: "saas_project_id"), !projectId.isEmpty else { return }
+        let dbUrl = UserDefaults.standard.string(forKey: "saas_database_url") ?? "https://\(projectId)-default-rtdb.firebaseio.com"
+        let cleanBase = dbUrl.hasSuffix("/") ? String(dbUrl.dropLast()) : dbUrl
+        for path in ["telemetria/bomberos", "telemetria/alertantes"] {
+            if let url = URL(string: "\(cleanBase)/\(path).json") {
+                var req = URLRequest(url: url)
+                req.httpMethod = "DELETE"
+                URLSession.shared.dataTask(with: req) { _, _, _ in }.resume()
+            }
+        }
     }
 }
 
@@ -725,6 +742,9 @@ final class IOSRealtimeService {
     private var vehiculosListener: ListenerRegistration?
     private var alertasListener: ListenerRegistration?
     private var personalListener: ListenerRegistration?
+    private var sciIncidentesListener: ListenerRegistration?
+    private var sciSubcolListeners: [String: ListenerRegistration] = [:]
+    private var alertedSciIds = Set<String>()
     private var activeProjectId: String?
     private var isFirstDispatchSnapshot = true
     private var isFirstPersonalSnapshot = true
@@ -738,6 +758,7 @@ final class IOSRealtimeService {
     private var latestVehiculosPayload: [[String: Any]]?
     private var latestAlertasPayload: [[String: Any]]?
     private var latestPersonalPayload: [[String: Any]]?
+    private var lastNativeSnapshotAt: TimeInterval = 0
 
     private init() {}
 
@@ -800,12 +821,18 @@ final class IOSRealtimeService {
         alertasListener = nil
         personalListener?.remove()
         personalListener = nil
+        sciIncidentesListener?.remove()
+        sciIncidentesListener = nil
+        for (_, subL) in sciSubcolListeners { subL.remove() }
+        sciSubcolListeners.removeAll()
         activeProjectId = nil
     }
 
     func ensureListenersRunning() {
         let currentPid = AppDelegate.currentTenantProjectId ?? FirebaseApp.app()?.options.projectID ?? ""
-        if despachosListener != nil && !currentPid.isEmpty && activeProjectId == currentPid {
+        let nowSec = Date().timeIntervalSince1970
+        let isStale = (lastNativeSnapshotAt > 0) && ((nowSec - lastNativeSnapshotAt) > 120.0)
+        if despachosListener != nil && centralListener != nil && !currentPid.isEmpty && activeProjectId == currentPid && !isStale {
             // Re-sincronizar los últimos snapshots cacheados al WebView sin reiniciar los listeners ni perder despachos en curso
             if let c = latestCentralPayload {
                 pushSnapshotToWebView(collection: "central", payload: c)
@@ -824,20 +851,35 @@ final class IOSRealtimeService {
             }
             return
         }
-        startListeners()
+        startListeners(resetFirstFlags: activeProjectId != currentPid)
     }
 
-    func startListeners() {
+    func restartListenersPreservingState() {
+        let currentPid = AppDelegate.currentTenantProjectId ?? FirebaseApp.app()?.options.projectID ?? ""
+        guard !currentPid.isEmpty else { return }
+        startListeners(resetFirstFlags: false)
+    }
+
+    func startListeners(resetFirstFlags: Bool = true) {
         stopAll()
         guard AppDelegate.currentTenantProjectId != nil || FirebaseApp.app() != nil else { return }
         activeProjectId = AppDelegate.currentTenantProjectId ?? FirebaseApp.app()?.options.projectID
-        isFirstDispatchSnapshot = true
-        isFirstPersonalSnapshot = true
+        if resetFirstFlags {
+            isFirstDispatchSnapshot = true
+            isFirstPersonalSnapshot = true
+        }
         let db = AppDelegate.activeFirestore()
+        db.enableNetwork(completion: nil)
 
         // 1. Listener nativo de accesos/central
         centralListener = db.collection("accesos").document("central").addSnapshotListener { [weak self] snap, error in
-            guard let self = self, error == nil else { return }
+            guard let self = self else { return }
+            if error != nil {
+                self.centralListener?.remove()
+                self.centralListener = nil
+                return
+            }
+            self.lastNativeSnapshotAt = Date().timeIntervalSince1970
             let raw = snap?.data() ?? [:]
             let clean = self.sanitizeDoc(raw)
 
@@ -873,12 +915,13 @@ final class IOSRealtimeService {
                 self.despachosListener?.remove()
                 self.despachosListener = nil
                 DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
-                    AppDelegate.authenticateNativeApp(AppDelegate.activeFirebaseApp()) {
-                        self.ensureListenersRunning()
+                    AppDelegate.authenticateNativeApp(AppDelegate.activeFirebaseApp(), forceRefresh: true) {
+                        self.restartListenersPreservingState()
                     }
                 }
                 return
             }
+            self.lastNativeSnapshotAt = Date().timeIntervalSince1970
             guard let documents = snap?.documents else { return }
             var rawDocsArray: [[String: Any]] = []
             let defaults = UserDefaults.standard
@@ -1163,6 +1206,24 @@ final class IOSRealtimeService {
                 defaults.set(alertedIds, forKey: "ALERTED_DISPATCH_IDS")
             }
 
+            let hasAnyOpenDispatch = rawDocsArray.contains { item in
+                guard let d = item["data"] as? [String: Any] else { return false }
+                let est = ((d["estado"] as? String) ?? "activa").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawOp = ((d["operadorFinal"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let opF = (rawOp == "<null>" || rawOp == "null") ? "" : rawOp
+                let finAt = (d["finalizadoAt"] as? NSNumber)?.int64Value ?? 0
+                let cerr = (d["cerrado"] as? Bool) ?? false
+                return !(cerr || !opF.isEmpty || finAt > 0 || ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "terminado", "terminada"].contains(est))
+            }
+            if !hasAnyOpenDispatch {
+                let curSvc = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "0").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !curSvc.isEmpty && curSvc != "0" {
+                    defaults.set("0", forKey: "USER_EN_SERVICIO")
+                }
+                IOSLocationService.shared.stopTracking()
+                IOSLocationService.shared.clearFinishedServiceNodesInRtdb()
+            }
+
             self.isFirstDispatchSnapshot = false
             self.latestDespachosPayload = rawDocsArray
             self.pushSnapshotToWebView(collection: "despachos", payload: rawDocsArray)
@@ -1185,6 +1246,11 @@ final class IOSRealtimeService {
                 let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let newEst = (!rawEst.isEmpty ? rawEst : (((cleanData["disponible"] as? Bool) == true) ? "0-9" : "0-8")).uppercased()
                 let oldEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                let newSvc = AppDelegate.stringFromAny(cleanData["enServicio"])
+                defaults.set(newSvc, forKey: "USER_EN_SERVICIO")
+                if newEst != "0-9" || newSvc.isEmpty || newSvc == "0" || newSvc.hasPrefix("-") {
+                    IOSLocationService.shared.stopTracking()
+                }
                 let changedByCentral = (cleanData["_changedByCentral"] as? Bool) ?? false
 
                 if !newEst.isEmpty && newEst != oldEst {
@@ -1219,9 +1285,144 @@ final class IOSRealtimeService {
                 self.isFirstPersonalSnapshot = false
             }
         }
+
+        // 4. Listener nativo de vehiculos (sincronización hacia WebView)
+        vehiculosListener = db.collection("vehiculos").addSnapshotListener { [weak self] snap, error in
+            guard let self = self else { return }
+            if error != nil {
+                self.vehiculosListener?.remove()
+                self.vehiculosListener = nil
+                return
+            }
+            self.lastNativeSnapshotAt = Date().timeIntervalSince1970
+            guard let documents = snap?.documents else { return }
+            var docsArr: [[String: Any]] = []
+            for doc in documents {
+                docsArr.append([
+                    "id": doc.documentID,
+                    "data": self.sanitizeDoc(doc.data()),
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ])
+            }
+            self.latestVehiculosPayload = docsArr
+            self.pushSnapshotToWebView(collection: "vehiculos", payload: docsArr)
+        }
+
+        // 5. Listener nativo de alertas (sincronización hacia WebView)
+        alertasListener = db.collection("alertas").addSnapshotListener { [weak self] snap, error in
+            guard let self = self else { return }
+            if error != nil {
+                self.alertasListener?.remove()
+                self.alertasListener = nil
+                return
+            }
+            self.lastNativeSnapshotAt = Date().timeIntervalSince1970
+            guard let documents = snap?.documents else { return }
+            var docsArr: [[String: Any]] = []
+            for doc in documents {
+                docsArr.append([
+                    "id": doc.documentID,
+                    "data": self.sanitizeDoc(doc.data()),
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ])
+            }
+            self.latestAlertasPayload = docsArr
+            self.pushSnapshotToWebView(collection: "alertas", payload: docsArr)
+        }
+
+        // 6. Listener nativo de sisbom-central/sci_incidentes (para Comandante idRadial == "1" en segundo plano)
+        startCentralSciListenerIfNeeded()
     }
 
-    private func postLocalBanner(id: String, title: String, body: String, soundName: String?, playDefaultIfNil: Bool = true, userInfo: [String: Any]) {
+    func startCentralSciListenerIfNeeded() {
+        let defaults = UserDefaults.standard
+        let idRadial = (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let licenseKey = (defaults.string(forKey: "LICENSE_KEY") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard idRadial == "1", !licenseKey.isEmpty else {
+            sciIncidentesListener?.remove()
+            sciIncidentesListener = nil
+            for (_, subL) in sciSubcolListeners { subL.remove() }
+            sciSubcolListeners.removeAll()
+            return
+        }
+        if sciIncidentesListener != nil { return }
+        guard let centralDb = AppDelegate.centralFirestore() else { return }
+
+        sciIncidentesListener = centralDb.collection("sci_incidentes").addSnapshotListener { [weak self] snap, error in
+            guard let self = self, error == nil, let docs = snap?.documents else { return }
+            let myLic = (UserDefaults.standard.string(forKey: "LICENSE_KEY") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            guard !myLic.isEmpty else { return }
+
+            var activeIds = Set<String>()
+            for incDoc in docs {
+                let rawInc = incDoc.data()
+                let estInc = AppDelegate.stringFromAny(rawInc["estado"]).uppercased()
+                let cerrado = (rawInc["cerrado"] as? Bool) == true || ["FINALIZADO", "FINALIZADA", "CERRADO", "CERRADA", "CANCELADO", "CANCELADA"].contains(estInc)
+                if cerrado { continue }
+                let origenLic = AppDelegate.stringFromAny(rawInc["licenciaOrigen"] ?? rawInc["cuerpoSolicitanteLicencia"]).uppercased()
+                if origenLic == myLic { continue }
+
+                let incId = incDoc.documentID
+                activeIds.insert(incId)
+                if self.sciSubcolListeners[incId] == nil {
+                    let subL = centralDb.collection("sci_incidentes").document(incId).collection("solicitudes").addSnapshotListener { [weak self] solSnap, solErr in
+                        guard let self = self, solErr == nil, let solDocs = solSnap?.documents else { return }
+                        let curLic = (UserDefaults.standard.string(forKey: "LICENSE_KEY") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                        let isAirplane = UserDefaults.standard.bool(forKey: "MODO_AVION")
+                        guard !curLic.isEmpty, !isAirplane else { return }
+
+                        var storedIds = Set(UserDefaults.standard.stringArray(forKey: "ALERTED_SCI_REQ_IDS") ?? [])
+                        var didAdd = false
+                        for solDoc in solDocs {
+                            let sData = solDoc.data()
+                            let destLic = AppDelegate.stringFromAny(sData["licenciaDestino"] ?? sData["cuerpoReceptorLicencia"] ?? sData["idCuerpo"]).uppercased()
+                            if destLic != curLic { continue }
+                            let estSol = AppDelegate.stringFromAny(sData["estado"]).uppercased()
+                            if ["RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO", "CERRADO", "CERRADA"].contains(estSol) { continue }
+                            if estSol == "PENDIENTE" || estSol == "ALERTA" || estSol == "SOLICITADA" || estSol.isEmpty {
+                                let alertKey = "sci_req_\(solDoc.documentID)"
+                                if !self.alertedSciIds.contains(alertKey) && !storedIds.contains(alertKey) {
+                                    self.alertedSciIds.insert(alertKey)
+                                    storedIds.insert(alertKey)
+                                    didAdd = true
+                                    let cSol = AppDelegate.stringFromAny(sData["cuerpoSolicitanteNombre"] ?? rawInc["cuerpoSolicitanteNombre"], fallback: "Cuerpo Vecino")
+                                    let uSol = AppDelegate.stringFromAny(sData["idCarroSolicitado"] ?? sData["unidad"])
+                                    let claveInc = AppDelegate.stringFromAny(rawInc["clave"], fallback: "SCI")
+                                    let dirInc = AppDelegate.stringFromAny(rawInc["direccion"] ?? rawInc["lugar"])
+                                    let isGeneral = uSol.isEmpty || uSol.uppercased() == "ALERTA GENERAL" || uSol.uppercased() == "CUALQUIERA"
+                                    let title = !isGeneral ? "🚨 SOLICITUD SCI [\(uSol)] [\(solDoc.documentID)]" : "🚨 ALERTA PREVENTIVA SCI [\(solDoc.documentID)]"
+                                    let body = !isGeneral ? "\(cSol) solicita despacho de \(uSol) (\(claveInc) \(dirInc))" : "\(cSol) solicita apoyo inter-cuerpos (\(claveInc) \(dirInc))"
+                                    if AppDelegate.isAppInForeground {
+                                        IOSSoundPlayer.shared.vibrateEmergency()
+                                    } else {
+                                        IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
+                                        self.postLocalBanner(
+                                            id: alertKey,
+                                            title: title,
+                                            body: body,
+                                            soundName: "alertas.mp3",
+                                            playDefaultIfNil: false,
+                                            userInfo: ["type": "SCI_ALERT", "payloadId": solDoc.documentID]
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        if didAdd {
+                            UserDefaults.standard.set(Array(storedIds.suffix(150)), forKey: "ALERTED_SCI_REQ_IDS")
+                        }
+                    }
+                    self.sciSubcolListeners[incId] = subL
+                }
+            }
+            for oldKey in Array(self.sciSubcolListeners.keys) where !activeIds.contains(oldKey) {
+                self.sciSubcolListeners[oldKey]?.remove()
+                self.sciSubcolListeners.removeValue(forKey: oldKey)
+            }
+        }
+    }
+
+    func postLocalBanner(id: String, title: String, body: String, soundName: String?, playDefaultIfNil: Bool = true, userInfo: [String: Any]) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
@@ -1278,6 +1479,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     static var currentTenantProjectId: String?
     static var cachedApnsDeviceToken: Data?
     static var isAppInForeground: Bool = true
+    static var lastBackgroundTimestamp: TimeInterval = 0
     private var bgTaskId: UIBackgroundTaskIdentifier = .invalid
 
     private static let knownIosAppIdsByProject: [String: String] = [
@@ -1464,7 +1666,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
-    static func authenticateNativeApp(_ app: FirebaseApp?, completion: (() -> Void)? = nil) {
+    static func authenticateNativeApp(_ app: FirebaseApp?, forceRefresh: Bool = false, completion: (() -> Void)? = nil) {
         guard let targetApp = app else {
             completion?()
             return
@@ -1473,9 +1675,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         // IMPORTANTE: firestore.rules bloquea usuarios anónimos (sign_in_provider != 'anonymous').
         // Si hay una sesión anónima cacheada de versiones anteriores, debemos reemplazarla por login autenticado.
         if let currentUser = auth.currentUser, !currentUser.isAnonymous {
+            if forceRefresh {
+                currentUser.getIDTokenForcingRefresh(true) { token, error in
+                    if error == nil && token != nil {
+                        completion?()
+                    } else {
+                        signInNativeWithStoredCredentials(auth: auth, completion: completion)
+                    }
+                }
+                return
+            }
             completion?()
             return
         }
+        signInNativeWithStoredCredentials(auth: auth, completion: completion)
+    }
+
+    private static func signInNativeWithStoredCredentials(auth: Auth, completion: (() -> Void)?) {
         if let rawSession = UserDefaults.standard.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
            let data = rawSession.data(using: .utf8),
            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -1506,6 +1722,23 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return Firestore.firestore(app: namedApp)
         }
         return Firestore.firestore()
+    }
+
+    static func centralFirestore() -> Firestore? {
+        let appName = "sentinel_central_saas"
+        if let existing = FirebaseApp.app(name: appName) {
+            return Firestore.firestore(app: existing)
+        }
+        let options = FirebaseOptions(googleAppID: "1:432594591351:ios:a2be8d98704f46d5beb072", gcmSenderID: "432594591351")
+        options.apiKey = "AIzaSyBjjSBwmUevGC0vT0GdxtQUw-yvawdrH44"
+        options.projectID = "sisbom-central"
+        options.storageBucket = "sisbom-central.firebasestorage.app"
+        options.bundleID = Bundle.main.bundleIdentifier ?? "com.misisbom.sisbom.NFR3L3CC3L"
+        FirebaseApp.configure(name: appName, options: options)
+        if let created = FirebaseApp.app(name: appName) {
+            return Firestore.firestore(app: created)
+        }
+        return nil
     }
 
     private static func resolveStoredTenantConfig() -> [String: Any]? {
@@ -1557,6 +1790,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationWillResignActive(_ application: UIApplication) {
         Self.isAppInForeground = false
+        if Self.lastBackgroundTimestamp == 0 {
+            Self.lastBackgroundTimestamp = Date().timeIntervalSince1970
+        }
         // Al pasar a Recientes / segundo plano, mantener vivo el canal de audio, GPS standby y tarea de fondo si está en 0-9
         IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
@@ -1565,6 +1801,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationDidEnterBackground(_ application: UIApplication) {
         Self.isAppInForeground = false
+        if Self.lastBackgroundTimestamp == 0 {
+            Self.lastBackgroundTimestamp = Date().timeIntervalSince1970
+        }
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
         IOSLocationService.shared.updateStandbyKeepAlive()
         if bgTaskId != .invalid {
@@ -1584,6 +1823,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func applicationDidBecomeActive(_ application: UIApplication) {
         Self.isAppInForeground = true
+        let bgSeconds = Self.lastBackgroundTimestamp > 0 ? max(0, Date().timeIntervalSince1970 - Self.lastBackgroundTimestamp) : 0
+        Self.lastBackgroundTimestamp = 0
         if bgTaskId != .invalid {
             application.endBackgroundTask(bgTaskId)
             bgTaskId = .invalid
@@ -1598,9 +1839,32 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         IOSLocationService.shared.syncPermissionsToWebView()
         IOSLocationService.shared.updateStandbyKeepAlive()
         if Self.currentTenantProjectId != nil {
-            IOSRealtimeService.shared.ensureListenersRunning()
+            Self.activeFirestore().enableNetwork(completion: nil)
+            let shouldRefresh = bgSeconds >= 15.0
+            Self.authenticateNativeApp(Self.activeFirebaseApp(), forceRefresh: shouldRefresh) {
+                if shouldRefresh {
+                    IOSRealtimeService.shared.restartListenersPreservingState()
+                } else {
+                    IOSRealtimeService.shared.ensureListenersRunning()
+                }
+            }
         } else if let tenantDict = Self.resolveStoredTenantConfig() {
             Self.configureDynamicFirebase(configDict: tenantDict)
+        }
+
+        // Notificar al WKWebView para que reactive de inmediato los canales Long-Polling y refresque tokens
+        DispatchQueue.main.async {
+            guard let wv = Self.sharedWebView else { return }
+            let js = """
+            (function() {
+                try {
+                    window.dispatchEvent(new CustomEvent('sentinelAppResume', {
+                        detail: { backgroundSeconds: \(Int(bgSeconds)), timestamp: Date.now() }
+                    }));
+                } catch (e) {}
+            })();
+            """
+            wv.evaluateJavaScript(js, completionHandler: nil)
         }
     }
 
@@ -2295,6 +2559,22 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         decisionHandler(.allow)
     }
 
+    // Si iOS termina el proceso WebContent en segundo plano tras muchas horas de inactividad,
+    // recargar automáticamente el WebView local para que nunca quede congelado ni obligue a cerrar la app de Recientes.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        DispatchQueue.main.async {
+            if let startUrl = URL(string: "sentinel://appassets.androidplatform.net/index.html") {
+                webView.load(URLRequest(url: startUrl))
+            } else {
+                webView.reload()
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                IOSLocationService.shared.syncPermissionsToWebView()
+                IOSRealtimeService.shared.ensureListenersRunning()
+            }
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let dict = message.body as? [String: Any],
               let action = dict["action"] as? String else { return }
@@ -2323,6 +2603,8 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         case "syncUserSession":
             if let user = dict["user"] as? [String: Any] {
                 let userId = AppDelegate.stringFromAny(user["idRegistro"] ?? user["id"])
+                let idRadial = AppDelegate.stringFromAny(user["idRadial"])
+                let licenseKey = AppDelegate.stringFromAny(user["licenseKey"]).uppercased()
                 let nombre = AppDelegate.stringFromAny(user["nombre"], fallback: "Bombero")
                 let rango = AppDelegate.stringFromAny(user["rango"], fallback: "Voluntario")
                 let compania = AppDelegate.stringFromAny(user["compania"], fallback: "1")
@@ -2332,6 +2614,8 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 let enServicio = AppDelegate.stringFromAny(user["enServicio"])
 
                 defaults.set(userId, forKey: "USER_ID")
+                if !idRadial.isEmpty { defaults.set(idRadial, forKey: "USER_ID_RADIAL") }
+                if !licenseKey.isEmpty { defaults.set(licenseKey, forKey: "LICENSE_KEY") }
                 defaults.set(nombre, forKey: "USER_NOMBRE")
                 defaults.set(rango, forKey: "USER_RANGO")
                 defaults.set(compania, forKey: "USER_COMPANIA")
@@ -2348,16 +2632,21 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 }
 
                 AppDelegate.syncFcmTopicsAndToken(userId: userId)
+                IOSRealtimeService.shared.startCentralSciListenerIfNeeded()
                 AppDelegate.scheduleDailyReminders()
                 IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                 IOSLocationService.shared.updateStandbyKeepAlive()
-                IOSLocationService.shared.startTracking(
-                    serviceId: enServicio,
-                    userId: userId,
-                    nombre: nombre,
-                    rango: rango,
-                    compania: compania
-                )
+                if estado == "0-9" && !enServicio.isEmpty && enServicio != "0" && !enServicio.hasPrefix("-") {
+                    IOSLocationService.shared.startTracking(
+                        serviceId: enServicio,
+                        userId: userId,
+                        nombre: nombre,
+                        rango: rango,
+                        compania: compania
+                    )
+                } else {
+                    IOSLocationService.shared.stopTracking()
+                }
             }
         case "clearUserSession":
             let oldId = defaults.string(forKey: "USER_ID") ?? SentinelKeychain.get("last_user_id") ?? ""
@@ -2395,11 +2684,13 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             let active = (dict["active"] as? Bool) ?? false
             defaults.set(active, forKey: "MODO_AVION")
             if active {
+                defaults.set("0-8", forKey: "USER_ESTADO")
+                defaults.set("0", forKey: "USER_EN_SERVICIO")
                 defaults.set("0-8", forKey: "LAST_SELF_STATUS_CHANGE")
                 defaults.set(Date().timeIntervalSince1970 * 1000.0, forKey: "LAST_SELF_STATUS_TIME")
                 IOSSoundPlayer.shared.stop()
                 IOSSoundPlayer.shared.stopBackgroundKeepAlive()
-                IOSLocationService.shared.updateStandbyKeepAlive()
+                IOSLocationService.shared.stopTracking()
             } else {
                 IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                 IOSLocationService.shared.updateStandbyKeepAlive()
@@ -2408,28 +2699,64 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         case "markSelfStatusChange":
             let st = AppDelegate.stringFromAny(dict["status"]).uppercased()
             if !st.isEmpty {
+                defaults.set(st, forKey: "USER_ESTADO")
                 defaults.set(st, forKey: "LAST_SELF_STATUS_CHANGE")
                 defaults.set(Date().timeIntervalSince1970 * 1000.0, forKey: "LAST_SELF_STATUS_TIME")
+                if st != "0-9" {
+                    defaults.set("0", forKey: "USER_EN_SERVICIO")
+                    IOSLocationService.shared.stopTracking()
+                }
+                IOSSoundPlayer.shared.updateBackgroundKeepAlive()
+                IOSLocationService.shared.updateStandbyKeepAlive()
             }
         case "acknowledgeDispatch":
-            let dispatchId = AppDelegate.stringFromAny(dict["dispatchId"])
+            let dispatchId = AppDelegate.stringFromAny(dict["dispatchId"]).trimmingCharacters(in: .whitespacesAndNewlines)
             let declined = (dict["declined"] as? Bool) ?? false
             IOSSoundPlayer.shared.stop()
             if !dispatchId.isEmpty {
-                IOSSoundPlayer.shared.cancelRepeat(for: dispatchId)
                 var declinedSet = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
                 var attendedSet = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
-                if declined {
+                if dispatchId == "0" || dispatchId.uppercased() == "LIBRE" {
+                    let prevSvc = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").replacingOccurrences(of: "-", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !prevSvc.isEmpty {
+                        IOSSoundPlayer.shared.cancelRepeat(for: prevSvc)
+                        attendedSet.removeAll { $0 == prevSvc }
+                        declinedSet.removeAll { $0 == prevSvc }
+                    }
+                    defaults.set("0", forKey: "USER_EN_SERVICIO")
+                    IOSLocationService.shared.stopTracking()
+                } else if declined {
+                    IOSSoundPlayer.shared.cancelRepeat(for: dispatchId)
                     if !declinedSet.contains(dispatchId) { declinedSet.append(dispatchId) }
                     attendedSet.removeAll { $0 == dispatchId }
                     defaults.set("-\(dispatchId)", forKey: "USER_EN_SERVICIO")
+                    IOSLocationService.shared.stopTracking()
                 } else {
+                    IOSSoundPlayer.shared.cancelRepeat(for: dispatchId)
                     if !attendedSet.contains(dispatchId) { attendedSet.append(dispatchId) }
                     declinedSet.removeAll { $0 == dispatchId }
                     defaults.set(dispatchId, forKey: "USER_EN_SERVICIO")
                 }
                 defaults.set(declinedSet, forKey: "DECLINED_DISPATCH_IDS")
                 defaults.set(attendedSet, forKey: "ATTENDED_DISPATCH_IDS")
+            }
+        case "showLocalNotification":
+            let title = AppDelegate.stringFromAny(dict["title"], fallback: "🚨 ALERTA SENTINEL")
+            let body = AppDelegate.stringFromAny(dict["body"])
+            let soundName = AppDelegate.stringFromAny(dict["soundName"], fallback: "alertas")
+            let fileName = IOSSoundPlayer.shared.resolveSoundFileName(for: soundName)
+            if AppDelegate.isAppInForeground {
+                IOSSoundPlayer.shared.vibrateEmergency()
+            } else {
+                IOSSoundPlayer.shared.play(nameOrClave: fileName, forceMaxVolume: true)
+                IOSRealtimeService.shared.postLocalBanner(
+                    id: "local_\(Int(Date().timeIntervalSince1970 * 1000))",
+                    title: title,
+                    body: body,
+                    soundName: "\(fileName).mp3",
+                    playDefaultIfNil: false,
+                    userInfo: ["type": "SCI_ALERT"]
+                )
             }
         case "playSound":
             let soundName = (dict["soundName"] as? String) ?? "despacho"

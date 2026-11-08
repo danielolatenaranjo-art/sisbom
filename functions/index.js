@@ -66,7 +66,8 @@ function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority =
         "authorization": `bearer ${getApnsJwt()}`,
         "apns-topic": APNS_BUNDLE_ID,
         "apns-push-type": "alert",
-        "apns-priority": String(priority)
+        "apns-priority": String(priority),
+        "apns-expiration": String(Math.floor(Date.now() / 1000) + 300)
       };
       if (collapseId) {
         headers["apns-collapse-id"] = String(collapseId).slice(0, 64);
@@ -814,6 +815,7 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
       headers: {
         "apns-priority": "10",
         "apns-push-type": "alert",
+        "apns-expiration": String(Math.floor(Date.now() / 1000) + 300),
         "apns-collapse-id": `disp_${dispatchId}`.slice(0, 64)
       },
       payload: {

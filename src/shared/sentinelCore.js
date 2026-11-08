@@ -2911,56 +2911,71 @@ export function buildCanonicalSciTacticalOrderDoc(raw = {}) {
 }
 
 /**
- * Construye un documento canónico de Solicitud de Apoyo Inter-Cuerpos en `sisbom-central/sci_apoyos_intercuerpos`.
- * Conecta el SENTINEL SCI de la comuna en emergencia con el SENTINEL CAD y SENTINEL ONE de los Cuerpos vecinos.
+ * Construye un documento canónico de Solicitud de Apoyo Inter-Cuerpos (sin campos duplicados).
+ * Compatible en Dual-Read con `SENTINEL SCI`, `SENTINEL ONE`, `SENTINEL CAD` y `SENTINEL NAV`.
  */
 export function buildCanonicalInterCorpsSupportDoc(raw = {}) {
   const nowMs = Date.now();
   const licenciaSolicitante = String(raw.licenciaSolicitante || '').trim().toUpperCase();
-  const cuerpoSolicitante = String(raw.cuerpoSolicitante || licenciaSolicitante).trim();
-  const licenciaApoyo = String(raw.licenciaApoyo || '').trim().toUpperCase();
-  const cuerpoApoyo = String(raw.cuerpoApoyo || licenciaApoyo).trim();
-  const idServicioOrigen = String(raw.idServicioOrigen || raw.serviceId || '').trim();
-  const idCarroSolicitado = String(raw.idCarroSolicitado || raw.unitName || 'CUALQUIERA').trim().toUpperCase();
-  const tipoSolicitud = String(raw.tipoSolicitud || 'SOLICITUD_UNIDAD').trim().toUpperCase(); // 'ALERTA_PREVENTIVA' | 'EVALUacion_APOYO' | 'SOLICITUD_UNIDAD'
-  const estado = String(raw.estado || 'PENDIENTE').trim().toUpperCase(); // 'ALERTA' | 'PENDIENTE' | 'ACEPTADO' | 'EN_CAMINO' | 'EN_LUGAR' | 'FINALIZADO' | 'RECHAZADO'
+  const cuerpoSolicitante = String(raw.cuerpoSolicitante || licenciaSolicitante).trim().toUpperCase();
+  const licenciaApoyo = String(raw.licenciaApoyo || raw.licenciaDestino || '').trim().toUpperCase();
+  const cuerpoApoyo = String(raw.cuerpoApoyo || raw.cuerpoDestino || licenciaApoyo).trim().toUpperCase();
+  const idServicioOrigen = String(raw.idServicioOrigen || raw.idServicio || raw.serviceId || '').trim();
+  const idCarroSolicitado = String(raw.idCarroSolicitado || raw.idCarro || raw.unitName || '').trim().toUpperCase();
+  const tipoSolicitud = String(raw.tipoSolicitud || 'SOLICITUD_UNIDAD').trim().toUpperCase();
+  const estado = String(raw.estado || 'PENDIENTE').trim().toUpperCase();
 
   const idSolicitud = String(
-    raw.id ||
-      raw.idSolicitud ||
-      `APOYO_${licenciaSolicitante}_${licenciaApoyo}_${idCarroSolicitado.replace(/[^A-Z0-9]/g, '')}_${idServicioOrigen || nowMs}`
-  );
+    raw.idSolicitud ||
+      raw.id ||
+      `APOYO_${licenciaSolicitante}_${licenciaApoyo}_${(idCarroSolicitado || 'ALERTA').replace(/[^A-Z0-9]/g, '')}_${idServicioOrigen || nowMs}`
+  ).trim();
+
+  const geoRaw = raw.geoEmergencia || raw.geo || null;
 
   return {
-    id: idSolicitud,
     idSolicitud,
+    idIncidenteSci: String(
+      raw.idIncidenteSci ||
+        (licenciaSolicitante && idServicioOrigen
+          ? buildCanonicalCentralSciIncidentId(licenciaSolicitante, idServicioOrigen)
+          : '')
+    ).trim(),
     licenciaSolicitante,
     cuerpoSolicitante,
-    comunaSolicitante: String(raw.comunaSolicitante || '').trim(),
+    comunaSolicitante: String(raw.comunaSolicitante || '').trim().toUpperCase(),
     licenciaApoyo,
     cuerpoApoyo,
-    comunaApoyo: String(raw.comunaApoyo || '').trim(),
+    comunaApoyo: String(raw.comunaApoyo || '').trim().toUpperCase(),
     idServicioOrigen,
-    claveEmergencia: String(raw.claveEmergencia || '10-0').trim().toUpperCase(),
-    direccionEmergencia: String(raw.direccionEmergencia || '').trim().toUpperCase(),
-    geoEmergencia: raw.geoEmergencia && typeof raw.geoEmergencia === 'object'
-      ? {
-          lat: Number(raw.geoEmergencia.lat || 0),
-          lng: Number(raw.geoEmergencia.lng || 0)
-        }
-      : null,
+    claveEmergencia: String(raw.claveEmergencia || raw.clave || '10-0').trim().toUpperCase(),
+    direccionEmergencia: String(raw.direccionEmergencia || raw.lugar || raw.direccion || '').trim().toUpperCase(),
+    geoEmergencia:
+      geoRaw && typeof geoRaw === 'object' && !isNaN(Number(geoRaw.lat)) && !isNaN(Number(geoRaw.lng ?? geoRaw.long))
+        ? {
+            lat: Number(geoRaw.lat),
+            lng: Number(geoRaw.lng ?? geoRaw.long)
+          }
+        : null,
     idCarroSolicitado,
     sectorDestino: String(raw.sectorDestino || 'ESPERA').trim().toUpperCase(),
-    destinoTactico: raw.destinoTactico || null,
+    dirigirse:
+      raw.dirigirse && typeof raw.dirigirse === 'object' && !isNaN(Number(raw.dirigirse.lat))
+        ? {
+            lat: Number(raw.dirigirse.lat),
+            lng: Number(raw.dirigirse.lng ?? raw.dirigirse.long ?? 0),
+            lado: String(raw.dirigirse.lado || raw.sectorDestino || '').trim().toUpperCase(),
+            instruccion: String(raw.dirigirse.instruccion || raw.instruccionTactica || '').trim()
+          }
+        : null,
     instruccionTactica: String(raw.instruccionTactica || 'Presentarse en Puesto de Comando / Área de Espera SCI').trim(),
-    comandanteSolicitante: String(raw.comandanteSolicitante || '').trim().toUpperCase(),
+    comandanteSolicitante: String(raw.comandanteSolicitante || raw.comandanteSci || '').trim().toUpperCase(),
     tipoSolicitud,
     estado,
     etaMinutos: raw.etaMinutos !== undefined ? Number(raw.etaMinutos) : null,
     distanciaKm: raw.distanciaKm !== undefined ? Number(raw.distanciaKm) : null,
-    firebaseConfigApoyo: raw.firebaseConfigApoyo || null,
     confirmadoPor: String(raw.confirmadoPor || '').trim().toUpperCase(),
-    confirmadoAt: Number(raw.confirmadoAt || 0) || null,
+    confirmadoAt: Number(raw.confirmadoAt || raw.fechaRespuesta || 0) || null,
     commanderToken: String(raw.commanderToken || '').trim(),
     commanderAuth:
       raw.commanderAuth && typeof raw.commanderAuth === 'object'
@@ -2971,7 +2986,9 @@ export function buildCanonicalInterCorpsSupportDoc(raw = {}) {
             idRadial: String(raw.commanderAuth.idRadial || '1').trim()
           }
         : null,
-    unidadesDisponibles: Array.isArray(raw.unidadesDisponibles) ? raw.unidadesDisponibles : [],
+    unidadesDisponibles: Array.isArray(raw.unidadesDisponibles || raw.vehiculosDisponibles)
+      ? raw.unidadesDisponibles || raw.vehiculosDisponibles
+      : [],
     createdAt: Number(raw.createdAt || nowMs),
     updatedAt: nowMs,
     _metaTimestamp: nowMs
@@ -2979,13 +2996,14 @@ export function buildCanonicalInterCorpsSupportDoc(raw = {}) {
 }
 
 /**
- * Normaliza un documento de `sci_apoyos_intercuerpos` para lectura segura en SCI, CAD, ONE y NAV.
+ * Normaliza un documento de `sci_apoyos_intercuerpos` o `sci_incidentes/{id}/solicitudes` para lectura segura en SCI, CAD, ONE y NAV.
  */
 export function normalizeInterCorpsSupportDoc(docId, raw = {}) {
   if (!raw || typeof raw !== 'object') return null;
+  const built = buildCanonicalInterCorpsSupportDoc({ ...raw, idSolicitud: docId || raw.idSolicitud || raw.id });
   return {
-    ...buildCanonicalInterCorpsSupportDoc({ ...raw, id: docId || raw.id || raw.idSolicitud }),
-    id: String(docId || raw.id || raw.idSolicitud || ''),
+    ...built,
+    id: built.idSolicitud,
     _metaTimestamp: getEntityMaxTimestamp(raw) || Number(raw.updatedAt || raw.createdAt || 0)
   };
 }
@@ -3335,8 +3353,7 @@ export function calculateNextCanonicalSciRequestId(existingDocsOrIds = [], yearO
 
 /**
  * Construye el documento canónico de una Solicitud de Apoyo en la subcolección
- * `sisbom-central/saas_clientes/{licenciaSolicitante}/sci_solicitudes/{idSolicitud}`
- * (también replicado en `sisbom-central/saas_clientes/{licenciaApoyo}/sci_solicitudes/{idSolicitud}`).
+ * `sisbom-central/sci_incidentes/{LICENCIA_SOLICITANTE}_{idServicio}/solicitudes/{idSolicitud}` (Opción B pura, sin campos duplicados).
  * - `idSolicitud` lleva siempre el formato correlativo `SCI-AAAA-000X` (ej. `SCI-2026-0001`).
  * - Visible única y exclusivamente para el Comandante (`idRadial == "1"`) en la pestaña `SCI` de `SENTINEL ONE` (sin mezclarse con `alertas`).
  */
@@ -3346,39 +3363,46 @@ export function buildCanonicalCentralSciRequestDoc(raw = {}) {
   const year = dObj.getFullYear();
 
   const rawId = String(raw.idSolicitud || raw.id || '').trim().toUpperCase();
-  const idSolicitud = /^SCI-\d{4}-\d{4,}$/.test(rawId)
+  const idSolicitud = rawId
     ? rawId
     : `SCI-${year}-${String(raw.correlativo || 1).padStart(4, '0')}`;
 
+  const cleanOwnLic = String(raw.licenciaSolicitante || '').trim().toUpperCase();
+  const cleanSvcId = String(raw.idServicioOrigen || raw.idServicio || '').trim();
+  const idIncidenteSci =
+    String(raw.idIncidenteSci || '').trim() ||
+    (cleanOwnLic && cleanSvcId ? buildCanonicalCentralSciIncidentId(cleanOwnLic, cleanSvcId) : '');
+
+  const geoRaw = raw.geoEmergencia || raw.geo || null;
+
   return {
-    id: idSolicitud,
     idSolicitud,
+    idIncidenteSci,
     sciActivo: raw.sciActivo !== undefined ? Boolean(raw.sciActivo) : true,
     soloComandante: true,
     idRadialDestinatario: '1', // Exclusivo Comandante (idRadial == "1")
     tipoSolicitud: String(raw.tipoSolicitud || 'ALERTA_PREVENTIVA').trim().toUpperCase(), // 'ALERTA_PREVENTIVA' | 'SOLICITUD_UNIDAD' | 'APOYO_OFRECIDO'
-    licenciaSolicitante: String(raw.licenciaSolicitante || '').trim().toUpperCase(),
+    licenciaSolicitante: cleanOwnLic,
     cuerpoSolicitante: String(raw.cuerpoSolicitante || '').trim().toUpperCase(),
     comunaSolicitante: String(raw.comunaSolicitante || '').trim().toUpperCase(),
     logoSolicitante: String(raw.logoSolicitante || '').trim(),
-    licenciaApoyo: String(raw.licenciaApoyo || '').trim().toUpperCase(),
-    cuerpoApoyo: String(raw.cuerpoApoyo || '').trim().toUpperCase(),
+    licenciaApoyo: String(raw.licenciaApoyo || raw.licenciaDestino || '').trim().toUpperCase(),
+    cuerpoApoyo: String(raw.cuerpoApoyo || raw.cuerpoDestino || '').trim().toUpperCase(),
     comunaApoyo: String(raw.comunaApoyo || '').trim().toUpperCase(),
-    idServicioOrigen: String(raw.idServicioOrigen || '').trim(),
-    claveEmergencia: String(raw.claveEmergencia || '10-0').trim().toUpperCase(),
-    direccionEmergencia: String(raw.direccionEmergencia || '').trim().toUpperCase(),
+    idServicioOrigen: cleanSvcId,
+    claveEmergencia: String(raw.claveEmergencia || raw.clave || '10-0').trim().toUpperCase(),
+    direccionEmergencia: String(raw.direccionEmergencia || raw.lugar || raw.direccion || '').trim().toUpperCase(),
     geoEmergencia:
-      raw.geoEmergencia &&
-      typeof raw.geoEmergencia === 'object' &&
-      !isNaN(Number(raw.geoEmergencia.lat)) &&
-      !isNaN(Number(raw.geoEmergencia.lng ?? raw.geoEmergencia.long))
+      geoRaw &&
+      typeof geoRaw === 'object' &&
+      !isNaN(Number(geoRaw.lat)) &&
+      !isNaN(Number(geoRaw.lng ?? geoRaw.long))
         ? {
-            lat: Number(raw.geoEmergencia.lat),
-            lng: Number(raw.geoEmergencia.lng ?? raw.geoEmergencia.long),
-            long: Number(raw.geoEmergencia.long ?? raw.geoEmergencia.lng)
+            lat: Number(geoRaw.lat),
+            lng: Number(geoRaw.lng ?? geoRaw.long)
           }
         : null,
-    idCarroSolicitado: String(raw.idCarroSolicitado || '').trim().toUpperCase(),
+    idCarroSolicitado: String(raw.idCarroSolicitado || raw.idCarro || '').trim().toUpperCase(),
     sectorDestino: String(raw.sectorDestino || '').trim().toUpperCase(),
     instruccionTactica: String(raw.instruccionTactica || '').trim(),
     dirigirse:
@@ -3388,17 +3412,18 @@ export function buildCanonicalCentralSciRequestDoc(raw = {}) {
       !isNaN(Number(raw.dirigirse.lng ?? raw.dirigirse.long))
         ? {
             lat: Number(raw.dirigirse.lat),
-            long: Number(raw.dirigirse.long ?? raw.dirigirse.lng),
             lng: Number(raw.dirigirse.lng ?? raw.dirigirse.long),
             lado: String(raw.dirigirse.lado || raw.sectorDestino || '').trim().toUpperCase(),
             instruccion: String(raw.dirigirse.instruccion || raw.instruccionTactica || '').trim()
           }
         : null,
-    comandanteSolicitante: String(raw.comandanteSolicitante || '').trim().toUpperCase(),
-    estado: String(raw.estado || 'PENDIENTE').trim().toUpperCase(), // 'PENDIENTE' | 'CONFIRMADA' | 'OFRECIDA' | 'EN_CAMINO' | 'EN_LUGAR' | 'RECHAZADA' | 'CANCELADA' | 'FINALIZADA'
+    comandanteSolicitante: String(raw.comandanteSolicitante || raw.comandanteSci || '').trim().toUpperCase(),
+    estado: String(raw.estado || 'PENDIENTE').trim().toUpperCase(), // 'ALERTA' | 'PENDIENTE' | 'CONFIRMADA' | 'APOYO_OFRECIDO' | 'EN_ESPERA' | 'RECHAZADA' | 'CANCELADA'
     confirmadoPor: String(raw.confirmadoPor || '').trim().toUpperCase(),
-    confirmadoAt: Number(raw.confirmadoAt || 0) || null,
-    unidadesDisponibles: Array.isArray(raw.unidadesDisponibles) ? raw.unidadesDisponibles : [],
+    confirmadoAt: Number(raw.confirmadoAt || raw.fechaRespuesta || 0) || null,
+    unidadesDisponibles: Array.isArray(raw.unidadesDisponibles || raw.vehiculosDisponibles)
+      ? raw.unidadesDisponibles || raw.vehiculosDisponibles
+      : [],
     commanderToken: String(raw.commanderToken || '').trim(),
     commanderAuth:
       raw.commanderAuth && typeof raw.commanderAuth === 'object'
@@ -3429,7 +3454,7 @@ export function buildCanonicalCentralSciRequestDoc(raw = {}) {
 
 /**
  * Calcula el ID canónico del documento de Incidente SCI activo en `sisbom-central/sci_incidentes/{docId}` (Opción B):
- * Formato: `{LICENCIA_SOLICITANTE}_{idServicio}` (ej. `SB-CBNC-OH_2026-00012` o `PRUEBA_SIM-SCI-17939...`).
+ * Formato: `{LICENCIA_SOLICITANTE}_{idServicio}` (ej. `SB-CBNC-OH_2026-00012`).
  */
 export function buildCanonicalCentralSciIncidentId(licenciaSolicitante = '', idServicio = '') {
   const cleanLic = String(licenciaSolicitante || 'SCI')
@@ -3444,9 +3469,8 @@ export function buildCanonicalCentralSciIncidentId(licenciaSolicitante = '', idS
 
 /**
  * Construye el documento canónico de la Colección Raíz `sci_incidentes/{LICENCIA_SOLICITANTE}_{idServicio}`
- * en `sisbom-central` (Opción B — Arquitectura dedicada con subcolecciones `solicitudes` y `mensajes`).
- * Incluye estado `evacuationAlert` y `maydayState` para alertar en tiempo real a `SENTINEL NAV` y `SENTINEL ONE`
- * tanto del propio Cuerpo como de los Cuerpos de Bomberos externos que trabajan en el servicio.
+ * en `sisbom-central` (Opción B pura, sin campos duplicados con distintos nombres).
+ * Compatible al 100% con `SENTINEL ONE`, `SENTINEL SCI` y `SENTINEL NAV`.
  */
 export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
   const nowMs = Number(raw.updatedAt || raw.timestamp || Date.now()) || Date.now();
@@ -3457,16 +3481,15 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
       ? String(raw.idIncidenteSci).trim()
       : buildCanonicalCentralSciIncidentId(cleanLic, cleanSvc);
 
-  const geoRaw = raw.geo || raw.geoEmergencia || null;
-  const geo =
+  const geoRaw = raw.geoEmergencia || raw.geo || null;
+  const geoEmergencia =
     geoRaw &&
     typeof geoRaw === 'object' &&
     !isNaN(Number(geoRaw.lat)) &&
     !isNaN(Number(geoRaw.lng ?? geoRaw.long))
       ? {
           lat: Number(geoRaw.lat),
-          lng: Number(geoRaw.lng ?? geoRaw.long),
-          long: Number(geoRaw.long ?? geoRaw.lng)
+          lng: Number(geoRaw.lng ?? geoRaw.long)
         }
       : null;
 
@@ -3474,7 +3497,6 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
   const maydayRaw = raw.maydayState && typeof raw.maydayState === 'object' ? raw.maydayState : {};
 
   return {
-    id: docId,
     idIncidenteSci: docId,
     activo: raw.activo !== undefined ? Boolean(raw.activo) : true,
     soloComandante: true,
@@ -3484,12 +3506,9 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
     comunaSolicitante: String(raw.comunaSolicitante || '').trim().toUpperCase(),
     logoSolicitante: String(raw.logoSolicitante || '').trim(),
     idServicio: cleanSvc,
-    clave: String(raw.clave || raw.claveEmergencia || '10-0').trim().toUpperCase(),
     claveEmergencia: String(raw.claveEmergencia || raw.clave || '10-0').trim().toUpperCase(),
-    lugar: String(raw.lugar || raw.direccionEmergencia || raw.direccion || '').trim().toUpperCase(),
     direccionEmergencia: String(raw.direccionEmergencia || raw.lugar || raw.direccion || '').trim().toUpperCase(),
-    geo,
-    geoEmergencia: geo,
+    geoEmergencia,
     comandanteSci: String(raw.comandanteSci || 'CI SCI').trim().toUpperCase(),
     cuerposAlertados: Array.isArray(raw.cuerposAlertados)
       ? Array.from(
@@ -3506,10 +3525,7 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
       targetSector: String(evacRaw.targetSector || 'TODOS').trim().toUpperCase(),
       motivo: String(evacRaw.motivo || '').trim(),
       triggeredAt: evacRaw.active ? Number(evacRaw.triggeredAt || nowMs) : null,
-      emitidoPor: String(evacRaw.emitidoPor || raw.comandanteSci || 'CI SCI').trim().toUpperCase(),
-      claveEmergencia: String(raw.clave || raw.claveEmergencia || '10-0').trim().toUpperCase(),
-      direccionEmergencia: String(raw.lugar || raw.direccionEmergencia || '').trim().toUpperCase(),
-      cuerpoSolicitante: String(raw.cuerpoSolicitante || cleanLic).trim().toUpperCase()
+      emitidoPor: String(evacRaw.emitidoPor || raw.comandanteSci || 'CI SCI').trim().toUpperCase()
     },
     maydayState: {
       active: Boolean(maydayRaw.active),

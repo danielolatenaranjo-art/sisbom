@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Location from 'expo-location';
 import { doc, getDoc, collection } from 'firebase/firestore';
 import { setDoc, updateDoc, addDoc } from '../config/firestoreMeta';
 import { ref, set as rtdbSet, remove as rtdbRemove } from 'firebase/database';
@@ -9,6 +8,7 @@ import {
   getDb,
   getRtdb,
   ensureFirebaseAuth,
+  reconnectFirebaseNetwork,
   DEFAULT_FIREBASE_CONFIG,
   parseFirestoreValue,
   fetchFirestoreWithAuth
@@ -23,15 +23,68 @@ import {
 const USER_SESSION_KEY = '@sentinel_one_v3_user_session';
 const PREFS_KEY = '@sentinel_one_v3_user_prefs';
 
-let telemetryWatcher = null;
-let browserWatchId = null;
+const activeBrowserWatchIds = new Set();
 let telemetryIntervalId = null;
 let activeTelemetryServiceId = null;
 let lastKnownTelemetryCoords = null;
+let telemetryGeneration = 0;
 let pendingStatusValue = null;
 let lastStatusChangeTs = 0;
 let pendingServiceValue = null;
 let lastServiceChangeTs = 0;
+
+function clearAllBrowserGeolocationWatches() {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+  try {
+    activeBrowserWatchIds.forEach((wId) => {
+      try {
+        navigator.geolocation.clearWatch(wId);
+      } catch (_) {}
+    });
+    activeBrowserWatchIds.clear();
+    for (let id = 1; id <= 250; id++) {
+      try {
+        navigator.geolocation.clearWatch(id);
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
+
+export async function removeBomberoFromRtdbNow(docId) {
+  const cleanId = String(docId || '').trim();
+  if (!cleanId) return;
+  try {
+    const rtdb = getRtdb();
+    if (rtdb) {
+      rtdbRemove(ref(rtdb, 'telemetria/bomberos/' + cleanId)).catch(() => {});
+    }
+  } catch (_) {}
+  try {
+    const fbConfig = useLicenseStore.getState().firebaseConfig;
+    const projId = fbConfig?.projectId;
+    if (projId) {
+      const dbUrl = String(fbConfig.databaseURL || ('https://' + projId + '-default-rtdb.firebaseio.com')).replace(/\/+$/, '');
+      fetch(dbUrl + '/telemetria/bomberos/' + encodeURIComponent(cleanId) + '.json', {
+        method: 'DELETE'
+      }).catch(() => {});
+    }
+  } catch (_) {}
+}
+
+function scheduleDefinitiveRtdbRemoval(docId, checkStillDisallowedFn) {
+  const cleanId = String(docId || '').trim();
+  if (!cleanId) return;
+  removeBomberoFromRtdbNow(cleanId);
+  [600, 1600, 3200].forEach((delayMs) => {
+    setTimeout(() => {
+      try {
+        if (!checkStillDisallowedFn || checkStillDisallowedFn()) {
+          removeBomberoFromRtdbNow(cleanId);
+        }
+      } catch (_) {}
+    }, delayMs);
+  });
+}
 
 function parsePersonalBoolean(val) {
   if (val === true || val === 1) return true;
@@ -274,6 +327,7 @@ function resolveSpecialStatusFromUser(u) {
 export function syncNativeUserSession(u) {
   if (!u || typeof window === 'undefined') return;
   try {
+    const licKey = String(useLicenseStore.getState().licenseKey || '').trim().toUpperCase();
     const payload = {
       id: String(u.idRegistro || u.idRadial || ''),
       idRegistro: String(u.idRegistro || u.idRadial || ''),
@@ -284,7 +338,8 @@ export function syncNativeUserSession(u) {
       estado: String(u.estado || '0-9'),
       conductor: Boolean(u.conductor),
       estadoEspecial: resolveSpecialStatusFromUser(u),
-      enServicio: String(u.enServicio && u.enServicio !== '0' ? u.enServicio : '')
+      enServicio: String(u.enServicio && u.enServicio !== '0' ? u.enServicio : ''),
+      licenseKey: licKey
     };
     const jsonStr = JSON.stringify(payload);
     if (window.AndroidApp?.syncUserSession) {
@@ -595,6 +650,17 @@ export const useAuthStore = create((set, get) => ({
 
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
+      const syncedEst = String(updatedUser.estado || '').trim().toUpperCase();
+      const syncedSvc = String(updatedUser.enServicio || '0').trim();
+      if (
+        get().isAirplaneMode ||
+        syncedEst !== '0-9' ||
+        !syncedSvc ||
+        syncedSvc === '0' ||
+        syncedSvc.startsWith('-')
+      ) {
+        get().stopLiveTelemetry();
+      }
       try {
         const serialized = JSON.stringify(updatedUser);
         syncNativeStorageKey(USER_SESSION_KEY, serialized);
@@ -729,13 +795,32 @@ export const useAuthStore = create((set, get) => ({
           AsyncStorage.setItem(PREFS_KEY, prefsStr).catch(() => {});
         } catch (_) {}
       }
+      if (cleanNewStatus === '0-8') {
+        pendingServiceValue = '0';
+        lastServiceChangeTs = nowTs;
+      }
       const updatedUser = {
         ...currentUser,
         estado: cleanNewStatus,
-        _metaTimestamp: nowTs
+        ...(cleanNewStatus === '0-8' ? { enServicio: '0' } : {}),
+        _metaTimestamp: nowTs,
+        _fieldTimestamps: {
+          ...(currentUser._fieldTimestamps || {}),
+          estado: nowTs,
+          ...(cleanNewStatus === '0-8' ? { enServicio: nowTs } : {})
+        }
       };
       set({ user: updatedUser });
       syncNativeUserSession(updatedUser);
+      if (cleanNewStatus !== '0-9') {
+        get().stopLiveTelemetry();
+        if (docId) {
+          scheduleDefinitiveRtdbRemoval(docId, () => {
+            const u = get().user;
+            return !u || String(u.estado || '').trim().toUpperCase() !== '0-9';
+          });
+        }
+      }
       try {
         if (typeof window !== 'undefined') {
           window.AndroidApp?.markSelfStatusChange?.(String(cleanNewStatus));
@@ -768,33 +853,41 @@ export const useAuthStore = create((set, get) => ({
           currentUser.idRegistro ||
           ''
       ).trim(),
-      enServicio: isSelf ? String(currentUser.enServicio || '0') : String(options.enServicio || '0'),
+      enServicio: cleanNewStatus === '0-8' ? '0' : (isSelf ? String(currentUser.enServicio || '0') : String(options.enServicio || '0')),
       timestamp: nowTs
     });
 
     try {
       const db = getDb();
-      if (db) {
-        await ensureFirebaseAuth();
-        await updateDoc(doc(db, 'personal', String(docId)), {
+      if (!db) throw new Error('Firestore db not ready');
+      await ensureFirebaseAuth();
+      await Promise.race([
+        updateDoc(doc(db, 'personal', String(docId)), {
           estado: cleanNewStatus,
+          ...(cleanNewStatus === '0-8' ? { enServicio: '0' } : {}),
           _changedByCentral: !isSelf,
           _metaTimestamp: nowTs
-        });
-        await setDoc(
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore updateStatus timeout')), 3500))
+      ]);
+      await Promise.race([
+        setDoc(
           doc(db, 'personal', String(docId), 'estados', String(nowTs)),
           statusHistoryDoc
-        ).catch((histErr) => {
-          console.warn('Error registrando subcolección estados en Firestore:', histErr);
-        });
-        console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${cleanNewStatus} (historial registrado)`);
-      }
+        ),
+        new Promise((resolve) => setTimeout(resolve, 2500))
+      ]).catch((histErr) => {
+        console.warn('Error registrando subcolección estados en Firestore:', histErr);
+      });
+      console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${cleanNewStatus} (historial registrado)`);
     } catch (dbErr) {
+      reconnectFirebaseNetwork(true).catch(() => {});
       const fbConfig = useLicenseStore.getState().firebaseConfig;
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_changedByCentral&updateMask.fieldPaths=_metaTimestamp`;
+      const extraMask = cleanNewStatus === '0-8' ? '&updateMask.fieldPaths=enServicio' : '';
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_changedByCentral&updateMask.fieldPaths=_metaTimestamp${extraMask}`;
 
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
@@ -802,6 +895,7 @@ export const useAuthStore = create((set, get) => ({
         body: JSON.stringify({
           fields: {
             estado: { stringValue: cleanNewStatus },
+            ...(cleanNewStatus === '0-8' ? { enServicio: { stringValue: '0' } } : {}),
             _changedByCentral: { booleanValue: !isSelf },
             _metaTimestamp: { integerValue: String(nowTs) }
           }
@@ -881,19 +975,26 @@ export const useAuthStore = create((set, get) => ({
 
     let newEnServicio = '0';
     if (responseType === 'ASISTO') {
-      newEnServicio = String(idServicio);
+      newEnServicio = String(idServicio).trim();
     } else if (responseType === 'NO_ASISTO') {
-      newEnServicio = `-${idServicio}`;
+      newEnServicio = `-${String(idServicio).trim()}`;
     }
 
     const nowTs = Date.now();
+    const myGen = ++telemetryGeneration;
     pendingServiceValue = newEnServicio;
     lastServiceChangeTs = nowTs;
+
+    const docId = String(currentUser.idRegistro || currentUser.idRadial || '').trim();
 
     const updatedUser = {
       ...currentUser,
       enServicio: newEnServicio,
-      _metaTimestamp: nowTs
+      _metaTimestamp: nowTs,
+      _fieldTimestamps: {
+        ...(currentUser._fieldTimestamps || {}),
+        enServicio: nowTs
+      }
     };
 
     set({ user: updatedUser });
@@ -915,10 +1016,18 @@ export const useAuthStore = create((set, get) => ({
             });
           }
         } else {
+          if (window.AndroidApp?.acknowledgeDispatch) {
+            window.AndroidApp.acknowledgeDispatch('0', true);
+          }
           if (window.AndroidApp?.stopTone) {
             window.AndroidApp.stopTone();
           }
           if (window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+            window.webkit.messageHandlers.iOSApp.postMessage({
+              action: 'acknowledgeDispatch',
+              dispatchId: '0',
+              declined: true
+            });
             window.webkit.messageHandlers.iOSApp.postMessage({
               action: 'stopSound'
             });
@@ -927,34 +1036,42 @@ export const useAuthStore = create((set, get) => ({
       }
     } catch (_) {}
 
+    if (responseType !== 'ASISTO') {
+      get().stopLiveTelemetry();
+      if (docId) {
+        scheduleDefinitiveRtdbRemoval(docId, () => {
+          const u = get().user;
+          const s = String(u?.enServicio || '0').trim();
+          const e = String(u?.estado || '0-8').trim().toUpperCase();
+          return !u || e !== '0-9' || !s || s === '0' || s.startsWith('-');
+        });
+      }
+    }
+
     try {
       const serialized = JSON.stringify(updatedUser);
       syncNativeStorageKey(USER_SESSION_KEY, serialized);
       await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
     } catch (e) {}
 
-    if (responseType !== 'ASISTO') {
-      get().stopLiveTelemetry();
-    }
-
     const isBypass = useLicenseStore.getState().isBypassMode;
     const isReadOnly = useLicenseStore.getState().isReadOnly;
-    if (isBypass || isReadOnly) return;
-
-    const docId = String(currentUser.idRegistro || currentUser.idRadial).trim();
-    if (!docId) return;
+    if (isBypass || isReadOnly || !docId) return;
 
     // 1. Actualizar inmediatamente `enServicio` en `personal/{idRegistro}` sin esperar al GPS (Escritura 100% Canónica)
     try {
       const db = getDb();
-      if (db) {
-        await ensureFirebaseAuth();
-        await updateDoc(doc(db, 'personal', docId), {
+      if (!db) throw new Error('Firestore db not ready');
+      await ensureFirebaseAuth();
+      await Promise.race([
+        updateDoc(doc(db, 'personal', docId), {
           enServicio: newEnServicio,
           _metaTimestamp: nowTs
-        });
-      }
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore setEmergencyResponse timeout')), 3500))
+      ]);
     } catch (dbErr) {
+      reconnectFirebaseNetwork(true).catch(() => {});
       const fbConfig = useLicenseStore.getState().firebaseConfig;
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
@@ -973,55 +1090,42 @@ export const useAuthStore = create((set, get) => ({
       }).catch(() => {});
     }
 
-    // 2. Si cancela ('LIBRE') o no asiste ('NO_ASISTO'), limpiar telemetría
-    if (responseType !== 'ASISTO') {
-      try {
-        const rtdb = getRtdb();
-        if (rtdb) {
-          await rtdbRemove(ref(rtdb, `telemetria/bomberos/${docId}`)).catch(() => {});
-        }
-      } catch (e) {}
+    // 2. Si cancela ('LIBRE'), no asiste ('NO_ASISTO'), está en 0-8 o hubo un cambio posterior mientras se aguardaba Firestore, limpiar telemetría y NO activar GPS
+    const latestUserAfterAwait = get().user;
+    const latestEstUp = String(latestUserAfterAwait?.estado || '0-8').trim().toUpperCase();
+    const latestSvcNow = String(latestUserAfterAwait?.enServicio || '0').trim();
+    if (
+      myGen !== telemetryGeneration ||
+      responseType !== 'ASISTO' ||
+      get().isAirplaneMode ||
+      latestEstUp !== '0-9' ||
+      !latestSvcNow ||
+      latestSvcNow === '0' ||
+      latestSvcNow.startsWith('-')
+    ) {
+      get().stopLiveTelemetry();
+      scheduleDefinitiveRtdbRemoval(docId, () => {
+        const u = get().user;
+        const s = String(u?.enServicio || '0').trim();
+        const e = String(u?.estado || '0-8').trim().toUpperCase();
+        return !u || e !== '0-9' || !s || s === '0' || s.startsWith('-');
+      });
       return;
     }
 
-    // 3. Si asiste ('ASISTO'), obtener coordenadas GPS reales (sin pisar con coordenadas del cuartel) y activar telemetría continua
+    // 3. Si asiste ('ASISTO') y sigue en 0-9, obtener coordenadas GPS reales y activar telemetría continua
     let userLat = lastKnownTelemetryCoords?.latitude ?? null;
     let userLng = lastKnownTelemetryCoords?.longitude ?? null;
     let userSpeed = lastKnownTelemetryCoords?.speed ?? 0;
     let userHeading = lastKnownTelemetryCoords?.heading ?? 0;
 
-    try {
-      const perm = await Location.requestForegroundPermissionsAsync().catch(() => Location.getForegroundPermissionsAsync());
-      if (perm?.status === 'granted') {
-        const lastKnown = await Location.getLastKnownPositionAsync().catch(() => null);
-        if (lastKnown?.coords) {
-          userLat = lastKnown.coords.latitude;
-          userLng = lastKnown.coords.longitude;
-          userSpeed = Number(lastKnown.coords.speed || 0);
-          userHeading = Number(lastKnown.coords.heading || 0);
-        }
-        const loc = await Promise.race([
-          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }),
-          new Promise((resolve) => setTimeout(() => resolve(null), 3500))
-        ]).catch(() => null);
-        if (loc?.coords) {
-          userLat = loc.coords.latitude;
-          userLng = loc.coords.longitude;
-          userSpeed = Number(loc.coords.speed || 0);
-          userHeading = Number(loc.coords.heading || 0);
-          lastKnownTelemetryCoords = loc.coords;
-        }
-      }
-    } catch (e) {}
-
-    // Fallback WebView / Browser Geolocation si expo-location aún no resolvió
-    if ((userLat === null || userLng === null) && typeof navigator !== 'undefined' && navigator.geolocation) {
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
       try {
         const webLoc = await new Promise((resolve) => {
           navigator.geolocation.getCurrentPosition(
             (pos) => resolve(pos),
             () => resolve(null),
-            { enableHighAccuracy: true, timeout: 3500, maximumAge: 15000 }
+            { enableHighAccuracy: true, timeout: 3500, maximumAge: 10000 }
           );
         });
         if (webLoc?.coords) {
@@ -1034,21 +1138,43 @@ export const useAuthStore = create((set, get) => ({
       } catch (_) {}
     }
 
+    // Re-verificar que el usuario NO haya cancelado ni cambiado a 0-8 mientras el GPS obtenía coordenadas
+    const postGpsUser = get().user;
+    const postGpsEst = String(postGpsUser?.estado || '0-8').trim().toUpperCase();
+    const postGpsSvc = String(postGpsUser?.enServicio || '0').trim();
+    if (
+      myGen !== telemetryGeneration ||
+      get().isAirplaneMode ||
+      postGpsEst !== '0-9' ||
+      !postGpsSvc ||
+      postGpsSvc === '0' ||
+      postGpsSvc.startsWith('-')
+    ) {
+      get().stopLiveTelemetry();
+      scheduleDefinitiveRtdbRemoval(docId, () => {
+        const u = get().user;
+        const s = String(u?.enServicio || '0').trim();
+        const e = String(u?.estado || '0-8').trim().toUpperCase();
+        return !u || e !== '0-9' || !s || s === '0' || s.startsWith('-');
+      });
+      return;
+    }
+
     try {
       const rtdb = getRtdb();
       if (rtdb && userLat !== null && userLng !== null) {
         await rtdbSet(ref(rtdb, `telemetria/bomberos/${docId}`), {
           id: docId,
           idRegistro: docId,
-          idRadial: String(currentUser.idRadial || docId),
-          nombre: String(currentUser.nombreBombero || 'BOMBERO'),
-          rango: String(currentUser.cargo || 'Voluntario'),
-          compania: Number(currentUser.compania || 1),
+          idRadial: String(postGpsUser.idRadial || docId),
+          nombre: String(postGpsUser.nombreBombero || 'BOMBERO'),
+          rango: String(postGpsUser.cargo || 'Voluntario'),
+          compania: Number(postGpsUser.compania || 1),
           lat: userLat,
           lng: userLng,
           speed: userSpeed,
           heading: userHeading,
-          timestamp: nowTs,
+          timestamp: Date.now(),
           idServicio: String(idServicio)
         }).catch(() => {});
       }
@@ -1060,23 +1186,67 @@ export const useAuthStore = create((set, get) => ({
   },
 
   startLiveTelemetry: async (idServicio) => {
-    const cleanServiceId = String(idServicio || '').replace(/^[+-]+\s*/, '').trim();
-    if (!cleanServiceId || cleanServiceId === '0') return;
+    const rawServiceId = String(idServicio || '').trim();
+    if (!rawServiceId || rawServiceId === '0' || rawServiceId.startsWith('-')) {
+      get().stopLiveTelemetry();
+      return;
+    }
+    const cleanServiceId = rawServiceId.replace(/^[+]+s*/, '').trim();
+    if (!cleanServiceId || cleanServiceId === '0' || cleanServiceId.startsWith('-')) {
+      get().stopLiveTelemetry();
+      return;
+    }
+    const currentUser = get().user;
+    const currentEstado = String(currentUser?.estado || '0-8').trim().toUpperCase();
+    const currentEnServicio = String(currentUser?.enServicio || '0').trim();
+    if (
+      !currentUser ||
+      get().isAirplaneMode ||
+      currentEstado !== '0-9' ||
+      !currentEnServicio ||
+      currentEnServicio === '0' ||
+      currentEnServicio.startsWith('-')
+    ) {
+      get().stopLiveTelemetry();
+      return;
+    }
     if (
       activeTelemetryServiceId === cleanServiceId &&
-      (telemetryWatcher || browserWatchId !== null || telemetryIntervalId)
+      (activeBrowserWatchIds.size > 0 || telemetryIntervalId)
     ) {
       return;
     }
 
-    get().stopLiveTelemetry();
-    const currentUser = get().user;
-    if (!currentUser) return;
+    // Limpiar watches/timers previos sin borrar RTDB (porque estamos iniciando telemetría legítima)
+    clearAllBrowserGeolocationWatches();
+    if (telemetryIntervalId) {
+      clearInterval(telemetryIntervalId);
+      telemetryIntervalId = null;
+    }
+
     const docId = String(currentUser.idRegistro || currentUser.idRadial).trim();
     if (!docId) return;
     activeTelemetryServiceId = cleanServiceId;
+    const watcherGen = telemetryGeneration;
+
+    const isTelemetryAllowedNow = () => {
+      if (watcherGen !== telemetryGeneration) return false;
+      const latestUser = get().user;
+      if (!latestUser || get().isAirplaneMode) return false;
+      const est = String(latestUser.estado || '0-8').trim().toUpperCase();
+      const svc = String(latestUser.enServicio || '0').trim();
+      if (est !== '0-9' || !svc || svc === '0' || svc.startsWith('-')) {
+        return false;
+      }
+      return true;
+    };
 
     const publishCoordsToRtdb = (coords) => {
+      if (!isTelemetryAllowedNow()) {
+        get().stopLiveTelemetry();
+        removeBomberoFromRtdbNow(docId);
+        return;
+      }
       if (!coords) return;
       const lat = Number(coords.latitude ?? coords.lat);
       const lng = Number(coords.longitude ?? coords.lng);
@@ -1089,7 +1259,7 @@ export const useAuthStore = create((set, get) => ({
       };
       const rtdb = getRtdb();
       const latestUser = get().user || currentUser;
-      if (rtdb) {
+      if (rtdb && isTelemetryAllowedNow()) {
         rtdbSet(ref(rtdb, `telemetria/bomberos/${docId}`), {
           id: docId,
           idRegistro: docId,
@@ -1107,51 +1277,36 @@ export const useAuthStore = create((set, get) => ({
       }
     };
 
-    try {
-      const perm = await Location.requestForegroundPermissionsAsync().catch(() => Location.getForegroundPermissionsAsync());
-      if (perm?.status === 'granted') {
-        Location.getLastKnownPositionAsync()
-          .then((loc) => { if (loc?.coords) publishCoordsToRtdb(loc.coords); })
-          .catch(() => {});
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
-          .then((loc) => { if (loc?.coords) publishCoordsToRtdb(loc.coords); })
-          .catch(() => {});
-
-        telemetryWatcher = await Location.watchPositionAsync(
-          {
-            accuracy: Location.Accuracy.High,
-            timeInterval: 4000,
-            distanceInterval: 0
-          },
-          (loc) => {
-            if (loc?.coords) publishCoordsToRtdb(loc.coords);
-          }
-        );
-      }
-    } catch (e) {}
-
-    // Respaldo simultáneo con navigator.geolocation (Android WebView / Browser)
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+    // Usar directamente navigator.geolocation (sin expo-location web que desincroniza IDs de clearWatch)
+    if (typeof navigator !== 'undefined' && navigator.geolocation && isTelemetryAllowedNow()) {
       try {
         navigator.geolocation.getCurrentPosition(
           (pos) => { if (pos?.coords) publishCoordsToRtdb(pos.coords); },
           () => {},
-          { enableHighAccuracy: true, timeout: 6000, maximumAge: 5000 }
+          { enableHighAccuracy: true, timeout: 5000, maximumAge: 5000 }
         );
-        browserWatchId = navigator.geolocation.watchPosition(
+        const wId = navigator.geolocation.watchPosition(
           (pos) => { if (pos?.coords) publishCoordsToRtdb(pos.coords); },
           () => {},
           { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 }
         );
+        if (wId !== null && wId !== undefined) {
+          activeBrowserWatchIds.add(wId);
+        }
       } catch (_) {}
     }
 
-    // Heartbeat periódico cada 6s para mantener fresca la posición en RTDB aunque el bombero esté detenido
+    // Heartbeat periódico cada 6s mientras el bombero continúe en 0-9 y asistiendo al servicio
     telemetryIntervalId = setInterval(() => {
+      if (!isTelemetryAllowedNow()) {
+        get().stopLiveTelemetry();
+        removeBomberoFromRtdbNow(docId);
+        return;
+      }
       if (lastKnownTelemetryCoords) {
         publishCoordsToRtdb(lastKnownTelemetryCoords);
       }
-      if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      if (typeof navigator !== 'undefined' && navigator.geolocation && isTelemetryAllowedNow()) {
         navigator.geolocation.getCurrentPosition(
           (pos) => { if (pos?.coords) publishCoordsToRtdb(pos.coords); },
           () => {},
@@ -1162,22 +1317,17 @@ export const useAuthStore = create((set, get) => ({
   },
 
   stopLiveTelemetry: () => {
+    telemetryGeneration++;
     activeTelemetryServiceId = null;
-    if (telemetryWatcher) {
-      try {
-        telemetryWatcher.remove();
-      } catch (e) {}
-      telemetryWatcher = null;
-    }
-    if (browserWatchId !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
-      try {
-        navigator.geolocation.clearWatch(browserWatchId);
-      } catch (e) {}
-      browserWatchId = null;
-    }
+    clearAllBrowserGeolocationWatches();
     if (telemetryIntervalId) {
       clearInterval(telemetryIntervalId);
       telemetryIntervalId = null;
+    }
+    const currentUser = get().user;
+    const docId = String(currentUser?.idRegistro || currentUser?.idRadial || '').trim();
+    if (docId) {
+      removeBomberoFromRtdbNow(docId);
     }
   },
 

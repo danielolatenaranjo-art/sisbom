@@ -828,7 +828,10 @@ object NotificationHelper {
         var playLoud = false
         var effectiveVibrateOnly = false
 
-        if (doorRequestId != null) {
+        if (forceVibrateOnly) {
+            playLoud = false
+            effectiveVibrateOnly = true
+        } else if (doorRequestId != null) {
             playLoud = isCentral
         } else if (is1210or66) {
             // Solicitudes 12-10 (Conductor) y 6-6 (Personal): suenan con tono de la clave forzando volumen al 100% y restaurando
@@ -852,9 +855,6 @@ object NotificationHelper {
                 playLoud = false
                 effectiveVibrateOnly = true
             }
-        } else if (forceVibrateOnly) {
-            playLoud = false
-            effectiveVibrateOnly = true
         } else if (forceMaxVolume == true && is09) {
             playLoud = true
         }
@@ -1335,6 +1335,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
+        var isLateDispatch = false
         if (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
             // Si el usuario se encuentra de Operador Central activo, NO hacer sonar el teléfono ni abrir pantalla de asistencia
             if (prefs.getBoolean("IS_CENTRAL_ACTIVE", false)) {
@@ -1347,8 +1348,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             val horaDespacho = data["horaDespacho"]
             val createdAt = data["createdAt"] ?: data["timestamp"]
             if (TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt)) {
-                Log.w("FCM", "Descarte de despacho antiguo (> 5 min): $payloadId")
-                return
+                Log.w("FCM", "Despacho recibido tardíamente (> 5 min): solo vibrar y mostrar notificación: $payloadId")
+                isLateDispatch = true
             }
         }
 
@@ -1408,27 +1409,32 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             played
         } else false
 
+        val effectiveTitle = if (isLateDispatch) "⚠️ NOTIFICACIÓN TARDÍA POR MALA COBERTURA TELEFÓNICA" else title
+        val effectiveBody = if (isLateDispatch) "$title — $body" else body
+
         NotificationHelper.sendNotification(
             context = applicationContext,
-            title = title,
-            body = body,
-            isCritical = isCritical,
+            title = effectiveTitle,
+            body = effectiveBody,
+            isCritical = isCritical && !isLateDispatch,
             customSoundRes = customSoundRes,
             chatId = chatId,
             dispatchId = dispatchId,
             alertId = alertId,
             forceMaxVolume = when {
+                isLateDispatch -> false
                 is1210or66Push -> true
                 isEscalation -> true
                 else -> null
             },
+            forceVibrateOnly = isLateDispatch,
             alertGrade = alertGrade,
             skipSoundBecauseAlreadyPlayed = alreadyPlayed,
             claveForRepeat = clave
         )
 
-        // Despertar pantalla completa automáticamente si es despacho nuevo (en 0-9) o escalamiento, y no ha respondido aún
-        if ((type == "DISPATCH" || isEscalation) && !isAttendingThisDispatch && (!hasDeclinedThisDispatch || isEscalation) && !alreadyPlayed) {
+        // Despertar pantalla completa automáticamente si es despacho nuevo (< 5 min, en 0-9) o escalamiento, y no ha respondido aún
+        if (!isLateDispatch && (type == "DISPATCH" || isEscalation) && !isAttendingThisDispatch && (!hasDeclinedThisDispatch || isEscalation) && !alreadyPlayed) {
             val userEstado = (prefs.getString("USER_ESTADO", "0-9") ?: "0-9").trim().uppercase(Locale.ROOT)
             val isUnavailable = prefs.getString("IS_UNAVAILABLE", "false") == "true"
             val is09 = userEstado == "0-9" && !isUnavailable
@@ -1483,8 +1489,52 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 // 5. SERVICIO FOREGROUND EN TIEMPO REAL (DESPACHOS, ESCALAMIENTOS, 12-10/6-6 Y TELEMETRÍA GPS)
 // ============================================================================
 class DispatchForegroundService : Service() {
+    companion object {
+        @Volatile
+        var instance: DispatchForegroundService? = null
+
+        fun evaluateLocationTrackingNow(context: Context) {
+            val appCtx = context.applicationContext
+            Handler(Looper.getMainLooper()).post {
+                try {
+                    val prefs = appCtx.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                    val userId = (prefs.getString("USER_ID", "") ?: "").trim()
+                    val estado = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+                    val enServicio = (prefs.getString("USER_EN_SERVICIO", "0") ?: "0").trim()
+                    val isAirplane = prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)
+
+                    val isDispatchService = !isAirplane &&
+                        userId.isNotEmpty() &&
+                        estado == "0-9" &&
+                        enServicio.isNotEmpty() &&
+                        enServicio != "0" &&
+                        !enServicio.startsWith("-") &&
+                        enServicio != "EN EL CUARTEL" &&
+                        enServicio != "EN LA COMPAÑIA" &&
+                        enServicio != "EN LA COMPAÑÍA" &&
+                        !enServicio.startsWith("UNIDAD:")
+
+                    if (isDispatchService) {
+                        instance?.startLocationTracking(userId)
+                    } else {
+                        instance?.stopLocationTracking()
+                        if (userId.isNotEmpty()) {
+                            try {
+                                MainActivity.getActiveRtdb(appCtx)
+                                    ?.getReference("telemetria/bomberos/$userId")
+                                    ?.removeValue()
+                            } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     private var despachosListener: ListenerRegistration? = null
     private var userDocListener: ListenerRegistration? = null
+    private var sciIncidentesListener: ListenerRegistration? = null
+    private val sciSubcolListeners = mutableMapOf<String, ListenerRegistration>()
     private var serviceWakeLock: PowerManager.WakeLock? = null
     private val notifiedDispatches = mutableSetOf<String>()
     private val lastUnitConductorReq = mutableMapOf<String, Long>()
@@ -1499,6 +1549,7 @@ class DispatchForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             serviceWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentinelOneV3::ServiceWakeLock").apply {
@@ -1550,7 +1601,7 @@ class DispatchForegroundService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val hasLoc = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            val fgType = if (hasLoc) {
+            val fgType = if (hasLoc && isTrackingLocation) {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             } else {
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
@@ -1670,7 +1721,10 @@ class DispatchForegroundService : Service() {
                         }
                         isFirstUserSnapshot = false
 
-                        val isDispatchService = enServicio.isNotEmpty() &&
+                        val isDispatchService = cleanNewEstado == "0-9" &&
+                            !prefs.getBoolean("MODO_AVION", false) &&
+                            !prefs.getBoolean("SILENCIO_ABSOLUTO", false) &&
+                            enServicio.isNotEmpty() &&
                             enServicio != "0" &&
                             !enServicio.startsWith("-") &&
                             enServicio != "EN EL CUARTEL" &&
@@ -1682,7 +1736,13 @@ class DispatchForegroundService : Service() {
                             startLocationTracking(userId)
                         } else {
                             stopLocationTracking()
+                            try {
+                                MainActivity.getActiveRtdb(applicationContext)
+                                    ?.getReference("telemetria/bomberos/$userId")
+                                    ?.removeValue()
+                            } catch (_: Exception) {}
                         }
+                        listenToCentralSciAlertsIfNeeded()
                     } catch (ex: Exception) {
                         Log.w("DispatchService", "Error procesando documento personal: ${ex.message}")
                     }
@@ -1712,6 +1772,18 @@ class DispatchForegroundService : Service() {
                     }
 
                     MainActivity.emitNativeDispatchesSnapshot(activeDocs)
+                    if (activeDocs.isEmpty()) {
+                        val curSvc = (prefs.getString("USER_EN_SERVICIO", "0") ?: "0").trim()
+                        if (curSvc.isNotEmpty() && curSvc != "0") {
+                            prefs.edit().putString("USER_EN_SERVICIO", "0").apply()
+                        }
+                        stopLocationTracking()
+                        try {
+                            val rtdb = MainActivity.getActiveRtdb(applicationContext)
+                            rtdb?.getReference("telemetria/bomberos")?.removeValue()
+                            rtdb?.getReference("telemetria/alertantes")?.removeValue()
+                        } catch (_: Exception) {}
+                    }
 
                     if (isInitialLoad) {
                         for (doc in activeDocs) {
@@ -1748,7 +1820,8 @@ class DispatchForegroundService : Service() {
                                 val alreadyRespondedInit = attendedInit.contains(id) || declinedInit.contains(id) || enServicioInit == id || enServicioInit == "-$id"
                                 val alreadyPlayed = PlayedSoundsTracker.hasPlayed(applicationContext, id) || alreadyRespondedInit
 
-                                if (!alreadyPlayed && !TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt)) {
+                                val isLateInit = TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt)
+                                if (!alreadyPlayed) {
                                     PlayedSoundsTracker.markPlayed(applicationContext, id)
                                     val unidadesRaw = doc.get("carros") ?: doc.get("unidades")
                                     val unidadesList = when (unidadesRaw) {
@@ -1759,14 +1832,17 @@ class DispatchForegroundService : Service() {
                                     }
                                     val unidadesStr = unidadesList.joinToString(" / ")
                                     val soundRes = NotificationHelper.getSoundResForClave(applicationContext, clave)
-                                    val bodyText = if (unidadesStr.isNotEmpty()) "$direccion\nUnidades: $unidadesStr" else direccion
+                                    val baseBody = if (unidadesStr.isNotEmpty()) "$direccion\nUnidades: $unidadesStr" else direccion
+                                    val notifTitle = if (isLateInit) "⚠️ NOTIFICACIÓN TARDÍA POR MALA COBERTURA TELEFÓNICA" else "DESPACHO: $clave"
+                                    val bodyText = if (isLateInit) "DESPACHO $clave — $baseBody" else baseBody
                                     NotificationHelper.sendNotification(
                                         context = applicationContext,
-                                        title = "DESPACHO: $clave",
+                                        title = notifTitle,
                                         body = bodyText,
-                                        isCritical = true,
+                                        isCritical = !isLateInit,
                                         customSoundRes = soundRes,
                                         dispatchId = id,
+                                        forceVibrateOnly = isLateInit,
                                         skipSoundBecauseAlreadyPlayed = false,
                                         claveForRepeat = clave
                                     )
@@ -1778,7 +1854,7 @@ class DispatchForegroundService : Service() {
                                     val estadoEspecialInit = prefs.getString("USER_ESTADO_ESPECIAL", "") ?: ""
                                     val isSilentInit = estadoEspecialInit in listOf("CDS", "SUSPENDIDO", "LICENCIA", "SILENCIO_ABSOLUTO", "PERMISO", "COMISION_SERVICIO")
 
-                                    if (!isCentralInit && !isReadOnlyInit && !isSilentInit && userEstadoInit == "0-9") {
+                                    if (!isLateInit && !isCentralInit && !isReadOnlyInit && !isSilentInit && userEstadoInit == "0-9") {
                                         try {
                                             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                                             @Suppress("DEPRECATION")
@@ -1798,8 +1874,6 @@ class DispatchForegroundService : Service() {
                                             startActivity(fullScreenIntent)
                                         } catch (_: Exception) {}
                                     }
-                                } else {
-                                    PlayedSoundsTracker.markPlayed(applicationContext, id)
                                 }
                             }
                         }
@@ -1863,44 +1937,48 @@ class DispatchForegroundService : Service() {
                             }
                         })
 
-                    // 1. Detectar nuevo despacho (Primer tono + programación del segundo tono a los 60s)
+                    // 1. Detectar nuevo despacho (Primer tono + programación del segundo tono a los 60s; si llega > 5 min por mala señal, solo vibrar y mostrar notificación)
                     if (!notifiedDispatches.contains(id)) {
                         notifiedDispatches.add(id)
                         lastDispatchClaves[id] = clave
                         lastDispatchEstados[id] = estadoDoc
                         val trackKey = id
 
-                        if (TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt) || isAlreadyAttending || hasAlreadyDeclined) {
+                        if (isAlreadyAttending || hasAlreadyDeclined) {
                             PlayedSoundsTracker.markPlayed(applicationContext, trackKey)
                             continue
                         }
 
+                        val isLateLive = TimeValidation.isTooOld(fechaDespacho, horaDespacho, createdAt)
                         val alreadyPlayed = PlayedSoundsTracker.hasPlayed(applicationContext, trackKey)
                         if (!alreadyPlayed) {
                             PlayedSoundsTracker.markPlayed(applicationContext, trackKey)
                         }
 
                         val soundRes = NotificationHelper.getSoundResForClave(applicationContext, clave)
-                        val bodyText = if (unidadesStr.isNotEmpty()) "$direccion\nUnidades: $unidadesStr" else direccion
+                        val baseBody = if (unidadesStr.isNotEmpty()) "$direccion\nUnidades: $unidadesStr" else direccion
+                        val notifTitle = if (isLateLive) "⚠️ NOTIFICACIÓN TARDÍA POR MALA COBERTURA TELEFÓNICA" else "DESPACHO: $clave"
+                        val bodyText = if (isLateLive) "DESPACHO $clave — $baseBody" else baseBody
                         NotificationHelper.sendNotification(
                             context = applicationContext,
-                            title = "DESPACHO: $clave",
+                            title = notifTitle,
                             body = bodyText,
-                            isCritical = true,
+                            isCritical = !isLateLive,
                             customSoundRes = soundRes,
                             dispatchId = id,
+                            forceVibrateOnly = isLateLive,
                             skipSoundBecauseAlreadyPlayed = alreadyPlayed,
                             claveForRepeat = clave
                         )
 
-                        // Levantar pantalla completa si el usuario está en 0-9 y aún no ha sonado/respondido
+                        // Levantar pantalla completa si el usuario está en 0-9, el despacho no es antiguo (> 5 min) y aún no ha sonado/respondido
                         val isCentral = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
                         val userRango = prefs.getString("USER_RANGO", "") ?: ""
                         val isReadOnlyUser = userRango.trim().equals("BOMBERO HONORARIO", ignoreCase = true)
                         val estadoEspecial = prefs.getString("USER_ESTADO_ESPECIAL", "") ?: ""
                         val isSilentStatus = estadoEspecial in listOf("CDS", "SUSPENDIDO", "LICENCIA", "SILENCIO_ABSOLUTO", "PERMISO", "COMISION_SERVICIO")
 
-                        if (!alreadyPlayed && !isCentral && !isReadOnlyUser && !isSilentStatus && userEstado == "0-9") {
+                        if (!isLateLive && !alreadyPlayed && !isCentral && !isReadOnlyUser && !isSilentStatus && userEstado == "0-9") {
                             try {
                                 val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
                                 @Suppress("DEPRECATION")
@@ -2059,14 +2137,149 @@ class DispatchForegroundService : Service() {
             }
     }
 
+    private fun listenToCentralSciAlertsIfNeeded() {
+        val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+        val idRadial = (prefs.getString("USER_ID_RADIAL", "") ?: "").trim()
+        val licenseKey = (prefs.getString("LICENSE_KEY", "") ?: "").trim().uppercase(Locale.ROOT)
+        if (idRadial != "1" || licenseKey.isEmpty()) {
+            sciIncidentesListener?.remove()
+            sciIncidentesListener = null
+            sciSubcolListeners.values.forEach { it.remove() }
+            sciSubcolListeners.clear()
+            return
+        }
+        if (sciIncidentesListener != null) return
+
+        val centralDb = MainActivity.getCentralFirestore(applicationContext) ?: return
+        sciIncidentesListener = centralDb.collection("sci_incidentes")
+            .addSnapshotListener { snapshots, err ->
+                try {
+                    if (err != null || snapshots == null) return@addSnapshotListener
+                    val currentLic = (prefs.getString("LICENSE_KEY", "") ?: "").trim().uppercase(Locale.ROOT)
+                    if (currentLic.isEmpty()) return@addSnapshotListener
+
+                    val activeIds = mutableSetOf<String>()
+                    for (incDoc in snapshots.documents) {
+                        val estadoInc = incDoc.safeString("estado").uppercase(Locale.ROOT)
+                        val cerrado = incDoc.safeBool("cerrado") ||
+                            estadoInc == "FINALIZADO" ||
+                            estadoInc == "FINALIZADA" ||
+                            estadoInc == "CERRADO" ||
+                            estadoInc == "CERRADA" ||
+                            estadoInc == "CANCELADO" ||
+                            estadoInc == "CANCELADA"
+                        if (cerrado) continue
+
+                        val origenLic = incDoc.safeString("licenciaOrigen")
+                            .ifEmpty { incDoc.safeString("cuerpoSolicitanteLicencia") }
+                            .trim().uppercase(Locale.ROOT)
+                        if (origenLic == currentLic) continue
+
+                        activeIds.add(incDoc.id)
+                        if (!sciSubcolListeners.containsKey(incDoc.id)) {
+                            val subListener = centralDb.collection("sci_incidentes")
+                                .document(incDoc.id)
+                                .collection("solicitudes")
+                                .addSnapshotListener { solSnap, solErr ->
+                                    try {
+                                        if (solErr != null || solSnap == null) return@addSnapshotListener
+                                        val myLic = (prefs.getString("LICENSE_KEY", "") ?: "").trim().uppercase(Locale.ROOT)
+                                        val isAirplane = prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)
+                                        if (myLic.isEmpty() || isAirplane) return@addSnapshotListener
+
+                                        for (solDoc in solSnap.documents) {
+                                            val destLic = solDoc.safeString("licenciaDestino")
+                                                .ifEmpty { solDoc.safeString("cuerpoReceptorLicencia") }
+                                                .ifEmpty { solDoc.safeString("idCuerpo") }
+                                                .trim().uppercase(Locale.ROOT)
+                                            if (destLic != myLic) continue
+
+                                            val estSol = solDoc.safeString("estado").uppercase(Locale.ROOT)
+                                            if (estSol == "RECHAZADA" || estSol == "RECHAZADO" || estSol == "CANCELADA" || estSol == "CANCELADO" || estSol == "CERRADO" || estSol == "CERRADA") {
+                                                continue
+                                            }
+                                            if (estSol == "PENDIENTE" || estSol == "ALERTA" || estSol == "SOLICITADA" || estSol.isEmpty()) {
+                                                val alertId = "sci_req_${solDoc.id}"
+                                                if (!PlayedSoundsTracker.hasPlayed(applicationContext, alertId)) {
+                                                    PlayedSoundsTracker.markPlayed(applicationContext, alertId)
+                                                    val cSol = solDoc.safeString("cuerpoSolicitanteNombre")
+                                                        .ifEmpty { incDoc.safeString("cuerpoSolicitanteNombre") }
+                                                        .ifEmpty { "Cuerpo Vecino" }
+                                                    val uSol = solDoc.safeString("idCarroSolicitado")
+                                                        .ifEmpty { solDoc.safeString("unidad") }
+                                                        .trim()
+                                                    val claveInc = incDoc.safeString("clave").ifEmpty { "SCI" }
+                                                    val dirInc = incDoc.safeString("direccion").ifEmpty { incDoc.safeString("lugar") }
+                                                    val isGeneralAlert = uSol.isEmpty() || uSol.uppercase(Locale.ROOT) == "ALERTA GENERAL" || uSol.uppercase(Locale.ROOT) == "CUALQUIERA"
+                                                    val title = if (!isGeneralAlert) {
+                                                        "🚨 SOLICITUD SCI [$uSol] [${solDoc.id}]"
+                                                    } else {
+                                                        "🚨 ALERTA PREVENTIVA SCI [${solDoc.id}]"
+                                                    }
+                                                    val body = if (!isGeneralAlert) {
+                                                        "$cSol solicita despacho de $uSol ($claveInc $dirInc)".trim()
+                                                    } else {
+                                                        "$cSol solicita apoyo inter-cuerpos ($claveInc $dirInc)".trim()
+                                                    }
+                                                    NotificationHelper.sendNotification(
+                                                        context = applicationContext,
+                                                        title = title,
+                                                        body = body,
+                                                        isCritical = true,
+                                                        customSoundRes = R.raw.alertas,
+                                                        alertId = alertId,
+                                                        forceMaxVolume = true,
+                                                        alertGrade = 3
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } catch (_: Exception) {}
+                                }
+                            sciSubcolListeners[incDoc.id] = subListener
+                        }
+                    }
+
+                    val toRemove = sciSubcolListeners.keys.filter { !activeIds.contains(it) }
+                    for (oldId in toRemove) {
+                        sciSubcolListeners.remove(oldId)?.remove()
+                    }
+                } catch (_: Exception) {}
+            }
+    }
+
     @SuppressLint("MissingPermission")
     private fun startLocationTracking(userId: String) {
+        val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+        val estadoInit = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+        val svcInit = (prefs.getString("USER_EN_SERVICIO", "0") ?: "0").trim()
+        if (prefs.getBoolean("MODO_AVION", false) ||
+            prefs.getBoolean("SILENCIO_ABSOLUTO", false) ||
+            estadoInit != "0-9" ||
+            svcInit.isEmpty() ||
+            svcInit == "0" ||
+            svcInit.startsWith("-") ||
+            svcInit == "EN EL CUARTEL" ||
+            svcInit == "EN LA COMPAÑIA" ||
+            svcInit == "EN LA COMPAÑÍA" ||
+            svcInit.startsWith("UNIDAD:")
+        ) {
+            stopLocationTracking()
+            try {
+                MainActivity.getActiveRtdb(applicationContext)
+                    ?.getReference("telemetria/bomberos/$userId")
+                    ?.removeValue()
+            } catch (_: Exception) {}
+            return
+        }
+
         if (isTrackingLocation) return
         val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!hasFine && !hasCoarse) return
 
         isTrackingLocation = true
+        startForegroundServiceNotification()
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 6_000L)
             .setMinUpdateIntervalMillis(3_000L)
             .setMinUpdateDistanceMeters(0f)
@@ -2075,30 +2288,48 @@ class DispatchForegroundService : Service() {
         val publishLocToRtdb: (android.location.Location) -> Unit = { loc ->
             val now = System.currentTimeMillis()
             try {
-                val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-                val nombre = prefs.getString("USER_NOMBRE", "") ?: ""
-                val rango = prefs.getString("USER_RANGO", "") ?: ""
-                val compania = prefs.getString("USER_COMPANIA", "1") ?: "1"
-                val idRadial = prefs.getString("USER_ID_RADIAL", userId) ?: userId
-                val enServicio = (prefs.getString("USER_EN_SERVICIO", "") ?: "").trim()
+                val curPrefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val curEstado = (curPrefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+                val enServicio = (curPrefs.getString("USER_EN_SERVICIO", "0") ?: "0").trim()
+                if (curPrefs.getBoolean("MODO_AVION", false) ||
+                    curPrefs.getBoolean("SILENCIO_ABSOLUTO", false) ||
+                    curEstado != "0-9" ||
+                    enServicio.isEmpty() ||
+                    enServicio == "0" ||
+                    enServicio.startsWith("-") ||
+                    enServicio == "EN EL CUARTEL" ||
+                    enServicio == "EN LA COMPAÑIA" ||
+                    enServicio == "EN LA COMPAÑÍA" ||
+                    enServicio.startsWith("UNIDAD:")
+                ) {
+                    stopLocationTracking()
+                    MainActivity.getActiveRtdb(applicationContext)
+                        ?.getReference("telemetria/bomberos/$userId")
+                        ?.removeValue()
+                } else {
+                    val nombre = curPrefs.getString("USER_NOMBRE", "") ?: ""
+                    val rango = curPrefs.getString("USER_RANGO", "") ?: ""
+                    val compania = curPrefs.getString("USER_COMPANIA", "1") ?: "1"
+                    val idRadial = curPrefs.getString("USER_ID_RADIAL", userId) ?: userId
 
-                val rtdb = MainActivity.getActiveRtdb(applicationContext)
-                val payload = mapOf(
-                    "id" to userId,
-                    "idRegistro" to userId,
-                    "idRadial" to idRadial.ifEmpty { userId },
-                    "nombre" to nombre,
-                    "rango" to rango,
-                    "compania" to compania,
-                    "idServicio" to enServicio,
-                    "lat" to loc.latitude,
-                    "lng" to loc.longitude,
-                    "heading" to loc.bearing.toDouble(),
-                    "speed" to loc.speed.toDouble(),
-                    "accuracy" to loc.accuracy.toDouble(),
-                    "timestamp" to now
-                )
-                rtdb?.getReference("telemetria/bomberos/$userId")?.setValue(payload)
+                    val rtdb = MainActivity.getActiveRtdb(applicationContext)
+                    val payload = mapOf(
+                        "id" to userId,
+                        "idRegistro" to userId,
+                        "idRadial" to idRadial.ifEmpty { userId },
+                        "nombre" to nombre,
+                        "rango" to rango,
+                        "compania" to compania,
+                        "idServicio" to enServicio,
+                        "lat" to loc.latitude,
+                        "lng" to loc.longitude,
+                        "heading" to loc.bearing.toDouble(),
+                        "speed" to loc.speed.toDouble(),
+                        "accuracy" to loc.accuracy.toDouble(),
+                        "timestamp" to now
+                    )
+                    rtdb?.getReference("telemetria/bomberos/$userId")?.setValue(payload)
+                }
             } catch (_: Exception) {}
         }
 
@@ -2118,11 +2349,12 @@ class DispatchForegroundService : Service() {
             fusedLocationClient.requestLocationUpdates(request, locationCallback!!, Looper.getMainLooper())
         } catch (e: Exception) {
             isTrackingLocation = false
+            startForegroundServiceNotification()
         }
     }
 
-    private fun stopLocationTracking() {
-        if (!isTrackingLocation) return
+    fun stopLocationTracking() {
+        val wasTracking = isTrackingLocation
         locationCallback?.let {
             try {
                 fusedLocationClient.removeLocationUpdates(it)
@@ -2130,12 +2362,28 @@ class DispatchForegroundService : Service() {
         }
         locationCallback = null
         isTrackingLocation = false
+        try {
+            val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+            val uid = (prefs.getString("USER_ID", "") ?: "").trim()
+            if (uid.isNotEmpty()) {
+                MainActivity.getActiveRtdb(applicationContext)
+                    ?.getReference("telemetria/bomberos/$uid")
+                    ?.removeValue()
+            }
+        } catch (_: Exception) {}
+        if (wasTracking) {
+            try {
+                startForegroundServiceNotification()
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startForegroundServiceNotification()
         if (despachosListener == null) {
             authenticateAndListen()
+        } else {
+            listenToCentralSciAlertsIfNeeded()
         }
         return START_STICKY
     }
@@ -2180,7 +2428,13 @@ class DispatchForegroundService : Service() {
         } catch (_: Exception) {}
         despachosListener?.remove()
         userDocListener?.remove()
+        sciIncidentesListener?.remove()
+        sciSubcolListeners.values.forEach { it.remove() }
+        sciSubcolListeners.clear()
         stopLocationTracking()
+        if (instance === this) {
+            instance = null
+        }
         super.onDestroy()
     }
 
@@ -2785,6 +3039,28 @@ class MainActivity : ComponentActivity() {
             return FirebaseFirestore.getInstance(app)
         }
 
+        fun getCentralFirestore(context: Context): FirebaseFirestore? {
+            return try {
+                val appContext = context.applicationContext
+                val appName = "sentinel_central_saas"
+                val existing = FirebaseApp.getApps(appContext).firstOrNull { it.name == appName }
+                val centralApp = existing ?: FirebaseApp.initializeApp(
+                    appContext,
+                    FirebaseOptions.Builder()
+                        .setApiKey("AIzaSyBjjSBwmUevGC0vT0GdxtQUw-yvawdrH44")
+                        .setProjectId("sisbom-central")
+                        .setApplicationId("1:432594591351:android:99a442ea6ae05276beb072")
+                        .setGcmSenderId("432594591351")
+                        .setStorageBucket("sisbom-central.firebasestorage.app")
+                        .build(),
+                    appName
+                )
+                FirebaseFirestore.getInstance(centralApp)
+            } catch (_: Exception) {
+                null
+            }
+        }
+
         fun getActiveAuth(context: Context): FirebaseAuth {
             val app = ensureFallbackFirebaseApp(context)
             return FirebaseAuth.getInstance(app)
@@ -3120,10 +3396,21 @@ class MainActivity : ComponentActivity() {
 
         webView = wv
         activeWebView = wv
-        setContentView(wv)
-        ViewCompat.setOnApplyWindowInsetsListener(wv) { view, windowInsets ->
-            val insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars())
+        val rootContainer = android.widget.FrameLayout(this).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            setBackgroundColor(barBgColor)
+            addView(wv)
+        }
+        setContentView(rootContainer)
+        ViewCompat.setOnApplyWindowInsetsListener(rootContainer) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
+            )
             view.setPadding(insets.left, 0, insets.right, insets.bottom)
+            wv.requestLayout()
             WindowInsetsCompat.CONSUMED
         }
 
@@ -3318,9 +3605,17 @@ class MainActivity : ComponentActivity() {
         DailyReminderReceiver.scheduleAllReminders(this)
     }
 
+    private var lastPauseTimestampMs: Long = 0L
+
     override fun onResume() {
         super.onResume()
         isAppInForeground = true
+        val bgSec = if (lastPauseTimestampMs > 0L) {
+            ((System.currentTimeMillis() - lastPauseTimestampMs) / 1000L).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        lastPauseTimestampMs = 0L
         val autoLaunched = intent?.getBooleanExtra("AUTO_LAUNCHED_FROM_ALARM", false) == true
         if (autoLaunched) {
             intent?.removeExtra("AUTO_LAUNCHED_FROM_ALARM")
@@ -3328,10 +3623,21 @@ class MainActivity : ComponentActivity() {
             SoundPlayer.stopAudioOnly(this)
         }
         notifyWebViewPermissionsChanged()
+        if (bgSec >= 15L) {
+            webView?.post {
+                webView?.evaluateJavascript(
+                    "try { window.dispatchEvent(new CustomEvent('sentinelAppResume', { detail: { backgroundSeconds: $bgSec, timestamp: Date.now() } })); } catch(e) {}",
+                    null
+                )
+            }
+        }
     }
 
     override fun onPause() {
         isAppInForeground = false
+        if (lastPauseTimestampMs == 0L) {
+            lastPauseTimestampMs = System.currentTimeMillis()
+        }
         super.onPause()
     }
 
@@ -3620,6 +3926,7 @@ class MainActivity : ComponentActivity() {
                 val conductor = obj.optBoolean("conductor", obj.optBoolean("esConductor", false))
                 val estadoEspecial = obj.optString("estadoEspecial", "").trim()
                 val enServicio = obj.optString("enServicio", "").trim()
+                val licenseKey = obj.optString("licenseKey", "").trim().uppercase(Locale.ROOT)
                 val isUnavailable = (estado.uppercase(Locale.ROOT) != "0-9")
 
                 val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
@@ -3653,6 +3960,9 @@ class MainActivity : ComponentActivity() {
                     .putStringSet("ATTENDED_DISPATCH_IDS", attendedSet)
                     .putStringSet("DECLINED_DISPATCH_IDS", declinedSet)
                     .putString("fire_user", userJson)
+                if (licenseKey.isNotEmpty()) {
+                    editor.putString("LICENSE_KEY", licenseKey)
+                }
 
                 if (estado.uppercase(Locale.ROOT) == "0-9") {
                     editor.putBoolean("MODO_AVION", false)
@@ -3663,6 +3973,7 @@ class MainActivity : ComponentActivity() {
                 registerFcmTokenInFirestore(context, userId)
                 NotificationHelper.ensureChannels(context)
                 startDispatchForegroundServiceSafely()
+                DispatchForegroundService.evaluateLocationTrackingNow(context)
                 scheduleDailyReminder()
             } catch (e: Exception) {
                 Log.w("WebAppInterface", "Error en syncUserSession: ${e.message}")
@@ -3700,6 +4011,14 @@ class MainActivity : ComponentActivity() {
                         )
                     } catch (_: Exception) {}
                 }
+                if (!oldUserId.isNullOrBlank()) {
+                    try {
+                        getActiveRtdb(context)
+                            ?.getReference("telemetria/bomberos/${oldUserId.trim()}")
+                            ?.removeValue()
+                    } catch (_: Exception) {}
+                }
+                DispatchForegroundService.instance?.stopLocationTracking()
                 SoundPlayer.stop(context)
                 stopDispatchForegroundServiceSafely()
             } catch (_: Exception) {}
@@ -3728,11 +4047,13 @@ class MainActivity : ComponentActivity() {
                 .putBoolean("SILENCIO_ABSOLUTO", active)
             if (active) {
                 editor.putString("USER_ESTADO", "0-8")
+                editor.putString("USER_EN_SERVICIO", "0")
                 editor.putString("IS_UNAVAILABLE", "true")
                 editor.putString("LAST_SELF_STATUS_CHANGE", "0-8")
                 editor.putLong("LAST_SELF_STATUS_TIME", System.currentTimeMillis())
             }
             editor.apply()
+            DispatchForegroundService.evaluateLocationTrackingNow(context)
             if (active) {
                 SoundPlayer.stop(context)
                 try {
@@ -3744,13 +4065,19 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun markSelfStatusChange(newStatus: String?) {
-            val clean = newStatus?.trim() ?: return
+            val clean = newStatus?.trim()?.uppercase(Locale.ROOT) ?: return
             if (clean.isEmpty()) return
             val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-            prefs.edit()
+            val edit = prefs.edit()
+                .putString("USER_ESTADO", clean)
+                .putString("IS_UNAVAILABLE", (clean != "0-9").toString())
                 .putString("LAST_SELF_STATUS_CHANGE", clean)
                 .putLong("LAST_SELF_STATUS_TIME", System.currentTimeMillis())
-                .apply()
+            if (clean != "0-9") {
+                edit.putString("USER_EN_SERVICIO", "0")
+            }
+            edit.apply()
+            DispatchForegroundService.evaluateLocationTrackingNow(context)
         }
 
         @JavascriptInterface
@@ -3758,18 +4085,28 @@ class MainActivity : ComponentActivity() {
             SoundPlayer.stop(context)
             if (dispatchId.isNullOrBlank()) return
             val cleanId = dispatchId.trim()
-            PlayedSoundsTracker.markPlayed(context, cleanId)
-            NotificationHelper.cancelRepeatForDispatch(cleanId)
-
             val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
             val declinedSet = prefs.getStringSet("DECLINED_DISPATCH_IDS", emptySet())?.toMutableSet() ?: mutableSetOf()
             val attendedSet = prefs.getStringSet("ATTENDED_DISPATCH_IDS", emptySet())?.toMutableSet() ?: mutableSetOf()
             val editor = prefs.edit()
-            if (declined) {
+
+            if (cleanId == "0" || cleanId.equals("LIBRE", ignoreCase = true)) {
+                val prevSvc = (prefs.getString("USER_EN_SERVICIO", "") ?: "").removePrefix("-").trim()
+                if (prevSvc.isNotEmpty()) {
+                    attendedSet.remove(prevSvc)
+                    declinedSet.remove(prevSvc)
+                    NotificationHelper.cancelRepeatForDispatch(prevSvc)
+                }
+                editor.putString("USER_EN_SERVICIO", "0")
+            } else if (declined) {
+                PlayedSoundsTracker.markPlayed(context, cleanId)
+                NotificationHelper.cancelRepeatForDispatch(cleanId)
                 declinedSet.add(cleanId)
                 attendedSet.remove(cleanId)
                 editor.putString("USER_EN_SERVICIO", "-$cleanId")
             } else {
+                PlayedSoundsTracker.markPlayed(context, cleanId)
+                NotificationHelper.cancelRepeatForDispatch(cleanId)
                 attendedSet.add(cleanId)
                 declinedSet.remove(cleanId)
                 editor.putString("USER_EN_SERVICIO", cleanId)
@@ -3777,6 +4114,8 @@ class MainActivity : ComponentActivity() {
             editor.putStringSet("DECLINED_DISPATCH_IDS", declinedSet)
             editor.putStringSet("ATTENDED_DISPATCH_IDS", attendedSet)
             editor.apply()
+
+            DispatchForegroundService.evaluateLocationTrackingNow(context)
 
             try {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -3875,18 +4214,28 @@ class MainActivity : ComponentActivity() {
 
         @JavascriptInterface
         fun showLocalNotification(title: String, body: String, toneName: String?) {
-            val cleanName = (toneName ?: "despacho").trim().lowercase(Locale.ROOT)
+            val rawTone = (toneName ?: "despacho").trim().lowercase(Locale.ROOT)
                 .removeSuffix(".mp3")
                 .replace("-", "_")
                 .replace(" ", "_")
+            val cleanName = if (rawTone == "alerta") "alertas" else rawTone
             val resId = context.resources.getIdentifier(cleanName, "raw", context.packageName)
             val customRes = if (resId != 0) resId else R.raw.despacho
+            val sciMatch = Regex("\\[(SCI-[A-Z0-9-]+)\\]").find(title)
+            val sciFolio = sciMatch?.groupValues?.getOrNull(1)
+            val alertId = if (!sciFolio.isNullOrBlank()) "sci_req_$sciFolio" else null
+            if (!alertId.isNullOrBlank()) {
+                PlayedSoundsTracker.markPlayed(context, alertId)
+            }
             NotificationHelper.sendNotification(
                 context = context,
                 title = title,
                 body = body,
                 isCritical = true,
-                customSoundRes = customRes
+                customSoundRes = customRes,
+                alertId = alertId,
+                forceMaxVolume = true,
+                alertGrade = 3
             )
         }
 

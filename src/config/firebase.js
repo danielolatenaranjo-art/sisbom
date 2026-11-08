@@ -2,8 +2,9 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   initializeFirestore,
   getFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager
+  memoryLocalCache,
+  enableNetwork,
+  disableNetwork
 } from 'firebase/firestore';
 import {
   initializeAuth,
@@ -34,6 +35,27 @@ let db = null;
 let auth = null;
 let rtdb = null;
 let authPromise = null;
+let lastAuthVerifyTs = 0;
+
+function withTimeout(promise, ms = 5000, fallbackValue = null) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(fallbackValue), ms))
+  ]);
+}
+
+function fetchWithTimeout(url, options = {}, timeoutMs = 9000) {
+  if (typeof AbortController === 'undefined') {
+    return fetch(url, options);
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch (_) {}
+  }, timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => {
+    clearTimeout(timer);
+  });
+}
 
 function resolveCachedTenantConfig() {
   try {
@@ -86,9 +108,11 @@ function resolveCachedUserAuthCredentials() {
 
 function getOrInitFirestore(firebaseApp) {
   if (!firebaseApp) return null;
+  // IMPORTANTE PARA iOS WKWebView: Usar memoryLocalCache() evita el bloqueo permanente de transacciones IndexedDB
+  // y leases de persistentMultipleTabManager cuando iOS suspende el proceso WebContent en segundo plano.
   try {
     return initializeFirestore(firebaseApp, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      localCache: memoryLocalCache(),
       experimentalForceLongPolling: true,
       useFetchStreams: false
     });
@@ -126,7 +150,7 @@ function getOrCreateFirebaseApp(config) {
 }
 
 // Asegurar autenticación de Firebase Auth para permisos de lectura/escritura de Firestore y RTDB (sin usuarios por defecto)
-export async function ensureFirebaseAuth(customAuth = null, customEmail = null, customPass = null) {
+export async function ensureFirebaseAuth(customAuth = null, customEmail = null, customPass = null, forceRefresh = false) {
   const currentAuth = customAuth || auth || getAuthInstance();
   if (!currentAuth) return null;
 
@@ -136,11 +160,16 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
       ? String(customPass)
       : `${String(customPass).trim()}_secure_sisbom`;
     try {
-      const cred = await signInWithEmailAndPassword(currentAuth, email, securePass);
+      const cred = await withTimeout(
+        signInWithEmailAndPassword(currentAuth, email, securePass),
+        6000,
+        null
+      );
       if (cred?.user) {
+        lastAuthVerifyTs = Date.now();
         try {
           const apiKey = currentAuth.app?.options?.apiKey;
-          const tok = await cred.user.getIdToken();
+          const tok = await withTimeout(cred.user.getIdToken(), 3500, null);
           if (apiKey && tok) {
             cachedAuthTokensByKey.set(apiKey, { token: tok, expiresAt: Date.now() + 3000 * 1000 });
           }
@@ -149,14 +178,46 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
       }
     } catch {
       try {
-        const credRaw = await signInWithEmailAndPassword(currentAuth, email, String(customPass).trim());
-        if (credRaw?.user) return credRaw.user;
+        const credRaw = await withTimeout(
+          signInWithEmailAndPassword(currentAuth, email, String(customPass).trim()),
+          6000,
+          null
+        );
+        if (credRaw?.user) {
+          lastAuthVerifyTs = Date.now();
+          return credRaw.user;
+        }
       } catch (_) {}
     }
   }
 
   if (currentAuth.currentUser && !currentAuth.currentUser.isAnonymous) {
-    return currentAuth.currentUser;
+    const now = Date.now();
+    // Si lleva más de 25 minutos sin verificar token o se pidió forceRefresh tras volver de segundo plano en iOS, refrescar el token
+    if (forceRefresh || (now - lastAuthVerifyTs) > 25 * 60 * 1000) {
+      try {
+        const refreshedTok = await withTimeout(
+          currentAuth.currentUser.getIdToken(true),
+          4000,
+          null
+        );
+        if (refreshedTok) {
+          lastAuthVerifyTs = now;
+          const apiKey = currentAuth.app?.options?.apiKey;
+          if (apiKey) {
+            cachedAuthTokensByKey.set(apiKey, {
+              token: refreshedTok,
+              expiresAt: now + 3000 * 1000
+            });
+          }
+          return currentAuth.currentUser;
+        }
+      } catch (_) {
+        // Si falló el refresh del token (ej. sesión expirada tras horas en suspensión), continuar abajo para re-autenticar
+      }
+    } else {
+      return currentAuth.currentUser;
+    }
   }
 
   if (authPromise) return authPromise;
@@ -166,33 +227,48 @@ export async function ensureFirebaseAuth(customAuth = null, customEmail = null, 
       const userCreds = resolveCachedUserAuthCredentials();
       if (userCreds) {
         try {
-          const cred = await Promise.race([
+          const cred = await withTimeout(
             signInWithEmailAndPassword(currentAuth, userCreds.email, userCreds.password),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Auth timeout')), 8000))
-          ]);
-          if (cred?.user) return cred.user;
+            6000,
+            null
+          );
+          if (cred?.user) {
+            lastAuthVerifyTs = Date.now();
+            return cred.user;
+          }
         } catch (_) {
           if (userCreds.rawPassword && userCreds.rawPassword !== userCreds.password) {
             try {
-              const credRaw = await signInWithEmailAndPassword(currentAuth, userCreds.email, userCreds.rawPassword);
-              if (credRaw?.user) return credRaw.user;
+              const credRaw = await withTimeout(
+                signInWithEmailAndPassword(currentAuth, userCreds.email, userCreds.rawPassword),
+                6000,
+                null
+              );
+              if (credRaw?.user) {
+                lastAuthVerifyTs = Date.now();
+                return credRaw.user;
+              }
             } catch (_) {}
           }
         }
       }
 
       try {
-        const v304Cred = await Promise.race([
+        const v304Cred = await withTimeout(
           signInWithEmailAndPassword(currentAuth, V304_AUTH_EMAIL, V304_AUTH_PASS),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('V304 auth timeout')), 8000))
-        ]);
-        if (v304Cred?.user) return v304Cred.user;
+          6000,
+          null
+        );
+        if (v304Cred?.user) {
+          lastAuthVerifyTs = Date.now();
+          return v304Cred.user;
+        }
       } catch (_) {}
     } catch (_) {
     } finally {
       authPromise = null;
     }
-    return null;
+    return currentAuth.currentUser || null;
   })();
 
   return authPromise;
@@ -304,18 +380,22 @@ export function parseFirestoreValue(v) {
 // Caché de tokens de Firebase Auth en memoria para REST (indexado por apiKey)
 const cachedAuthTokensByKey = new Map();
 
-export async function getFirebaseAuthToken(apiKey, email = null, password = null) {
+export async function getFirebaseAuthToken(apiKey, email = null, password = null, forceRefresh = false) {
   if (!apiKey) return null;
   const now = Date.now();
-  const cached = cachedAuthTokensByKey.get(apiKey);
-  if (cached && cached.token && now < cached.expiresAt - 60000) {
-    return cached.token;
+  if (forceRefresh) {
+    cachedAuthTokensByKey.delete(apiKey);
+  } else {
+    const cached = cachedAuthTokensByKey.get(apiKey);
+    if (cached && cached.token && now < cached.expiresAt - 120000) {
+      return cached.token;
+    }
   }
 
-  // Si ya hay un usuario autenticado con cuenta real (no anónima) en el SDK de Firebase Auth para esta app, usar su idToken directo
+  // Si ya hay un usuario autenticado con cuenta real (no anónima) en el SDK de Firebase Auth para esta app, usar su idToken con timeout corto
   try {
-    if (auth && auth.currentUser && !auth.currentUser.isAnonymous) {
-      const sdkToken = await auth.currentUser.getIdToken();
+    if (auth && auth.currentUser && !auth.currentUser.isAnonymous && auth.app?.options?.apiKey === apiKey) {
+      const sdkToken = await withTimeout(auth.currentUser.getIdToken(forceRefresh), 3000, null);
       if (sdkToken) {
         cachedAuthTokensByKey.set(apiKey, {
           token: sdkToken,
@@ -329,13 +409,17 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
   const creds = email && password ? { email, password } : resolveCachedUserAuthCredentials();
   try {
     if (creds && creds.email && creds.password) {
-      const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: creds.email, password: creds.password, returnSecureToken: true })
-      });
+      const res = await fetchWithTimeout(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: creds.email, password: creds.password, returnSecureToken: true })
+        },
+        6000
+      );
 
-      if (res.ok) {
+      if (res && res.ok) {
         const data = await res.json();
         const expiresInSec = parseInt(data.expiresIn || '3600', 10);
         cachedAuthTokensByKey.set(apiKey, {
@@ -348,12 +432,16 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
 
     // Autenticación de versión autorizada V.3.0.4 vía REST
     try {
-      const v304Res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: V304_AUTH_EMAIL, password: V304_AUTH_PASS, returnSecureToken: true })
-      });
-      if (v304Res.ok) {
+      const v304Res = await fetchWithTimeout(
+        `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: V304_AUTH_EMAIL, password: V304_AUTH_PASS, returnSecureToken: true })
+        },
+        6000
+      );
+      if (v304Res && v304Res.ok) {
         const v304Data = await v304Res.json();
         const expiresInSec = parseInt(v304Data.expiresIn || '3600', 10);
         cachedAuthTokensByKey.set(apiKey, {
@@ -370,17 +458,27 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
 }
 
 export async function fetchFirestoreWithAuth(url, apiKey, options = {}) {
-  const token = await getFirebaseAuthToken(apiKey);
-  const headers = {
-    'Accept': 'application/json',
-    ...(options.headers || {})
+  let token = await getFirebaseAuthToken(apiKey, null, null, false);
+  const buildHeaders = (tok) => {
+    const h = {
+      'Accept': 'application/json',
+      ...(options.headers || {})
+    };
+    if (tok) {
+      h['Authorization'] = `Bearer ${tok}`;
+    }
+    return h;
   };
 
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  let res = await fetchWithTimeout(url, { ...options, headers: buildHeaders(token) }, 9000);
+  // Si el token expiró tras horas en suspensión (401 / 403), refrescar token forzosamente y reintentar 1 vez
+  if (res && (res.status === 401 || res.status === 403) && apiKey) {
+    token = await getFirebaseAuthToken(apiKey, null, null, true);
+    if (token) {
+      res = await fetchWithTimeout(url, { ...options, headers: buildHeaders(token) }, 9000);
+    }
   }
-
-  return fetch(url, { ...options, headers });
+  return res;
 }
 
 let centralApp = null;
@@ -393,11 +491,19 @@ export function getCentralDb() {
     centralApp = existing || initializeApp(CENTRAL_FIREBASE_CONFIG, 'sisbom_central_broker');
     try {
       centralDb = initializeFirestore(centralApp, {
+        localCache: memoryLocalCache(),
         experimentalForceLongPolling: true,
         useFetchStreams: false
       });
     } catch {
-      centralDb = getFirestore(centralApp);
+      try {
+        centralDb = initializeFirestore(centralApp, {
+          experimentalForceLongPolling: true,
+          useFetchStreams: false
+        });
+      } catch {
+        centralDb = getFirestore(centralApp);
+      }
     }
     return centralDb;
   } catch (e) {
@@ -406,5 +512,35 @@ export function getCentralDb() {
   }
 }
 
-export { resolveCachedUserAuthCredentials };
+let reconnectInFlightPromise = null;
 
+// Reconecta activamente los canales Long-Polling de Firestore y refresca el token de Auth
+// cuando iOS o Android despiertan de una suspensión prolongada o cambian de red (Wi-Fi <-> Datos).
+export async function reconnectFirebaseNetwork(forceTokenRefresh = true) {
+  if (reconnectInFlightPromise) return reconnectInFlightPromise;
+  reconnectInFlightPromise = (async () => {
+    try {
+      if (forceTokenRefresh) {
+        cachedAuthTokensByKey.clear();
+      }
+      await ensureFirebaseAuth(null, null, null, forceTokenRefresh).catch(() => {});
+
+      const currentDb = db || getDb();
+      if (currentDb) {
+        await withTimeout(disableNetwork(currentDb).catch(() => {}), 2000, null);
+        await withTimeout(enableNetwork(currentDb).catch(() => {}), 2500, null);
+      }
+      if (centralDb) {
+        await withTimeout(disableNetwork(centralDb).catch(() => {}), 1500, null);
+        await withTimeout(enableNetwork(centralDb).catch(() => {}), 2000, null);
+      }
+    } catch (e) {
+      console.warn('⚠️ [Firebase] Advertencia al reconectar red:', e?.message || e);
+    } finally {
+      reconnectInFlightPromise = null;
+    }
+  })();
+  return reconnectInFlightPromise;
+}
+
+export { resolveCachedUserAuthCredentials };

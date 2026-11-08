@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 const args = process.argv.slice(2).map(a => a.toLowerCase());
 const onlyPrepareWww = args.includes('--prepare-only') || args.includes('--sync-www') || args.includes('--both-www');
+const onlyApk = args.includes('--apk-only');
 const shouldUploadPlayStore = args.includes('--upload-playstore') || args.includes('--playstore');
 
 const distDir = path.join(__dirname, 'dist');
@@ -188,16 +189,17 @@ try {
     process.exit(0);
   }
 
-  console.log('\n[3/4] Compilando APK y AAB con Gradle (assembleRelease bundleRelease)...');
+  const gradleTasks = onlyApk ? 'assembleRelease' : 'assembleRelease bundleRelease';
+  console.log(`\n[3/4] Compilando ${onlyApk ? 'APK' : 'APK y AAB'} con Gradle (${gradleTasks})...`);
   const gradlewCmd = process.platform === 'win32'
-    ? '.\\gradlew.bat assembleRelease bundleRelease'
-    : './gradlew assembleRelease bundleRelease';
+    ? `.\\gradlew.bat ${gradleTasks}`
+    : `./gradlew ${gradleTasks}`;
   execSync(gradlewCmd, {
     cwd: androidDir,
     stdio: 'inherit'
   });
 
-  console.log('\n[4/4] Copiando APK y AAB compilados a TERMINADOS y FINAL...');
+  console.log(`\n[4/4] Copiando ${onlyApk ? 'APK' : 'APK y AAB'} compilados a TERMINADOS y FINAL...`);
   const releaseApk = path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
   const debugApk = path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'debug', 'app-debug.apk');
   const sourceApk = fs.existsSync(releaseApk) ? releaseApk : debugApk;
@@ -217,7 +219,7 @@ try {
   const releaseAab = path.join(androidDir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab');
   const destAab = path.join(finalDir, 'SENTINEL_ONE_V3.aab');
   const destTerminadosAab = path.join(terminadosDir, 'SENTINEL_ONE_V3.aab');
-  if (fs.existsSync(releaseAab)) {
+  if (!onlyApk && fs.existsSync(releaseAab)) {
     fs.copyFileSync(releaseAab, destAab);
     fs.copyFileSync(releaseAab, destTerminadosAab);
   }
