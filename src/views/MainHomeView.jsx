@@ -58,6 +58,7 @@ import {
   parseCanonicalChatMessages
 } from '../shared/sentinelCore';
 import { TacticalDispatchMap } from '../components/dispatch/TacticalDispatchMap';
+import { CommanderTacticalNavMap } from '../components/dispatch/CommanderTacticalNavMap';
 import { ProfileDrawer } from '../components/modals/ProfileDrawer';
 import { FirefighterModal } from '../components/modals/FirefighterModal';
 import { AttendanceDetailModal } from '../components/modals/AttendanceDetailModal';
@@ -448,6 +449,8 @@ export const MainHomeView = ({ onLogout }) => {
   const [profileDrawerVisible, setProfileDrawerVisible] = useState(false);
   const [isCommanderFleetExpanded, setIsCommanderFleetExpanded] = useState(false);
   const [expandedCommanderCompanyIds, setExpandedCommanderCompanyIds] = useState({});
+  const [focusedCommanderUnitRequest, setFocusedCommanderUnitRequest] = useState(null);
+  const autoExpandedDispatchIdRef = useRef('');
 
   // Flujo Oficial de Despacho Táctico idéntico a SENTINEL CAD (KeySelector -> PreDispatchConfirmModal -> DispatchDetails + CompanyUnitsSelector)
   const [showCentralConsole, setShowCentralConsole] = useState(false);
@@ -1821,11 +1824,25 @@ export const MainHomeView = ({ onLogout }) => {
     );
   };
 
+  // Auto-desplegar el panel de Unidades + Mapa Táctico NAV del Comandante cuando ingresa una emergencia activa
+  useEffect(() => {
+    if (!isStrictCommander) return;
+    const activeWithoutDraft = allActiveDispatches.filter(
+      (d) => !cadDraftId || String(d.idServicio) !== String(cadDraftId)
+    );
+    const primaryId = String(activeWithoutDraft[0]?.idServicio || activeWithoutDraft[0]?.id || '').trim();
+    if (primaryId && autoExpandedDispatchIdRef.current !== primaryId) {
+      autoExpandedDispatchIdRef.current = primaryId;
+      setIsCommanderFleetExpanded(true);
+    } else if (!primaryId) {
+      autoExpandedDispatchIdRef.current = '';
+    }
+  }, [isStrictCommander, allActiveDispatches, cadDraftId]);
+
   // =========================================================================
-  // PANEL DE ESTADO DE MATERIAL MAYOR PARA COMANDANTE (idRadial == "1")
-  // Idéntico al botón desplegable "UNIDADES DISPONIBLES" del Mapa Táctico de SENTINEL CAD:
-  // - 1 sola Compañía: muestra todos los carros directamente en grilla de 3 columnas.
-  // - Multi-Compañía: muestra las compañías; al abrir una compañía muestra sus carros.
+  // PANEL DE ESTADO DE MATERIAL MAYOR Y MAPA TÁCTICO NAV PARA COMANDANTE (idRadial == "1")
+  // Muestra en el espacio de unidades el Mapa Táctico estilo SENTINEL NAV con ubicación en vivo
+  // de unidades y bomberos en el servicio, más la grilla interactiva de carros por compañía.
   // =========================================================================
   const renderCommanderUnitsStatusPanel = () => {
     if (!isStrictCommander) return null;
@@ -1888,7 +1905,8 @@ export const MainHomeView = ({ onLogout }) => {
             const uKey = String(v.idCarro || v.nombre || v.id || `U-${idx}`)
               .trim()
               .toUpperCase();
-            const { isOut08, isBusy, isAvailable, subLabel } = resolveUnitStatus(v);
+            const { isOut08, isBusy, subLabel } = resolveUnitStatus(v);
+            const isFocusedUnit = focusedCommanderUnitRequest?.unitId === uKey;
 
             const cardBg = isOut08
               ? 'rgba(127, 29, 29, 0.25)'
@@ -1898,11 +1916,13 @@ export const MainHomeView = ({ onLogout }) => {
                   ? 'rgba(30, 41, 59, 0.85)'
                   : '#F8FAFC';
 
-            const cardBorder = isOut08
-              ? 'rgba(239, 68, 68, 0.42)'
-              : isBusy
-                ? 'rgba(59, 130, 246, 0.50)'
-                : 'rgba(16, 185, 129, 0.42)';
+            const cardBorder = isFocusedUnit
+              ? '#38BDF8'
+              : isOut08
+                ? 'rgba(239, 68, 68, 0.42)'
+                : isBusy
+                  ? 'rgba(59, 130, 246, 0.50)'
+                  : 'rgba(16, 185, 129, 0.42)';
 
             const titleColor = isOut08
               ? '#FCA5A5'
@@ -1919,13 +1939,18 @@ export const MainHomeView = ({ onLogout }) => {
                 : '#34D399';
 
             return (
-              <View
+              <TouchableOpacity
                 key={uKey}
+                activeOpacity={0.82}
+                onPress={() => {
+                  triggerHaptic('medium');
+                  setFocusedCommanderUnitRequest({ unitId: uKey, ts: Date.now() });
+                }}
                 style={{
                   width: '31.3%',
                   backgroundColor: cardBg,
                   borderColor: cardBorder,
-                  borderWidth: 1,
+                  borderWidth: isFocusedUnit ? 1.6 : 1,
                   borderRadius: 12,
                   paddingVertical: 9,
                   paddingHorizontal: 6,
@@ -1956,7 +1981,7 @@ export const MainHomeView = ({ onLogout }) => {
                 >
                   {subLabel}
                 </Text>
-              </View>
+              </TouchableOpacity>
             );
           })}
         </View>
@@ -1995,14 +2020,28 @@ export const MainHomeView = ({ onLogout }) => {
                 color: isDarkMode ? '#FFFFFF' : '#0F172A',
                 fontSize: 11,
                 fontWeight: '900',
-                letterSpacing: 1.1
+                letterSpacing: 1.0
               }}
             >
-              UNIDADES DISPONIBLES
+              UNIDADES Y MAPA NAV
             </Text>
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <View
+              style={{
+                backgroundColor: 'rgba(14, 165, 233, 0.18)',
+                borderColor: 'rgba(56, 189, 248, 0.40)',
+                borderWidth: 1,
+                borderRadius: 8,
+                paddingHorizontal: 7,
+                paddingVertical: 2.5
+              }}
+            >
+              <Text style={{ color: '#38BDF8', fontSize: 9.5, fontWeight: '900' }}>
+                GPS
+              </Text>
+            </View>
             <View
               style={{
                 backgroundColor: 'rgba(239, 68, 68, 0.20)',
@@ -2062,10 +2101,10 @@ export const MainHomeView = ({ onLogout }) => {
                 color: isDarkMode ? '#FFFFFF' : '#0F172A',
                 fontSize: 10.5,
                 fontWeight: '900',
-                letterSpacing: 1.0
+                letterSpacing: 0.9
               }}
             >
-              UNIDADES DISPONIBLES ({availTotalCount}/{fleetList.length})
+              UNIDADES Y MAPA NAV ({availTotalCount}/{fleetList.length})
             </Text>
           </View>
 
@@ -2083,6 +2122,19 @@ export const MainHomeView = ({ onLogout }) => {
             <ChevronUp size={13} color="#94A3B8" />
           </View>
         </TouchableOpacity>
+
+        {/* Mapa Táctico estilo SENTINEL NAV con ubicación en vivo de unidades y bomberos en servicio */}
+        <CommanderTacticalNavMap
+          fleetList={fleetList}
+          activeDispatches={activeDispatchesExcludingDraft}
+          firefightersList={allFirefighters}
+          cuartelLat={cuartelLat}
+          cuartelLng={cuartelLng}
+          cuarteles={cuarteles}
+          institutionCompaniesList={institutionCompaniesList}
+          isDarkMode={isDarkMode}
+          focusedUnitRequest={focusedCommanderUnitRequest}
+        />
 
         {isSingleCompanyInstitution ? (
           /* MODO 1 COMPAÑÍA: Muestra todos los carros directamente en grilla de 3 columnas */

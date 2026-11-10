@@ -113,6 +113,7 @@ async function sendDirectApnsToIosUsers({
   data = {},
   targetUserIds = null,
   onlyConductors = false,
+  respectStatus09ForSound = true,
   unrespondedOnlyForDispatchId = "",
   respondedUserIds = null
 }) {
@@ -129,13 +130,14 @@ async function sendDirectApnsToIosUsers({
       docs = snap.docs;
     }
 
-    const apnsTokens = new Set();
+    const audibleTokens = new Set();
+    const silentBannerTokens = new Set();
     for (const d of docs) {
       const p = d.data() || {};
       if (p.modoAvion === true || p.silencioAbsoluto === true) continue;
       if (onlyConductors && !p.conductor) continue;
+      const est = String(p.estado || (p.disponible === false ? "0-8" : "0-9")).trim().toUpperCase();
       if (unrespondedOnlyForDispatchId) {
-        const est = String(p.estado || (p.disponible === false ? "0-8" : "0-9")).trim().toUpperCase();
         if (est !== "0-9") continue;
         const enSvc = String(p.enServicio || "").trim();
         if (enSvc === unrespondedOnlyForDispatchId || enSvc === `-${unrespondedOnlyForDispatchId}`) continue;
@@ -143,32 +145,50 @@ async function sendDirectApnsToIosUsers({
         if (respondedUserIds && respondedUserIds.has(uid)) continue;
       }
       const candidate = String(p.apnsToken || "").trim().toLowerCase();
-      if (/^[0-9a-f]{64}$/.test(candidate)) {
-        apnsTokens.add(candidate);
+      if (!/^[0-9a-f]{64}$/.test(candidate)) continue;
+      if (!respectStatus09ForSound || est === "0-9") {
+        audibleTokens.add(candidate);
+        silentBannerTokens.delete(candidate);
+      } else if (!audibleTokens.has(candidate)) {
+        silentBannerTokens.add(candidate);
       }
     }
 
-    if (apnsTokens.size === 0) return;
+    if (audibleTokens.size === 0 && silentBannerTokens.size === 0) return;
 
-    const payloadObj = Object.assign({}, data, {
-      aps: {
+    const buildApnsPayload = (includeSound) => {
+      const aps = {
         alert: {
           title: String(title || "SENTINEL ONE"),
           body: String(body || "")
         },
-        sound: String(sound || "default"),
         badge: 1,
         category: String(category || "EMERGENCY_DISPATCH"),
         "interruption-level": String(interruptionLevel || "time-sensitive"),
         "relevance-score": Number(relevanceScore || 1.0),
         "content-available": 1,
         "mutable-content": 1
+      };
+      if (includeSound && sound) {
+        aps.sound = String(sound);
       }
-    });
+      return Object.assign({}, data, {aps});
+    };
 
-    await Promise.all(
-      Array.from(apnsTokens).map((tok) => sendDirectApnsToDevice(tok, payloadObj, collapseId, priority))
-    );
+    const tasks = [];
+    if (audibleTokens.size > 0) {
+      const audiblePayload = buildApnsPayload(true);
+      for (const tok of audibleTokens) {
+        tasks.push(sendDirectApnsToDevice(tok, audiblePayload, collapseId, priority));
+      }
+    }
+    if (silentBannerTokens.size > 0) {
+      const silentPayload = buildApnsPayload(false);
+      for (const tok of silentBannerTokens) {
+        tasks.push(sendDirectApnsToDevice(tok, silentPayload, collapseId, priority));
+      }
+    }
+    await Promise.all(tasks);
   } catch (err) {
     console.warn("APNs direct send warning:", err.message);
   }
@@ -202,7 +222,7 @@ function isValidFcmRegistrationToken(raw) {
   return tok.length > 60 && tok.includes(":");
 }
 
-async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral) {
+async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral, platform = "") {
   if (!isValidFcmRegistrationToken(token)) return;
   const cleanId = String(userId || "").trim().replace(/\s+/g, "");
   const topics = ["all", "despachos", "alertas", "alertas_generales"];
@@ -212,6 +232,18 @@ async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral) {
   }
   if (isConductor) topics.push("conductores");
   if (isCentral) topics.push("central_operador");
+
+  const isIosDevice = String(platform || "").trim().toLowerCase() === "ios";
+  if (isIosDevice) {
+    // Los dispositivos iOS reciben push directo individualizado vía sendDirectApnsToIosUsers (con filtro 0-9/0-8).
+    // Desuscribirlos de los tópicos FCM grupales evita recibir doble push y doble audio (eco).
+    await Promise.all(
+      topics.map((t) =>
+        admin.messaging().unsubscribeFromTopic([token], t).catch(() => null)
+      )
+    );
+    return;
+  }
 
   await Promise.all(
     topics.map((t) =>
@@ -329,25 +361,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         admin.messaging().send({
           topic: "despachos",
           data: escData,
-          android: {priority: "high", ttl: 300000},
-          apns: {
-            headers: {"apns-priority": "10", "apns-push-type": "alert"},
-            payload: {
-              aps: {
-                alert: {
-                  title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
-                  body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`
-                },
-                sound: resolveApnsSound(newClave),
-                badge: 1,
-                category: "EMERGENCY_DISPATCH",
-                "interruption-level": "time-sensitive",
-                "relevance-score": 1.0,
-                "content-available": 1,
-                "mutable-content": 1
-              }
-            }
-          }
+          android: {priority: "high", ttl: 300000}
         }).catch((e) => console.warn("FCM escalation warning:", e.message)),
         sendDirectApnsToIosUsers({
           title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
@@ -355,6 +369,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
           sound: resolveApnsSound(newClave),
           category: "EMERGENCY_DISPATCH",
           collapseId: `esc_${dispatchId}_${newClave}`,
+          respectStatus09ForSound: false,
           data: escData
         })
       ]);
@@ -386,25 +401,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         admin.messaging().send({
           topic: "conductores",
           data: req1210Data,
-          android: {priority: "high", ttl: 300000},
-          apns: {
-            headers: {"apns-priority": "10", "apns-push-type": "alert"},
-            payload: {
-              aps: {
-                alert: {
-                  title: `🚨 SOLICITUD 12-10 (${unitName})`,
-                  body: `Se solicita conductor para unidad ${unitName} en ${direccion}`
-                },
-                sound: "importante.mp3",
-                badge: 1,
-                category: "EMERGENCY_DISPATCH",
-                "interruption-level": "time-sensitive",
-                "relevance-score": 1.0,
-                "content-available": 1,
-                "mutable-content": 1
-              }
-            }
-          }
+          android: {priority: "high", ttl: 300000}
         }).catch((e) => console.warn("FCM 12-10 warning:", e.message)),
         sendDirectApnsToIosUsers({
           title: `🚨 SOLICITUD 12-10 (${unitName})`,
@@ -435,25 +432,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         admin.messaging().send({
           topic: "despachos",
           data: req66Data,
-          android: {priority: "high", ttl: 300000},
-          apns: {
-            headers: {"apns-priority": "10", "apns-push-type": "alert"},
-            payload: {
-              aps: {
-                alert: {
-                  title: `🚨 SOLICITUD 6-6 (${unitName})`,
-                  body: `Se solicita personal para unidad ${unitName} en ${direccion}`
-                },
-                sound: "importante.mp3",
-                badge: 1,
-                category: "EMERGENCY_DISPATCH",
-                "interruption-level": "time-sensitive",
-                "relevance-score": 1.0,
-                "content-available": 1,
-                "mutable-content": 1
-              }
-            }
-          }
+          android: {priority: "high", ttl: 300000}
         }).catch((e) => console.warn("FCM 6-6 warning:", e.message)),
         sendDirectApnsToIosUsers({
           title: `🚨 SOLICITUD 6-6 (${unitName})`,
@@ -516,27 +495,6 @@ const onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
       },
       android: {
         priority: isG3 || isG2 ? "high" : "normal"
-      },
-      apns: {
-        headers: {
-          "apns-priority": isG3 || isG2 ? "10" : "5",
-          "apns-push-type": "alert"
-        },
-        payload: {
-          aps: {
-            alert: {
-              title: isOrden ? `📋 ${titulo}` : `🔔 ALERTA GRADO ${grado}: ${titulo}`,
-              body: mensaje
-            },
-            sound: (isG3 || isG2) ? "importante.mp3" : "alertas.mp3",
-            badge: 1,
-            category: "GENERAL_ALERT",
-            "interruption-level": (isG3 || isG2) ? "time-sensitive" : "active",
-            "relevance-score": isG3 ? 1.0 : 0.8,
-            "content-available": 1,
-            "mutable-content": 1
-          }
-        }
       }
     };
     return admin.messaging().send(msg).catch((e) => console.warn("FCM alert warning:", e.message));
@@ -603,24 +561,6 @@ exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event)
       android: {
         priority: "high",
         ttl: 300000
-      },
-      apns: {
-        headers: {
-          "apns-priority": "10",
-          "apns-push-type": "alert"
-        },
-        payload: {
-          aps: {
-            alert: {
-              title: titleText,
-              body: bodyText
-            },
-            sound: "default",
-            category: "GENERAL_ALERT",
-            "interruption-level": "time-sensitive",
-            "content-available": 1
-          }
-        }
       }
     }).catch((e) => console.warn("FCM status warning:", e.message)),
     sendDirectApnsToIosUsers({
@@ -643,8 +583,9 @@ exports.subscribeTokenToTopics = onDocumentCreated("personal/{userId}", async (e
   const userId = String(data.idRegistro || event.params.userId || "").trim();
   const tok = String(data.deviceId || "").trim();
   const isConductor = Boolean(data.conductor);
+  const platform = data.apnsToken ? "ios" : String(data.platform || "");
   if (isValidFcmRegistrationToken(tok)) {
-    await subscribeFcmTokenForUser(tok, userId, isConductor, false);
+    await subscribeFcmTokenForUser(tok, userId, isConductor, false, platform);
   }
 });
 
@@ -656,8 +597,10 @@ exports.syncTokenTopicsOnUpdate = onDocumentUpdated("personal/{userId}", async (
   const tokBefore = String(before.deviceId || "").trim();
   const condAfter = Boolean(after.conductor);
   const condBefore = Boolean(before.conductor);
-  if (isValidFcmRegistrationToken(tokAfter) && (tokAfter !== tokBefore || condAfter !== condBefore)) {
-    await subscribeFcmTokenForUser(tokAfter, userId, condAfter, false);
+  const platAfter = after.apnsToken ? "ios" : String(after.platform || "");
+  const platBefore = before.apnsToken ? "ios" : String(before.platform || "");
+  if (isValidFcmRegistrationToken(tokAfter) && (tokAfter !== tokBefore || condAfter !== condBefore || platAfter !== platBefore)) {
+    await subscribeFcmTokenForUser(tokAfter, userId, condAfter, false, platAfter);
   }
 });
 
@@ -810,29 +753,6 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
     android: {
       priority: "high",
       ttl: 300000
-    },
-    apns: {
-      headers: {
-        "apns-priority": "10",
-        "apns-push-type": "alert",
-        "apns-expiration": String(Math.floor(Date.now() / 1000) + 300),
-        "apns-collapse-id": `disp_${dispatchId}`.slice(0, 64)
-      },
-      payload: {
-        aps: {
-          alert: {
-            title: `🚨 ${titleText}`,
-            body: String(bodyText)
-          },
-          sound: apnsSound,
-          badge: 1,
-          category: "EMERGENCY_DISPATCH",
-          "interruption-level": "time-sensitive",
-          "relevance-score": 1.0,
-          "content-available": 1,
-          "mutable-content": 1
-        }
-      }
     }
   };
 

@@ -121,7 +121,7 @@ function resolveAabPath() {
 export async function uploadAabToPlayConsole({
   track = trackArg,
   releaseStatus = statusArg,
-  releaseNotes = 'SENTINEL ONE V3 - Integración SCI en sisbom-central (sci_incidentes), mejoras operativas y estabilidad.'
+  releaseNotes = 'SENTINEL ONE V3.0.4 - Mapa táctico estilo NAV en vivo para Comandante (unidades y bomberos en servicio), mejoras en alertas sonoras 0-9 y GPS.'
 } = {}) {
   console.log('====================================================');
   console.log(' SUBIDA DIRECTA A GOOGLE PLAY CONSOLE (SIN GITHUB)');

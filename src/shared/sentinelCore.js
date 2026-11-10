@@ -3596,11 +3596,26 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
   };
 }
 
+// ============================================================================
+// 9. PORTAL CANÓNICO MULTITENANT DE GEOLOCALIZACIÓN 132 (geo.sistemasentinel.cl)
+// ============================================================================
 
+export const CANONICAL_GEO_PORTAL_URL = 'https://geo.sistemasentinel.cl';
 
-
-
-
-
-
+/**
+ * Construye el enlace canónico multitenant de captura GPS del alertante (132)
+ * compatible con cualquier licencia activa en `sisbom-central/saas_clientes/{licenseKey}`.
+ */
+export function buildCanonicalGeoPortalUrl({ licenseKey = '', serviceId = '', phone = '' } = {}) {
+  const cleanLic = String(licenseKey || '').trim().toUpperCase();
+  const cleanId = String(serviceId || 'draft-session').trim() || 'draft-session';
+  const cleanPhone = String(phone || '').replace(/\D/g, '').slice(-8) || 'alertante';
+  const params = new URLSearchParams();
+  if (cleanLic) {
+    params.set('l', cleanLic);
+  }
+  params.set('id', cleanId);
+  params.set('t', cleanPhone);
+  return `${CANONICAL_GEO_PORTAL_URL}/?${params.toString()}`;
+}
 

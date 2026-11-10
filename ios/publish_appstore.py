@@ -26,16 +26,16 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.0.4"
-TARGET_BUILD_NUMBER = "3026"
+TARGET_BUILD_NUMBER = "3027"
 
 SUPPORT_URL = "https://github.com/danielolatenaranjo-art/sisbom"
 COPYRIGHT_TEXT = "2026 Sistema Sentinel - Cuerpos de Bomberos"
 
 WHATS_NEW_ES = (
     "SENTINEL ONE V.3.0.4:\n"
-    "- Optimización de conexiones en tiempo real a Firestore (cero lecturas periódicas innecesarias y ahorro de batería).\n"
-    "- Mejoras en el mapa táctico de despachos activos y apertura directa en mapas nativos del dispositivo.\n"
-    "- Mejoras en alertas sonoras de despacho (0-9) y avisos de cambio de estado desde la Central de Alarmas."
+    "- Nuevo Mapa Táctico estilo SENTINEL NAV para Comandancia con posición en tiempo real de unidades y bomberos en servicio.\n"
+    "- Alarma sonora de despacho al 100% de volumen desde el primer tono cuando el bombero está disponible (0-9), sin eco.\n"
+    "- Optimización de permisos GPS y ahorro de batería en segundo plano."
 )
 
 PROMOTIONAL_TEXT_ES = (
@@ -526,10 +526,10 @@ def main():
             else:
                 print("   ✅ AgeRatingDeclaration actualizado al 100%.")
 
-    # 4. Obtener la versión TARGET_VERSION, cancelar cualquier reviewSubmission WAITING_FOR_REVIEW previa si se necesita adjuntar un nuevo build, y configurar Copyright + ReleaseType
+    # 4. Obtener la versión TARGET_VERSION, cancelar cualquier reviewSubmission WAITING_FOR_REVIEW o IN_REVIEW previa si se necesita adjuntar un nuevo build, y configurar Copyright + ReleaseType
     _, waiting_res = api_request(
         "GET",
-        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=WAITING_FOR_REVIEW",
+        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=WAITING_FOR_REVIEW,IN_REVIEW",
         token=token,
     )
     for w_sub in waiting_res.get("data", []):
@@ -734,18 +734,21 @@ def main():
             token=token,
         )
 
-    # 7. Vincular el Build TARGET_BUILD_NUMBER (esperando a que pase a VALID si recién subió)
+    # 7. Vincular el Build TARGET_BUILD_NUMBER (esperando a que pase a VALID si recién subió, consultando preReleaseVersions que sí incluye builds en procesamiento)
     selected_build = None
-    for attempt in range(24):
-        _, b_res = api_request("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10", token=token)
-        builds = b_res.get("data", [])
+    for attempt in range(36):
+        _, pre_res = api_request("GET", f"/v1/preReleaseVersions?filter[app]={app_id}&include=builds&limit=10", token=token)
+        builds = [inc for inc in pre_res.get("included", []) if inc.get("type") == "builds"]
+        if not builds:
+            _, b_res = api_request("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10", token=token)
+            builds = b_res.get("data", [])
         for b in builds:
             if str(b.get("attributes", {}).get("version")) == TARGET_BUILD_NUMBER and b.get("attributes", {}).get("processingState") == "VALID":
                 selected_build = b
                 break
         if selected_build:
             break
-        print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} en App Store Connect (intento {attempt + 1}/24)...")
+        print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} en App Store Connect (intento {attempt + 1}/36)...")
         time.sleep(15)
     if not selected_build:
         for b in builds:
@@ -841,7 +844,7 @@ def main():
 
     # Imprimir estado final de la versión
     _, final_ver = api_request("GET", f"/v1/appStoreVersions/{version_id}", token=token)
-    print("🏁 Estado final de la versión 3.0.3:", json.dumps(final_ver.get("data", {}).get("attributes", {}), indent=2, ensure_ascii=False))
+    print(f"🏁 Estado final de la versión {TARGET_VERSION}:", json.dumps(final_ver.get("data", {}).get("attributes", {}), indent=2, ensure_ascii=False))
 
 
 if __name__ == "__main__":

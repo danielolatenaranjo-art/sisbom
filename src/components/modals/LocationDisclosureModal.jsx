@@ -63,12 +63,15 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
 
     const checkAndAutoClose = () => {
       const updated = refreshPerms();
-      if (
-        updated.notifications &&
-        updated.backgroundLocation &&
-        updated.overlay &&
-        updated.batteryUnrestricted
-      ) {
+      const satisfied = isIos
+        ? Boolean(updated.notifications && (updated.backgroundLocation || updated.fineLocation))
+        : Boolean(
+            updated.notifications &&
+              updated.backgroundLocation &&
+              updated.overlay &&
+              updated.batteryUnrestricted
+          );
+      if (satisfied) {
         if (onAccept) onAccept(updated);
         return true;
       }
@@ -142,8 +145,10 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
     } catch (e) {}
   };
 
+  const isIosLocationOk = Boolean(perms.backgroundLocation || perms.fineLocation);
+
   const allRequiredGranted = isIos
-    ? Boolean(perms.notifications && perms.backgroundLocation)
+    ? Boolean(perms.notifications && isIosLocationOk)
     : Boolean(
         perms.notifications &&
           perms.backgroundLocation &&
@@ -154,9 +159,8 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
   const getPrimaryButtonLabel = () => {
     if (allRequiredGranted) return 'CONTINUAR A LA APP';
     if (!perms.notifications) return 'ACTIVAR NOTIFICACIONES';
-    if (!perms.backgroundLocation) {
-      return isIos ? 'ACTIVAR UBICACIÓN (SIEMPRE)' : 'ACTIVAR UBICACIÓN (TODO EL TIEMPO)';
-    }
+    if (isIos && !isIosLocationOk) return 'ACTIVAR UBICACIÓN GPS';
+    if (!isIos && !perms.backgroundLocation) return 'ACTIVAR UBICACIÓN (TODO EL TIEMPO)';
     if (!isIos && !perms.overlay) return 'ACTIVAR MOSTRAR SOBRE OTRAS APPS';
     if (!isIos && !perms.batteryUnrestricted) return 'ACTIVAR BATERÍA SIN RESTRICCIÓN';
     return 'ACEPTAR Y ACTIVAR PERMISOS';
@@ -187,7 +191,7 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
         handleRequestNotifications();
         return;
       }
-      if (!current.backgroundLocation) {
+      if (!current.backgroundLocation && !current.fineLocation) {
         handleRequestGpsAlways();
         return;
       }
@@ -284,7 +288,9 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
             <TouchableOpacity
               style={[
                 styles.permCard,
-                perms.backgroundLocation ? styles.permCardActive : styles.permCardPending
+                (isIos ? isIosLocationOk : perms.backgroundLocation)
+                  ? styles.permCardActive
+                  : styles.permCardPending
               ]}
               activeOpacity={0.8}
               onPress={handleRequestGpsAlways}
@@ -295,20 +301,20 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
               <View style={styles.permInfo}>
                 <Text style={styles.permTitle}>
                   {isIos
-                    ? '2. Ubicación GPS: "Siempre"'
+                    ? '2. Ubicación GPS en Emergencias'
                     : '2. Ubicación GPS: "Permitir todo el tiempo"'}
                 </Text>
                 <Text style={styles.permDesc}>
                   {isIos
-                    ? perms.fineLocation && !perms.backgroundLocation
-                      ? 'Tiene "Al usar la app". Presione aquí y en Configuración -> Ubicación seleccione "Siempre".'
-                      : 'Presione Activar: primero elija "Al usar la app" y luego "Cambiar a permitir siempre" (o en Configuración -> Ubicación -> Siempre).'
+                    ? isIosLocationOk
+                      ? 'Ubicación GPS autorizada correctamente para transmisión en ruta durante despachos activos.'
+                      : 'Presione Activar y autorice el uso de ubicación para transmitir su posición al asistir a emergencias.'
                     : perms.fineLocation && !perms.backgroundLocation
                       ? 'Falta el permiso en segundo plano. Presione aquí y en Ubicación elija "Permitir todo el tiempo".'
                       : 'Al abrirse los ajustes de Ubicación, debe elegir la opción "Permitir todo el tiempo".'}
                 </Text>
               </View>
-              {perms.backgroundLocation ? (
+              {(isIos ? isIosLocationOk : perms.backgroundLocation) ? (
                 <CheckCircle2 size={20} color="#10B981" />
               ) : (
                 <View style={styles.activatePill}>

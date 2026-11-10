@@ -33,6 +33,20 @@ let lastStatusChangeTs = 0;
 let pendingServiceValue = null;
 let lastServiceChangeTs = 0;
 
+function hasNativeGpsBridge() {
+  try {
+    if (typeof window === 'undefined') return false;
+    return Boolean(
+      window.webkit?.messageHandlers?.iOSApp ||
+        window.AndroidApp ||
+        window.__SENTINEL_PLATFORM__ === 'ios' ||
+        window.__SENTINEL_PLATFORM__ === 'android'
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
 function clearAllBrowserGeolocationWatches() {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return;
   try {
@@ -1191,7 +1205,10 @@ export const useAuthStore = create((set, get) => ({
     let userSpeed = lastKnownTelemetryCoords?.speed ?? 0;
     let userHeading = lastKnownTelemetryCoords?.heading ?? 0;
 
-    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+    // En apps nativas (iOS WKWebView / Android WebView), el rastreo GPS hacia RTDB lo realiza
+    // exclusivamente el servicio nativo (IOSLocationService / DispatchForegroundService).
+    // NUNCA invocar navigator.geolocation dentro del WebView nativo para evitar popups repetitivos de origen web en iOS.
+    if (!hasNativeGpsBridge() && typeof navigator !== 'undefined' && navigator.geolocation) {
       try {
         const webLoc = await new Promise((resolve) => {
           navigator.geolocation.getCurrentPosition(
@@ -1349,7 +1366,14 @@ export const useAuthStore = create((set, get) => ({
       }
     };
 
-    // Usar directamente navigator.geolocation (sin expo-location web que desincroniza IDs de clearWatch)
+    // Si estamos dentro de la app nativa iOS o Android, el servicio nativo ya transmite el GPS a RTDB
+    // en primer y segundo plano; evitamos abrir sesiones duplicadas de navigator.geolocation en el WebView.
+    if (hasNativeGpsBridge()) {
+      activeTelemetryServiceId = cleanServiceId;
+      return;
+    }
+
+    // Usar directamente navigator.geolocation solo en navegadores web puros
     if (typeof navigator !== 'undefined' && navigator.geolocation && isTelemetryAllowedNow()) {
       try {
         navigator.geolocation.getCurrentPosition(

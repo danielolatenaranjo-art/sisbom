@@ -95,22 +95,14 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         } else {
             status = CLLocationManager.authorizationStatus()
         }
+        let defaults = UserDefaults.standard
         if status == .notDetermined {
+            defaults.set(true, forKey: "IOS_ASKED_WHEN_IN_USE_LOCATION")
             manager.requestWhenInUseAuthorization()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                self?.manager.requestAlwaysAuthorization()
-            }
         } else if status == .authorizedWhenInUse {
-            let defaults = UserDefaults.standard
-            let askedAlwaysBefore = defaults.bool(forKey: "IOS_ASKED_ALWAYS_LOCATION")
-            defaults.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
-            manager.requestAlwaysAuthorization()
-            if askedAlwaysBefore {
-                DispatchQueue.main.async {
-                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
-                    }
-                }
+            if !defaults.bool(forKey: "IOS_ASKED_ALWAYS_LOCATION") {
+                defaults.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
+                manager.requestAlwaysAuthorization()
             }
         } else if status == .denied || status == .restricted {
             DispatchQueue.main.async {
@@ -156,8 +148,9 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         if #available(iOS 14.0, *) {
-            if manager.authorizationStatus == .authorizedWhenInUse {
-                UserDefaults.standard.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
+            let defaults = UserDefaults.standard
+            if manager.authorizationStatus == .authorizedWhenInUse && !defaults.bool(forKey: "IOS_ASKED_ALWAYS_LOCATION") {
+                defaults.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
                 manager.requestAlwaysAuthorization()
             }
         }
@@ -195,7 +188,7 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
             )
             let defaults = UserDefaults.standard
             defaults.set(notifGranted, forKey: "IOS_NOTIF_GRANTED")
-            if fine && bg && notifGranted {
+            if fine && notifGranted {
                 defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
             }
             DispatchQueue.main.async {
@@ -210,7 +203,7 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
                             batteryUnrestricted: true,
                             notifications: \(notifGranted ? "true" : "false")
                         };
-                        if (\(fine && bg && notifGranted ? "true" : "false") && window.localStorage) {
+                        if (\(fine && notifGranted ? "true" : "false") && window.localStorage) {
                             window.localStorage.setItem('@sentinel_one_location_disclosed_v3', 'true');
                         }
                         window.dispatchEvent(new CustomEvent('sentinelPermissionsChanged'));
@@ -371,6 +364,28 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     private var hiddenVolumeView: MPVolumeView?
     private(set) var lastAlarmStartMs: Int64 = 0
     private var lastPlayedSoundKey: String = ""
+    private var playedFirstToneDispatchIds = Set<String>()
+    private var playedRepeat60sDispatchIds = Set<String>()
+
+    func claimFirstToneIfNeeded(dispatchId: String) -> Bool {
+        let clean = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return true }
+        if playedFirstToneDispatchIds.contains(clean) {
+            return false
+        }
+        playedFirstToneDispatchIds.insert(clean)
+        return true
+    }
+
+    func claimRepeat60sIfNeeded(dispatchId: String) -> Bool {
+        let clean = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return true }
+        if playedRepeat60sDispatchIds.contains(clean) {
+            return false
+        }
+        playedRepeat60sDispatchIds.insert(clean)
+        return true
+    }
 
     override init() {
         super.init()
@@ -584,18 +599,18 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         let fileName = resolveSoundFileName(for: nameOrClave)
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
 
-        // Evitar que Push + Firestore Snapshot disparen el mismo MP3 con milisegundos de diferencia cortándose entre sí
-        if let active = audioPlayer, active.isPlaying, fileName == lastPlayedSoundKey, (nowMs - lastAlarmStartMs) < 3_500 {
+        // Evitar que Push + Firestore Snapshot disparen el mismo MP3 con segundos de diferencia generando doble reproducción con eco
+        if let active = audioPlayer, active.isPlaying, fileName == lastPlayedSoundKey, (nowMs - lastAlarmStartMs) < 12_000 {
             if forceMaxVolume {
                 forceHardwareSystemVolumeToMax()
             }
-            vibrateEmergency()
             return
         }
 
         audioPlayer?.stop()
         audioPlayer = nil
-        keepAlivePlayer?.volume = 0.0
+        keepAlivePlayer?.stop()
+        keepAlivePlayer = nil
 
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "mp3")
@@ -607,22 +622,43 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
         let session = AVAudioSession.sharedInstance()
         if forceMaxVolume {
-            // CRÍTICO: Usar [.mixWithOthers, .duckOthers] con .playback en segundo plano
-            // para saltar el interruptor físico de silencio (botón de silencio) SIN lanzar error 561015905 (!pla)
-            if (try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers, .duckOthers])) == nil {
-                try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            // CRÍTICO PARA iOS 0-9:
+            // 1) Activar .playback SIN .mixWithOthers interrumpe y silencia al instante el sonido bajo de SpringBoard (cero eco doble).
+            // 2) .playback ignora el interruptor físico de silencio del iPhone.
+            // 3) Si en algún estado restringido iOS rechaza categoría exclusiva, cae de respaldo a [.mixWithOthers, .duckOthers].
+            var exclusiveActivated = false
+            do {
+                try session.setCategory(.playback, mode: .default, options: [.duckOthers])
+                try session.setActive(true, options: [])
+                exclusiveActivated = true
+            } catch {
+                exclusiveActivated = false
             }
+            if !exclusiveActivated {
+                try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers, .duckOthers])
+                try? session.setActive(true)
+            }
+            // Subir el volumen físico del sistema al 100% ANTES de la primera muestra de audio del 1er tono
+            forceHardwareSystemVolumeToMax()
         } else {
             try? session.setCategory(.ambient, mode: .default, options: [.mixWithOthers])
+            try? session.setActive(true)
         }
-        try? session.setActive(true)
 
         do {
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
             player.volume = 1.0
             player.prepareToPlay()
-            player.play()
+            if forceMaxVolume {
+                forceHardwareSystemVolumeToMax()
+                let startAt = player.deviceCurrentTime + 0.14
+                if !player.play(atTime: startAt) {
+                    player.play()
+                }
+            } else {
+                player.play()
+            }
             self.audioPlayer = player
             self.lastAlarmStartMs = nowMs
             self.lastPlayedSoundKey = fileName
@@ -632,6 +668,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             vibrateEmergency()
         } catch {
             vibrateEmergency()
+            updateBackgroundKeepAlive()
         }
     }
 
@@ -706,6 +743,10 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             let timer = Timer(timeInterval: 60.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
                 self.repeatTimers.removeValue(forKey: dispatchId)
+                let notifId = "repeat_60s_\(dispatchId)"
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notifId])
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notifId])
+
                 let defaults = UserDefaults.standard
                 if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "IS_CENTRAL_ACTIVE") { return }
                 let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-8").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -717,7 +758,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
                 let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if enServicio == dispatchId || enServicio == "-\(dispatchId)" { return }
 
-                // El segundo tono a los 60 segundos SIEMPRE debe sonar si el bombero no ha puesto Asistir o No Asistir
+                guard self.claimRepeat60sIfNeeded(dispatchId: dispatchId) else { return }
+                // El segundo tono a los 60 segundos SIEMPRE debe sonar una sola vez al 100% si el bombero sigue en 0-9 sin responder
                 self.play(nameOrClave: clave, forceMaxVolume: true)
                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: dispatchId, showFullscreen: true)
             }
@@ -1021,8 +1063,10 @@ final class IOSRealtimeService {
                             }
                         } else {
                             if is09 {
-                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                if IOSSoundPlayer.shared.claimFirstToneIfNeeded(dispatchId: docId) {
+                                    IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                }
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             } else {
                                 IOSSoundPlayer.shared.vibrateEmergency()
@@ -1032,7 +1076,7 @@ final class IOSRealtimeService {
                                 title: "🚨 DESPACHO \(clave)",
                                 body: direccion,
                                 soundName: nil,
-                                playDefaultIfNil: !is09,
+                                playDefaultIfNil: false,
                                 userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
                             )
                         }
@@ -1079,8 +1123,10 @@ final class IOSRealtimeService {
                             }
                         } else {
                             if is09 {
-                                IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
-                                IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                if IOSSoundPlayer.shared.claimFirstToneIfNeeded(dispatchId: docId) {
+                                    IOSSoundPlayer.shared.play(nameOrClave: clave, forceMaxVolume: true)
+                                    IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
+                                }
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             } else {
                                 IOSSoundPlayer.shared.vibrateEmergency()
@@ -1090,7 +1136,7 @@ final class IOSRealtimeService {
                                 title: "🚨 DESPACHO \(clave)",
                                 body: direccion,
                                 soundName: nil,
-                                playDefaultIfNil: !is09,
+                                playDefaultIfNil: false,
                                 userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
                             )
                         }
@@ -2076,31 +2122,49 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
         let activePid = currentTenantProjectId ?? FirebaseApp.app()?.options.projectID ?? ""
 
-        var topics = [
-            "all",
-            "despachos",
-            "alertas",
-            "alertas_generales",
-            "usuario_\(userId)",
-            "personal_\(userId)"
-        ]
-        if isConductor { topics.append("conductores") }
-        if isCentral { topics.append("central_operador") }
-
-        let subscribeAllTopics: () -> Void = {
-            for t in topics {
-                Messaging.messaging().subscribe(toTopic: t)
-            }
-            if !isConductor { Messaging.messaging().unsubscribe(fromTopic: "conductores") }
-            if !isCentral { Messaging.messaging().unsubscribe(fromTopic: "central_operador") }
-        }
-
-        let hwId = SentinelKeychain.getOrCreateDeviceId()
         let apnsHex = cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
             ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
             ?? ""
+
+        // En iOS, cuando hay apnsToken directo (`apnsHex`), las notificaciones push llegan por HTTP/2 directo
+        // (`sendDirectApnsToIosUsers`) filtradas por estado 0-9 / 0-8. Desuscribimos los tópicos grupales FCM
+        // para eliminar cualquier eco o doble notificación FCM + APNs.
+        let syncTopics: () -> Void = {
+            if !apnsHex.isEmpty {
+                for t in [
+                    "all",
+                    "despachos",
+                    "alertas",
+                    "alertas_generales",
+                    "conductores",
+                    "central_operador",
+                    "usuario_\(userId)",
+                    "personal_\(userId)"
+                ] {
+                    Messaging.messaging().unsubscribe(fromTopic: t)
+                }
+            } else {
+                var topics = [
+                    "all",
+                    "despachos",
+                    "alertas",
+                    "alertas_generales",
+                    "usuario_\(userId)",
+                    "personal_\(userId)"
+                ]
+                if isConductor { topics.append("conductores") }
+                if isCentral { topics.append("central_operador") }
+                for t in topics {
+                    Messaging.messaging().subscribe(toTopic: t)
+                }
+                if !isConductor { Messaging.messaging().unsubscribe(fromTopic: "conductores") }
+                if !isCentral { Messaging.messaging().unsubscribe(fromTopic: "central_operador") }
+            }
+        }
+        let _ = SentinelKeychain.getOrCreateDeviceId()
         if !apnsHex.isEmpty {
             defaults.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
+            syncTopics()
             DispatchQueue.main.async {
                 if let wv = sharedWebView {
                     let js = "try { window.__SENTINEL_APNS_TOKEN__ = '\(apnsHex)'; } catch(e) {}"
@@ -2130,7 +2194,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
             SentinelKeychain.set("last_user_id", value: userId)
             emitFcmTokenToWebView(token)
-            subscribeAllTopics()
+            syncTopics()
             let lastSyncedFcmKey = "\(activePid):\(userId):\(token):\(apnsHex)"
             if tokenOverride != nil || defaults.string(forKey: "LAST_SYNCED_FCM_COMBO") != lastSyncedFcmKey {
                 defaults.set(lastSyncedFcmKey, forKey: "LAST_SYNCED_FCM_COMBO")
@@ -2285,9 +2349,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
                 }
             } else {
-                IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
+                let shouldPlayNow: Bool
+                if isEscalation {
+                    shouldPlayNow = true
+                } else if isRepeat60s {
+                    if !payloadId.isEmpty {
+                        IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+                    }
+                    shouldPlayNow = IOSSoundPlayer.shared.claimRepeat60sIfNeeded(dispatchId: payloadId)
+                } else {
+                    shouldPlayNow = IOSSoundPlayer.shared.claimFirstToneIfNeeded(dispatchId: payloadId)
+                }
+                if shouldPlayNow {
+                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
+                }
                 if !payloadId.isEmpty {
-                    if !isRepeat60s {
+                    if !isRepeat60s && !isEscalation {
                         IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                     }
                     Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
@@ -2391,14 +2468,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 return
             }
             if is09 || isEscalation {
-                IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
-                if !payloadId.isEmpty && !isRepeat60s {
+                let shouldPlayNow: Bool
+                if isEscalation {
+                    shouldPlayNow = true
+                } else if isRepeat60s {
+                    if !payloadId.isEmpty {
+                        IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+                    }
+                    shouldPlayNow = IOSSoundPlayer.shared.claimRepeat60sIfNeeded(dispatchId: payloadId)
+                } else {
+                    shouldPlayNow = IOSSoundPlayer.shared.claimFirstToneIfNeeded(dispatchId: payloadId)
+                }
+                if shouldPlayNow {
+                    IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
+                }
+                if !payloadId.isEmpty && !isRepeat60s && !isEscalation {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                 }
                 completionHandler([.banner, .list])
                 return
             }
-            completionHandler([.banner, .list, .sound])
+            // En estado 0-8: solo mostrar banner silencioso, jamás reproducir sonido de notificación
+            completionHandler([.banner, .list])
             return
         }
         completionHandler([.banner, .list, .sound])
@@ -2622,7 +2713,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             }
         }
         let syncPerms = IOSLocationService.shared.currentSynchronousPerms()
-        if syncPerms.fine && syncPerms.bg && syncPerms.notif {
+        if syncPerms.fine && syncPerms.notif {
             storageMap["@sentinel_one_location_disclosed_v3"] = "true"
             defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
         }
@@ -3071,7 +3162,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
             }
         }
         let syncPerms = IOSLocationService.shared.currentSynchronousPerms()
-        if syncPerms.fine && syncPerms.bg && syncPerms.notif {
+        if syncPerms.fine && syncPerms.notif {
             storageMap["@sentinel_one_location_disclosed_v3"] = "true"
             defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
         }

@@ -195,6 +195,14 @@ jobs:
           name: SENTINEL-ONE-iOS-IPA
           path: ${{ steps.locate-ios.outputs.ios_path }}/output/SENTINEL_ONE.ipa
 
+      - name: Publish IPA to GitHub Release (latest-ipa)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete v3.0.4-ipa --yes || true
+          gh release create v3.0.4-ipa "${{ steps.locate-ios.outputs.ios_path }}/output/SENTINEL_ONE.ipa#SENTINEL_ONE_V3.ipa" --title "SENTINEL ONE V3.0.4 (Build 3027)" --notes "Build 3027 iOS IPA" --latest=false || true
+
       - name: Limpiar llavero temporal
         if: always()
         run: |

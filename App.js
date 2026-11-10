@@ -105,13 +105,28 @@ export default function App() {
     if (isBooting) return;
 
     let cancelled = false;
+    const isIosRuntime =
+      typeof window !== 'undefined' &&
+      Boolean(window.webkit?.messageHandlers?.iOSApp || window.__SENTINEL_PLATFORM__ === 'ios');
+
+    const isPermsSatisfied = (permsObj) => {
+      if (!permsObj) return false;
+      if (isIosRuntime) {
+        return Boolean(
+          permsObj.notifications && (permsObj.backgroundLocation || permsObj.fineLocation)
+        );
+      }
+      return Boolean(
+        permsObj.notifications &&
+          permsObj.backgroundLocation &&
+          permsObj.overlay &&
+          permsObj.batteryUnrestricted
+      );
+    };
+
     const evaluatePermissions = async () => {
       const currentPerms = readNativePermissionsStatus();
-      const allGranted =
-        currentPerms.notifications &&
-        currentPerms.backgroundLocation &&
-        currentPerms.overlay &&
-        currentPerms.batteryUnrestricted;
+      const allGranted = isPermsSatisfied(currentPerms);
 
       if (allGranted) {
         persistDisclosureAccepted();
@@ -129,12 +144,7 @@ export default function App() {
 
     const onPermsChanged = () => {
       const updated = readNativePermissionsStatus();
-      if (
-        updated.notifications &&
-        updated.backgroundLocation &&
-        updated.overlay &&
-        updated.batteryUnrestricted
-      ) {
+      if (isPermsSatisfied(updated)) {
         persistDisclosureAccepted();
         setLocationModalVisible(false);
       }
