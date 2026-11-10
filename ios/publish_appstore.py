@@ -26,7 +26,7 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.0.4"
-TARGET_BUILD_NUMBER = "3025"
+TARGET_BUILD_NUMBER = "3026"
 
 SUPPORT_URL = "https://github.com/danielolatenaranjo-art/sisbom"
 COPYRIGHT_TEXT = "2026 Sistema Sentinel - Cuerpos de Bomberos"
@@ -526,7 +526,24 @@ def main():
             else:
                 print("   ✅ AgeRatingDeclaration actualizado al 100%.")
 
-    # 4. Obtener la versión 3.0.3 y configurar Copyright + ReleaseType
+    # 4. Obtener la versión TARGET_VERSION, cancelar cualquier reviewSubmission WAITING_FOR_REVIEW previa si se necesita adjuntar un nuevo build, y configurar Copyright + ReleaseType
+    _, waiting_res = api_request(
+        "GET",
+        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=WAITING_FOR_REVIEW",
+        token=token,
+    )
+    for w_sub in waiting_res.get("data", []):
+        w_id = w_sub.get("id")
+        if w_id:
+            print(f"🔄 Retirando momentáneamente envío en espera (id={w_id}) para vincular el nuevo Build {TARGET_BUILD_NUMBER}...")
+            api_request(
+                "PATCH",
+                f"/v1/reviewSubmissions/{w_id}",
+                body={"data": {"type": "reviewSubmissions", "id": w_id, "attributes": {"canceled": True}}},
+                token=token,
+            )
+            time.sleep(3)
+
     _, ver_res = api_request("GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10", token=token)
     versions = ver_res.get("data", [])
     version_id = None
@@ -717,14 +734,19 @@ def main():
             token=token,
         )
 
-    # 7. Vincular el Build 3004 (o el más reciente VALID)
-    _, b_res = api_request("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10", token=token)
-    builds = b_res.get("data", [])
+    # 7. Vincular el Build TARGET_BUILD_NUMBER (esperando a que pase a VALID si recién subió)
     selected_build = None
-    for b in builds:
-        if str(b.get("attributes", {}).get("version")) == TARGET_BUILD_NUMBER and b.get("attributes", {}).get("processingState") == "VALID":
-            selected_build = b
+    for attempt in range(24):
+        _, b_res = api_request("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10", token=token)
+        builds = b_res.get("data", [])
+        for b in builds:
+            if str(b.get("attributes", {}).get("version")) == TARGET_BUILD_NUMBER and b.get("attributes", {}).get("processingState") == "VALID":
+                selected_build = b
+                break
+        if selected_build:
             break
+        print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} en App Store Connect (intento {attempt + 1}/24)...")
+        time.sleep(15)
     if not selected_build:
         for b in builds:
             if b.get("attributes", {}).get("processingState") == "VALID":
@@ -748,16 +770,30 @@ def main():
         )
         print(f"✅ Build {b_ver} vinculado a la versión {TARGET_VERSION}.")
 
-    # 8. Enviar oficialmente a Revisión de App Store
-    print("🚀 Enviando versión 3.0.3 a Revisión de App Store...")
+    # 8. Enviar oficialmente a Revisión de App Store (priorizando UNRESOLVED_ISSUES y marcando items REJECTED como resolved=True)
+    print(f"🚀 Enviando versión {TARGET_VERSION} a Revisión de App Store...")
     _, list_res = api_request(
         "GET",
-        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=READY_FOR_REVIEW,UNRESOLVED_ISSUES",
+        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=UNRESOLVED_ISSUES,READY_FOR_REVIEW&include=items",
         token=token,
     )
     existing_subs = list_res.get("data", [])
-    if existing_subs:
-        submission_id = existing_subs[0]["id"]
+    unresolved_subs = [s for s in existing_subs if s.get("attributes", {}).get("state") == "UNRESOLVED_ISSUES"]
+    ready_subs = [s for s in existing_subs if s.get("attributes", {}).get("state") == "READY_FOR_REVIEW"]
+
+    if unresolved_subs:
+        submission_id = unresolved_subs[0]["id"]
+        for item_ref in unresolved_subs[0].get("relationships", {}).get("items", {}).get("data", []):
+            item_id = item_ref.get("id")
+            if item_id:
+                api_request(
+                    "PATCH",
+                    f"/v1/reviewSubmissionItems/{item_id}",
+                    body={"data": {"type": "reviewSubmissionItems", "id": item_id, "attributes": {"resolved": True}}},
+                    token=token,
+                )
+    elif ready_subs:
+        submission_id = ready_subs[0]["id"]
     else:
         st_sub, sub_res = api_request(
             "POST",
@@ -774,20 +810,21 @@ def main():
         submission_id = sub_res.get("data", {}).get("id") if st_sub in (200, 201) else None
 
     if submission_id:
-        api_request(
-            "POST",
-            "/v1/reviewSubmissionItems",
-            body={
-                "data": {
-                    "type": "reviewSubmissionItems",
-                    "relationships": {
-                        "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": submission_id}},
-                        "appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}},
-                    },
-                }
-            },
-            token=token,
-        )
+        if not unresolved_subs:
+            api_request(
+                "POST",
+                "/v1/reviewSubmissionItems",
+                body={
+                    "data": {
+                        "type": "reviewSubmissionItems",
+                        "relationships": {
+                            "reviewSubmission": {"data": {"type": "reviewSubmissions", "id": submission_id}},
+                            "appStoreVersion": {"data": {"type": "appStoreVersions", "id": version_id}},
+                        },
+                    }
+                },
+                token=token,
+            )
         st_conf, conf_res = api_request(
             "PATCH",
             f"/v1/reviewSubmissions/{submission_id}",

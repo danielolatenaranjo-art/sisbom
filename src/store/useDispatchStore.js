@@ -1111,6 +1111,8 @@ export const useDispatchStore = create((set, get) => ({
           get().applyAlertsRawDocs(payload);
         } else if (col === 'personal' && Array.isArray(payload)) {
           get().applyPersonalRawDocs(payload);
+        } else if (col === 'personalSelf' && payload && typeof payload === 'object') {
+          useAuthStore.getState().syncUserFromPersonalList([payload]);
         }
       };
       window.addEventListener('sentinelNativeFirestoreSync', (ev) => {
@@ -1553,8 +1555,13 @@ export const useDispatchStore = create((set, get) => ({
         _fieldTimestamps: rawData._fieldTimestamps && typeof rawData._fieldTimestamps === 'object' ? rawData._fieldTimestamps : {}
       };
 
+      const authUserNow = useAuthStore.getState().user;
+      const isMyDoc = authUserNow && String(authUserNow.idRegistro || '').trim() === docId;
+      const localCandidate = isMyDoc && getEntityMaxTimestamp(authUserNow) > getEntityMaxTimestamp(existing) ? { ...(existing || {}), ...authUserNow } : existing;
+
       // Ley #4: Si el registro local en memoria tiene un timestamp mayor al entrante, conservar el local
-      if (existing && (shouldKeepLocalByTimestamp('personal', docId, existing, incomingItem) || hasPendingWrites)) {
+      if (localCandidate && (shouldKeepLocalByTimestamp('personal', docId, localCandidate, incomingItem) || hasPendingWrites)) {
+        const existing = localCandidate;
         list.push({
           ...incomingItem,
           ...existing,
@@ -1821,7 +1828,7 @@ export const useDispatchStore = create((set, get) => ({
           'idRegistro', 'idRadial', 'nombreBombero', 'nombre', 'cargo',
           'compania', 'estado', 'enServicio', 'conductor', 'activo',
           'puerta', 'Puerta', 'telefono', 'licenciaMedica',
-          'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp'
+          'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
         ].map((f) => `mask.fieldPaths=${f}`).join('&');
         const persRes = await fetchFirestoreWithAuth(`${baseUrl}/personal?pageSize=300&${maskFields}`, apiKey).catch(() => null);
         if (persRes && persRes.ok) {

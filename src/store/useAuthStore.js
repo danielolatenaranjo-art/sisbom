@@ -151,7 +151,7 @@ async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
     'cargo', 'compania', 'estado', 'enServicio', 'conductor', 'activo',
     'puerta', 'Puerta', 'contrasena', 'telefono', 'email', 'deviceId',
     'tokenFcm', 'fcmToken', 'apnsToken', 'hardwareDeviceId',
-    'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds'
+    'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
   ].map(f => `mask.fieldPaths=${f}`).join('&');
 
   let pageToken = '';
@@ -515,13 +515,35 @@ export const useAuthStore = create((set, get) => ({
     try {
       const freshMatch = await fetchPersonalUserFromFirestoreRest(currentUser);
       if (freshMatch) {
+        const now = Date.now();
         const localMaxTs = getEntityMaxTimestamp(currentUser);
         const incomingMaxTs = getEntityMaxTimestamp(freshMatch);
-        // Ley #4: "Mayor Timestamp Gana" — si el estado local tiene un timestamp estrictamente mayor que el entrante de red, no pisar
-        if (localMaxTs > 0 && incomingMaxTs > 0 && localMaxTs > incomingMaxTs) {
-          return currentUser;
-        }
+        const localFieldTs = currentUser._fieldTimestamps || {};
+        const incomingFieldTs = freshMatch._fieldTimestamps || {};
         const updatedUser = buildNormalizedUserObject(freshMatch, currentUser);
+        // Ley #4: "Mayor Timestamp Gana" por campo y por entidad
+        if (localMaxTs > 0 && incomingMaxTs > 0 && localMaxTs > incomingMaxTs) {
+          const localEstTs = Number(localFieldTs.estado || localMaxTs);
+          const incEstTs = Number(incomingFieldTs.estado || incomingMaxTs);
+          if (localEstTs >= incEstTs) updatedUser.estado = currentUser.estado;
+          const localSvcTs = Number(localFieldTs.enServicio || localMaxTs);
+          const incSvcTs = Number(incomingFieldTs.enServicio || incomingMaxTs);
+          if (localSvcTs >= incSvcTs) updatedUser.enServicio = currentUser.enServicio;
+        }
+        if (pendingStatusValue !== null && (now - lastStatusChangeTs) < 20000) {
+          if (updatedUser.estado === pendingStatusValue) {
+            pendingStatusValue = null;
+          } else {
+            updatedUser.estado = currentUser.estado;
+          }
+        }
+        if (pendingServiceValue !== null && (now - lastServiceChangeTs) < 20000) {
+          if (String(updatedUser.enServicio) === String(pendingServiceValue)) {
+            pendingServiceValue = null;
+          } else {
+            updatedUser.enServicio = currentUser.enServicio;
+          }
+        }
         set({ user: updatedUser });
         syncNativeUserSession(updatedUser);
         try {
@@ -614,7 +636,7 @@ export const useAuthStore = create((set, get) => ({
       }
 
       // Protección anti-rebote (4s) para estado y enServicio frente a snapshots en vuelo (idéntico a SisBomViewModel.kt)
-      if (pendingStatusValue !== null && (now - lastStatusChangeTs) < 4000) {
+      if (pendingStatusValue !== null && (now - lastStatusChangeTs) < 20000) {
         if (updatedUser.estado === pendingStatusValue) {
           pendingStatusValue = null;
         } else {
@@ -624,7 +646,7 @@ export const useAuthStore = create((set, get) => ({
         pendingStatusValue = null;
       }
 
-      if (pendingServiceValue !== null && (now - lastServiceChangeTs) < 4000) {
+      if (pendingServiceValue !== null && (now - lastServiceChangeTs) < 20000) {
         if (String(updatedUser.enServicio) === String(pendingServiceValue)) {
           pendingServiceValue = null;
         } else {
@@ -666,6 +688,32 @@ export const useAuthStore = create((set, get) => ({
         syncNativeStorageKey(USER_SESSION_KEY, serialized);
         await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
       } catch (e) {}
+      try {
+        const { useDispatchStore, markLocalWrite } = require('./useDispatchStore');
+        if (typeof markLocalWrite === 'function' && docId) {
+          markLocalWrite('personal', String(docId), nowTs);
+        }
+        const dispState = useDispatchStore?.getState?.();
+        if (dispState && Array.isArray(dispState.firefightersList)) {
+          useDispatchStore.setState({
+            firefightersList: dispState.firefightersList.map((f) =>
+              String(f.idRegistro).trim() === String(docId).trim()
+                ? {
+                    ...f,
+                    estado: cleanNewStatus,
+                    ...(cleanNewStatus === '0-8' ? { enServicio: '0' } : {}),
+                    _metaTimestamp: nowTs,
+                    _fieldTimestamps: {
+                      ...(f._fieldTimestamps || {}),
+                      estado: nowTs,
+                      ...(cleanNewStatus === '0-8' ? { enServicio: nowTs } : {})
+                    }
+                  }
+                : f
+            )
+          });
+        }
+      } catch (_) {}
     }
   },
 
@@ -1053,6 +1101,30 @@ export const useAuthStore = create((set, get) => ({
       syncNativeStorageKey(USER_SESSION_KEY, serialized);
       await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
     } catch (e) {}
+    try {
+      const { useDispatchStore, markLocalWrite } = require('./useDispatchStore');
+      if (typeof markLocalWrite === 'function' && docId) {
+        markLocalWrite('personal', String(docId), nowTs);
+      }
+      const dispState = useDispatchStore?.getState?.();
+      if (dispState && Array.isArray(dispState.firefightersList)) {
+        useDispatchStore.setState({
+          firefightersList: dispState.firefightersList.map((f) =>
+            String(f.idRegistro).trim() === String(docId).trim()
+              ? {
+                  ...f,
+                  enServicio: newEnServicio,
+                  _metaTimestamp: nowTs,
+                  _fieldTimestamps: {
+                    ...(f._fieldTimestamps || {}),
+                    enServicio: nowTs
+                  }
+                }
+              : f
+          )
+        });
+      }
+    } catch (_) {}
 
     const isBypass = useLicenseStore.getState().isBypassMode;
     const isReadOnly = useLicenseStore.getState().isReadOnly;

@@ -378,6 +378,35 @@ export function resolveCoreUnitStatusInfo(
     }
 
     const cleanClave = rawServ === '1' ? 'ACTO' : rawServ.toUpperCase();
+
+    // Si es una salida especial ("6-14", "10-9", "6-13") y tenemos bitácoras cargadas,
+    // verificar que tenga al menos una bitácora abierta sin timestamp de cierre 6-8 (h68 / tiempos.h68).
+    // Si todas las bitácoras de ese carro están cerradas con 6-8, el carro está disponible (0-9).
+    if ((cleanClave === '6-14' || cleanClave === '10-9' || cleanClave === '6-13') && bitacoraMapOrList && typeof bitacoraMapOrList.forEach === 'function') {
+      let hasAnyBitacoraForCarro = false;
+      let hasOpenBitacoraForCarro = false;
+      bitacoraMapOrList.forEach(b => {
+        const bCarro = String(b?.carro || b?.idCarro || '').replace(/-/g, '').trim().toUpperCase();
+        if (bCarro === normUnitId) {
+          hasAnyBitacoraForCarro = true;
+          const isClosed = Boolean(b?.tiempos?.h68 || b?.h68 || b?.hora68);
+          if (!isClosed) {
+            hasOpenBitacoraForCarro = true;
+          }
+        }
+      });
+      if (hasAnyBitacoraForCarro && !hasOpenBitacoraForCarro) {
+        return {
+          isAvailable: true,
+          is08: false,
+          isInService: false,
+          activeClave: null,
+          activeServiceId: null,
+          badgeLabel: '0-9 DISP'
+        };
+      }
+    }
+
     return {
       isAvailable: false,
       is08: false,
@@ -562,6 +591,19 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
     mergedFieldTimestamps[k] = Math.max(Number(localFieldTs[k] || 0), Number(remoteFieldTs[k] || 0));
   });
 
+  const mergedTripulacion = (() => {
+    const lTrip = Array.isArray(localUnit.tripulacion) && localUnit.tripulacion.length > 0 ? localUnit.tripulacion : null;
+    const rTrip = Array.isArray(remoteUnit.tripulacion) && remoteUnit.tripulacion.length > 0 ? remoteUnit.tripulacion : null;
+    if (lTrip && !rTrip) return lTrip;
+    if (!lTrip && rTrip) return rTrip;
+    if (lTrip && rTrip) {
+      const lFts = Number(localFieldTs.tripulacion || localTs || 0);
+      const rFts = Number(remoteFieldTs.tripulacion || remoteTs || 0);
+      return lFts >= rFts ? lTrip : rTrip;
+    }
+    return [];
+  })();
+
   return {
     ...remoteUnit,
     ...localUnit,
@@ -571,6 +613,7 @@ export function mergeServiceUnitByHigherTimestamp(localUnit = {}, remoteUnit = {
     driverRad: pickField('driverRad') || '',
     obacRad: pickField('obacRad') || '',
     count: pickField('count') || '',
+    tripulacion: mergedTripulacion,
     tripInfo: pickField('tripInfo') || '',
     report: pickField('report') || '',
     observation: pickField('observation') || '',
@@ -871,6 +914,7 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
     driverRad: b.conductor || '',
     obacRad: b.obac || '',
     count: b.cuantosBomberos !== undefined && b.cuantosBomberos !== '' ? String(b.cuantosBomberos) : '',
+    tripulacion: Array.isArray(b.tripulacion) ? b.tripulacion : (Array.isArray(ex.tripulacion) ? ex.tripulacion : []),
     tripInfo: b.preinforme || '',
     report: b.informe63 || '',
     observation: b.observacion || '',
@@ -1131,7 +1175,14 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
     cuantosBomberos: typeof rawCount === 'string' && isNaN(Number(rawCount.trim())) && rawCount.trim() !== ''
       ? rawCount.trim()
       : cuantosBomberos,
-    tripulacion: Array.isArray(sourceUnit.tripulacion) ? sourceUnit.tripulacion : [],
+    tripulacion: Array.isArray(sourceUnit.tripulacion)
+      ? sourceUnit.tripulacion
+          .map((m) => ({
+            idRadial: String(m?.idRadial || m?.id || '').trim().toUpperCase(),
+            nombre: String(m?.nombre || m?.nombreBombero || '').trim().toUpperCase()
+          }))
+          .filter((m) => Boolean(m.idRadial || m.nombre))
+      : [],
     kmLlegada: kmLlegadaNum,
     estadoMovil,
     tiempos: {

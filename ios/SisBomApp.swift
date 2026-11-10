@@ -758,6 +758,7 @@ final class IOSRealtimeService {
     private var latestVehiculosPayload: [[String: Any]]?
     private var latestAlertasPayload: [[String: Any]]?
     private var latestPersonalPayload: [[String: Any]]?
+    private var latestPersonalSelfPayload: [String: Any]?
     private var lastNativeSnapshotAt: TimeInterval = 0
 
     private init() {}
@@ -848,6 +849,9 @@ final class IOSRealtimeService {
             }
             if let p = latestPersonalPayload {
                 pushSnapshotToWebView(collection: "personal", payload: p)
+            }
+            if let ps = latestPersonalSelfPayload {
+                pushSnapshotToWebView(collection: "personalSelf", payload: ps)
             }
             return
         }
@@ -1282,6 +1286,24 @@ final class IOSRealtimeService {
                         }
                     }
                 }
+                var selfPayload = cleanData
+                selfPayload["idRegistro"] = doc.documentID
+                self.latestPersonalSelfPayload = selfPayload
+                self.pushSnapshotToWebView(collection: "personalSelf", payload: selfPayload)
+
+                if let rawSession = defaults.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
+                   let sessData = rawSession.data(using: .utf8),
+                   var sessDict = (try? JSONSerialization.jsonObject(with: sessData)) as? [String: Any] {
+                    if !newEst.isEmpty {
+                        sessDict["estado"] = newEst
+                    }
+                    sessDict["enServicio"] = newSvc.isEmpty ? "0" : newSvc
+                    if let updatedData = try? JSONSerialization.data(withJSONObject: sessDict),
+                       let updatedStr = String(data: updatedData, encoding: .utf8) {
+                        defaults.set(updatedStr, forKey: "WEBSTORAGE_@sentinel_one_v3_user_session")
+                    }
+                }
+
                 self.isFirstPersonalSnapshot = false
             }
         }
@@ -2085,14 +2107,18 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     wv.evaluateJavaScript(js, completionHandler: nil)
                 }
             }
-            authenticateNativeApp(activeFirebaseApp()) {
-                let db = activeFirestore()
-                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                db.collection("personal").document(userId).setData([
-                    "apnsToken": apnsHex,
-                    "platform": "ios",
-                    "_metaTimestamp": nowMs
-                ], merge: true)
+            let lastSyncedApnsKey = "\(activePid):\(userId):\(apnsHex)"
+            if defaults.string(forKey: "LAST_SYNCED_APNS_COMBO") != lastSyncedApnsKey {
+                defaults.set(lastSyncedApnsKey, forKey: "LAST_SYNCED_APNS_COMBO")
+                authenticateNativeApp(activeFirebaseApp()) {
+                    let db = activeFirestore()
+                    let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                    db.collection("personal").document(userId).setData([
+                        "apnsToken": apnsHex,
+                        "platform": "ios",
+                        "_metaTimestamp": nowMs
+                    ], merge: true)
+                }
             }
         }
 
@@ -2105,18 +2131,22 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             SentinelKeychain.set("last_user_id", value: userId)
             emitFcmTokenToWebView(token)
             subscribeAllTopics()
-            authenticateNativeApp(activeFirebaseApp()) {
-                let db = activeFirestore()
-                let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                var patch: [String: Any] = [
-                    "deviceId": token,
-                    "platform": "ios",
-                    "_metaTimestamp": nowMs
-                ]
-                if !apnsHex.isEmpty {
-                    patch["apnsToken"] = apnsHex
+            let lastSyncedFcmKey = "\(activePid):\(userId):\(token):\(apnsHex)"
+            if tokenOverride != nil || defaults.string(forKey: "LAST_SYNCED_FCM_COMBO") != lastSyncedFcmKey {
+                defaults.set(lastSyncedFcmKey, forKey: "LAST_SYNCED_FCM_COMBO")
+                authenticateNativeApp(activeFirebaseApp()) {
+                    let db = activeFirestore()
+                    let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+                    var patch: [String: Any] = [
+                        "deviceId": token,
+                        "platform": "ios",
+                        "_metaTimestamp": nowMs
+                    ]
+                    if !apnsHex.isEmpty {
+                        patch["apnsToken"] = apnsHex
+                    }
+                    db.collection("personal").document(userId).setData(patch, merge: true)
                 }
-                db.collection("personal").document(userId).setData(patch, merge: true)
             }
         }
 
@@ -2561,8 +2591,91 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
 
     // Si iOS termina el proceso WebContent en segundo plano tras muchas horas de inactividad,
     // recargar automáticamente el WebView local para que nunca quede congelado ni obligue a cerrar la app de Recientes.
+    static func refreshBootUserScript(on webView: WKWebView?) {
+        guard let wv = webView else { return }
+        let defaults = UserDefaults.standard
+        let storageKeys = [
+            "@sentinel_one_v3_license_cache",
+            "@sentinel_one_v3_logo_data_uri",
+            "@sentinel_one_v3_user_session",
+            "@sentinel_one_v3_user_prefs",
+            "@sentinel_one_location_disclosed_v3"
+        ]
+        var storageMap: [String: String] = [:]
+        for k in storageKeys {
+            if let val = defaults.string(forKey: "WEBSTORAGE_\(k)"), !val.isEmpty {
+                storageMap[k] = val
+            }
+        }
+        // Asegurar que la sesión inyectada tenga siempre el último USER_ESTADO conocido en UserDefaults
+        if let rawSess = storageMap["@sentinel_one_v3_user_session"],
+           let sessData = rawSess.data(using: .utf8),
+           var sessDict = (try? JSONSerialization.jsonObject(with: sessData)) as? [String: Any] {
+            let latestEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if !latestEst.isEmpty {
+                sessDict["estado"] = latestEst
+            }
+            if let updatedData = try? JSONSerialization.data(withJSONObject: sessDict),
+               let updatedStr = String(data: updatedData, encoding: .utf8) {
+                storageMap["@sentinel_one_v3_user_session"] = updatedStr
+                defaults.set(updatedStr, forKey: "WEBSTORAGE_@sentinel_one_v3_user_session")
+            }
+        }
+        let syncPerms = IOSLocationService.shared.currentSynchronousPerms()
+        if syncPerms.fine && syncPerms.bg && syncPerms.notif {
+            storageMap["@sentinel_one_location_disclosed_v3"] = "true"
+            defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
+        }
+        let storageJson: String
+        if let jsonData = try? JSONSerialization.data(withJSONObject: storageMap),
+           let jsonStr = String(data: jsonData, encoding: .utf8) {
+            storageJson = jsonStr
+        } else {
+            storageJson = "{}"
+        }
+        let hwId = SentinelKeychain.getOrCreateDeviceId()
+        let apnsHex = AppDelegate.cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
+            ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
+            ?? SentinelKeychain.get("apns_token_hex")
+            ?? ""
+        let lastKeychainPid = SentinelKeychain.get("last_project_id") ?? ""
+        let lastKeychainUid = SentinelKeychain.get("last_user_id") ?? ""
+        let lastSessionStr = (!lastKeychainPid.isEmpty && !lastKeychainUid.isEmpty) ? "\(lastKeychainPid):\(lastKeychainUid)" : ""
+
+        let bootJs = """
+        (function() {
+            try {
+                window.__SENTINEL_PLATFORM__ = 'ios';
+                window.__SENTINEL_HW_DEVICE_ID__ = "\(hwId)";
+                window.__SENTINEL_APNS_TOKEN__ = "\(apnsHex)";
+                window.__SENTINEL_KEYCHAIN_LAST_SESSION__ = "\(lastSessionStr)";
+                window.__SENTINEL_IOS_PERMS__ = {
+                    fineLocation: \(syncPerms.fine ? "true" : "false"),
+                    backgroundLocation: \(syncPerms.bg ? "true" : "false"),
+                    overlay: true,
+                    batteryUnrestricted: true,
+                    notifications: \(syncPerms.notif ? "true" : "false")
+                };
+                var restored = \(storageJson);
+                if (window.localStorage && restored) {
+                    Object.keys(restored).forEach(function(k) {
+                        if (!window.localStorage.getItem(k) && restored[k]) {
+                            window.localStorage.setItem(k, restored[k]);
+                        }
+                    });
+                }
+            } catch (e) {}
+        })();
+        """
+        let ucc = wv.configuration.userContentController
+        ucc.removeAllUserScripts()
+        let userScript = WKUserScript(source: bootJs, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+        ucc.addUserScript(userScript)
+    }
+
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         DispatchQueue.main.async {
+            Self.refreshBootUserScript(on: webView)
             if let startUrl = URL(string: "sentinel://appassets.androidplatform.net/index.html") {
                 webView.load(URLRequest(url: startUrl))
             } else {
@@ -2706,6 +2819,17 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                     defaults.set("0", forKey: "USER_EN_SERVICIO")
                     IOSLocationService.shared.stopTracking()
                 }
+                if let rawSess = defaults.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
+                   let sessData = rawSess.data(using: .utf8),
+                   var sessDict = (try? JSONSerialization.jsonObject(with: sessData)) as? [String: Any] {
+                    sessDict["estado"] = st
+                    if st == "0-8" { sessDict["enServicio"] = "0" }
+                    if let updatedData = try? JSONSerialization.data(withJSONObject: sessDict),
+                       let updatedStr = String(data: updatedData, encoding: .utf8) {
+                        defaults.set(updatedStr, forKey: "WEBSTORAGE_@sentinel_one_v3_user_session")
+                    }
+                }
+                Self.refreshBootUserScript(on: AppDelegate.sharedWebView)
                 IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                 IOSLocationService.shared.updateStandbyKeepAlive()
             }
@@ -2779,6 +2903,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 } else {
                     defaults.removeObject(forKey: "WEBSTORAGE_\(key)")
                 }
+                Self.refreshBootUserScript(on: AppDelegate.sharedWebView)
             }
         case "cacheInstitutionLogo":
             if let rawUrl = dict["url"] as? String,
@@ -2992,7 +3117,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
             } catch (e) {}
         })();
         """
-        let userScript = WKUserScript(source: bootJs, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        let userScript = WKUserScript(source: bootJs, injectionTime: .atDocumentStart, forMainFrameOnly: true)
         config.userContentController.addUserScript(userScript)
 
         let wv = WKWebView(frame: .zero, configuration: config)
