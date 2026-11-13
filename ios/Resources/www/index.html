@@ -46,6 +46,8 @@
         box-shadow: none !important;
       }
       html, body, #root {
+        position: fixed !important;
+        inset: 0 !important;
         width: 100% !important;
         height: 100% !important;
         margin: 0 !important;
@@ -54,6 +56,9 @@
         overscroll-behavior: none !important;
         touch-action: pan-y !important;
         background-color: #060911 !important;
+      }
+      .leaflet-container, .leaflet-container * {
+        touch-action: none !important;
       }
     </style>
     <script>
@@ -70,6 +75,6 @@
     <noscript> You need to enable JavaScript to run this app. </noscript>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
-  <script src="/expo_bundle/static/js/web/index-bf704693ed1cf7e59c44ef3bd436aada.js" defer></script>
+  <script src="/expo_bundle/static/js/web/index-1fc173bf76ff05f4ab32a60af48ad471.js" defer></script>
 </body>
 </html>

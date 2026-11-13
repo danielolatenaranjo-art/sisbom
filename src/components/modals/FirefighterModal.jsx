@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
@@ -10,13 +10,10 @@ import {
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { X, MessageCircle, PhoneCall } from "lucide-react-native";
-import { doc } from "firebase/firestore";
-import { setDoc, updateDoc } from "../../config/firestoreMeta";
-import { getDb, ensureFirebaseAuth } from "../../config/firebase";
 import { useAuthStore } from "../../store/useAuthStore";
 import { useLicenseStore } from "../../store/useLicenseStore";
 import { useDispatchStore } from "../../store/useDispatchStore";
-import { buildCanonicalPersonStatusHistoryDoc } from "../../shared/sentinelCore";
+import { hasCommanderPrivileges } from "../../shared/sentinelCore";
 
 // Formato de Teléfono Chileno: +56 9 XXXX XXXX
 function formatChileanPhone(rawPhone) {
@@ -41,22 +38,86 @@ function formatChileanPhone(rawPhone) {
   return rawPhone;
 }
 
+const ADMIN_STATUS_OPTIONS = [
+  { key: "0-9", label: "0-9", bg: "#059669", border: "#34D399" },
+  { key: "0-8", label: "0-8", bg: "#DC2626", border: "#F87171" },
+  { key: "PERMISO", label: "PERMISO", bg: "#EA580C", border: "#FB923C" },
+  { key: "LICENCIA", label: "LICENCIA", bg: "#0284C7", border: "#38BDF8" },
+  { key: "CDS", label: "CDS", bg: "#CA8A04", border: "#FACC15" },
+  { key: "SUSPENDIDO", label: "SUSPENDIDO", bg: "#7C3AED", border: "#C084FC" },
+];
+
+function getStatusPillColors(estUpper) {
+  switch (estUpper) {
+    case "0-9":
+      return {
+        bg: "rgba(52, 199, 89, 0.15)",
+        border: "#34c759",
+        dot: "#34c759",
+        text: "#34c759",
+        label: "0-9 EN SERVICIO",
+      };
+    case "PERMISO":
+      return {
+        bg: "rgba(249, 115, 22, 0.18)",
+        border: "#fb923c",
+        dot: "#fb923c",
+        text: "#fb923c",
+        label: "PERMISO",
+      };
+    case "LICENCIA":
+      return {
+        bg: "rgba(14, 165, 233, 0.18)",
+        border: "#38bdf8",
+        dot: "#38bdf8",
+        text: "#38bdf8",
+        label: "LICENCIA MÉDICA",
+      };
+    case "CDS":
+      return {
+        bg: "rgba(234, 179, 8, 0.18)",
+        border: "#facc15",
+        dot: "#facc15",
+        text: "#facc15",
+        label: "CDS",
+      };
+    case "SUSPENDIDO":
+      return {
+        bg: "rgba(139, 92, 246, 0.22)",
+        border: "#c084fc",
+        dot: "#c084fc",
+        text: "#c084fc",
+        label: "SUSPENDIDO",
+      };
+    default:
+      return {
+        bg: "rgba(255, 59, 48, 0.15)",
+        border: "#ff3b30",
+        dot: "#ff3b30",
+        text: "#ff6b6b",
+        label: estUpper === "0-8" ? "0-8 FUERA DE SERVICIO" : estUpper,
+      };
+  }
+}
+
 export const FirefighterModal = ({ visible, bombero, onClose }) => {
-  const { user } = useAuthStore();
+  const { user, updateStatus } = useAuthStore();
   const { logoUrl } = useLicenseStore();
   const { isCentralActive } = useDispatchStore();
-  const [updatingStatus, setUpdatingStatus] = useState(false);
 
   if (!bombero) return null;
 
-  const est = String(bombero.estado || "0-8").toUpperCase();
+  const est = String(bombero.estado || "0-8").trim().toUpperCase();
   const is09 = est === "0-9";
+  const pillTheme = getStatusPillColors(est);
   const phoneFormatted = formatChileanPhone(bombero.telefono);
 
   const myRadial = String(user?.idRadial || "").trim();
   const radialNum = parseInt(myRadial.replace(/\D/g, ""), 10) || 0;
   const isComandante =
-    myRadial === "1" || user?.cargo?.toUpperCase().includes("COMANDANTE");
+    hasCommanderPrivileges(user) ||
+    myRadial === "1" ||
+    user?.cargo?.toUpperCase().includes("COMANDANTE");
   const isCapitan = radialNum >= 40 && radialNum <= 49;
   const canManageStatus = isComandante || isCapitan || isCentralActive;
 
@@ -130,52 +191,26 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
     Linking.openURL(telUrl).catch(() => {});
   };
 
-  const handleChangeBomberoStatus = async (newEstado) => {
-    if (updatingStatus) return;
-    setUpdatingStatus(true);
-    try {
-      const db = getDb();
-      if (db && bombero.idRegistro) {
-        await ensureFirebaseAuth();
-        const nowTs = Date.now();
-        const docId = String(bombero.idRegistro).trim();
-        const prevEstado = String(bombero.estado || "0-8").trim().toUpperCase();
-        const cleanNewEstado = String(newEstado || "0-8").trim().toUpperCase();
-        const isSelf = docId === String(user?.idRegistro || "").trim();
-        const payload = {
-          estado: cleanNewEstado,
-          _changedByCentral: !isSelf,
-          _metaTimestamp: nowTs,
-        };
-        if (cleanNewEstado === "LICENCIA") {
-          payload.licenciaMedica = "LICENCIA";
-        } else if (bombero.licenciaMedica) {
-          payload.licenciaMedica = "";
-        }
-        await updateDoc(doc(db, "personal", docId), payload);
+  // Cambio de estado 100% instantáneo (0ms en pantalla, sincronización REST + SDK en segundo plano sin bloquear la UI)
+  const handleChangeBomberoStatus = (newEstado) => {
+    const docId = String(bombero.idRegistro || "").trim();
+    if (!docId) return;
+    const prevEstado = String(bombero.estado || "0-8").trim().toUpperCase();
+    const cleanNewEstado = String(newEstado || "0-8").trim().toUpperCase();
+    const isSelf = docId === String(user?.idRegistro || "").trim();
 
-        const statusHistoryDoc = buildCanonicalPersonStatusHistoryDoc({
-          idEstado: String(nowTs),
-          estado: cleanNewEstado,
-          estadoAnterior: prevEstado,
-          origen: isCentralActive ? "CAD" : "ONE",
-          modificadoPor: String(
-            user?.nombreBombero || user?.nombre || user?.idRegistro || "OPERADOR",
-          ).trim(),
-          enServicio: String(bombero.enServicio || "0"),
-          timestamp: nowTs,
-        });
-        await setDoc(
-          doc(db, "personal", docId, "estados", String(nowTs)),
-          statusHistoryDoc,
-        ).catch(() => {});
-      }
-      onClose();
-    } catch (e) {
-      console.warn("Error actualizando estado de bombero:", e);
-    } finally {
-      setUpdatingStatus(false);
-    }
+    updateStatus(cleanNewEstado, isSelf ? null : docId, {
+      previousStatus: prevEstado,
+      origen: isCentralActive ? "CAD" : "ONE",
+      modificadoPor: String(
+        user?.nombreBombero || user?.nombre || user?.idRegistro || "OPERADOR",
+      ).trim(),
+      enServicio: String(bombero.enServicio || "0"),
+    }).catch((err) => {
+      console.warn("Error actualizando estado de bombero:", err);
+    });
+
+    onClose();
   };
 
   return (
@@ -239,26 +274,25 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
               <View
                 style={[
                   styles.statusPill,
-                  is09 ? styles.pill09 : styles.pill08,
+                  {
+                    backgroundColor: pillTheme.bg,
+                    borderColor: pillTheme.border,
+                  },
                 ]}
               >
                 <View
                   style={[
                     styles.dot,
-                    { backgroundColor: is09 ? "#34c759" : "#ff3b30" },
+                    { backgroundColor: pillTheme.dot },
                   ]}
                 />
                 <Text
                   style={[
                     styles.statusPillText,
-                    { color: is09 ? "#34c759" : "#ff6b6b" },
+                    { color: pillTheme.text },
                   ]}
                 >
-                  {is09
-                    ? "0-9 EN SERVICIO"
-                    : est === "0-8"
-                      ? "0-8 FUERA DE SERVICIO"
-                      : est}
+                  {pillTheme.label}
                 </Text>
               </View>
             </View>
@@ -310,38 +344,40 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
               </TouchableOpacity>
             </View>
 
-            {/* Panel de Gestión de Estado para Comandancia / Capitán / Operador */}
+            {/* Panel de Gestión de Estado para Comandancia / Capitán / Operador (Incluye SUSPENDIDO, 6 botones de igual tamaño) */}
             {canManageStatus ? (
               <View style={styles.adminStatusSection}>
                 <Text style={styles.adminStatusTitle}>
                   CAMBIAR ESTADO OPERACIONAL:
                 </Text>
                 <View style={styles.adminBtnsRow}>
-                  {["0-9", "0-8", "PERMISO", "LICENCIA", "CDS"].map(
-                    (stOption) => {
-                      const active = est === stOption;
-                      return (
-                        <TouchableOpacity
-                          key={stOption}
+                  {ADMIN_STATUS_OPTIONS.map((opt) => {
+                    const active = est === opt.key;
+                    return (
+                      <TouchableOpacity
+                        key={opt.key}
+                        style={[
+                          styles.adminStatusChip,
+                          active && {
+                            backgroundColor: opt.bg,
+                            borderColor: opt.border,
+                          },
+                        ]}
+                        onPress={() => handleChangeBomberoStatus(opt.key)}
+                        activeOpacity={0.8}
+                      >
+                        <Text
                           style={[
-                            styles.adminStatusChip,
-                            active && styles.adminStatusChipActive,
+                            styles.adminStatusChipText,
+                            active && { color: "#ffffff" },
                           ]}
-                          onPress={() => handleChangeBomberoStatus(stOption)}
-                          disabled={updatingStatus}
+                          numberOfLines={1}
                         >
-                          <Text
-                            style={[
-                              styles.adminStatusChipText,
-                              active && { color: "#ffffff" },
-                            ]}
-                          >
-                            {stOption}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    },
-                  )}
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               </View>
             ) : null}
@@ -350,7 +386,7 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
             {bombero.telefono ? (
               <View style={styles.contactButtonsRow}>
                 <TouchableOpacity
-                  style={[styles.whatsappButton, { flex: 1 }]}
+                  style={styles.whatsappButton}
                   onPress={handleOpenWhatsApp}
                   activeOpacity={0.85}
                 >
@@ -367,7 +403,12 @@ export const FirefighterModal = ({ visible, bombero, onClose }) => {
                   onPress={handleCallPhone}
                   activeOpacity={0.85}
                 >
-                  <PhoneCall size={17} color="#ffffff" />
+                  <PhoneCall
+                    size={17}
+                    color="#ffffff"
+                    style={{ marginRight: 6 }}
+                  />
+                  <Text style={styles.whatsappButtonText}>LLAMAR</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -470,8 +511,11 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   closeBtn: {
-    padding: 6,
-    borderRadius: 8,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.06)",
   },
   infoRow: {
@@ -501,14 +545,6 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
-  pill09: {
-    backgroundColor: "rgba(52, 199, 89, 0.15)",
-    borderColor: "#34c759",
-  },
-  pill08: {
-    backgroundColor: "rgba(255, 59, 48, 0.15)",
-    borderColor: "#ff3b30",
-  },
   dot: {
     width: 6,
     height: 6,
@@ -535,38 +571,41 @@ const styles = StyleSheet.create({
   adminBtnsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 6,
+    justifyContent: "space-between",
+    rowGap: 8,
   },
   adminStatusChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
+    width: "31.5%",
+    height: 38,
+    borderRadius: 10,
     backgroundColor: "#1e293b",
     borderWidth: 1,
     borderColor: "#334155",
-  },
-  adminStatusChipActive: {
-    backgroundColor: "#dc2626",
-    borderColor: "#ef4444",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 4,
   },
   adminStatusChipText: {
     fontSize: 10,
     fontWeight: "900",
     color: "#cbd5e1",
+    letterSpacing: 0.3,
   },
   contactButtonsRow: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     gap: 10,
     marginTop: 16,
   },
   whatsappButton: {
+    flex: 1,
+    height: 44,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#25d366",
-    borderRadius: 14,
-    paddingVertical: 11,
+    borderRadius: 12,
   },
   whatsappButtonText: {
     fontSize: 12,
@@ -575,19 +614,21 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   callButton: {
-    width: 44,
-    height: 42,
-    borderRadius: 14,
+    flex: 1,
+    height: 44,
+    flexDirection: "row",
+    borderRadius: 12,
     backgroundColor: "#2563eb",
     alignItems: "center",
     justifyContent: "center",
   },
   closeButton: {
     marginTop: 10,
+    height: 44,
     backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: 12,
-    paddingVertical: 12,
     alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
   },

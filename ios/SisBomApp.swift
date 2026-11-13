@@ -98,16 +98,14 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         let defaults = UserDefaults.standard
         if status == .notDetermined {
             defaults.set(true, forKey: "IOS_ASKED_WHEN_IN_USE_LOCATION")
-            manager.requestWhenInUseAuthorization()
+            DispatchQueue.main.async {
+                self.manager.requestWhenInUseAuthorization()
+            }
         } else if status == .authorizedWhenInUse {
             if !defaults.bool(forKey: "IOS_ASKED_ALWAYS_LOCATION") {
                 defaults.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
-                manager.requestAlwaysAuthorization()
-            }
-        } else if status == .denied || status == .restricted {
-            DispatchQueue.main.async {
-                if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
+                DispatchQueue.main.async {
+                    self.manager.requestAlwaysAuthorization()
                 }
             }
         }
@@ -119,29 +117,69 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             if settings.authorizationStatus == .notDetermined {
-                center.requestAuthorization(options: [.alert, .badge, .sound, .criticalAlert]) { granted, _ in
-                    if !granted {
-                        center.requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in
-                            self.syncPermissionsToWebView()
-                        }
-                    } else {
-                        self.syncPermissionsToWebView()
-                    }
+                var opts: UNAuthorizationOptions = [.alert, .badge, .sound]
+                if #available(iOS 15.0, *) {
+                    opts.insert(.timeSensitive)
+                }
+                center.requestAuthorization(options: opts) { _, _ in
+                    UserDefaults.standard.set(true, forKey: "IOS_NOTIF_DETERMINED")
                     DispatchQueue.main.async {
                         UIApplication.shared.registerForRemoteNotifications()
                     }
-                }
-            } else if settings.authorizationStatus == .denied {
-                DispatchQueue.main.async {
-                    if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
-                    }
+                    self.syncPermissionsToWebView()
                 }
             } else {
+                UserDefaults.standard.set(true, forKey: "IOS_NOTIF_DETERMINED")
                 DispatchQueue.main.async {
                     UIApplication.shared.registerForRemoteNotifications()
                 }
                 self.syncPermissionsToWebView()
+            }
+        }
+    }
+
+    func requestInitialIosPermissions() {
+        let center = UNUserNotificationCenter.current()
+        let requestLocIfNeeded = {
+            DispatchQueue.main.async {
+                let locStatus: CLAuthorizationStatus
+                if #available(iOS 14.0, *) {
+                    locStatus = self.manager.authorizationStatus
+                } else {
+                    locStatus = CLLocationManager.authorizationStatus()
+                }
+                if locStatus == .notDetermined {
+                    UserDefaults.standard.set(true, forKey: "IOS_ASKED_WHEN_IN_USE_LOCATION")
+                    self.manager.requestWhenInUseAuthorization()
+                } else if locStatus == .authorizedWhenInUse && !UserDefaults.standard.bool(forKey: "IOS_ASKED_ALWAYS_LOCATION") {
+                    UserDefaults.standard.set(true, forKey: "IOS_ASKED_ALWAYS_LOCATION")
+                    self.manager.requestAlwaysAuthorization()
+                }
+                self.syncPermissionsToWebView()
+                self.updateStandbyKeepAlive()
+            }
+        }
+
+        center.getNotificationSettings { settings in
+            if settings.authorizationStatus == .notDetermined {
+                var opts: UNAuthorizationOptions = [.alert, .badge, .sound]
+                if #available(iOS 15.0, *) {
+                    opts.insert(.timeSensitive)
+                }
+                center.requestAuthorization(options: opts) { _, _ in
+                    UserDefaults.standard.set(true, forKey: "IOS_NOTIF_DETERMINED")
+                    DispatchQueue.main.async {
+                        UIApplication.shared.registerForRemoteNotifications()
+                    }
+                    self.syncPermissionsToWebView()
+                    requestLocIfNeeded()
+                }
+            } else {
+                UserDefaults.standard.set(true, forKey: "IOS_NOTIF_DETERMINED")
+                DispatchQueue.main.async {
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+                requestLocIfNeeded()
             }
         }
     }
@@ -158,7 +196,7 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         updateStandbyKeepAlive()
     }
 
-    func currentSynchronousPerms() -> (fine: Bool, bg: Bool, notif: Bool) {
+    func currentSynchronousPerms() -> (fine: Bool, bg: Bool, notif: Bool, locNotDetermined: Bool, notifNotDetermined: Bool) {
         let status: CLAuthorizationStatus
         if #available(iOS 14.0, *) {
             status = manager.authorizationStatus
@@ -167,8 +205,10 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         }
         let fine = (status == .authorizedAlways || status == .authorizedWhenInUse)
         let bg = (status == .authorizedAlways)
+        let locNotDetermined = (status == .notDetermined)
         let notif = UserDefaults.standard.bool(forKey: "IOS_NOTIF_GRANTED")
-        return (fine, bg, notif)
+        let notifDetermined = UserDefaults.standard.bool(forKey: "IOS_NOTIF_DETERMINED")
+        return (fine, bg, notif, locNotDetermined, !notifDetermined)
     }
 
     func syncPermissionsToWebView() {
@@ -180,15 +220,18 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
         }
         let fine = (status == .authorizedAlways || status == .authorizedWhenInUse)
         let bg = (status == .authorizedAlways)
+        let locNotDetermined = (status == .notDetermined)
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             let notifGranted = (
                 settings.authorizationStatus == .authorized ||
                 settings.authorizationStatus == .provisional ||
                 settings.authorizationStatus == .ephemeral
             )
+            let notifNotDetermined = (settings.authorizationStatus == .notDetermined)
             let defaults = UserDefaults.standard
             defaults.set(notifGranted, forKey: "IOS_NOTIF_GRANTED")
-            if fine && notifGranted {
+            defaults.set(!notifNotDetermined, forKey: "IOS_NOTIF_DETERMINED")
+            if !locNotDetermined && !notifNotDetermined {
                 defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
             }
             DispatchQueue.main.async {
@@ -201,9 +244,11 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
                             backgroundLocation: \(bg ? "true" : "false"),
                             overlay: true,
                             batteryUnrestricted: true,
-                            notifications: \(notifGranted ? "true" : "false")
+                            notifications: \(notifGranted ? "true" : "false"),
+                            locNotDetermined: \(locNotDetermined ? "true" : "false"),
+                            notifNotDetermined: \(notifNotDetermined ? "true" : "false")
                         };
-                        if (\(fine && notifGranted ? "true" : "false") && window.localStorage) {
+                        if (\(!locNotDetermined && !notifNotDetermined ? "true" : "false") && window.localStorage) {
                             window.localStorage.setItem('@sentinel_one_location_disclosed_v3', 'true');
                         }
                         window.dispatchEvent(new CustomEvent('sentinelPermissionsChanged'));
@@ -1785,6 +1830,97 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
+    static func triggerNativeDoorOpen(requestId: String? = nil, customUserName: String? = nil) {
+        let targetApp = activeFirebaseApp()
+        let writeDoorCommands = {
+            let defaults = UserDefaults.standard
+            let resolvedUser = stringFromAny(customUserName).isEmpty
+                ? stringFromAny(defaults.string(forKey: "USER_NOMBRE"), fallback: "SENTINEL ONE")
+                : stringFromAny(customUserName)
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            let db = activeFirestore()
+
+            db.collection("accesos").document("central").setData([
+                "puerta": true,
+                "timestampPuerta": nowMs,
+                "solicitantePuerta": resolvedUser,
+                "_metaTimestamp": nowMs
+            ], merge: true)
+
+            db.collection("configuracion").document("porton").setData([
+                "comando": "ABRIR",
+                "timestamp": nowMs,
+                "autorizadoPor": resolvedUser,
+                "_metaTimestamp": nowMs
+            ], merge: true)
+
+            let cleanReqId = stringFromAny(requestId)
+            if !cleanReqId.isEmpty {
+                db.collection("solicitudes_puerta").document(cleanReqId).setData([
+                    "estado": "APROBADA",
+                    "autorizadoPor": resolvedUser,
+                    "timestampRespuesta": nowMs,
+                    "_metaTimestamp": nowMs
+                ], merge: true)
+            }
+
+            if let app = targetApp, let dbUrl = app.options.databaseURL, !dbUrl.isEmpty {
+                let rtdbRef = Database.database(app: app, url: dbUrl).reference().child("hardware/puerta")
+                rtdbRef.setValue([
+                    "trigger": true,
+                    "comando": "ABRIR",
+                    "timestamp": nowMs,
+                    "solicitante": resolvedUser
+                ])
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.2) {
+                let resetMs = Int64(Date().timeIntervalSince1970 * 1000)
+                activeFirestore().collection("accesos").document("central").setData([
+                    "puerta": false,
+                    "_metaTimestamp": resetMs
+                ], merge: true)
+            }
+        }
+
+        if let app = targetApp {
+            authenticateNativeApp(app) {
+                writeDoorCommands()
+            }
+        } else if let tenantDict = resolveStoredTenantConfig() {
+            configureDynamicFirebase(configDict: tenantDict)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                if let retryApp = activeFirebaseApp() {
+                    authenticateNativeApp(retryApp) {
+                        writeDoorCommands()
+                    }
+                }
+            }
+        }
+    }
+
+    static func triggerNativeDoorBellRequest(solId: String, idRegistro: String, nombreBombero: String, compania: Int) {
+        let targetApp = activeFirebaseApp()
+        let writeBellRequest = {
+            let cleanId = stringFromAny(solId).isEmpty ? "\(Int64(Date().timeIntervalSince1970 * 1000))" : stringFromAny(solId)
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            activeFirestore().collection("solicitudes_puerta").document(cleanId).setData([
+                "idSolicitud": cleanId,
+                "idRegistro": stringFromAny(idRegistro),
+                "nombreBombero": stringFromAny(nombreBombero, fallback: "BOMBERO"),
+                "compania": compania > 0 ? compania : 1,
+                "estado": "pendiente",
+                "timestamp": nowMs,
+                "_metaTimestamp": nowMs
+            ], merge: true)
+        }
+        if let app = targetApp {
+            authenticateNativeApp(app) {
+                writeBellRequest()
+            }
+        }
+    }
+
     static func activeFirestore() -> Firestore {
         if let pid = currentTenantProjectId, let namedApp = FirebaseApp.app(name: "tenant_\(pid)") {
             return Firestore.firestore(app: namedApp)
@@ -2050,17 +2186,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     private func requestNotificationPermissions(application: UIApplication) {
         let center = UNUserNotificationCenter.current()
-        var opts: UNAuthorizationOptions = [.alert, .badge, .sound]
-        if #available(iOS 15.0, *) {
-            opts.insert(.timeSensitive)
-        }
-        center.requestAuthorization(options: opts) { granted, _ in
-            if !granted {
-                center.requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
-            }
+        center.getNotificationSettings { settings in
+            let isDetermined = (settings.authorizationStatus != .notDetermined)
+            UserDefaults.standard.set(isDetermined, forKey: "IOS_NOTIF_DETERMINED")
+            let isGranted = (
+                settings.authorizationStatus == .authorized ||
+                settings.authorizationStatus == .provisional ||
+                settings.authorizationStatus == .ephemeral
+            )
+            UserDefaults.standard.set(isGranted, forKey: "IOS_NOTIF_GRANTED")
             DispatchQueue.main.async {
                 application.registerForRemoteNotifications()
             }
+            IOSLocationService.shared.syncPermissionsToWebView()
         }
     }
 
@@ -2542,6 +2680,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     "_metaTimestamp": nowMs
                 ], merge: true)
             }
+        case "ACTION_OPEN_DOOR":
+            Self.triggerNativeDoorOpen(requestId: payloadId)
         default:
             if !payloadId.isEmpty {
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
@@ -2713,7 +2853,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             }
         }
         let syncPerms = IOSLocationService.shared.currentSynchronousPerms()
-        if syncPerms.fine && syncPerms.notif {
+        if !syncPerms.locNotDetermined && !syncPerms.notifNotDetermined {
             storageMap["@sentinel_one_location_disclosed_v3"] = "true"
             defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
         }
@@ -2745,7 +2885,9 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                     backgroundLocation: \(syncPerms.bg ? "true" : "false"),
                     overlay: true,
                     batteryUnrestricted: true,
-                    notifications: \(syncPerms.notif ? "true" : "false")
+                    notifications: \(syncPerms.notif ? "true" : "false"),
+                    locNotDetermined: \(syncPerms.locNotDetermined ? "true" : "false"),
+                    notifNotDetermined: \(syncPerms.notifNotDetermined ? "true" : "false")
                 };
                 var restored = \(storageJson);
                 if (window.localStorage && restored) {
@@ -2798,6 +2940,32 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             IOSLocationService.shared.requestAlwaysPermissions()
         case "requestNotificationsPermission":
             IOSLocationService.shared.requestNotificationsPermission()
+        case "requestInitialIosPermissions":
+            IOSLocationService.shared.requestInitialIosPermissions()
+        case "openDoor":
+            DispatchQueue.main.async {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            let reqId = AppDelegate.stringFromAny(dict["requestId"])
+            let uName = AppDelegate.stringFromAny(dict["userName"])
+            AppDelegate.triggerNativeDoorOpen(
+                requestId: reqId.isEmpty ? nil : reqId,
+                customUserName: uName.isEmpty ? nil : uName
+            )
+        case "requestDoorBell":
+            DispatchQueue.main.async {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            }
+            let solId = AppDelegate.stringFromAny(dict["solId"])
+            let idReg = AppDelegate.stringFromAny(dict["idRegistro"])
+            let nom = AppDelegate.stringFromAny(dict["nombreBombero"], fallback: "BOMBERO")
+            let comp = (dict["compania"] as? Int) ?? Int(AppDelegate.stringFromAny(dict["compania"], fallback: "1")) ?? 1
+            AppDelegate.triggerNativeDoorBellRequest(
+                solId: solId,
+                idRegistro: idReg,
+                nombreBombero: nom,
+                compania: comp
+            )
         case "openAppSettings":
             DispatchQueue.main.async {
                 if let settingsUrl = URL(string: UIApplication.openSettingsURLString) {
@@ -3162,7 +3330,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
             }
         }
         let syncPerms = IOSLocationService.shared.currentSynchronousPerms()
-        if syncPerms.fine && syncPerms.notif {
+        if !syncPerms.locNotDetermined && !syncPerms.notifNotDetermined {
             storageMap["@sentinel_one_location_disclosed_v3"] = "true"
             defaults.set("true", forKey: "WEBSTORAGE_@sentinel_one_location_disclosed_v3")
         }
@@ -3195,7 +3363,9 @@ struct SentinelWebViewContainer: UIViewRepresentable {
                     backgroundLocation: \(syncPerms.bg ? "true" : "false"),
                     overlay: true,
                     batteryUnrestricted: true,
-                    notifications: \(syncPerms.notif ? "true" : "false")
+                    notifications: \(syncPerms.notif ? "true" : "false"),
+                    locNotDetermined: \(syncPerms.locNotDetermined ? "true" : "false"),
+                    notifNotDetermined: \(syncPerms.notifNotDetermined ? "true" : "false")
                 };
                 var restored = \(storageJson);
                 if (window.localStorage && restored) {
@@ -3217,6 +3387,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
         wv.backgroundColor = UIColor(red: 6/255, green: 9/255, blue: 17/255, alpha: 1.0)
         wv.scrollView.bounces = false
         wv.scrollView.isScrollEnabled = false
+        wv.scrollView.contentInsetAdjustmentBehavior = .never
         wv.scrollView.showsVerticalScrollIndicator = false
         wv.scrollView.showsHorizontalScrollIndicator = false
 

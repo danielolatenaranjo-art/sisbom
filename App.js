@@ -127,6 +127,22 @@ export default function App() {
     const evaluatePermissions = async () => {
       const currentPerms = readNativePermissionsStatus();
       const allGranted = isPermsSatisfied(currentPerms);
+      const localDisclosed =
+        (typeof window !== 'undefined' && window.localStorage?.getItem(DISCLOSURE_KEY)) ||
+        (await AsyncStorage.getItem(DISCLOSURE_KEY).catch(() => null));
+
+      if (isIosRuntime) {
+        const iosNeedsPrompt = Boolean(currentPerms.notifNotDetermined || currentPerms.locNotDetermined);
+        if (!iosNeedsPrompt || allGranted) {
+          persistDisclosureAccepted();
+          if (!cancelled) setLocationModalVisible(false);
+          return;
+        }
+        if (!localDisclosed) {
+          if (!cancelled) setLocationModalVisible(true);
+        }
+        return;
+      }
 
       if (allGranted) {
         persistDisclosureAccepted();
@@ -134,8 +150,7 @@ export default function App() {
         return;
       }
 
-      const disclosed = await AsyncStorage.getItem(DISCLOSURE_KEY).catch(() => null);
-      if (!disclosed || !allGranted) {
+      if (!localDisclosed) {
         if (!cancelled) setLocationModalVisible(true);
       }
     };
@@ -144,7 +159,10 @@ export default function App() {
 
     const onPermsChanged = () => {
       const updated = readNativePermissionsStatus();
-      if (isPermsSatisfied(updated)) {
+      const done = isIosRuntime
+        ? !updated.notifNotDetermined && !updated.locNotDetermined
+        : isPermsSatisfied(updated);
+      if (done || isPermsSatisfied(updated)) {
         persistDisclosureAccepted();
         setLocationModalVisible(false);
       }
@@ -181,18 +199,10 @@ export default function App() {
   };
 
   const handleDeclineLocation = async () => {
-    try {
-      await AsyncStorage.removeItem(DISCLOSURE_KEY);
-    } catch (e) {}
-    try {
-      if (typeof window !== 'undefined' && window.AndroidApp?.closeApp) {
-        window.AndroidApp.closeApp();
-        return;
-      }
-    } catch (e) {}
-    try {
-      BackHandler.exitApp();
-    } catch (e) {}
+    // Nunca cerrar forzosamente la app (cumplimiento política Broken Functionality Google Play / Apple):
+    // registrar que el usuario vio el aviso y permitir continuar operando en la pantalla principal.
+    setLocationModalVisible(false);
+    persistDisclosureAccepted();
   };
 
   const handleFullLogout = async () => {

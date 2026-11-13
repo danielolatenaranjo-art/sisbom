@@ -1,5 +1,5 @@
-export const APP_VERSION = "V.3.0.0";
-export const SEMVER_VERSION = "3.0.0";
+export const APP_VERSION = "V.3.1.0";
+export const SEMVER_VERSION = "3.1.0";
 
 export const GOOGLE_REVIEW_KEYS = [];
 export const MOCK_USER_DANIEL = null;

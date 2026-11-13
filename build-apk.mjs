@@ -100,8 +100,14 @@ function rewriteUnderscorePathsInTextFiles(dir) {
 
 try {
   console.log('====================================================');
-  console.log(' EMPACANDO APK: SENTINEL ONE V.3.0.4');
+  console.log(' EMPACANDO APK: SENTINEL ONE V.3.1.0');
   console.log('====================================================');
+
+  console.log('\n[0/4] Sincronizando SHARED y ejecutando Auditoría Anti-Bucles...');
+  execSync('node "../../SHARED/sync-shared.mjs"', {
+    cwd: __dirname,
+    stdio: 'inherit'
+  });
 
   cleanOldFiles();
 
@@ -151,6 +157,8 @@ try {
         box-shadow: none !important;
       }
       html, body, #root {
+        position: fixed !important;
+        inset: 0 !important;
         width: 100% !important;
         height: 100% !important;
         margin: 0 !important;
@@ -159,6 +167,9 @@ try {
         overscroll-behavior: none !important;
         touch-action: pan-y !important;
         background-color: #060911 !important;
+      }
+      .leaflet-container, .leaflet-container * {
+        touch-action: none !important;
       }
     </style>
     <script>

@@ -23,7 +23,7 @@ export const CENTRAL_FIREBASE_CONFIG = {
   messagingSenderId: "432594591351"
 };
 
-export const APP_VERSION = "3.0.4";
+export const APP_VERSION = "3.1.0";
 const V304_AUTH_EMAIL = "v304.app@sisbom.com";
 const V304_AUTH_PASS = "SentinelOne_V304_Auth!2026";
 

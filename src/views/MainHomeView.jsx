@@ -36,11 +36,13 @@ import {
   CheckCircle2,
   Truck,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Navigation
 } from 'lucide-react-native';
 import { doc, onSnapshot } from 'firebase/firestore';
+import { ref as rtdbRef, onValue, off } from 'firebase/database';
 import { setDoc } from '../config/firestoreMeta';
-import { getDb, ensureFirebaseAuth } from '../config/firebase';
+import { getDb, getRtdb, ensureFirebaseAuth } from '../config/firebase';
 import { useAuthStore } from '../store/useAuthStore';
 import { useLicenseStore } from '../store/useLicenseStore';
 import {
@@ -55,7 +57,10 @@ import {
   formatShortPersonName,
   resolveCoreUnitStatusInfo,
   isCanonicalCommander,
-  parseCanonicalChatMessages
+  hasAdminModeFlag,
+  hasCommanderPrivileges,
+  parseCanonicalChatMessages,
+  buildCanonicalGeoPortalUrl
 } from '../shared/sentinelCore';
 import { TacticalDispatchMap } from '../components/dispatch/TacticalDispatchMap';
 import { CommanderTacticalNavMap } from '../components/dispatch/CommanderTacticalNavMap';
@@ -380,6 +385,7 @@ const INTERROGATION_GUIDES = {
 export const MainHomeView = ({ onLogout }) => {
   const { user, isDarkMode = true, isAirplaneMode = false, updateStatus, setEmergencyResponse } = useAuthStore();
   const {
+    licenseKey,
     nombreMostrar,
     clientName,
     logoUrl,
@@ -448,6 +454,7 @@ export const MainHomeView = ({ onLogout }) => {
   const [gateState, setGateState] = useState('IDLE'); // 'IDLE' | 'TOCADO'
   const [profileDrawerVisible, setProfileDrawerVisible] = useState(false);
   const [isCommanderFleetExpanded, setIsCommanderFleetExpanded] = useState(false);
+  const [isCommanderGpsModalOpen, setIsCommanderGpsModalOpen] = useState(false);
   const [expandedCommanderCompanyIds, setExpandedCommanderCompanyIds] = useState({});
   const [focusedCommanderUnitRequest, setFocusedCommanderUnitRequest] = useState(null);
   const autoExpandedDispatchIdRef = useRef('');
@@ -501,6 +508,26 @@ export const MainHomeView = ({ onLogout }) => {
   const is09 = userEstado === '0-9';
   const is08 = userEstado === '0-8';
   const isRestrictedStatus = ['PERMISO', 'LICENCIA', 'CDS', 'SUSPENDIDO'].includes(userEstado);
+  const isRemovableRestrictedStatus = ['PERMISO', 'LICENCIA', 'CDS'].includes(userEstado);
+  const [unlockRestrictedToggle, setUnlockRestrictedToggle] = useState(false);
+  const lastRestrictedTapTsRef = useRef(0);
+  const unlockRestrictedTimerRef = useRef(null);
+
+  useEffect(() => {
+    if (!isRemovableRestrictedStatus) {
+      setUnlockRestrictedToggle(false);
+      if (unlockRestrictedTimerRef.current) {
+        clearTimeout(unlockRestrictedTimerRef.current);
+        unlockRestrictedTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (unlockRestrictedTimerRef.current) {
+        clearTimeout(unlockRestrictedTimerRef.current);
+        unlockRestrictedTimerRef.current = null;
+      }
+    };
+  }, [isRemovableRestrictedStatus, userEstado]);
 
   // Reconocimiento reactivo instantáneo del Operador Central Activo (por idRegistro, idRadial o Nombre normalizado)
   const isMeCentralOperator = useMemo(() => {
@@ -608,86 +635,108 @@ export const MainHomeView = ({ onLogout }) => {
     return () => window.removeEventListener('message', onMessage);
   }, []);
 
-  // Escuchar ubicación GPS del alertante en tiempo real desde `geolocalizaciones_alertantes/{draftId}` (Idéntico a SentinelLinkGeoModal.jsx de SENTINEL CAD)
+  // Escuchar ubicación fija del alertante en Firestore (`geolocalizaciones_alertantes/{draftId}`) y seguimiento GPS en vivo en RTDB (`telemetria/alertantes/{draftId}`)
   useEffect(() => {
     const targetDraftId = cadDraftId;
     if (!targetDraftId) return undefined;
     const db = getDb();
-    if (!db) return undefined;
+    const rtdb = getRtdb();
+    if (!db && !rtdb) return undefined;
 
-    const unsub = onSnapshot(
-      doc(db, 'geolocalizaciones_alertantes', String(targetDraftId)),
-      async (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          if (data && data.lat && data.lng) {
-            const lat = parseFloat(data.lat);
-            const lng = parseFloat(data.lng);
-            if (!isNaN(lat) && !isNaN(lng)) {
-              const acc = data.accuracy || 10;
-              setWaitingSentinelLinkGeo(false);
+    const handleAlertData = async (data) => {
+      if (data && data.lat && data.lng) {
+        const isDisc = data.desconectado === true || String(data.estado || '').toLowerCase() === 'desconectado';
+        if (isDisc) return;
+        const lat = parseFloat(data.lat);
+        const lng = parseFloat(data.lng);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const acc = data.accuracy || 10;
+          setWaitingSentinelLinkGeo(false);
 
-              let fullStr = `COORD: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-              try {
-                const res = await fetch(
-                  `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
-                  { headers: { 'Accept-Language': 'es' } }
-                );
-                if (res.ok) {
-                  const geoJson = await res.json();
-                  const addr = geoJson.address || {};
-                  const street = addr.road || addr.street || addr.neighbourhood || '';
-                  const house = addr.house_number || '';
-                  if (street) {
-                    fullStr = `${street} ${house}`.trim().toUpperCase();
-                  }
-                }
-              } catch (_) {}
-
-              const alertantePayload = {
-                lat,
-                lng,
-                accuracy: acc,
-                address: fullStr,
-                telefono: sentinelLinkPhoneDigits
-                  ? `+569${sentinelLinkPhoneDigits}`
-                  : data.telefono || '',
-                timestamp: Date.now()
-              };
-
-              setCadAlertanteGeo(alertantePayload);
-              if (alertantePayload.telefono && !formCallerPhone) {
-                setFormCallerPhone(alertantePayload.telefono);
-              }
-              try {
-                window.AndroidApp?.showToast?.(
-                  '📍 Ubicación GPS del alertante recibida (Marcador Azul en Mapa)'
-                );
-              } catch (_) {}
-
-              const idKey = String(targetDraftId);
-              if (!autoClosedSentinelLinkIdsRef.current.has(idKey)) {
-                autoClosedSentinelLinkIdsRef.current.add(idKey);
-                setIsSentinelLinkModalOpen(false);
+          let fullStr = `COORD: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+          try {
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+              { headers: { 'Accept-Language': 'es' } }
+            );
+            if (res.ok) {
+              const geoJson = await res.json();
+              const addr = geoJson.address || {};
+              const street = addr.road || addr.street || addr.neighbourhood || '';
+              const house = addr.house_number || '';
+              if (street) {
+                fullStr = `${street} ${house}`.trim().toUpperCase();
               }
             }
+          } catch (_) {}
+
+          const alertantePayload = {
+            lat,
+            lng,
+            accuracy: acc,
+            address: fullStr,
+            telefono: sentinelLinkPhoneDigits
+              ? `+569${sentinelLinkPhoneDigits}`
+              : data.telefono || data.phone || '',
+            timestamp: Date.now()
+          };
+
+          setCadAlertanteGeo(alertantePayload);
+          if (alertantePayload.telefono && !formCallerPhone) {
+            setFormCallerPhone(alertantePayload.telefono);
+          }
+          try {
+            window.AndroidApp?.showToast?.(
+              '📍 Ubicación GPS del alertante recibida (Marcador Azul en Mapa)'
+            );
+          } catch (_) {}
+
+          const idKey = String(targetDraftId);
+          if (!autoClosedSentinelLinkIdsRef.current.has(idKey)) {
+            autoClosedSentinelLinkIdsRef.current.add(idKey);
+            setIsSentinelLinkModalOpen(false);
           }
         }
-      },
-      () => {}
-    );
+      }
+    };
+
+    const cleanups = [];
+    if (db) {
+      const unsubFs = onSnapshot(
+        doc(db, 'geolocalizaciones_alertantes', String(targetDraftId)),
+        (snap) => { if (snap.exists()) handleAlertData(snap.data()); },
+        () => {}
+      );
+      cleanups.push(unsubFs);
+    }
+    if (rtdb) {
+      const alertRef = rtdbRef(rtdb, `telemetria/alertantes/${String(targetDraftId)}`);
+      const onAlertValue = (snap) => handleAlertData(snap.val());
+      onValue(alertRef, onAlertValue, () => {});
+      cleanups.push(() => {
+        try { off(alertRef, 'value', onAlertValue); } catch (_) {}
+      });
+    }
 
     return () => {
-      try {
-        unsub();
-      } catch (_) {}
+      cleanups.forEach((fn) => { try { fn(); } catch (_) {} });
     };
   }, [cadDraftId, sentinelLinkPhoneDigits, formCallerPhone]);
 
-  // Visibilidad de pestañas: Pestaña dinámica SCI exclusiva para Comandante (idRadial == "1") cuando hay un SCI activo
-  const isStrictCommander = isCanonicalCommander(user) || myRadial === '1';
+  // Visibilidad y facultades de Comandante (`idRadial == "1"` o `modoAdmin: true` en `personal/{idRegistro}`)
+  const isModoAdmin = useMemo(() => {
+    if (hasAdminModeFlag(user)) return true;
+    const myRegId = String(user?.idRegistro || '').trim();
+    if (myRegId && Array.isArray(firefightersList)) {
+      const liveMe = firefightersList.find((f) => String(f?.idRegistro || '').trim() === myRegId);
+      if (liveMe && hasAdminModeFlag(liveMe)) return true;
+    }
+    return false;
+  }, [user, firefightersList]);
+
+  const isStrictCommander = Boolean(hasCommanderPrivileges(user) || isModoAdmin || myRadial === '1');
   const showSciTab = Boolean(isStrictCommander && isSciTabActive);
-  const showDisponiblesTab = Boolean(isMeCentralOperator || myRadial === '1');
+  const showDisponiblesTab = Boolean(isMeCentralOperator || isStrictCommander);
   const visibleTabs = [
     'actividad',
     'ordenes',
@@ -782,6 +831,10 @@ export const MainHomeView = ({ onLogout }) => {
         setFullscreenDispatchId(null);
         return;
       }
+      if (isCommanderGpsModalOpen) {
+        setIsCommanderGpsModalOpen(false);
+        return;
+      }
       if (isSentinelLinkModalOpen) {
         setIsSentinelLinkModalOpen(false);
         return;
@@ -832,6 +885,7 @@ export const MainHomeView = ({ onLogout }) => {
     };
   }, [
     fullscreenDispatchId,
+    isCommanderGpsModalOpen,
     isSentinelLinkModalOpen,
     pendingCadKey,
     selectedAttendanceModal,
@@ -860,6 +914,7 @@ export const MainHomeView = ({ onLogout }) => {
     switchTabAnimated,
     anyModalOpen: Boolean(
       fullscreenDispatchId ||
+        isCommanderGpsModalOpen ||
         isSentinelLinkModalOpen ||
         pendingCadKey ||
         selectedAttendanceModal ||
@@ -1089,8 +1144,8 @@ export const MainHomeView = ({ onLogout }) => {
       hasAssisted
   );
 
-  // Jerarquía de visualización según ID Radial y Rol (MainScreen.kt)
-  const isComandante = myRadial === '1' || user?.cargo?.toUpperCase().includes('COMANDANTE');
+  // Jerarquía de visualización según ID Radial, Rol o `modoAdmin: true` (MainScreen.kt)
+  const isComandante = Boolean(isStrictCommander || user?.cargo?.toUpperCase().includes('COMANDANTE'));
   const isAyudante = myRadial === '25' || user?.cargo?.toUpperCase().includes('AYUDANTE');
   const isSecretario = myRadial === '32' || user?.cargo?.toUpperCase().includes('SECRETARIO');
   const isOperadorCad = user?.cargo?.toUpperCase().includes('OPERADOR') || isMeCentralOperator;
@@ -1465,7 +1520,11 @@ export const MainHomeView = ({ onLogout }) => {
   const handleCopySentinelLinkUrl = () => {
     const currentId = cadDraftId || 'draft-session';
     const cleanPhone = sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8);
-    const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone || 'alertante'}`;
+    const generatedLink = buildCanonicalGeoPortalUrl({
+      licenseKey,
+      serviceId: currentId,
+      phone: cleanPhone || 'alertante'
+    });
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(generatedLink);
@@ -1488,7 +1547,11 @@ export const MainHomeView = ({ onLogout }) => {
     triggerHaptic('medium');
     setWaitingSentinelLinkGeo(true);
     const currentId = cadDraftId || 'draft-session';
-    const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone}`;
+    const generatedLink = buildCanonicalGeoPortalUrl({
+      licenseKey,
+      serviceId: currentId,
+      phone: cleanPhone
+    });
     const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${generatedLink}`;
     const waAppUrl = `whatsapp://send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
     const waWebUrl = `https://api.whatsapp.com/send?phone=569${cleanPhone}&text=${encodeURIComponent(msgText)}`;
@@ -1521,7 +1584,11 @@ export const MainHomeView = ({ onLogout }) => {
     const currentId = cadDraftId || `draft-${Date.now()}`;
     const fullPhone = `+569${cleanPhone}`;
     const queueId = `${Date.now()}_${cleanPhone}`;
-    const generatedLink = `https://sentinellink-app.web.app/geo.html?id=${currentId}&t=${cleanPhone}`;
+    const generatedLink = buildCanonicalGeoPortalUrl({
+      licenseKey,
+      serviceId: currentId,
+      phone: cleanPhone
+    });
     const msgText = `BOMBEROS: Presione el enlace para compartir su ubicacion con la Central: ${generatedLink}`;
     setFormCallerPhone(fullPhone);
 
@@ -1584,10 +1651,19 @@ export const MainHomeView = ({ onLogout }) => {
     setIsSearchingAddress(true);
     try {
       let foundCoords = null;
-      // 1. Photon Geocoder con sesgo de coordenadas comunales
+      // 1. Photon Geocoder con sesgo de coordenadas comunales (solo si existen coordenadas de cuartel configuradas)
       try {
         const pQuery = `${clean} ${comuna || ''} Chile`.replace(/\s+/g, ' ').trim();
-        const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(pQuery)}&lat=${cuartelLat || -34.637373}&lon=${cuartelLng || -71.125741}&limit=3`;
+        const biasComp = (institutionCompaniesList || []).find(
+          (c) => c?.lat && c?.lng && !isNaN(Number(c.lat)) && !isNaN(Number(c.lng))
+        );
+        const biasLat = cuartelLat ?? biasComp?.lat ?? null;
+        const biasLng = cuartelLng ?? biasComp?.lng ?? null;
+        const biasParams =
+          biasLat !== null && biasLng !== null && !isNaN(Number(biasLat)) && !isNaN(Number(biasLng))
+            ? `&lat=${Number(biasLat)}&lon=${Number(biasLng)}`
+            : '';
+        const photonUrl = `https://photon.komoot.io/api/?q=${encodeURIComponent(pQuery)}${biasParams}&limit=3`;
         const pRes = await fetch(photonUrl);
         if (pRes.ok) {
           const pData = await pRes.json();
@@ -1704,6 +1780,7 @@ export const MainHomeView = ({ onLogout }) => {
         preinforme: formDetalle.trim(),
         sirenEnabled: cadSirenEnabled,
         coords: cadCoords,
+        alertanteGeo: cadAlertanteGeo,
         activeCompanies: effComps,
         vehiculosSeleccionados: selectedUnits
       });
@@ -1724,6 +1801,7 @@ export const MainHomeView = ({ onLogout }) => {
         setFormAnswers({});
         setFormDetalle('');
         setCadCoords(null);
+        setCadAlertanteGeo(null);
         setSelectedUnits([]);
         setShowCentralConsole(false);
       }
@@ -1739,28 +1817,55 @@ export const MainHomeView = ({ onLogout }) => {
     );
   };
 
-  // Filtrado de Bomberos en Disponibles
+  // Filtrado de Bomberos en Disponibles (Exclusión estricta de personal no activo, idéntico a PersonalView.jsx de SENTINEL CAD)
   const allFirefighters = Array.isArray(firefightersList) ? firefightersList : [];
 
-  const displayedFirefighters = allFirefighters
-    .filter((f) => {
-      if (isSingleCompanyInstitution) return true;
-      if (isCapitan) return Number(f.compania) === capitanCompany;
-      if (isDirector) return Number(f.compania) === directorCompany;
-
-      if (selectedCompanyFilter && selectedCompanyFilter !== 'TODAS') {
-        const selectedCompNum = parseInt(String(selectedCompanyFilter).replace(/\D/g, ''), 10);
-        if (selectedCompNum > 0) {
-          return Number(f.compania) === selectedCompNum;
+  const displayedFirefighters = useMemo(() => {
+    return allFirefighters
+      .filter((f) => {
+        if (!f) return false;
+        const rawAct = f.activo ?? f.ACTIVO ?? f.Activo;
+        if (rawAct !== undefined && rawAct !== null && String(rawAct).trim() !== '') {
+          const actStr = String(rawAct).trim().toUpperCase();
+          if (
+            rawAct === false ||
+            rawAct === 0 ||
+            actStr === '0' ||
+            actStr === 'NO' ||
+            actStr === 'FALSE' ||
+            actStr === 'FALSO' ||
+            actStr === 'INACTIVO'
+          ) {
+            return false;
+          }
         }
-      }
-      return true;
-    })
-    .sort((a, b) => {
-      const numA = parseInt(String(a.idRadial).replace(/\D/g, ''), 10) || 999;
-      const numB = parseInt(String(b.idRadial).replace(/\D/g, ''), 10) || 999;
-      return numA - numB;
-    });
+        if (isSingleCompanyInstitution) return true;
+        if (!canViewAllCompanies && isCapitan) return Number(f.compania) === capitanCompany;
+        if (!canViewAllCompanies && isDirector) return Number(f.compania) === directorCompany;
+
+        if (selectedCompanyFilter && selectedCompanyFilter !== 'TODAS') {
+          const selectedCompNum = parseInt(String(selectedCompanyFilter).replace(/\D/g, ''), 10);
+          if (selectedCompNum > 0) {
+            return Number(f.compania) === selectedCompNum;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const numA = parseInt(String(a.idRadial).replace(/\D/g, ''), 10) || 999;
+        const numB = parseInt(String(b.idRadial).replace(/\D/g, ''), 10) || 999;
+        return numA - numB;
+      });
+  }, [
+    allFirefighters,
+    isSingleCompanyInstitution,
+    canViewAllCompanies,
+    isCapitan,
+    capitanCompany,
+    isDirector,
+    directorCompany,
+    selectedCompanyFilter
+  ]);
 
   // Título de sección inferior dentro de TopAppBarView (MainScreen.kt líneas 732-759)
   const renderTabHeaderTitle = (tab) => {
@@ -1840,14 +1945,10 @@ export const MainHomeView = ({ onLogout }) => {
   }, [isStrictCommander, allActiveDispatches, cadDraftId]);
 
   // =========================================================================
-  // PANEL DE ESTADO DE MATERIAL MAYOR Y MAPA TÁCTICO NAV PARA COMANDANTE (idRadial == "1")
-  // Muestra en el espacio de unidades el Mapa Táctico estilo SENTINEL NAV con ubicación en vivo
-  // de unidades y bomberos en el servicio, más la grilla interactiva de carros por compañía.
+  // PANEL DE ESTADO DE MATERIAL MAYOR Y GPS A PANTALLA COMPLETA PARA COMANDANTE (idRadial == "1")
   // =========================================================================
-  const renderCommanderUnitsStatusPanel = () => {
-    if (!isStrictCommander) return null;
-
-    const fleetList =
+  const commanderFleetList = useMemo(
+    () =>
       Array.isArray(vehiculosList) && vehiculosList.length > 0
         ? vehiculosList
         : [
@@ -1855,21 +1956,48 @@ export const MainHomeView = ({ onLogout }) => {
             { id: 'BX-1', idCarro: 'BX-1', nombre: 'BX-1', tipo: 'BOMBA', compania: 1, estado: '0-9' },
             { id: 'R-1', idCarro: 'R-1', nombre: 'R-1', tipo: 'RESCATE', compania: 1, estado: '0-9' },
             { id: 'Z-1', idCarro: 'Z-1', nombre: 'Z-1', tipo: 'CISTERNA', compania: 1, estado: '0-9' }
-          ];
+          ],
+    [vehiculosList]
+  );
 
-    const activeDispatchesExcludingDraft = allActiveDispatches.filter(
-      (d) => !cadDraftId || String(d.idServicio) !== String(cadDraftId)
+  const commanderActiveDispatches = useMemo(
+    () =>
+      allActiveDispatches.filter(
+        (d) => !cadDraftId || String(d.idServicio) !== String(cadDraftId)
+      ),
+    [allActiveDispatches, cadDraftId]
+  );
+
+  const activeSelectedBomberoModal = useMemo(() => {
+    if (!selectedBomberoModal) return null;
+    const selId = String(selectedBomberoModal.idRegistro || '').trim();
+    if (!selId) return selectedBomberoModal;
+    return (
+      allFirefighters.find((f) => String(f?.idRegistro || '').trim() === selId) ||
+      selectedBomberoModal
     );
+  }, [selectedBomberoModal, allFirefighters]);
+
+  const renderCommanderUnitsStatusPanel = () => {
+    if (!isStrictCommander) return null;
+
+    const fleetList = commanderFleetList;
+    const activeDispatchesExcludingDraft = commanderActiveDispatches;
 
     const resolveUnitStatus = (v) => {
       const statusInfo = resolveCoreUnitStatusInfo(v, activeDispatchesExcludingDraft, fleetList);
-      const isOut08 = Boolean(statusInfo.isOut08 || statusInfo.is08Unit);
+      const isOut08 = Boolean(statusInfo.is08 || statusInfo.isOut08 || statusInfo.is08Unit);
       const isBusy = Boolean(statusInfo.isInService || statusInfo.isBusy);
       const isAvailable = Boolean(statusInfo.isAvailable && !isBusy && !isOut08);
+      const activeClaveClean = String(statusInfo.activeClave || '')
+        .trim()
+        .toUpperCase();
       const subLabel = isOut08
         ? '0-8 F/S'
         : isBusy
-          ? statusInfo.badgeLabel || 'EN SERVICIO'
+          ? activeClaveClean && activeClaveClean !== '0-8'
+            ? activeClaveClean
+            : String(statusInfo.badgeLabel || 'EN SERVICIO').replace(/^EN\s+/i, '').trim()
           : '0-9 DISP.';
       return {
         statusInfo,
@@ -1945,14 +2073,15 @@ export const MainHomeView = ({ onLogout }) => {
                 onPress={() => {
                   triggerHaptic('medium');
                   setFocusedCommanderUnitRequest({ unitId: uKey, ts: Date.now() });
+                  setIsCommanderGpsModalOpen(true);
                 }}
                 style={{
                   width: '31.3%',
+                  height: 52,
                   backgroundColor: cardBg,
                   borderColor: cardBorder,
                   borderWidth: isFocusedUnit ? 1.6 : 1,
                   borderRadius: 12,
-                  paddingVertical: 9,
                   paddingHorizontal: 6,
                   alignItems: 'center',
                   justifyContent: 'center'
@@ -1990,12 +2119,7 @@ export const MainHomeView = ({ onLogout }) => {
 
     if (!isCommanderFleetExpanded) {
       return (
-        <TouchableOpacity
-          onPress={() => {
-            triggerHaptic('medium');
-            setIsCommanderFleetExpanded(true);
-          }}
-          activeOpacity={0.85}
+        <View
           style={[
             styles.glassCard,
             {
@@ -2004,44 +2128,35 @@ export const MainHomeView = ({ onLogout }) => {
                 ? 'rgba(255, 255, 255, 0.15)'
                 : 'rgba(15, 23, 42, 0.14)',
               borderRadius: 16,
-              paddingHorizontal: 14,
-              paddingVertical: 12,
-              marginBottom: 14,
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between'
+              padding: 12,
+              marginBottom: 14
             }
           ]}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
-            <Truck size={15} color="#EF4444" />
-            <Text
-              style={{
-                color: isDarkMode ? '#FFFFFF' : '#0F172A',
-                fontSize: 11,
-                fontWeight: '900',
-                letterSpacing: 1.0
-              }}
-            >
-              UNIDADES Y MAPA NAV
-            </Text>
-          </View>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <View
-              style={{
-                backgroundColor: 'rgba(14, 165, 233, 0.18)',
-                borderColor: 'rgba(56, 189, 248, 0.40)',
-                borderWidth: 1,
-                borderRadius: 8,
-                paddingHorizontal: 7,
-                paddingVertical: 2.5
-              }}
-            >
-              <Text style={{ color: '#38BDF8', fontSize: 9.5, fontWeight: '900' }}>
-                GPS
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 10
+            }}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+              <Truck size={15} color="#EF4444" />
+              <Text
+                style={{
+                  color: isDarkMode ? '#FFFFFF' : '#0F172A',
+                  fontSize: 10.5,
+                  fontWeight: '900',
+                  letterSpacing: 0.6,
+                  flex: 1
+                }}
+                numberOfLines={2}
+              >
+                GPS DE UNIDADES Y PERSONAL EN SERVICIO
               </Text>
             </View>
+
             <View
               style={{
                 backgroundColor: 'rgba(239, 68, 68, 0.20)',
@@ -2049,16 +2164,84 @@ export const MainHomeView = ({ onLogout }) => {
                 borderWidth: 1,
                 borderRadius: 8,
                 paddingHorizontal: 8,
-                paddingVertical: 2.5
+                paddingVertical: 3,
+                marginLeft: 8
               }}
             >
               <Text style={{ color: '#F87171', fontSize: 10, fontWeight: '900' }}>
                 {availTotalCount}/{fleetList.length} DISP.
               </Text>
             </View>
-            <ChevronDown size={15} color="#94A3B8" />
           </View>
-        </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic('medium');
+                setFocusedCommanderUnitRequest(null);
+                setIsCommanderGpsModalOpen(true);
+              }}
+              activeOpacity={0.85}
+              style={{
+                flex: 1,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: '#0284C7',
+                borderWidth: 1,
+                borderColor: '#7DD3FC',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 7
+              }}
+            >
+              <Navigation size={15} color="#FFFFFF" />
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontSize: 11,
+                  fontWeight: '900',
+                  letterSpacing: 0.5
+                }}
+              >
+                VER UBICACIONES
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                triggerHaptic('medium');
+                setIsCommanderFleetExpanded(true);
+              }}
+              activeOpacity={0.85}
+              style={{
+                flex: 1,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: isDarkMode ? 'rgba(30, 41, 59, 0.92)' : '#F1F5F9',
+                borderWidth: 1,
+                borderColor: isDarkMode ? 'rgba(148, 163, 184, 0.35)' : '#CBD5E1',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 6
+              }}
+            >
+              <Truck size={15} color={isDarkMode ? '#F8FAFC' : '#0F172A'} />
+              <Text
+                style={{
+                  color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                  fontSize: 11,
+                  fontWeight: '900',
+                  letterSpacing: 0.5
+                }}
+              >
+                VER UNIDADES
+              </Text>
+              <ChevronDown size={15} color="#94A3B8" />
+            </TouchableOpacity>
+          </View>
+        </View>
       );
     }
 
@@ -2077,13 +2260,7 @@ export const MainHomeView = ({ onLogout }) => {
           }
         ]}
       >
-        {/* Cabecera desplegada (Idéntica a TacticalEmergencyMapModal.jsx de SENTINEL CAD) */}
-        <TouchableOpacity
-          onPress={() => {
-            triggerHaptic('medium');
-            setIsCommanderFleetExpanded(false);
-          }}
-          activeOpacity={0.8}
+        <View
           style={{
             flexDirection: 'row',
             alignItems: 'center',
@@ -2094,47 +2271,90 @@ export const MainHomeView = ({ onLogout }) => {
             borderBottomColor: isDarkMode ? 'rgba(255, 255, 255, 0.10)' : '#E2E8F0'
           }}
         >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Truck size={14} color="#EF4444" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+            <Truck size={15} color="#EF4444" />
             <Text
               style={{
                 color: isDarkMode ? '#FFFFFF' : '#0F172A',
                 fontSize: 10.5,
                 fontWeight: '900',
-                letterSpacing: 0.9
+                letterSpacing: 0.6,
+                flex: 1
               }}
+              numberOfLines={2}
             >
-              UNIDADES Y MAPA NAV ({availTotalCount}/{fleetList.length})
+              GPS DE UNIDADES Y PERSONAL EN SERVICIO ({availTotalCount}/{fleetList.length})
             </Text>
           </View>
+        </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        {/* Dos botones superiores de igual tamaño: VER UBICACIONES (abre GPS pantalla completa) y OCULTAR UNIDADES */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <TouchableOpacity
+            onPress={() => {
+              triggerHaptic('medium');
+              setFocusedCommanderUnitRequest(null);
+              setIsCommanderGpsModalOpen(true);
+            }}
+            activeOpacity={0.85}
+            style={{
+              flex: 1,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: '#0284C7',
+              borderWidth: 1,
+              borderColor: '#7DD3FC',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 7
+            }}
+          >
+            <Navigation size={15} color="#FFFFFF" />
             <Text
               style={{
-                color: '#94A3B8',
-                fontSize: 9.5,
-                fontWeight: '800',
+                color: '#FFFFFF',
+                fontSize: 11,
+                fontWeight: '900',
+                letterSpacing: 0.5
+              }}
+            >
+              VER UBICACIONES
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => {
+              triggerHaptic('medium');
+              setIsCommanderFleetExpanded(false);
+            }}
+            activeOpacity={0.85}
+            style={{
+              flex: 1,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: isDarkMode ? 'rgba(30, 41, 59, 0.92)' : '#F1F5F9',
+              borderWidth: 1,
+              borderColor: isDarkMode ? 'rgba(148, 163, 184, 0.35)' : '#CBD5E1',
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6
+            }}
+          >
+            <ChevronUp size={15} color="#94A3B8" />
+            <Text
+              style={{
+                color: isDarkMode ? '#F8FAFC' : '#0F172A',
+                fontSize: 11,
+                fontWeight: '900',
                 letterSpacing: 0.5
               }}
             >
               MINIMIZAR
             </Text>
-            <ChevronUp size={13} color="#94A3B8" />
-          </View>
-        </TouchableOpacity>
-
-        {/* Mapa Táctico estilo SENTINEL NAV con ubicación en vivo de unidades y bomberos en servicio */}
-        <CommanderTacticalNavMap
-          fleetList={fleetList}
-          activeDispatches={activeDispatchesExcludingDraft}
-          firefightersList={allFirefighters}
-          cuartelLat={cuartelLat}
-          cuartelLng={cuartelLng}
-          cuarteles={cuarteles}
-          institutionCompaniesList={institutionCompaniesList}
-          isDarkMode={isDarkMode}
-          focusedUnitRequest={focusedCommanderUnitRequest}
-        />
+          </TouchableOpacity>
+        </View>
 
         {isSingleCompanyInstitution ? (
           /* MODO 1 COMPAÑÍA: Muestra todos los carros directamente en grilla de 3 columnas */
@@ -2314,8 +2534,19 @@ export const MainHomeView = ({ onLogout }) => {
       });
 
     // Mapa táctico interactivo pre-despacho (idéntico a TacticalMapPanoramico.jsx de SENTINEL CAD)
-    const mapCenterLat = Number(cadCoords?.lat || cuartelLat || -34.637373);
-    const mapCenterLng = Number(cadCoords?.lng || cuartelLng || -71.125741);
+    const firstCompWithCoords = (institutionCompaniesList || []).find(
+      (c) => c?.lat && c?.lng && !isNaN(Number(c.lat)) && !isNaN(Number(c.lng))
+    );
+    const resolvedHqLat = Number(cuartelLat ?? firstCompWithCoords?.lat ?? NaN);
+    const resolvedHqLng = Number(cuartelLng ?? firstCompWithCoords?.lng ?? NaN);
+    const hasHqCoords =
+      Number.isFinite(resolvedHqLat) &&
+      Number.isFinite(resolvedHqLng) &&
+      Math.abs(resolvedHqLat) > 0.1 &&
+      Math.abs(resolvedHqLng) > 0.1;
+
+    const mapCenterLat = Number(cadCoords?.lat || (hasHqCoords ? resolvedHqLat : -33.4489));
+    const mapCenterLng = Number(cadCoords?.lng || (hasHqCoords ? resolvedHqLng : -70.6693));
     const hasIncidentPin = Boolean(
       cadCoords && !isNaN(Number(cadCoords.lat)) && !isNaN(Number(cadCoords.lng))
     );
@@ -2324,8 +2555,8 @@ export const MainHomeView = ({ onLogout }) => {
     );
     const callerLat = Number(cadAlertanteGeo?.lat || 0);
     const callerLng = Number(cadAlertanteGeo?.lng || 0);
-    const cLat = Number(cuartelLat || -34.637373);
-    const cLng = Number(cuartelLng || -71.125741);
+    const cLat = hasHqCoords ? resolvedHqLat : 0;
+    const cLng = hasHqCoords ? resolvedHqLng : 0;
 
     const cadInteractiveMapHtml = `<!DOCTYPE html>
 <html>
@@ -2383,13 +2614,15 @@ export const MainHomeView = ({ onLogout }) => {
       L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
     }
 
-    var hqIcon = L.divIcon({
-      className: '',
-      html: '<div class="hq-pin">C</div>',
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
-    });
-    L.marker([hqLat, hqLng], { icon: hqIcon, interactive: false }).addTo(map);
+    if (Math.abs(hqLat) > 0.1 && Math.abs(hqLng) > 0.1) {
+      var hqIcon = L.divIcon({
+        className: '',
+        html: '<div class="hq-pin">C</div>',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+      L.marker([hqLat, hqLng], { icon: hqIcon, interactive: false }).addTo(map);
+    }
 
     if (hasCaller) {
       var callerIcon = L.divIcon({
@@ -4339,9 +4572,11 @@ export const MainHomeView = ({ onLogout }) => {
                   }}
                 >
                   <Text style={{ color: '#7DD3FC', fontSize: 10, fontWeight: '700' }}>
-                    {`https://sentinellink-app.web.app/geo.html?id=${
-                      cadDraftId || 'draft-session'
-                    }&t=${sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8) || 'alertante'}`}
+                    {buildCanonicalGeoPortalUrl({
+                      licenseKey,
+                      serviceId: cadDraftId || 'draft-session',
+                      phone: sentinelLinkPhoneDigits.replace(/[^0-9]/g, '').slice(0, 8) || 'alertante'
+                    })}
                   </Text>
                 </View>
               </View>
@@ -6813,25 +7048,56 @@ export const MainHomeView = ({ onLogout }) => {
               </View>
             </TouchableOpacity>
 
-            {/* Botones 09 y 08 (54x44, borderRadius: 8) o Estado Especial */}
-            {isRestrictedStatus ? (
-              <View
-                style={[
-                  styles.restrictedStatusPill,
-                  {
-                    backgroundColor:
-                      userEstado === 'PERMISO'
-                        ? '#FF9500'
-                        : userEstado === 'LICENCIA'
-                          ? '#34A8DF'
-                          : userEstado === 'CDS'
-                            ? '#D1A100'
-                            : '#8E24AA'
-                  }
-                ]}
-              >
-                <Text style={styles.restrictedStatusPillText}>{userEstado}</Text>
-              </View>
+            {/* Botones 09 y 08 (54x44, borderRadius: 8) o Estado Especial (Doble toque en LICENCIA / CDS / PERMISO habilita cambio a 0-8 o 0-9) */}
+            {isRestrictedStatus && !(isRemovableRestrictedStatus && unlockRestrictedToggle) ? (
+              isRemovableRestrictedStatus ? (
+                <TouchableOpacity
+                  style={[
+                    styles.restrictedStatusPill,
+                    {
+                      backgroundColor:
+                        userEstado === 'PERMISO'
+                          ? '#FF9500'
+                          : userEstado === 'LICENCIA'
+                            ? '#34A8DF'
+                            : '#D1A100'
+                    }
+                  ]}
+                  onPress={() => {
+                    const now = Date.now();
+                    const delta = now - lastRestrictedTapTsRef.current;
+                    if (delta >= 40 && delta <= 480) {
+                      lastRestrictedTapTsRef.current = 0;
+                      triggerHaptic('heavy');
+                      setUnlockRestrictedToggle(true);
+                      if (unlockRestrictedTimerRef.current) {
+                        clearTimeout(unlockRestrictedTimerRef.current);
+                      }
+                      unlockRestrictedTimerRef.current = setTimeout(() => {
+                        setUnlockRestrictedToggle(false);
+                        unlockRestrictedTimerRef.current = null;
+                      }, 10000);
+                    } else {
+                      lastRestrictedTapTsRef.current = now;
+                      triggerHaptic('medium');
+                    }
+                  }}
+                  activeOpacity={0.82}
+                >
+                  <Text style={styles.restrictedStatusPillText}>{userEstado}</Text>
+                </TouchableOpacity>
+              ) : (
+                <View
+                  style={[
+                    styles.restrictedStatusPill,
+                    {
+                      backgroundColor: '#8E24AA'
+                    }
+                  ]}
+                >
+                  <Text style={styles.restrictedStatusPillText}>{userEstado}</Text>
+                </View>
+              )
             ) : (
               <View style={styles.toggle0908Container}>
                 <TouchableOpacity
@@ -6850,6 +7116,11 @@ export const MainHomeView = ({ onLogout }) => {
                   onPress={() => {
                     if (inService) return;
                     triggerHaptic('medium');
+                    if (unlockRestrictedTimerRef.current) {
+                      clearTimeout(unlockRestrictedTimerRef.current);
+                      unlockRestrictedTimerRef.current = null;
+                    }
+                    setUnlockRestrictedToggle(false);
                     updateStatus('0-9');
                   }}
                   disabled={inService}
@@ -6887,6 +7158,11 @@ export const MainHomeView = ({ onLogout }) => {
                   onPress={() => {
                     if (inService) return;
                     triggerHaptic('medium');
+                    if (unlockRestrictedTimerRef.current) {
+                      clearTimeout(unlockRestrictedTimerRef.current);
+                      unlockRestrictedTimerRef.current = null;
+                    }
+                    setUnlockRestrictedToggle(false);
                     updateStatus('0-8');
                   }}
                   disabled={inService}
@@ -6927,29 +7203,31 @@ export const MainHomeView = ({ onLogout }) => {
       </View>
 
       {/* Cuerpo desplazable con transición horizontal limpia (translateX + opacity sin scale) */}
-      <ScrollView
-        ref={scrollBodyRef}
-        style={styles.scrollBody}
-        contentContainerStyle={styles.scrollBodyContent}
-        showsVerticalScrollIndicator={false}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        <Animated.View
-          style={{
-            opacity: tabFadeAnim,
-            transform: [{ translateX: tabSlideAnim }]
-          }}
+      <View style={styles.scrollBodyViewport}>
+        <ScrollView
+          ref={scrollBodyRef}
+          style={styles.scrollBody}
+          contentContainerStyle={styles.scrollBodyContent}
+          showsVerticalScrollIndicator={false}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
         >
-          {currentTab === 'actividad' && renderActividadTab()}
-          {currentTab === 'ordenes' && renderOrdenesTab()}
-          {currentTab === 'alertas' && renderAlertasTab()}
-          {currentTab === 'sci' && renderSciTab()}
-          {currentTab === 'asistencia' && renderAsistenciaTab()}
-          {currentTab === 'disponibles' && renderDisponiblesTab()}
-        </Animated.View>
-      </ScrollView>
+          <Animated.View
+            style={{
+              opacity: tabFadeAnim,
+              transform: [{ translateX: tabSlideAnim }]
+            }}
+          >
+            {currentTab === 'actividad' && renderActividadTab()}
+            {currentTab === 'ordenes' && renderOrdenesTab()}
+            {currentTab === 'alertas' && renderAlertasTab()}
+            {currentTab === 'sci' && renderSciTab()}
+            {currentTab === 'asistencia' && renderAsistenciaTab()}
+            {currentTab === 'disponibles' && renderDisponiblesTab()}
+          </Animated.View>
+        </ScrollView>
+      </View>
 
       {/* Botón Flotante Circular (+) en Órdenes y Alertas (TabScreens.kt líneas 539-554 y 775-792) */}
       {currentTab === 'ordenes' && canPublishOrders ? (
@@ -6985,10 +7263,27 @@ export const MainHomeView = ({ onLogout }) => {
         onLogout={onLogout}
       />
 
+      {/* MODAL GPS DE UNIDADES Y PERSONAL EN SERVICIO (SIEMPRE PANTALLA COMPLETA — INSTANCIA ÚNICA) */}
+      {isStrictCommander ? (
+        <CommanderTacticalNavMap
+          visible={isCommanderGpsModalOpen}
+          onClose={() => setIsCommanderGpsModalOpen(false)}
+          fleetList={commanderFleetList}
+          activeDispatches={commanderActiveDispatches}
+          firefightersList={allFirefighters}
+          cuartelLat={cuartelLat}
+          cuartelLng={cuartelLng}
+          cuarteles={cuarteles}
+          institutionCompaniesList={institutionCompaniesList}
+          isDarkMode={isDarkMode}
+          focusedUnitRequest={focusedCommanderUnitRequest}
+        />
+      ) : null}
+
       {/* MODAL DETALLE DE BOMBERO (DISPONIBLES) */}
       <FirefighterModal
-        visible={Boolean(selectedBomberoModal)}
-        bombero={selectedBomberoModal}
+        visible={Boolean(activeSelectedBomberoModal)}
+        bombero={activeSelectedBomberoModal}
         onClose={() => setSelectedBomberoModal(null)}
       />
 
@@ -7633,13 +7928,26 @@ const styles = StyleSheet.create({
     paddingBottom: 0,
     zIndex: 20
   },
-  scrollBody: {
+  scrollBodyViewport: {
     flex: 1,
+    minHeight: 0,
     marginTop: -44,
     marginHorizontal: 14,
     overflow: 'hidden',
     WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 6px, black 100%)',
     maskImage: 'linear-gradient(to bottom, transparent 0px, black 6px, black 100%)'
+  },
+  scrollBody: {
+    flex: 1,
+    minHeight: 0,
+    ...(Platform.OS === 'web'
+      ? {
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y'
+        }
+      : {})
   },
   scrollBodyContent: {
     paddingHorizontal: 0,

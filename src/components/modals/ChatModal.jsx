@@ -601,6 +601,7 @@ const styles = StyleSheet.create({
   },
   messagesScroll: {
     flex: 1,
+    minHeight: 0,
     zIndex: 1
   },
   messagesContent: {

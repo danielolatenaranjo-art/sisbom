@@ -214,14 +214,14 @@ export const LoginView = ({ onLoginSuccess }) => {
             )}
           </TouchableOpacity>
 
-          {/* Pie de Versión con Logo Oficial SENTINEL ONE + V.3.0.4 */}
+          {/* Pie de Versión con Logo Oficial SENTINEL ONE + V.3.1.0 */}
           <View style={styles.footerVersionRow}>
             <Image
               source={require('../../assets/SENTINEL_ONE.png')}
               style={styles.moduleFooterLogo}
               resizeMode="contain"
             />
-            <Text style={styles.versionTagText}>V.3.0.4</Text>
+            <Text style={styles.versionTagText}>V.3.1.0</Text>
           </View>
         </View>
       </ScrollView>

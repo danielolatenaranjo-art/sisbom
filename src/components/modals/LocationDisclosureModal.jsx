@@ -32,7 +32,9 @@ export function readNativePermissionsStatus() {
           backgroundLocation: Boolean(p.backgroundLocation),
           overlay: true,
           batteryUnrestricted: true,
-          notifications: Boolean(p.notifications)
+          notifications: Boolean(p.notifications),
+          locNotDetermined: p.locNotDetermined !== false,
+          notifNotDetermined: p.notifNotDetermined !== false
         };
       }
     }
@@ -42,7 +44,9 @@ export function readNativePermissionsStatus() {
     backgroundLocation: false,
     overlay: false,
     batteryUnrestricted: false,
-    notifications: false
+    notifications: false,
+    locNotDetermined: true,
+    notifNotDetermined: true
   };
 }
 
@@ -64,7 +68,7 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
     const checkAndAutoClose = () => {
       const updated = refreshPerms();
       const satisfied = isIos
-        ? Boolean(updated.notifications && (updated.backgroundLocation || updated.fineLocation))
+        ? Boolean(!updated.locNotDetermined && !updated.notifNotDetermined)
         : Boolean(
             updated.notifications &&
               updated.backgroundLocation &&
@@ -157,17 +161,27 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
       );
 
   const getPrimaryButtonLabel = () => {
+    if (isIos) return 'Continuar';
     if (allRequiredGranted) return 'CONTINUAR A LA APP';
     if (!perms.notifications) return 'ACTIVAR NOTIFICACIONES';
-    if (isIos && !isIosLocationOk) return 'ACTIVAR UBICACIÓN GPS';
-    if (!isIos && !perms.backgroundLocation) return 'ACTIVAR UBICACIÓN (TODO EL TIEMPO)';
-    if (!isIos && !perms.overlay) return 'ACTIVAR MOSTRAR SOBRE OTRAS APPS';
-    if (!isIos && !perms.batteryUnrestricted) return 'ACTIVAR BATERÍA SIN RESTRICCIÓN';
+    if (!perms.backgroundLocation) return 'ACTIVAR UBICACIÓN (TODO EL TIEMPO)';
+    if (!perms.overlay) return 'ACTIVAR MOSTRAR SOBRE OTRAS APPS';
+    if (!perms.batteryUnrestricted) return 'ACTIVAR BATERÍA SIN RESTRICCIÓN';
     return 'ACEPTAR Y ACTIVAR PERMISOS';
   };
 
   const handlePrimaryAction = () => {
     const current = refreshPerms();
+
+    if (isIos && typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+      if (onAccept) onAccept(current);
+      try {
+        window.webkit.messageHandlers.iOSApp.postMessage({
+          action: 'requestInitialIosPermissions'
+        });
+      } catch (_) {}
+      return;
+    }
 
     if (typeof window !== 'undefined' && window.AndroidApp) {
       if (!current.notifications) {
@@ -186,15 +200,6 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
         handleRequestBattery();
         return;
       }
-    } else if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp?.postMessage) {
-      if (!current.notifications) {
-        handleRequestNotifications();
-        return;
-      }
-      if (!current.backgroundLocation && !current.fineLocation) {
-        handleRequestGpsAlways();
-        return;
-      }
     }
 
     if (onAccept) onAccept(current);
@@ -205,7 +210,7 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
       visible={visible}
       transparent={true}
       animationType="fade"
-      onRequestClose={onDecline}
+      onRequestClose={isIos ? () => {} : onDecline}
     >
       <View style={styles.overlay}>
         <View style={styles.card}>
@@ -215,7 +220,9 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
               <MapPin size={22} color="#E2E8F0" />
             </View>
             <View style={styles.headerText}>
-              <Text style={styles.title}>Aviso de uso de ubicación y permisos</Text>
+              <Text style={styles.title}>
+                {isIos ? 'Permisos de la aplicación' : 'Aviso de uso de ubicación y permisos'}
+              </Text>
             </View>
           </View>
 
@@ -228,11 +235,11 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
             showsVerticalScrollIndicator={false}
           >
             <Text style={styles.sectionHeading}>
-              ¿Por qué Sentinel One utiliza sus permisos y GPS?
+              ¿Por qué Sentinel One solicita notificaciones y ubicación?
             </Text>
 
             <Text style={styles.justifiedParagraph}>
-              Sentinel One recibe alertas críticas de emergencia y recopila datos de ubicación en tiempo real para permitir el despacho, el cálculo de rutas al cuartel o incidente y la confirmación de llegada y seguridad del bombero, incluso cuando la aplicación está cerrada o en segundo plano.
+              Sentinel One recibe alertas de emergencia y recopila datos de ubicación en tiempo real para permitir el despacho, el cálculo de rutas al cuartel o incidente y la confirmación de llegada y seguridad del bombero, incluso cuando la aplicación está en segundo plano durante una emergencia activa.
             </Text>
 
             <Text style={styles.justifiedParagraph}>
@@ -247,150 +254,164 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
 
             <View style={styles.sectionDivider} />
 
-            {/* Lista de Permisos Requeridos según Sistema Operativo */}
+            {/* Lista de Permisos según Sistema Operativo */}
             <Text style={styles.sectionTitle}>
               {isIos
-                ? 'Active estos 2 permisos en su iPhone para continuar:'
+                ? 'A continuación el sistema solicitará los siguientes permisos:'
                 : 'Active estos 4 permisos en su teléfono para continuar:'}
             </Text>
 
-            {/* 1. Notificaciones de Emergencia (Android e iOS) */}
-            <TouchableOpacity
-              style={[
-                styles.permCard,
-                perms.notifications ? styles.permCardActive : styles.permCardPending
-              ]}
-              activeOpacity={0.8}
-              onPress={handleRequestNotifications}
-            >
-              <View style={styles.permIconBox}>
-                <Bell size={18} color="#CBD5E1" />
-              </View>
-              <View style={styles.permInfo}>
-                <Text style={styles.permTitle}>1. Notificaciones de Emergencia</Text>
-                <Text style={styles.permDesc}>
-                  {isIos
-                    ? 'Permite recibir alarmas de despacho y avisos de la Central. En iPhone marque "Permitir".'
-                    : 'Permite sonar y mostrar alertas de despacho y cambios de estado.'}
-                </Text>
-              </View>
-              {perms.notifications ? (
-                <CheckCircle2 size={20} color="#10B981" />
-              ) : (
-                <View style={styles.activatePill}>
-                  <Text style={styles.activatePillText}>Activar</Text>
-                  <ChevronRight size={13} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* 2. Ubicación GPS: Permitir siempre / Todo el tiempo */}
-            <TouchableOpacity
-              style={[
-                styles.permCard,
-                (isIos ? isIosLocationOk : perms.backgroundLocation)
-                  ? styles.permCardActive
-                  : styles.permCardPending
-              ]}
-              activeOpacity={0.8}
-              onPress={handleRequestGpsAlways}
-            >
-              <View style={styles.permIconBox}>
-                <MapPin size={18} color="#CBD5E1" />
-              </View>
-              <View style={styles.permInfo}>
-                <Text style={styles.permTitle}>
-                  {isIos
-                    ? '2. Ubicación GPS en Emergencias'
-                    : '2. Ubicación GPS: "Permitir todo el tiempo"'}
-                </Text>
-                <Text style={styles.permDesc}>
-                  {isIos
-                    ? isIosLocationOk
-                      ? 'Ubicación GPS autorizada correctamente para transmisión en ruta durante despachos activos.'
-                      : 'Presione Activar y autorice el uso de ubicación para transmitir su posición al asistir a emergencias.'
-                    : perms.fineLocation && !perms.backgroundLocation
-                      ? 'Falta el permiso en segundo plano. Presione aquí y en Ubicación elija "Permitir todo el tiempo".'
-                      : 'Al abrirse los ajustes de Ubicación, debe elegir la opción "Permitir todo el tiempo".'}
-                </Text>
-              </View>
-              {(isIos ? isIosLocationOk : perms.backgroundLocation) ? (
-                <CheckCircle2 size={20} color="#10B981" />
-              ) : (
-                <View style={styles.activatePill}>
-                  <Text style={styles.activatePillText}>Activar</Text>
-                  <ChevronRight size={13} color="#FFFFFF" />
-                </View>
-              )}
-            </TouchableOpacity>
-
-            {/* 3. Mostrar sobre otras aplicaciones (Exclusivo Android) */}
-            {!isIos && (
-              <TouchableOpacity
-                style={[
-                  styles.permCard,
-                  perms.overlay ? styles.permCardActive : styles.permCardPending
-                ]}
-                activeOpacity={0.8}
-                onPress={handleRequestOverlay}
-              >
-                <View style={styles.permIconBox}>
-                  <Layers size={18} color="#CBD5E1" />
-                </View>
-                <View style={styles.permInfo}>
-                  <Text style={styles.permTitle}>3. Mostrar sobre otras aplicaciones</Text>
-                  <Text style={styles.permDesc}>
-                    Busque "SENTINEL ONE" en la lista y active el interruptor para ver la alarma sobre pantalla bloqueada.
-                  </Text>
-                </View>
-                {perms.overlay ? (
-                  <CheckCircle2 size={20} color="#10B981" />
-                ) : (
-                  <View style={styles.activatePill}>
-                    <Text style={styles.activatePillText}>Activar</Text>
-                    <ChevronRight size={13} color="#FFFFFF" />
+            {isIos ? (
+              <>
+                <View style={[styles.permCard, styles.permCardPending]}>
+                  <View style={styles.permIconBox}>
+                    <Bell size={18} color="#CBD5E1" />
                   </View>
-                )}
-              </TouchableOpacity>
-            )}
-
-            {/* 4. Encendido y segundo plano 24/7 (Exclusivo Android) */}
-            {!isIos && (
-              <TouchableOpacity
-                style={[
-                  styles.permCard,
-                  perms.batteryUnrestricted ? styles.permCardActive : styles.permCardPending
-                ]}
-                activeOpacity={0.8}
-                onPress={handleRequestBattery}
-              >
-                <View style={styles.permIconBox}>
-                  <Zap size={18} color="#CBD5E1" />
-                </View>
-                <View style={styles.permInfo}>
-                  <Text style={styles.permTitle}>4. Batería sin restricciones 24/7</Text>
-                  <Text style={styles.permDesc}>
-                    Presione "Permitir" para que el teléfono no apague la alarma en la noche.
-                  </Text>
-                </View>
-                {perms.batteryUnrestricted ? (
-                  <CheckCircle2 size={20} color="#10B981" />
-                ) : (
-                  <View style={styles.activatePill}>
-                    <Text style={styles.activatePillText}>Activar</Text>
-                    <ChevronRight size={13} color="#FFFFFF" />
+                  <View style={styles.permInfo}>
+                    <Text style={styles.permTitle}>1. Notificaciones de Emergencia</Text>
+                    <Text style={styles.permDesc}>
+                      Permite recibir alarmas de despacho, citaciones y avisos operativos de la Central de Alarmas.
+                    </Text>
                   </View>
-                )}
-              </TouchableOpacity>
+                </View>
+
+                <View style={[styles.permCard, styles.permCardPending]}>
+                  <View style={styles.permIconBox}>
+                    <MapPin size={18} color="#CBD5E1" />
+                  </View>
+                  <View style={styles.permInfo}>
+                    <Text style={styles.permTitle}>2. Ubicación en Emergencias</Text>
+                    <Text style={styles.permDesc}>
+                      Permite calcular distancia y ruta hacia el cuartel o emergencia y coordinar la llegada de unidades.
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <>
+                {/* 1. Notificaciones de Emergencia (Android) */}
+                <TouchableOpacity
+                  style={[
+                    styles.permCard,
+                    perms.notifications ? styles.permCardActive : styles.permCardPending
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={handleRequestNotifications}
+                >
+                  <View style={styles.permIconBox}>
+                    <Bell size={18} color="#CBD5E1" />
+                  </View>
+                  <View style={styles.permInfo}>
+                    <Text style={styles.permTitle}>1. Notificaciones de Emergencia</Text>
+                    <Text style={styles.permDesc}>
+                      Permite sonar y mostrar alertas de despacho y cambios de estado.
+                    </Text>
+                  </View>
+                  {perms.notifications ? (
+                    <CheckCircle2 size={20} color="#10B981" />
+                  ) : (
+                    <View style={styles.activatePill}>
+                      <Text style={styles.activatePillText}>Activar</Text>
+                      <ChevronRight size={13} color="#FFFFFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* 2. Ubicación GPS: Permitir todo el tiempo (Android) */}
+                <TouchableOpacity
+                  style={[
+                    styles.permCard,
+                    perms.backgroundLocation ? styles.permCardActive : styles.permCardPending
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={handleRequestGpsAlways}
+                >
+                  <View style={styles.permIconBox}>
+                    <MapPin size={18} color="#CBD5E1" />
+                  </View>
+                  <View style={styles.permInfo}>
+                    <Text style={styles.permTitle}>2. Ubicación GPS: "Permitir todo el tiempo"</Text>
+                    <Text style={styles.permDesc}>
+                      {perms.fineLocation && !perms.backgroundLocation
+                        ? 'Falta el permiso en segundo plano. Presione aquí y en Ubicación elija "Permitir todo el tiempo".'
+                        : 'Al abrirse los ajustes de Ubicación, debe elegir la opción "Permitir todo el tiempo".'}
+                    </Text>
+                  </View>
+                  {perms.backgroundLocation ? (
+                    <CheckCircle2 size={20} color="#10B981" />
+                  ) : (
+                    <View style={styles.activatePill}>
+                      <Text style={styles.activatePillText}>Activar</Text>
+                      <ChevronRight size={13} color="#FFFFFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* 3. Mostrar sobre otras aplicaciones (Exclusivo Android) */}
+                <TouchableOpacity
+                  style={[
+                    styles.permCard,
+                    perms.overlay ? styles.permCardActive : styles.permCardPending
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={handleRequestOverlay}
+                >
+                  <View style={styles.permIconBox}>
+                    <Layers size={18} color="#CBD5E1" />
+                  </View>
+                  <View style={styles.permInfo}>
+                    <Text style={styles.permTitle}>3. Mostrar sobre otras aplicaciones</Text>
+                    <Text style={styles.permDesc}>
+                      Busque "SENTINEL ONE" en la lista y active el interruptor para ver la alarma sobre pantalla bloqueada.
+                    </Text>
+                  </View>
+                  {perms.overlay ? (
+                    <CheckCircle2 size={20} color="#10B981" />
+                  ) : (
+                    <View style={styles.activatePill}>
+                      <Text style={styles.activatePillText}>Activar</Text>
+                      <ChevronRight size={13} color="#FFFFFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* 4. Encendido y segundo plano 24/7 (Exclusivo Android) */}
+                <TouchableOpacity
+                  style={[
+                    styles.permCard,
+                    perms.batteryUnrestricted ? styles.permCardActive : styles.permCardPending
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={handleRequestBattery}
+                >
+                  <View style={styles.permIconBox}>
+                    <Zap size={18} color="#CBD5E1" />
+                  </View>
+                  <View style={styles.permInfo}>
+                    <Text style={styles.permTitle}>4. Batería sin restricciones 24/7</Text>
+                    <Text style={styles.permDesc}>
+                      Presione "Permitir" para que el teléfono no apague la alarma en la noche.
+                    </Text>
+                  </View>
+                  {perms.batteryUnrestricted ? (
+                    <CheckCircle2 size={20} color="#10B981" />
+                  ) : (
+                    <View style={styles.activatePill}>
+                      <Text style={styles.activatePillText}>Activar</Text>
+                      <ChevronRight size={13} color="#FFFFFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </>
             )}
           </ScrollView>
 
-          {/* Botones de Acción: Paso a Paso / Continuar y No acepto */}
+          {/* Botones de Acción */}
           <View style={styles.footer}>
             <TouchableOpacity
               style={[
                 styles.acceptButton,
-                allRequiredGranted && styles.acceptButtonReady
+                (allRequiredGranted || isIos) && styles.acceptButtonReady
               ]}
               activeOpacity={0.85}
               onPress={handlePrimaryAction}
@@ -398,13 +419,15 @@ export const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
               <Text style={styles.acceptButtonText}>{getPrimaryButtonLabel()}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.declineButton}
-              activeOpacity={0.75}
-              onPress={onDecline}
-            >
-              <Text style={styles.declineButtonText}>NO ACEPTO</Text>
-            </TouchableOpacity>
+            {!isIos ? (
+              <TouchableOpacity
+                style={styles.declineButton}
+                activeOpacity={0.75}
+                onPress={onDecline}
+              >
+                <Text style={styles.declineButtonText}>AHORA NO</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </View>
@@ -462,7 +485,8 @@ const styles = StyleSheet.create({
     marginVertical: 14
   },
   scrollArea: {
-    flex: 1
+    flex: 1,
+    minHeight: 0
   },
   scrollContent: {
     paddingBottom: 8

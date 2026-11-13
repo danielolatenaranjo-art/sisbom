@@ -18,6 +18,8 @@
     "zustand": "^5.0.15"
   },
   "scripts": {
+    "sync:shared": "node ../../SHARED/sync-shared.mjs",
+    "prestart": "node ../../SHARED/sync-shared.mjs",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

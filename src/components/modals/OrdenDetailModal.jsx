@@ -229,7 +229,8 @@ const styles = StyleSheet.create({
     flexShrink: 0
   },
   scrollArea: {
-    flex: 1
+    flex: 1,
+    minHeight: 0
   },
   scrollContent: {
     padding: 14,

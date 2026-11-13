@@ -25,17 +25,19 @@ ISSUER_ID = os.environ.get("APPSTORE_ISSUER_ID", "").strip()
 PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
-TARGET_VERSION = "3.0.4"
-TARGET_BUILD_NUMBER = "3027"
+TARGET_VERSION = "3.1.0"
+TARGET_BUILD_NUMBER = "3033"
 
-SUPPORT_URL = "https://github.com/danielolatenaranjo-art/sisbom"
+SUPPORT_URL = "https://sistemasentinel.cl/soporte"
+MARKETING_URL = "https://sistemasentinel.cl"
+PRIVACY_URL = "https://sistemasentinel.cl/privacidad"
 COPYRIGHT_TEXT = "2026 Sistema Sentinel - Cuerpos de Bomberos"
 
 WHATS_NEW_ES = (
-    "SENTINEL ONE V.3.0.4:\n"
-    "- Nuevo Mapa Táctico estilo SENTINEL NAV para Comandancia con posición en tiempo real de unidades y bomberos en servicio.\n"
-    "- Alarma sonora de despacho al 100% de volumen desde el primer tono cuando el bombero está disponible (0-9), sin eco.\n"
-    "- Optimización de permisos GPS y ahorro de batería en segundo plano."
+    "SENTINEL ONE V.3.1.0:\n"
+    "- GPS de Unidades y Personal en Servicio siempre a pantalla completa con totales tácticos en tiempo real.\n"
+    "- Mejoras en control remoto de apertura de puerta de cuartel y respuesta en tiempo real en iOS.\n"
+    "- Optimización del flujo informativo de permisos, rendimiento y estabilidad general."
 )
 
 PROMOTIONAL_TEXT_ES = (
@@ -44,28 +46,33 @@ PROMOTIONAL_TEXT_ES = (
 )
 
 DESCRIPTION_ES = (
-    "SENTINEL ONE es la aplicación móvil oficial para bomberos e instituciones de emergencia conectadas "
+    "SENTINEL ONE es la aplicación móvil operativa para bomberos e instituciones de emergencia conectadas "
     "al ecosistema SENTINEL V3.\n\n"
     "Funciones principales:\n"
     "• Recepción instantánea de despachos de emergencia con alarma crítica y mapa táctico en vivo.\n"
     "• Gestión rápida de disponibilidad operativa (0-9 Disponible / 0-8 No Disponible) y confirmación de asistencia en ruta.\n"
     "• Visualización en tiempo real de unidades despachadas, dotación en cuartel, operador de Central de Alarmas y bitácora.\n"
-    "• Canal operacional de comunicaciones, órdenes del día, alertas institucionales y registro histórico de asistencias."
+    "• Canal operacional de comunicaciones, órdenes del día, alertas institucionales y registro histórico de asistencias.\n\n"
+    "Nota: SENTINEL ONE es una plataforma tecnológica privada licenciada a Cuerpos de Bomberos suscritos al ecosistema SENTINEL V3 y no representa a una entidad gubernamental estatal."
 )
 
 KEYWORDS_ES = "bomberos,emergencias,sentinel,despacho,alarma,rescate,132,central,incidente"
 
 REVIEW_NOTES = (
-    "SENTINEL ONE es una aplicación institucional para Cuerpos de Bomberos en Chile.\n\n"
+    "SENTINEL ONE es una plataforma tecnológica privada utilizada por Cuerpos de Bomberos suscritos.\n\n"
     "PASOS PARA PROBAR LA APLICACIÓN CON CUENTA DEMO:\n"
     "1. En la pantalla inicial ('Clave de Licencia'), ingrese la licencia: PRUEBA y presione 'Conectar'.\n"
-    "2. En la pantalla de inicio de sesión del bombero ingrese:\n"
-    "   - Usuario: 1\n"
+    "2. En el aviso informativo previo a permisos presione 'Continuar' y responda a los diálogos del sistema.\n"
+    "3. En la pantalla de inicio de sesión del bombero ingrese:\n"
+    "   - Usuario: 100\n"
     "   - Clave de Acceso: 1234\n\n"
+    "CORRECCIONES REALIZADAS PARA ESTA REVISIÓN (V3.1.0 / Build 3033):\n"
+    "- Directriz 5.1.1(iv): Se eliminó cualquier botón 'Activar' / 'No acepto' en el aviso previo de permisos; ahora muestra únicamente un aviso neutral con botón 'Continuar' que procede siempre a la solicitud nativa de iOS, y nunca redirige a Configuración si el usuario elige 'No permitir'.\n"
+    "- Directriz 2.3.3: Se reemplazaron todas las capturas de pantalla de iPhone (6.9\", 6.7\", 6.5\") e iPad Pro (13\" y 12.9\" 2ª gen.) por capturas reales de la aplicación en uso.\n"
+    "- Corrección del botón 'Apertura de Puerta' en iOS mediante puente nativo y respaldo REST con restablecimiento inmediato.\n\n"
     "USO DE UBICACIÓN EN SEGUNDO PLANO:\n"
     "SENTINEL ONE utiliza el GPS en segundo plano únicamente cuando el bombero confirma 'ASISTIR' a un despacho "
-    "de emergencia activo, transmitiendo su posición en ruta hacia el cuartel o incidente para coordinación del "
-    "Oficial a Cargo (OBAC) y la Central de Alarmas."
+    "de emergencia activo para coordinación táctica en ruta."
 )
 
 
@@ -326,14 +333,13 @@ def upload_screenshot_to_set(set_id, file_path, token):
 
 
 def ensure_screenshots_for_localization(loc_id, token):
-    os.makedirs("/tmp/asc_screenshots", exist_ok=True)
-    # Dimensiones oficiales exactas exigidas por App Store Connect:
-    # - iPhone con Dynamic Island (6.7" / 6.5"): 1290 x 2796 y 1284 x 2778
-    # - iPad con pantalla de 13 pulgadas: 2064 x 2752 y 2048 x 2732
-    targets = [
-        ("APP_IPHONE_67", 1290, 2796),
-        ("APP_IPHONE_65", 1284, 2778),
-        ("APP_IPAD_PRO_3GEN_129", 2064, 2752),
+    base_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
+    display_types = [
+        "APP_IPHONE_69",
+        "APP_IPHONE_67",
+        "APP_IPHONE_65",
+        "APP_IPAD_PRO_3GEN_129",
+        "APP_IPAD_PRO_129",
     ]
 
     st, sets_res = api_request(
@@ -346,7 +352,18 @@ def ensure_screenshots_for_localization(loc_id, token):
         for s in sets_res.get("data", [])
     }
 
-    for display_type, w, h in targets:
+    for display_type in display_types:
+        local_dir = os.path.join(base_dir, display_type)
+        if not os.path.isdir(local_dir):
+            print(f"⚠️ No existe carpeta local de capturas para {display_type}: {local_dir}")
+            continue
+        local_files = sorted(
+            f for f in os.listdir(local_dir) if f.lower().endswith(".png")
+        )
+        if not local_files:
+            print(f"⚠️ Sin capturas PNG en {local_dir}")
+            continue
+
         set_id = existing_sets.get(display_type)
         if not set_id:
             create_set_body = {
@@ -369,31 +386,27 @@ def ensure_screenshots_for_localization(loc_id, token):
             if st_cs in (200, 201):
                 set_id = cs_res["data"]["id"]
                 print(f"📸 ScreenshotSet creado para {display_type} (id={set_id})")
-            elif display_type == "APP_IPAD_PRO_3GEN_129":
-                # Probar con 2048x2732 si el displayType ya existía o requiere resolución clásica 12.9"
-                pass
+            else:
+                print(f"ℹ️ DisplayType {display_type} omitido por ASC (HTTP {st_cs}).")
+                continue
 
-        if not set_id:
-            continue
-
-        # Verificar cuántas capturas tiene actualmente ese set
         st_sc, sc_res = api_request("GET", f"/v1/appScreenshotSets/{set_id}/appScreenshots", token=token)
-        current_screenshots = [
-            sc for sc in sc_res.get("data", [])
-            if sc.get("attributes", {}).get("assetDeliveryState", {}).get("state") in ("COMPLETE", "UPLOAD_COMPLETE", "AWAITING_UPLOAD")
-        ]
-        if len(current_screenshots) >= 2:
-            print(f"✅ {display_type} ya cuenta con {len(current_screenshots)} capturas cargadas.")
-            continue
+        existing_items = sc_res.get("data", [])
+        complete_names = set()
+        for sc in existing_items:
+            attrs = sc.get("attributes", {})
+            fname = attrs.get("fileName", "")
+            dstate = attrs.get("assetDeliveryState", {}).get("state", "")
+            if fname.startswith("sentinel_310_") and dstate in ("COMPLETE", "UPLOAD_COMPLETE"):
+                complete_names.add(fname)
+            else:
+                api_request("DELETE", f"/v1/appScreenshots/{sc['id']}", token=token)
+                print(f"🗑️ Captura antigua/inválida eliminada en {display_type}: {fname} ({dstate})")
 
-        for idx in (1, 2):
-            img_path = f"/tmp/asc_screenshots/{display_type}_{idx}.png"
-            create_tactical_screenshot(w, h, idx, img_path)
-            ok = upload_screenshot_to_set(set_id, img_path, token)
-            if not ok and display_type == "APP_IPAD_PRO_3GEN_129":
-                # Fallback a 2048x2732 para APP_IPAD_PRO_3GEN_129
-                create_tactical_screenshot(2048, 2732, idx, img_path)
-                upload_screenshot_to_set(set_id, img_path, token)
+        for fname in local_files:
+            if fname in complete_names:
+                continue
+            upload_screenshot_to_set(set_id, os.path.join(local_dir, fname), token)
 
 
 def main():
@@ -465,7 +478,7 @@ def main():
                     "type": "appInfoLocalizations",
                     "id": ail_id,
                     "attributes": {
-                        "privacyPolicyUrl": SUPPORT_URL,
+                        "privacyPolicyUrl": PRIVACY_URL,
                     },
                 }
             }
@@ -547,19 +560,40 @@ def main():
     _, ver_res = api_request("GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10", token=token)
     versions = ver_res.get("data", [])
     version_id = None
+    editable_states = {"PREPARE_FOR_SUBMISSION", "DEVELOPER_REJECTED", "REJECTED", "METADATA_REJECTED", "INVALID_BINARY"}
     for v in versions:
         if v.get("attributes", {}).get("versionString") == TARGET_VERSION:
             version_id = v["id"]
             break
-    if not version_id and versions:
-        version_id = versions[0]["id"]
+    if not version_id:
+        for v in versions:
+            st_v = v.get("attributes", {}).get("appStoreState") or v.get("attributes", {}).get("appVersionState")
+            if st_v in editable_states:
+                version_id = v["id"]
+                break
+    if not version_id:
+        st_nv, nv_res = api_request(
+            "POST",
+            "/v1/appStoreVersions",
+            body={
+                "data": {
+                    "type": "appStoreVersions",
+                    "attributes": {"platform": "IOS", "versionString": TARGET_VERSION, "releaseType": "AFTER_APPROVAL"},
+                    "relationships": {"app": {"data": {"type": "apps", "id": app_id}}},
+                }
+            },
+            token=token,
+        )
+        if st_nv in (200, 201):
+            version_id = nv_res["data"]["id"]
 
-    print(f"📝 Actualizando Copyright y ReleaseType en versión {TARGET_VERSION} (id={version_id})...")
+    print(f"📝 Actualizando VersionString, Copyright y ReleaseType en versión {TARGET_VERSION} (id={version_id})...")
     ver_patch = {
         "data": {
             "type": "appStoreVersions",
             "id": version_id,
             "attributes": {
+                "versionString": TARGET_VERSION,
                 "copyright": COPYRIGHT_TEXT,
                 "releaseType": "AFTER_APPROVAL",
             },
@@ -670,7 +704,7 @@ def main():
             "keywords": KEYWORDS_ES,
             "promotionalText": PROMOTIONAL_TEXT_ES,
             "supportUrl": SUPPORT_URL,
-            "marketingUrl": SUPPORT_URL,
+            "marketingUrl": MARKETING_URL,
             "whatsNew": WHATS_NEW_ES,
         }
         st_l, _ = api_request(
@@ -700,7 +734,7 @@ def main():
         "contactLastName": "Olate",
         "contactPhone": "+56998887766",
         "contactEmail": "daniel.olate.naranjo@gmail.com",
-        "demoAccountName": "1",
+        "demoAccountName": "100",
         "demoAccountPassword": "1234",
         "demoAccountRequired": True,
         "notes": REVIEW_NOTES,
@@ -736,7 +770,7 @@ def main():
 
     # 7. Vincular el Build TARGET_BUILD_NUMBER (esperando a que pase a VALID si recién subió, consultando preReleaseVersions que sí incluye builds en procesamiento)
     selected_build = None
-    for attempt in range(36):
+    for attempt in range(44):
         _, pre_res = api_request("GET", f"/v1/preReleaseVersions?filter[app]={app_id}&include=builds&limit=10", token=token)
         builds = [inc for inc in pre_res.get("included", []) if inc.get("type") == "builds"]
         if not builds:
@@ -748,13 +782,8 @@ def main():
                 break
         if selected_build:
             break
-        print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} en App Store Connect (intento {attempt + 1}/36)...")
+        print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} en App Store Connect (intento {attempt + 1}/44)...")
         time.sleep(15)
-    if not selected_build:
-        for b in builds:
-            if b.get("attributes", {}).get("processingState") == "VALID":
-                selected_build = b
-                break
 
     if selected_build:
         b_id = selected_build["id"]

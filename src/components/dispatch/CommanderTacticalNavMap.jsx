@@ -5,8 +5,6 @@ import {
   Truck,
   Users,
   Satellite,
-  Maximize2,
-  Minimize2,
   LocateFixed,
   Plus,
   Minus,
@@ -14,6 +12,7 @@ import {
   X
 } from 'lucide-react-native';
 import { getRtdb, ensureFirebaseAuth } from '../../config/firebase';
+import { useLicenseStore } from '../../store/useLicenseStore';
 import {
   resolveCompanyFromVehicleId,
   resolveCoreUnitStatusInfo,
@@ -47,7 +46,6 @@ function buildCommanderNavMapHtml() {
     .leaflet-control-attribution, .leaflet-control-zoom {
       display: none !important;
     }
-    /* Filtro modo oscuro táctico idéntico a CarPlayTacticalMap.jsx de SENTINEL NAV */
     body.nav-dark-streets .leaflet-tile-pane {
       filter: invert(100%) hue-rotate(180deg) brightness(96%) contrast(94%) saturate(88%);
     }
@@ -126,7 +124,6 @@ function buildCommanderNavMapHtml() {
           .replace(/"/g, '&quot;');
       }
 
-      // Ícono de Cuartel de Bomberos (idéntico a createFireStationFlaticonMarker en SENTINEL NAV)
       function makeStationIcon(label) {
         var safeLabel = esc(label || 'CUARTEL');
         return L.divIcon({
@@ -155,7 +152,6 @@ function buildCommanderNavMapHtml() {
         });
       }
 
-      // Ícono de Emergencia por Clave Radial (idéntico a createEmergencyTargetCrossIcon de SENTINEL NAV)
       function getClaveMeta(clave) {
         var c = String(clave || '10-0').trim().toUpperCase();
         if (c.indexOf('10-0') === 0 || c.indexOf('10-10') === 0 || c === '10-30') {
@@ -240,7 +236,6 @@ function buildCommanderNavMapHtml() {
         });
       }
 
-      // Ícono de Unidad / Carro Bomba (idéntico a createOtherVehicleTacticalIcon en SENTINEL NAV)
       function makeVehicleIcon(v) {
         var stUpper = String(v.statusShort || '0-9').trim().toUpperCase();
         var isOut = stUpper.indexOf('0-8') !== -1;
@@ -293,7 +288,6 @@ function buildCommanderNavMapHtml() {
         });
       }
 
-      // Ícono de Bombero en Servicio (idéntico a createFirefighterTacticalIcon en SENTINEL NAV)
       function makeFirefighterIcon(b) {
         var radial = esc(b.idRadial || '--');
         return L.divIcon({
@@ -308,7 +302,6 @@ function buildCommanderNavMapHtml() {
         });
       }
 
-      // Ícono de Alertante GPS (SENTINEL LINK)
       function makeAlertanteIcon() {
         return L.divIcon({
           className: 'custom-alertante-blue-pin',
@@ -326,6 +319,7 @@ function buildCommanderNavMapHtml() {
       }
 
       var stationMarkers = {};
+      var stationSigMap = {};
       var incidentMarkers = {};
       var alertanteMarkers = {};
       var vehicleMarkers = {};
@@ -334,6 +328,8 @@ function buildCommanderNavMapHtml() {
       var bomberoSigMap = {};
       var hasAutoFittedOnce = false;
       var lastActiveIncidentSig = '';
+      var lastStationSig = '';
+      var hadAnyVehicleOnce = false;
 
       function syncMapCollection(existingMap, sigMap, items, makeIconFn, makePopupFn, zOffset) {
         var nextKeys = {};
@@ -392,7 +388,12 @@ function buildCommanderNavMapHtml() {
         if (pts.length === 1) {
           map.setView(pts[0], forceFit ? 16 : 15, { animate: Boolean(forceFit) });
         } else if (pts.length > 1) {
-          map.fitBounds(L.latLngBounds(pts), { padding: [36, 36], maxZoom: 16, animate: Boolean(forceFit) });
+          map.fitBounds(L.latLngBounds(pts), {
+            paddingTopLeft: [28, 108],
+            paddingBottomRight: [28, 178],
+            maxZoom: 16,
+            animate: Boolean(forceFit)
+          });
         }
       }
 
@@ -405,7 +406,7 @@ function buildCommanderNavMapHtml() {
 
         syncMapCollection(
           stationMarkers,
-          null,
+          stationSigMap,
           payload.stations || [],
           function(s) { return makeStationIcon(s.label); },
           function(s) {
@@ -446,9 +447,7 @@ function buildCommanderNavMapHtml() {
           payload.showUnits !== false ? (payload.vehicles || []) : [],
           function(v) { return makeVehicleIcon(v); },
           function(v) {
-            var gpsTxt = v.hasLiveGps
-              ? ('GPS EN VIVO' + (v.speedKmh >= 2 ? ' • ' + Math.round(v.speedKmh) + ' km/h' : ''))
-              : 'Posición en Cuartel';
+            var gpsTxt = 'GPS EN VIVO' + (v.speedKmh >= 2 ? ' • ' + Math.round(v.speedKmh) + ' km/h' : '');
             return '<div style="font-weight:900;color:#93C5FD;font-size:12px;">🚒 UNIDAD ' + esc(v.idCarro) + '</div>' +
               '<div style="color:#34D399;font-weight:800;margin-top:2px;">Estado: ' + esc(v.statusShort) + '</div>' +
               '<div style="color:#94A3B8;font-size:10px;margin-top:2px;">' + esc(gpsTxt) + '</div>';
@@ -470,9 +469,20 @@ function buildCommanderNavMapHtml() {
         );
 
         var incSig = (payload.incidents || []).map(function(i) { return i.key + ':' + i.lat.toFixed(4) + ',' + i.lng.toFixed(4); }).join('|');
-        if (!hasAutoFittedOnce || (incSig && incSig !== lastActiveIncidentSig)) {
+        var stSig = (payload.stations || []).map(function(s) { return s.key + ':' + s.lat.toFixed(5) + ',' + s.lng.toFixed(5); }).join('|');
+        var hasVehiclesNow = (payload.vehicles || []).length > 0;
+        var shouldFitFirstVehicles = !hadAnyVehicleOnce && hasVehiclesNow && !incSig;
+        if (hasVehiclesNow) hadAnyVehicleOnce = true;
+
+        if (
+          !hasAutoFittedOnce ||
+          (incSig && incSig !== lastActiveIncidentSig) ||
+          (stSig && stSig !== lastStationSig && !incSig) ||
+          shouldFitFirstVehicles
+        ) {
           hasAutoFittedOnce = true;
           lastActiveIncidentSig = incSig;
+          if (stSig) lastStationSig = stSig;
           setTimeout(function() {
             map.invalidateSize();
             fitOperationalBounds(payload, false);
@@ -517,6 +527,8 @@ function buildCommanderNavMapHtml() {
 }
 
 export const CommanderTacticalNavMap = ({
+  visible = false,
+  onClose = () => {},
   fleetList = [],
   activeDispatches = [],
   firefightersList = [],
@@ -534,19 +546,26 @@ export const CommanderTacticalNavMap = ({
   const [showUnits, setShowUnits] = useState(true);
   const [showBomberos, setShowBomberos] = useState(true);
   const [onlyServiceUnits, setOnlyServiceUnits] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const inlineIframeRef = useRef(null);
   const modalIframeRef = useRef(null);
+  const syncPayloadRef = useRef(null);
+  const focusedUnitReqRef = useRef(null);
   const mapHtml = useMemo(() => buildCommanderNavMapHtml(), []);
 
-  // Suscripción en tiempo real a RTDB (`telemetria/vehiculos`, `telemetria/bomberos`, `telemetria/alertantes`)
-  // idéntica a useTelemetryStore.js de SENTINEL CAD y useNavStore.js de SENTINEL NAV.
+  // Suscripción en tiempo real a RTDB únicamente cuando el GPS a pantalla completa está abierto (prevención total de bucles y consumo en segundo plano)
   useEffect(() => {
+    if (!visible) return undefined;
+
     let cancelled = false;
     let unsubVeh = null;
     let unsubBom = null;
     let unsubAle = null;
+    let vehTimer = null;
+    let bomTimer = null;
+    let pendingVehVal = null;
+    let pendingBomVal = null;
+    let lastVehTs = 0;
+    let lastBomTs = 0;
 
     const connectRtdb = async () => {
       try {
@@ -558,7 +577,25 @@ export const CommanderTacticalNavMap = ({
         unsubVeh = onValue(
           ref(rtdb, 'telemetria/vehiculos'),
           (snap) => {
-            if (!cancelled) setRtdbVehicles(snap.val() || {});
+            if (cancelled) return;
+            const nextVal = snap.val() || {};
+            const now = Date.now();
+            if (now - lastVehTs >= 450) {
+              lastVehTs = now;
+              setRtdbVehicles(nextVal);
+            } else {
+              pendingVehVal = nextVal;
+              if (!vehTimer) {
+                vehTimer = setTimeout(() => {
+                  vehTimer = null;
+                  if (!cancelled && pendingVehVal) {
+                    lastVehTs = Date.now();
+                    setRtdbVehicles(pendingVehVal);
+                    pendingVehVal = null;
+                  }
+                }, 450);
+              }
+            }
           },
           () => {}
         );
@@ -566,7 +603,25 @@ export const CommanderTacticalNavMap = ({
         unsubBom = onValue(
           ref(rtdb, 'telemetria/bomberos'),
           (snap) => {
-            if (!cancelled) setRtdbBomberos(snap.val() || {});
+            if (cancelled) return;
+            const nextVal = snap.val() || {};
+            const now = Date.now();
+            if (now - lastBomTs >= 450) {
+              lastBomTs = now;
+              setRtdbBomberos(nextVal);
+            } else {
+              pendingBomVal = nextVal;
+              if (!bomTimer) {
+                bomTimer = setTimeout(() => {
+                  bomTimer = null;
+                  if (!cancelled && pendingBomVal) {
+                    lastBomTs = Date.now();
+                    setRtdbBomberos(pendingBomVal);
+                    pendingBomVal = null;
+                  }
+                }, 450);
+              }
+            }
           },
           () => {}
         );
@@ -583,76 +638,106 @@ export const CommanderTacticalNavMap = ({
 
     connectRtdb();
 
+    // Refrescar silenciosamente metadatos del cuartel/compañías si corresponde (con guarda anti-bucle de 30s)
+    useLicenseStore.getState().refreshStationMetadataSilently?.().catch(() => {});
+
     return () => {
       cancelled = true;
+      if (vehTimer) clearTimeout(vehTimer);
+      if (bomTimer) clearTimeout(bomTimer);
       try { if (typeof unsubVeh === 'function') unsubVeh(); } catch (_) {}
       try { if (typeof unsubBom === 'function') unsubBom(); } catch (_) {}
       try { if (typeof unsubAle === 'function') unsubAle(); } catch (_) {}
     };
-  }, []);
+  }, [visible]);
 
-  // Coordenadas base de cuarteles institucionales (1 compañía o multi-compañía)
   const stationsList = useMemo(() => {
     const out = [];
     const baseLat = Number(cuartelLat);
     const baseLng = Number(cuartelLng);
     const hasBase =
-      !isNaN(baseLat) && !isNaN(baseLng) && Math.abs(baseLat) > 0.1 && Math.abs(baseLng) > 0.1;
+      Number.isFinite(baseLat) &&
+      Number.isFinite(baseLng) &&
+      Math.abs(baseLat) > 0.1 &&
+      Math.abs(baseLng) > 0.1;
 
     if (cuarteles && typeof cuarteles === 'object') {
       const entries = Array.isArray(cuarteles)
-        ? cuarteles.map((c, idx) => [String(c?.compania || c?.id || idx + 1), c])
+        ? cuarteles.map((c, idx) => [String(c?.compania || c?.alias || c?.id || idx + 1), c])
         : Object.entries(cuarteles);
 
       for (const [k, c] of entries) {
-        const lat = Number(c?.lat ?? c?.latitud ?? c?.coordenadas?.lat);
-        const lng = Number(c?.lng ?? c?.longitud ?? c?.coordenadas?.lng);
-        if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) > 0.1 && Math.abs(lng) > 0.1) {
-          const compNum = String(k).replace(/\D/g, '') || '1';
+        if (!c || typeof c !== 'object') continue;
+        const cCoords = c.coordenadas || c.geo || c.ubicacion || {};
+        const lat = Number(
+          c.lat ?? c.latitud ?? c.latCuartel ?? c.cuartelLat ?? c.cuartel_lat ?? cCoords.lat ?? cCoords.latitude
+        );
+        const lng = Number(
+          c.lng ?? c.lon ?? c.longitud ?? c.lngCuartel ?? c.cuartelLng ?? c.cuartel_long ?? c.cuartel_lng ?? cCoords.lng ?? cCoords.lon ?? cCoords.longitude
+        );
+        if (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) > 0.1 && Math.abs(lng) > 0.1) {
+          const compNum = String(c.alias || k).replace(/\D/g, '') || '1';
+          const rawLabel = String(
+            c.cuartel ||
+              c.nombre ||
+              (institutionCompaniesList.length <= 1 ? 'CUARTEL' : `CUARTEL ${compNum}ª CÍA`)
+          )
+            .trim()
+            .toUpperCase();
           out.push({
             key: `st_${compNum}`,
             compId: compNum,
             lat,
             lng,
-            label: String(c?.nombre || c?.alias || `CUARTEL ${compNum}ª CÍA`).toUpperCase(),
-            sub: String(c?.direccion || '')
+            label: rawLabel,
+            sub: String(c.direccion || ''),
+            sig: `${compNum}|${rawLabel}|${lat.toFixed(5)},${lng.toFixed(5)}`
           });
         }
       }
     }
 
     if (out.length === 0 && hasBase) {
+      const mainLabel = institutionCompaniesList.length > 1 ? 'CUARTEL GENERAL' : 'CUARTEL';
       out.push({
         key: 'st_main',
         compId: '1',
         lat: baseLat,
         lng: baseLng,
-        label:
-          institutionCompaniesList.length > 1 ? 'CUARTEL GENERAL' : 'CUARTEL',
-        sub: ''
+        label: mainLabel,
+        sub: '',
+        sig: `main|${mainLabel}|${baseLat.toFixed(5)},${baseLng.toFixed(5)}`
       });
+    } else if (hasBase && out.length > 1) {
+      // En multi-compañía, si el Cuartel General tiene coordenadas propias distintas a los cuarteles de compañía, incluirlo también
+      const matchesExisting = out.some(
+        (s) => Math.abs(s.lat - baseLat) < 0.00025 && Math.abs(s.lng - baseLng) < 0.00025
+      );
+      if (!matchesExisting) {
+        out.unshift({
+          key: 'st_general',
+          compId: '0',
+          lat: baseLat,
+          lng: baseLng,
+          label: 'CUARTEL GENERAL',
+          sub: '',
+          sig: `general|CUARTEL GENERAL|${baseLat.toFixed(5)},${baseLng.toFixed(5)}`
+        });
+      }
     }
 
     return out;
   }, [cuartelLat, cuartelLng, cuarteles, institutionCompaniesList.length]);
 
-  const fallbackCenter = useMemo(() => {
-    if (stationsList.length > 0) {
-      return { lat: stationsList[0].lat, lng: stationsList[0].lng };
-    }
-    return { lat: -34.6384, lng: -71.1274 };
-  }, [stationsList]);
-
-  // Emergencias activas con coordenadas válidas
   const incidentsPayload = useMemo(() => {
     const list = [];
     for (const d of activeDispatches) {
       if (!d) continue;
       const lat = Number(
-        d.coordenadas?.lat ?? d.lat ?? d.latitud ?? d.ubicacion?.lat ?? NaN
+        d.geo?.lat ?? d.coordenadas?.lat ?? d.lat ?? d.latitud ?? d.ubicacion?.lat ?? NaN
       );
       const lng = Number(
-        d.coordenadas?.lng ?? d.lng ?? d.longitud ?? d.ubicacion?.lng ?? NaN
+        d.geo?.lng ?? d.coordenadas?.lng ?? d.lng ?? d.longitud ?? d.ubicacion?.lng ?? NaN
       );
       if (isNaN(lat) || isNaN(lng) || Math.abs(lat) < 0.1 || Math.abs(lng) < 0.1) continue;
       const unidadesStr = Array.isArray(d.carros)
@@ -670,7 +755,6 @@ export const CommanderTacticalNavMap = ({
     return list;
   }, [activeDispatches]);
 
-  // Alertantes con GPS activo (solo de servicios actualmente abiertos)
   const alertantesPayload = useMemo(() => {
     const activeIds = new Set(
       activeDispatches.map((d) => String(d?.idServicio || d?.id || '').trim()).filter(Boolean)
@@ -694,91 +778,107 @@ export const CommanderTacticalNavMap = ({
     return out;
   }, [rtdbAlertantes, activeDispatches]);
 
-  // Unidades (Carros Bomba) combinando Firestore (`vehiculos` + `despachos`) + GPS en vivo de RTDB (`telemetria/vehiculos`)
+  // Mostrar ESTRICTAMENTE SOLO las unidades que poseen datos GPS reales en `telemetria/vehiculos` (igual que SENTINEL CAD `MaterialMayorView.jsx`)
   const vehiclesPayload = useMemo(() => {
-    const nowMs = Date.now();
-    const stationSlotCounters = {};
-    const out = [];
+    const baseVehicles = Array.isArray(fleetList) ? [...fleetList] : [];
+    const existingNormIds = new Set(
+      baseVehicles.map((v) =>
+        String(v?.idCarro || v?.nombre || v?.id || '')
+          .trim()
+          .toUpperCase()
+          .replace(/[-\s]/g, '')
+      )
+    );
 
-    for (let idx = 0; idx < fleetList.length; idx++) {
-      const v = fleetList[idx];
-      const uKey = String(v?.idCarro || v?.nombre || v?.id || `U-${idx}`)
+    // Incluir cualquier unidad que esté reportando activamente en RTDB (`telemetria/vehiculos`) aunque no figure aún en `fleetList`
+    for (const [tKey, tv] of Object.entries(rtdbVehicles || {})) {
+      if (!tv || typeof tv !== 'object') continue;
+      const rawId = String(tv.idCarro || tv.id || tv.unidad || tKey || '').trim().toUpperCase();
+      const normId = rawId.replace(/[-\s]/g, '');
+      if (!normId || existingNormIds.has(normId)) continue;
+      existingNormIds.add(normId);
+      baseVehicles.push({
+        idCarro: rawId,
+        id: rawId,
+        estado: '0-9',
+        enServicio: String(tv.enServicio || '0'),
+        compania: resolveCompanyFromVehicleId(rawId)
+      });
+    }
+
+    const out = [];
+    const coordBuckets = {};
+
+    for (let idx = 0; idx < baseVehicles.length; idx++) {
+      const v = baseVehicles[idx];
+      const uKey = String(v?.idCarro || v?.nombre || v?.id || '')
         .trim()
         .toUpperCase();
       if (!uKey) continue;
 
-      const statusInfo = resolveCoreUnitStatusInfo(v, activeDispatches, fleetList);
-      const isOut08 = Boolean(statusInfo.isOut08 || statusInfo.is08Unit);
+      const noDash = uKey.replace(/[-\s]/g, '');
+      const withDash = uKey.replace(/^([A-Z]+)(\d+)$/, '$1-$2');
+
+      const telem =
+        rtdbVehicles?.[uKey] ||
+        rtdbVehicles?.[noDash] ||
+        rtdbVehicles?.[withDash] ||
+        Object.values(rtdbVehicles || {}).find((tv) => {
+          if (!tv || typeof tv !== 'object') return false;
+          const candidate = String(tv.idCarro || tv.id || tv.unidad || '')
+            .trim()
+            .toUpperCase();
+          return candidate === uKey || candidate.replace(/[-\s]/g, '') === noDash;
+        }) ||
+        null;
+
+      // Si la unidad aún NO tiene datos GPS reales en `telemetria/vehiculos`, NO mostrarla en el mapa
+      if (!telem || typeof telem !== 'object') continue;
+
+      const tLat = Number(telem.lat ?? telem.latitude ?? telem.latitud);
+      const tLng = Number(telem.lng ?? telem.lon ?? telem.longitude ?? telem.longitud);
+      if (!Number.isFinite(tLat) || !Number.isFinite(tLng) || Math.abs(tLat) < 0.1 || Math.abs(tLng) < 0.1) {
+        continue;
+      }
+
+      const statusInfo = resolveCoreUnitStatusInfo(v, activeDispatches, baseVehicles);
+      const isOut08 = Boolean(statusInfo.is08 || statusInfo.isOut08 || statusInfo.is08Unit);
       const isInService = Boolean(statusInfo.isInService || statusInfo.isBusy);
 
       if (onlyServiceUnits && !isInService) continue;
 
+      const activeClaveClean = String(statusInfo.activeClave || '').trim().toUpperCase();
       const statusShort = isOut08
         ? '0-8'
         : isInService
-          ? String(statusInfo.badgeLabel || 'EN SERVICIO').toUpperCase()
+          ? activeClaveClean && activeClaveClean !== '0-8'
+            ? activeClaveClean
+            : String(statusInfo.badgeLabel || 'EN SERVICIO').replace(/^EN\s+/i, '').trim()
           : '0-9';
 
-      // Buscar telemetría GPS en RTDB (por clave exacta o normalizada)
-      const telem =
-        rtdbVehicles?.[uKey] ||
-        rtdbVehicles?.[uKey.replace(/[-\s]/g, '')] ||
-        Object.values(rtdbVehicles || {}).find(
-          (tv) =>
-            String(tv?.id || tv?.idCarro || tv?.unidad || '')
-              .trim()
-              .toUpperCase() === uKey
-        ) ||
-        null;
-
-      const tLat = Number(telem?.lat ?? telem?.latitude ?? v?.lat ?? v?.coordenadas?.lat);
-      const tLng = Number(telem?.lng ?? telem?.longitude ?? v?.lng ?? v?.coordenadas?.lng);
-      const tTs = Number(telem?.timestamp || 0);
-      const isFreshTelem =
-        !isNaN(tLat) &&
-        !isNaN(tLng) &&
-        Math.abs(tLat) > 0.1 &&
-        Math.abs(tLng) > 0.1 &&
-        (tTs === 0 || nowMs - tTs < 6 * 3600 * 1000);
-
-      let finalLat = null;
-      let finalLng = null;
-      let hasLiveGps = false;
-
-      if (isFreshTelem) {
-        finalLat = tLat;
-        finalLng = tLng;
-        hasLiveGps = Boolean(telem && !isNaN(Number(telem.lat ?? telem.latitude)));
-      } else {
-        // Ubicar en el cuartel de su compañía con ligero desplazamiento radial (~22m) igual que CarPlayTacticalMap.jsx
-        const compNum = String(resolveCompanyFromVehicleId(uKey, v?.compania) || '1');
-        const st =
-          stationsList.find((s) => String(s.compId) === compNum) ||
-          stationsList[0] ||
-          fallbackCenter;
-        if (st && typeof st.lat === 'number' && typeof st.lng === 'number') {
-          const slotIdx = stationSlotCounters[compNum] || 0;
-          stationSlotCounters[compNum] = slotIdx + 1;
-          const angleRad = ((slotIdx * 65) % 360) * (Math.PI / 180);
-          const ringRadius = 0.00020 * (1 + Math.floor(slotIdx / 6) * 0.65);
-          finalLat = st.lat + Math.sin(angleRad) * ringRadius;
-          finalLng = st.lng + Math.cos(angleRad) * ringRadius;
-        }
+      // Si dos unidades con GPS real reportan exactamente en el mismo punto (ej. estacionadas en el cuartel), separarlas levemente (~14m) para que no se encimen
+      const bucketKey = `${tLat.toFixed(4)}_${tLng.toFixed(4)}`;
+      const slotIdx = coordBuckets[bucketKey] || 0;
+      coordBuckets[bucketKey] = slotIdx + 1;
+      let finalLat = tLat;
+      let finalLng = tLng;
+      if (slotIdx > 0) {
+        const angleRad = ((slotIdx * 65) % 360) * (Math.PI / 180);
+        const offset = 0.00013 * (1 + Math.floor(slotIdx / 5) * 0.6);
+        finalLat += Math.sin(angleRad) * offset;
+        finalLng += Math.cos(angleRad) * offset;
       }
 
-      if (finalLat === null || finalLng === null) continue;
-
-      const rawSpd = Number(telem?.speed ?? 0);
-      // En SENTINEL NAV `telemetria/vehiculos.speed` viene en km/h (o m/s si es < 45 y proviene de geolocalización cruda)
-      const speedKmh = rawSpd > 0 ? Math.round(rawSpd) : 0;
-      const heading = Number(telem?.heading || 0);
+      const rawSpd = Number(telem.speed ?? telem.velocidad ?? 0);
+      const speedKmh = Number.isFinite(rawSpd) && rawSpd > 0 ? Math.round(rawSpd) : 0;
+      const heading = Number(telem.heading ?? telem.rumbo ?? 0) || 0;
 
       out.push({
         key: uKey,
         idCarro: uKey,
         statusShort,
         isInService,
-        hasLiveGps,
+        hasLiveGps: true,
         lat: finalLat,
         lng: finalLng,
         heading,
@@ -788,10 +888,9 @@ export const CommanderTacticalNavMap = ({
     }
 
     return out;
-  }, [fleetList, activeDispatches, rtdbVehicles, stationsList, fallbackCenter, onlyServiceUnits]);
+  }, [fleetList, activeDispatches, rtdbVehicles, onlyServiceUnits]);
 
-  // Bomberos en Servicio con GPS en vivo (`telemetria/bomberos`) — Regla estricta:
-  // Solo aparecen bomberos en 0-9 con asistencia activa a un servicio abierto (jamás 0-8, "0" ni "-X")
+  // Bomberos en Servicio con GPS en vivo (`telemetria/bomberos`)
   const bomberosPayload = useMemo(() => {
     const activeServiceIds = new Set(
       activeDispatches.map((d) => String(d?.idServicio || d?.id || '').trim()).filter(Boolean)
@@ -805,7 +904,6 @@ export const CommanderTacticalNavMap = ({
       if (idReg) personById.set(idReg, f);
     }
 
-    // Recolectar asistentes confirmados en los documentos de despacho activos
     const dispatchAttendingIds = new Set();
     for (const d of activeDispatches) {
       if (Array.isArray(d?.asistentes)) {
@@ -829,7 +927,7 @@ export const CommanderTacticalNavMap = ({
       if (isNaN(lat) || isNaN(lng) || Math.abs(lat) < 0.1 || Math.abs(lng) < 0.1) continue;
 
       const ts = Number(b.timestamp || 0);
-      if (ts > 0 && nowMs - ts > 60 * 60 * 1000) continue; // Ignorar telemetría obsoleta > 60 min
+      if (ts > 0 && nowMs - ts > 60 * 60 * 1000) continue;
 
       const docId = String(b.idRegistro || b.id || key || '').trim();
       if (!docId) continue;
@@ -854,7 +952,6 @@ export const CommanderTacticalNavMap = ({
       ).trim();
       const shortName = formatShortPersonName(fullName) || fullName;
       const compNum = Number(person?.compania || b.compania || 1) || 1;
-      // En iOS/Android `telemetria/bomberos.speed` proviene de CLLocation/Location en m/s -> convertir a km/h
       const rawSpeedMs = Math.max(0, Number(b.speed || 0));
       const speedKmh = Math.round(rawSpeedMs * 3.6);
 
@@ -870,7 +967,6 @@ export const CommanderTacticalNavMap = ({
       });
     }
 
-    // Evitar superposición exacta cuando 2+ bomberos van juntos en el mismo vehículo o cuartel
     const coordBuckets = {};
     return rawValid.map((item) => {
       const bucketKey = `${item.lat.toFixed(4)}_${item.lng.toFixed(4)}`;
@@ -892,6 +988,55 @@ export const CommanderTacticalNavMap = ({
       };
     });
   }, [rtdbBomberos, activeDispatches, firefightersList]);
+
+  // Total exacto de Personal en Servicio (unión de bomberos con enServicio activo en Firestore + asistentes confirmados + GPS en vivo)
+  const inServicePersonnelCount = useMemo(() => {
+    const activeServiceIds = new Set(
+      activeDispatches.map((d) => String(d?.idServicio || d?.id || '').trim()).filter(Boolean)
+    );
+    if (activeServiceIds.size === 0) return 0;
+
+    const personnelIds = new Set();
+
+    for (const f of firefightersList) {
+      if (!f) continue;
+      const idReg = String(f.idRegistro || f.id || '').trim();
+      const est = String(f.estado || '0-9').trim().toUpperCase();
+      const enSvc = String(f.enServicio || '').trim();
+      if (idReg && est === '0-9' && enSvc && !enSvc.startsWith('-') && enSvc !== '0') {
+        if (activeServiceIds.has(enSvc)) {
+          personnelIds.add(idReg);
+        }
+      }
+    }
+
+    for (const d of activeDispatches) {
+      if (Array.isArray(d?.asistentes)) {
+        for (const a of d.asistentes) {
+          const aid =
+            typeof a === 'string'
+              ? a.trim()
+              : String(a?.idRegistro || a?.id || a?.bomberoId || '').trim();
+          if (aid) personnelIds.add(aid);
+        }
+      }
+    }
+
+    for (const b of bomberosPayload) {
+      if (b?.docId) personnelIds.add(String(b.docId));
+    }
+
+    return personnelIds.size;
+  }, [activeDispatches, firefightersList, bomberosPayload]);
+
+  const inServiceUnitsCount = useMemo(() => {
+    let count = 0;
+    for (const v of fleetList) {
+      const info = resolveCoreUnitStatusInfo(v, activeDispatches, fleetList);
+      if (info.isInService || info.isBusy) count += 1;
+    }
+    return count;
+  }, [fleetList, activeDispatches]);
 
   const syncPayload = useMemo(
     () => ({
@@ -918,302 +1063,355 @@ export const CommanderTacticalNavMap = ({
     ]
   );
 
-  const postToIframes = useCallback((messageObj) => {
-    const serialized = JSON.stringify(messageObj);
-    [inlineIframeRef.current, modalIframeRef.current].forEach((ifr) => {
-      try {
-        if (ifr && ifr.contentWindow) {
-          ifr.contentWindow.postMessage(serialized, '*');
-        }
-      } catch (_) {}
-    });
+  syncPayloadRef.current = syncPayload;
+  focusedUnitReqRef.current = focusedUnitRequest;
+
+  const postToIframe = useCallback((messageObj) => {
+    try {
+      const ifr = modalIframeRef.current;
+      if (ifr && ifr.contentWindow) {
+        ifr.contentWindow.postMessage(JSON.stringify(messageObj), '*');
+      }
+    } catch (_) {}
   }, []);
 
-  // Empujar actualizaciones en vivo al iframe Leaflet sin recargarlo
   useEffect(() => {
-    postToIframes({ type: 'SENTINEL_CMD_MAP_SYNC', payload: syncPayload });
-  }, [syncPayload, postToIframes, isFullscreen]);
+    if (!visible) return;
+    postToIframe({ type: 'SENTINEL_CMD_MAP_SYNC', payload: syncPayload });
+  }, [visible, syncPayload, postToIframe]);
 
-  // Responder cuando el iframe termina de inicializar Leaflet
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
+    if (!visible || typeof window === 'undefined' || typeof window.addEventListener !== 'function') {
       return undefined;
     }
     const onMessage = (ev) => {
       try {
         const data = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
         if (data?.type === 'SENTINEL_CMD_MAP_READY') {
-          postToIframes({ type: 'SENTINEL_CMD_MAP_SYNC', payload: syncPayload });
+          if (syncPayloadRef.current) {
+            postToIframe({ type: 'SENTINEL_CMD_MAP_SYNC', payload: syncPayloadRef.current });
+          }
+          if (focusedUnitReqRef.current?.unitId) {
+            setTimeout(() => {
+              postToIframe({
+                type: 'SENTINEL_CMD_MAP_ACTION',
+                action: 'FOCUS_UNIT',
+                unitId: focusedUnitReqRef.current.unitId
+              });
+            }, 150);
+          }
         }
       } catch (_) {}
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [syncPayload, postToIframes]);
+  }, [visible, postToIframe]);
 
-  // Enfocar unidad específica cuando el Comandante toca su tarjeta en la grilla inferior
   useEffect(() => {
-    if (!focusedUnitRequest?.unitId) return;
-    postToIframes({
+    if (!visible || !focusedUnitRequest?.unitId) return;
+    postToIframe({
       type: 'SENTINEL_CMD_MAP_ACTION',
       action: 'FOCUS_UNIT',
       unitId: focusedUnitRequest.unitId
     });
-  }, [focusedUnitRequest, postToIframes]);
+  }, [visible, focusedUnitRequest, postToIframe]);
 
   const sendMapAction = (action, extra = {}) => {
-    postToIframes({ type: 'SENTINEL_CMD_MAP_ACTION', action, ...extra });
+    postToIframe({ type: 'SENTINEL_CMD_MAP_ACTION', action, ...extra });
   };
 
-  const inServiceUnitsCount = useMemo(
-    () => vehiclesPayload.filter((v) => v.isInService).length,
-    [vehiclesPayload]
-  );
-  const primaryIncident = incidentsPayload[0] || null;
-
-  const renderMapCanvas = (heightValue, inModal = false) => (
-    <View
-      style={[
-        styles.mapWrapper,
-        inModal ? styles.mapWrapperFullscreen : { height: heightValue }
-      ]}
-    >
-      {Platform.OS === 'web' ? (
-        <iframe
-          ref={inModal ? modalIframeRef : inlineIframeRef}
-          title={inModal ? 'SentinelCommanderNavFullscreen' : 'SentinelCommanderNavInline'}
-          srcDoc={mapHtml}
-          onLoad={() => {
-            postToIframes({ type: 'SENTINEL_CMD_MAP_SYNC', payload: syncPayload });
-            setTimeout(() => sendMapAction('INVALIDATE'), 120);
-          }}
-          style={{
-            width: '100%',
-            height: '100%',
-            border: 'none',
-            backgroundColor: '#060911',
-            display: 'block'
-          }}
-        />
-      ) : null}
-
-      {/* Píldora Superior Izquierda estilo SENTINEL NAV */}
-      <View style={styles.topLeftHud} pointerEvents="box-none">
-        <View style={styles.navBrandBadge}>
-          <Navigation size={11} color="#38BDF8" />
-          <Text style={styles.navBrandText}>MAPA TÁCTICO NAV</Text>
-          <View style={styles.liveDot} />
-        </View>
-
-        {activeDispatches.length > 0 ? (
-          <TouchableOpacity
-            activeOpacity={0.85}
-            onPress={() => setOnlyServiceUnits((prev) => !prev)}
-            style={[
-              styles.filterChip,
-              onlyServiceUnits && styles.filterChipActive
-            ]}
-          >
-            <Text style={styles.filterChipText}>
-              {onlyServiceUnits ? 'SOLO EN SERVICIO' : 'TODA LA FLOTA'}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* Botonera Flotante Derecha idéntica a CarPlayTacticalMap.jsx de SENTINEL NAV */}
-      <View style={styles.rightControlsCol} pointerEvents="box-none">
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => setShowUnits((p) => !p)}
-          style={[
-            styles.navFloatingBtn,
-            showUnits && styles.navFloatingBtnUnitsActive
-          ]}
-        >
-          <Truck size={13} color={showUnits ? '#FFFFFF' : '#CBD5E1'} />
-          <Text style={[styles.navFloatingBtnText, showUnits && { color: '#FFFFFF' }]}>
-            {vehiclesPayload.length}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => setShowBomberos((p) => !p)}
-          style={[
-            styles.navFloatingBtn,
-            showBomberos && styles.navFloatingBtnBomberosActive
-          ]}
-        >
-          <Users size={13} color={showBomberos ? '#FFFFFF' : '#CBD5E1'} />
-          <Text style={[styles.navFloatingBtnText, showBomberos && { color: '#FFFFFF' }]}>
-            {bomberosPayload.length}
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() =>
-            setMapLayer((prev) => (prev === 'streets' ? 'satellite' : 'streets'))
-          }
-          style={[
-            styles.navFloatingBtn,
-            mapLayer === 'satellite' && styles.navFloatingBtnSatActive
-          ]}
-        >
-          <Satellite size={13} color="#FFFFFF" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => sendMapAction('RECENTER')}
-          style={styles.navFloatingBtn}
-        >
-          <LocateFixed size={13} color="#38BDF8" />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={() => setIsFullscreen((prev) => !prev)}
-          style={styles.navFloatingBtn}
-        >
-          {inModal ? (
-            <Minimize2 size={13} color="#F8FAFC" />
-          ) : (
-            <Maximize2 size={13} color="#F8FAFC" />
-          )}
-        </TouchableOpacity>
-
-        <View style={styles.zoomGroup}>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => sendMapAction('ZOOM_IN')}
-            style={styles.zoomBtn}
-          >
-            <Plus size={13} color="#F8FAFC" />
-          </TouchableOpacity>
-          <View style={styles.zoomDivider} />
-          <TouchableOpacity
-            activeOpacity={0.8}
-            onPress={() => sendMapAction('ZOOM_OUT')}
-            style={styles.zoomBtn}
-          >
-            <Minus size={13} color="#F8FAFC" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Barra Inferior Oscura estilo SENTINEL NAV (#262629) */}
-      <View style={styles.bottomHudBar} pointerEvents="none">
-        <View style={styles.bottomHudPill}>
-          <Text style={styles.bottomHudPrimary} numberOfLines={1}>
-            {primaryIncident
-              ? `🚨 ${primaryIncident.clave} • ${primaryIncident.direccion}`
-              : 'monitoreo gps de flota y personal'}
-          </Text>
-          <Text style={styles.bottomHudSecondary} numberOfLines={1}>
-            {`🚒 ${inServiceUnitsCount}/${fleetList.length} en servicio  •  👨‍🚒 ${bomberosPayload.length} en ruta`}
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
+  if (!visible) return null;
 
   return (
-    <View style={styles.outerContainer}>
-      {renderMapCanvas(275, false)}
+    <Modal
+      visible={visible}
+      animationType="fade"
+      transparent={false}
+      statusBarTranslucent={true}
+      onRequestClose={onClose}
+    >
+      <View style={styles.fullscreenModalRoot}>
+        {/* Lienzo GPS 100% Pantalla Completa Inmersivo (borde a borde tipo iOS) */}
+        <View style={styles.mapWrapperFullscreen}>
+          {Platform.OS === 'web' ? (
+            <iframe
+              ref={modalIframeRef}
+              title="SentinelCommanderGpsFullscreen"
+              srcDoc={mapHtml}
+              onLoad={() => {
+                if (syncPayloadRef.current) {
+                  postToIframe({ type: 'SENTINEL_CMD_MAP_SYNC', payload: syncPayloadRef.current });
+                }
+                setTimeout(() => {
+                  sendMapAction('INVALIDATE');
+                  if (focusedUnitReqRef.current?.unitId) {
+                    sendMapAction('FOCUS_UNIT', { unitId: focusedUnitReqRef.current.unitId });
+                  }
+                }, 140);
+              }}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                width: '100%',
+                height: '100%',
+                border: 'none',
+                backgroundColor: '#060911',
+                display: 'block'
+              }}
+            />
+          ) : null}
 
-      {/* Modal Pantalla Completa para inspección táctica detallada del Comandante */}
-      <Modal
-        visible={isFullscreen}
-        animationType="fade"
-        transparent={false}
-        onRequestClose={() => setIsFullscreen(false)}
-      >
-        <View style={styles.fullscreenModalRoot}>
-          <View style={styles.fullscreenTopBar}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+          {/* Encabezado Flotante Translúcido Tipo iOS (el mapa continúa detrás de extremo a extremo) */}
+          <View style={styles.immersiveTopOverlay} pointerEvents="box-none">
+            <View style={styles.immersiveTitlePill} pointerEvents="none">
               <Navigation size={15} color="#38BDF8" />
-              <Text style={styles.fullscreenTitle} numberOfLines={1}>
-                COMANDO TÁCTICO NAV — UNIDADES Y PERSONAL EN VIVO
+              <Text style={styles.fullscreenTitle} numberOfLines={2}>
+                GPS DE UNIDADES Y PERSONAL EN SERVICIO
               </Text>
             </View>
+
             <TouchableOpacity
               activeOpacity={0.85}
-              onPress={() => setIsFullscreen(false)}
-              style={styles.closeFullscreenBtn}
+              onPress={onClose}
+              style={styles.closeSquareBtn}
             >
-              <X size={15} color="#FFFFFF" />
-              <Text style={styles.closeFullscreenText}>CERRAR</Text>
+              <X size={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
-          <View style={{ flex: 1 }}>{renderMapCanvas(0, true)}</View>
+          {/* Filtro opcional si hay despacho activo */}
+          {activeDispatches.length > 0 ? (
+            <View style={styles.topLeftHud} pointerEvents="box-none">
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setOnlyServiceUnits((prev) => !prev)}
+                style={[
+                  styles.filterChip,
+                  onlyServiceUnits && styles.filterChipActive
+                ]}
+              >
+                <Text style={styles.filterChipText}>
+                  {onlyServiceUnits ? 'SOLO EN SERVICIO' : 'TODA LA FLOTA'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {/* Dock Inferior Inmersivo Tipo iOS: Botonera Horizontal Uniforme (46x46) Arriba + Tarjeta de Totales Ocupando Todo el Borde Inferior */}
+          <View style={styles.bottomImmersiveCluster} pointerEvents="box-none">
+            <View style={styles.bottomControlsDockRow} pointerEvents="box-none">
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setShowUnits((p) => !p)}
+                style={[
+                  styles.uniformMapBtn,
+                  showUnits && styles.uniformMapBtnUnitsActive
+                ]}
+              >
+                <Truck size={18} color={showUnits ? '#FFFFFF' : '#CBD5E1'} />
+                <Text style={[styles.uniformBtnBadgeText, showUnits && { color: '#FFFFFF' }]}>
+                  {vehiclesPayload.length}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setShowBomberos((p) => !p)}
+                style={[
+                  styles.uniformMapBtn,
+                  showBomberos && styles.uniformMapBtnBomberosActive
+                ]}
+              >
+                <Users size={18} color={showBomberos ? '#FFFFFF' : '#CBD5E1'} />
+                <Text style={[styles.uniformBtnBadgeText, showBomberos && { color: '#FFFFFF' }]}>
+                  {bomberosPayload.length}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() =>
+                  setMapLayer((prev) => (prev === 'streets' ? 'satellite' : 'streets'))
+                }
+                style={[
+                  styles.uniformMapBtn,
+                  mapLayer === 'satellite' && styles.uniformMapBtnSatActive
+                ]}
+              >
+                <Satellite size={19} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => sendMapAction('RECENTER')}
+                style={styles.uniformMapBtn}
+              >
+                <LocateFixed size={19} color="#38BDF8" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => sendMapAction('ZOOM_IN')}
+                style={styles.uniformMapBtn}
+              >
+                <Plus size={20} color="#F8FAFC" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => sendMapAction('ZOOM_OUT')}
+                style={styles.uniformMapBtn}
+              >
+                <Minus size={20} color="#F8FAFC" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Tarjeta de Totales en Servicio Ocupando Todo el Borde Inferior (Sin subtítulo, solo totales) */}
+            <View style={styles.bottomFullTotalsBar} pointerEvents="none">
+              <View style={styles.totalBlock}>
+                <Text style={styles.totalNumberUnits}>
+                  {inServiceUnitsCount} / {fleetList.length}
+                </Text>
+                <Text style={styles.totalLabel}>UNIDADES EN SERVICIO</Text>
+              </View>
+
+              <View style={styles.totalDivider} />
+
+              <View style={styles.totalBlock}>
+                <Text style={styles.totalNumberPersonnel}>
+                  {inServicePersonnelCount}
+                </Text>
+                <Text style={styles.totalLabel}>PERSONAL EN SERVICIO</Text>
+              </View>
+            </View>
+          </View>
         </View>
-      </Modal>
-    </View>
+      </View>
+    </Modal>
   );
 };
 
 const styles = StyleSheet.create({
-  outerContainer: {
-    marginBottom: 10
-  },
-  mapWrapper: {
+  fullscreenModalRoot: {
+    flex: 1,
     width: '100%',
-    borderRadius: 14,
-    overflow: 'hidden',
+    height: '100%',
     backgroundColor: '#060911',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.28)',
-    position: 'relative'
+    ...(Platform.OS === 'web'
+      ? {
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0
+        }
+      : {})
   },
   mapWrapperFullscreen: {
     flex: 1,
-    borderRadius: 0,
-    borderWidth: 0
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#060911',
+    position: 'relative',
+    overflow: 'hidden'
+  },
+  immersiveTopOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: Platform.OS === 'web' ? 'max(38px, env(safe-area-inset-top, 38px))' : Platform.OS === 'ios' ? 48 : 38,
+    paddingHorizontal: 14,
+    paddingBottom: 8,
+    gap: 10
+  },
+  immersiveTitlePill: {
+    flex: 1,
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: 'rgba(9, 13, 22, 0.80)',
+    borderWidth: 1,
+    borderColor: 'rgba(56, 189, 248, 0.34)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? {
+          backdropFilter: 'blur(18px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(18px) saturate(160%)'
+        }
+      : {})
+  },
+  fullscreenTitle: {
+    color: '#F8FAFC',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.55,
+    flex: 1
+  },
+  closeSquareBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: 'rgba(220, 38, 38, 0.88)',
+    borderWidth: 1,
+    borderColor: 'rgba(252, 165, 165, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    elevation: 6,
+    ...(Platform.OS === 'web'
+      ? {
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)'
+        }
+      : {})
   },
   topLeftHud: {
     position: 'absolute',
-    top: 8,
-    left: 8,
-    zIndex: 20,
+    top: Platform.OS === 'web' ? 'calc(max(38px, env(safe-area-inset-top, 38px)) + 56px)' : Platform.OS === 'ios' ? 104 : 94,
+    left: 14,
+    zIndex: 25,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    flexWrap: 'wrap',
-    maxWidth: '76%'
-  },
-  navBrandBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    backgroundColor: 'rgba(9, 13, 22, 0.90)',
-    borderWidth: 1,
-    borderColor: 'rgba(56, 189, 248, 0.45)',
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 4
-  },
-  navBrandText: {
-    color: '#F8FAFC',
-    fontSize: 9,
-    fontWeight: '900',
-    letterSpacing: 0.7
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10B981'
+    alignItems: 'center'
   },
   filterChip: {
-    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    height: 46,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(9, 13, 22, 0.80)',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.35)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4
+    borderColor: 'rgba(148, 163, 184, 0.36)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 6,
+    elevation: 5,
+    ...(Platform.OS === 'web'
+      ? {
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)'
+        }
+      : {})
   },
   filterChipActive: {
     backgroundColor: 'rgba(220, 38, 38, 0.88)',
@@ -1221,132 +1419,117 @@ const styles = StyleSheet.create({
   },
   filterChipText: {
     color: '#F8FAFC',
-    fontSize: 8.5,
+    fontSize: 10.5,
     fontWeight: '900',
-    letterSpacing: 0.4
+    letterSpacing: 0.5
   },
-  rightControlsCol: {
+  bottomImmersiveCluster: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    zIndex: 20,
-    alignItems: 'flex-end',
-    gap: 5
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 28,
+    alignItems: 'stretch'
   },
-  navFloatingBtn: {
+  bottomControlsDockRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    minWidth: 32,
-    height: 28,
-    paddingHorizontal: 7,
-    borderRadius: 9,
-    backgroundColor: 'rgba(15, 23, 42, 0.92)',
+    alignSelf: 'center',
+    gap: 8,
+    marginBottom: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 18,
+    backgroundColor: 'rgba(9, 13, 22, 0.76)',
     borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.32)'
+    borderColor: 'rgba(148, 163, 184, 0.28)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    elevation: 8,
+    ...(Platform.OS === 'web'
+      ? {
+          backdropFilter: 'blur(20px) saturate(165%)',
+          WebkitBackdropFilter: 'blur(20px) saturate(165%)'
+        }
+      : {})
   },
-  navFloatingBtnUnitsActive: {
-    backgroundColor: 'rgba(2, 132, 199, 0.92)',
-    borderColor: '#7DD3FC'
-  },
-  navFloatingBtnBomberosActive: {
-    backgroundColor: 'rgba(5, 150, 105, 0.92)',
-    borderColor: '#6EE7B7'
-  },
-  navFloatingBtnSatActive: {
-    backgroundColor: 'rgba(37, 99, 235, 0.92)',
-    borderColor: '#93C5FD'
-  },
-  navFloatingBtnText: {
-    color: '#CBD5E1',
-    fontSize: 9.5,
-    fontWeight: '900'
-  },
-  zoomGroup: {
-    backgroundColor: 'rgba(15, 23, 42, 0.92)',
-    borderWidth: 1,
-    borderColor: 'rgba(148, 163, 184, 0.32)',
-    borderRadius: 9,
-    overflow: 'hidden'
-  },
-  zoomBtn: {
-    width: 32,
-    height: 26,
+  uniformMapBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 13,
+    backgroundColor: 'rgba(15, 23, 42, 0.88)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(148, 163, 184, 0.36)',
     alignItems: 'center',
     justifyContent: 'center'
   },
-  zoomDivider: {
-    height: 1,
-    backgroundColor: 'rgba(148, 163, 184, 0.25)'
+  uniformMapBtnUnitsActive: {
+    backgroundColor: 'rgba(2, 132, 199, 0.92)',
+    borderColor: '#7DD3FC'
   },
-  bottomHudBar: {
-    position: 'absolute',
-    bottom: 7,
-    left: 8,
-    right: 46,
-    zIndex: 20,
-    alignItems: 'flex-start'
+  uniformMapBtnBomberosActive: {
+    backgroundColor: 'rgba(5, 150, 105, 0.92)',
+    borderColor: '#6EE7B7'
   },
-  bottomHudPill: {
-    backgroundColor: 'rgba(24, 24, 27, 0.93)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.14)',
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    maxWidth: '100%'
+  uniformMapBtnSatActive: {
+    backgroundColor: 'rgba(37, 99, 235, 0.92)',
+    borderColor: '#93C5FD'
   },
-  bottomHudPrimary: {
-    color: '#FFFFFF',
+  uniformBtnBadgeText: {
+    color: '#CBD5E1',
     fontSize: 9.5,
     fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3
-  },
-  bottomHudSecondary: {
-    color: '#94A3B8',
-    fontSize: 8.5,
-    fontWeight: '800',
     marginTop: 1
   },
-  fullscreenModalRoot: {
-    flex: 1,
-    backgroundColor: '#060911'
-  },
-  fullscreenTopBar: {
+  bottomFullTotalsBar: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 42,
-    paddingBottom: 10,
-    paddingHorizontal: 14,
-    backgroundColor: '#090D16',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(56, 189, 248, 0.25)'
+    backgroundColor: 'rgba(9, 13, 22, 0.84)',
+    borderTopWidth: 1.2,
+    borderTopColor: 'rgba(56, 189, 248, 0.34)',
+    paddingTop: 12,
+    paddingBottom: Platform.OS === 'web' ? 'max(16px, env(safe-area-inset-bottom, 16px))' : Platform.OS === 'ios' ? 26 : 14,
+    paddingHorizontal: 16,
+    ...(Platform.OS === 'web'
+      ? {
+          backdropFilter: 'blur(22px) saturate(170%)',
+          WebkitBackdropFilter: 'blur(22px) saturate(170%)'
+        }
+      : {})
   },
-  fullscreenTitle: {
+  totalBlock: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  totalDivider: {
+    width: 1,
+    height: 38,
+    backgroundColor: 'rgba(148, 163, 184, 0.28)',
+    marginHorizontal: 10
+  },
+  totalNumberUnits: {
+    color: '#38BDF8',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 0.5
+  },
+  totalNumberPersonnel: {
+    color: '#34D399',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 0.5
+  },
+  totalLabel: {
     color: '#F8FAFC',
     fontSize: 11,
     fontWeight: '900',
     letterSpacing: 0.7,
-    flex: 1
-  },
-  closeFullscreenBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(220, 38, 38, 0.85)',
-    borderWidth: 1,
-    borderColor: '#FCA5A5',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 5
-  },
-  closeFullscreenText: {
-    color: '#FFFFFF',
-    fontSize: 9.5,
-    fontWeight: '900',
-    letterSpacing: 0.5
+    marginTop: 3
   }
 });

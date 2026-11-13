@@ -303,23 +303,133 @@ export function resolveCoreUnitStatusInfo(
     return {
       isAvailable: false,
       is08: true,
+      is08Unit: true,
+      isOut08: true,
       isInService: false,
+      isBusy: false,
+      category: 'fuera',
       activeClave: '0-8',
       activeServiceId: null,
       badgeLabel: '0-8 F/S'
     };
   }
 
+  // Helper Dual-Read para evaluar si un despacho `s` mantiene activa a `normUnitId`
+  // (soporta `s.units` de CAD/SCI, `s.unidades` mapa u objeto canónico V3 y `s.carros` / `s.vehiculo` legado V2)
+  const isUnitActiveInServiceDoc = (s) => {
+    if (!s || typeof s !== 'object') return false;
+    const svcEst = String(s.estado || 'activa').trim().toLowerCase();
+    const rawOpFin = String(s.operadorFinal || '').trim();
+    const opFin = rawOpFin === 'null' || rawOpFin === '<null>' ? '' : rawOpFin;
+    if (
+      ['cancelada', 'cancelado', 'finalizada', 'finalizado', 'cerrada', 'cerrado', 'terminada', 'terminado'].includes(svcEst) ||
+      Boolean(opFin) ||
+      Number(s.finalizadoAt) > 0
+    ) {
+      return false;
+    }
+
+    // A) Arreglo `s.units` (formato interno CAD / SCI)
+    if (Array.isArray(s.units) && s.units.length > 0) {
+      return s.units.some((u) => {
+        const uName = String(typeof u === 'string' ? u : u?.name || u?.carro || u?.idCarro || '')
+          .replace(/-/g, '')
+          .trim()
+          .toUpperCase();
+        if (uName !== normUnitId) return false;
+        if (typeof u === 'object' && u !== null) {
+          const uSt = String(u.status || u.estadoMovil || u.estado || '').trim().toLowerCase();
+          if (uSt === '6-8' || uSt === 'disponible' || uSt === 'finalizado' || Boolean(u.time68 || u.h68 || u.tiempos?.h68)) {
+            return false;
+          }
+        }
+        return true;
+      });
+    }
+
+    // B) Mapa u arreglo `s.unidades` (esquema canónico Firestore `despachos/{idServicio}`)
+    if (s.unidades && typeof s.unidades === 'object') {
+      if (Array.isArray(s.unidades)) {
+        const hit = s.unidades.find((u) => {
+          const uName = String(typeof u === 'string' ? u : u?.name || u?.carro || u?.idCarro || '')
+            .replace(/-/g, '')
+            .trim()
+            .toUpperCase();
+          return uName === normUnitId;
+        });
+        if (hit) {
+          if (typeof hit === 'object' && hit !== null) {
+            const uSt = String(hit.status || hit.estadoMovil || hit.estado || '').trim().toLowerCase();
+            if (uSt === '6-8' || uSt === 'disponible' || uSt === 'finalizado' || Boolean(hit.time68 || hit.h68 || hit.tiempos?.h68)) {
+              return false;
+            }
+          }
+          return true;
+        }
+      } else {
+        for (const [k, uVal] of Object.entries(s.unidades)) {
+          if (uVal === null || uVal === undefined || uVal === '__DELETE_FIELD__' || uVal === false) continue;
+          const kNorm = String(k || '').replace(/-/g, '').trim().toUpperCase();
+          if (kNorm !== normUnitId) continue;
+          if (typeof uVal === 'object') {
+            const uSt = String(uVal.status || uVal.estadoMovil || uVal.estado || '').trim().toLowerCase();
+            if (
+              uSt === '6-8' ||
+              uSt === 'disponible' ||
+              uSt === 'finalizado' ||
+              Boolean(uVal.time68 || uVal.h68 || uVal.hora68 || uVal.tiempos?.h68)
+            ) {
+              return false;
+            }
+            const salId = String(uVal.idSalida || uVal.bitacoraId || '').trim();
+            if (salId && bitacoraMapOrList && typeof bitacoraMapOrList.forEach === 'function') {
+              let closedByBitacora = false;
+              bitacoraMapOrList.forEach((b) => {
+                if (String(b?.idSalida || b?.id || '').trim() === salId) {
+                  if (Boolean(b?.tiempos?.h68 || b?.h68 || b?.hora68)) {
+                    closedByBitacora = true;
+                  }
+                }
+              });
+              if (closedByBitacora) return false;
+            }
+          }
+          return true;
+        }
+      }
+    }
+
+    // C) Respaldo legado `s.carros` / `s.vehiculo` solo cuando el documento no trae `s.units` ni `s.unidades` poblados
+    const hasCanonicalMap =
+      s.unidades && typeof s.unidades === 'object' && !Array.isArray(s.unidades) && Object.keys(s.unidades).length > 0;
+    if (!hasCanonicalMap) {
+      const legacyRaw = s.carros || s.vehiculo || '';
+      const legacyArr = Array.isArray(legacyRaw)
+        ? legacyRaw
+        : String(legacyRaw)
+            .split(/[,/]+/)
+            .map((x) => x.trim())
+            .filter(Boolean);
+      if (legacyArr.some((c) => String(c).replace(/-/g, '').trim().toUpperCase() === normUnitId)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
   // 2. Buscar si la unidad está asignada activamente en algún despacho de `activeServicesList`
-  const activeSvcByUnit = servicesList.find(s =>
-    (s.units || []).some(u => String(u?.name || '').replace(/-/g, '').trim().toUpperCase() === normUnitId)
-  );
+  const activeSvcByUnit = servicesList.find((s) => isUnitActiveInServiceDoc(s));
   if (activeSvcByUnit) {
     const clave = String(activeSvcByUnit.clave || activeSvcByUnit.key || 'ACTO').trim().toUpperCase();
     return {
       isAvailable: false,
       is08: false,
+      is08Unit: false,
+      isOut08: false,
       isInService: true,
+      isBusy: true,
+      category: 'emergencia',
       activeClave: clave,
       activeServiceId: String(activeSvcByUnit.id || activeSvcByUnit.idServicio || ''),
       badgeLabel: `EN ${clave}`
@@ -333,15 +443,17 @@ export function resolveCoreUnitStatusInfo(
     if (/^\d{4}-\d+$/.test(rawServ)) {
       const matchingSvc = servicesList.find(s => String(s.id || s.idServicio).trim() === rawServ);
       if (matchingSvc) {
-        const inActiveUnits = (matchingSvc.units || []).some(
-          u => String(u?.name || '').replace(/-/g, '').trim().toUpperCase() === normUnitId
-        );
+        const inActiveUnits = isUnitActiveInServiceDoc(matchingSvc);
         if (inActiveUnits) {
           const clave = String(matchingSvc.clave || matchingSvc.key || 'ACTO').trim().toUpperCase();
           return {
             isAvailable: false,
             is08: false,
+            is08Unit: false,
+            isOut08: false,
             isInService: true,
+            isBusy: true,
+            category: 'emergencia',
             activeClave: clave,
             activeServiceId: rawServ,
             badgeLabel: `EN ${clave}`
@@ -360,7 +472,11 @@ export function resolveCoreUnitStatusInfo(
         return {
           isAvailable: false,
           is08: false,
+          is08Unit: false,
+          isOut08: false,
           isInService: true,
+          isBusy: true,
+          category: 'emergencia',
           activeClave: labelClave,
           activeServiceId: rawServ,
           badgeLabel: `EN ${labelClave}`
@@ -370,7 +486,11 @@ export function resolveCoreUnitStatusInfo(
       return {
         isAvailable: true,
         is08: false,
+        is08Unit: false,
+        isOut08: false,
         isInService: false,
+        isBusy: false,
+        category: 'disponible',
         activeClave: null,
         activeServiceId: null,
         badgeLabel: '0-9 DISP'
@@ -399,7 +519,11 @@ export function resolveCoreUnitStatusInfo(
         return {
           isAvailable: true,
           is08: false,
+          is08Unit: false,
+          isOut08: false,
           isInService: false,
+          isBusy: false,
+          category: 'disponible',
           activeClave: null,
           activeServiceId: null,
           badgeLabel: '0-9 DISP'
@@ -410,7 +534,11 @@ export function resolveCoreUnitStatusInfo(
     return {
       isAvailable: false,
       is08: false,
+      is08Unit: false,
+      isOut08: false,
       isInService: true,
+      isBusy: true,
+      category: 'emergencia',
       activeClave: cleanClave,
       activeServiceId: rawServ,
       badgeLabel: `EN ${cleanClave}`
@@ -420,7 +548,11 @@ export function resolveCoreUnitStatusInfo(
   return {
     isAvailable: true,
     is08: false,
+    is08Unit: false,
+    isOut08: false,
     isInService: false,
+    isBusy: false,
+    category: 'disponible',
     activeClave: null,
     activeServiceId: null,
     badgeLabel: '0-9 DISP'
@@ -958,6 +1090,7 @@ export const CANONICAL_DISPATCH_KEYS = new Set([
   'comuna',
   'geo',
   'alertante',
+  'alertanteGeo',
   'companias',
   'unidades',
   'estado',
@@ -1040,11 +1173,16 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
   const sourceUnit = isSingleArg ? svc : unit;
 
   const idSalida = String(sourceUnit.idSalida || sourceUnit.bitacoraId || '').trim();
-  const idServicio = String(
-    isSingleArg
-      ? (sourceUnit.idServicio || '')
-      : (sourceSvc.idServicio || sourceSvc.id || sourceUnit.idServicio || '')
-  ).trim();
+  const rawCandidateSvc = isSingleArg
+    ? (sourceUnit.idServicio || '')
+    : (sourceSvc?.isSpecialExit
+        ? ''
+        : (sourceSvc?.idServicio !== undefined ? sourceSvc.idServicio : (sourceUnit?.idServicio || sourceSvc?.id || '')));
+  const cleanCandidateSvc = String(rawCandidateSvc || '').trim();
+  const idServicio = (
+    !cleanCandidateSvc ||
+    /^(?:SPECIAL-|IC_|(?:10|6)-\d+(?:-\d{4}-\d+)?$)/i.test(cleanCandidateSvc)
+  ) ? '' : cleanCandidateSvc;
   const carro = String(sourceUnit.name || sourceUnit.carro || sourceUnit.idCarro || '').trim().toUpperCase();
 
   const vMatch = (Array.isArray(vehicles) ? vehicles : []).find(
@@ -1525,19 +1663,47 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
   const estadoSuscripcion = String(raw.estadoSuscripcion || raw.estado || 'activo').trim().toLowerCase();
   const avisoPagoHasta = String(raw.avisoPagoHasta || '').trim();
 
-  // Cuartel General (Canónico V3 + fallback raíz V2)
+  // Cuartel General (Canónico V3 + fallback raíz V2 + coordenadas anidadas)
   const cgRaw = (raw.cuartelGeneral && typeof raw.cuartelGeneral === 'object') ? raw.cuartelGeneral : {};
-  const rawLat = cgRaw.lat ?? raw.lat ?? raw.latitud ?? raw.latCuartel ?? raw.cuartelLat ?? null;
-  const rawLng = cgRaw.lng ?? raw.lng ?? raw.longitud ?? raw.lngCuartel ?? raw.cuartelLng ?? null;
-  const lat = rawLat !== null && rawLat !== '' && !isNaN(Number(rawLat)) ? Number(rawLat) : null;
-  const lng = rawLng !== null && rawLng !== '' && !isNaN(Number(rawLng)) ? Number(rawLng) : null;
-
-  const cuartelGeneral = {
-    nombre: String(cgRaw.nombre || 'Cuartel General').trim(),
-    lat,
-    lng,
-    direccion: String(cgRaw.direccion || '').trim()
-  };
+  const cgCoords = (cgRaw.coordenadas && typeof cgRaw.coordenadas === 'object')
+    ? cgRaw.coordenadas
+    : ((cgRaw.geo && typeof cgRaw.geo === 'object') ? cgRaw.geo : {});
+  const rootCoords = (raw.coordenadas && typeof raw.coordenadas === 'object')
+    ? raw.coordenadas
+    : ((raw.geo && typeof raw.geo === 'object') ? raw.geo : {});
+  const rawLat =
+    cgRaw.lat ??
+    cgRaw.latitud ??
+    cgCoords.lat ??
+    cgCoords.latitude ??
+    raw.lat ??
+    raw.latitud ??
+    raw.latCuartel ??
+    raw.cuartelLat ??
+    raw.cuartel_lat ??
+    rootCoords.lat ??
+    rootCoords.latitude ??
+    null;
+  const rawLng =
+    cgRaw.lng ??
+    cgRaw.lon ??
+    cgRaw.longitud ??
+    cgCoords.lng ??
+    cgCoords.lon ??
+    cgCoords.longitude ??
+    raw.lng ??
+    raw.lon ??
+    raw.longitud ??
+    raw.lngCuartel ??
+    raw.cuartelLng ??
+    raw.cuartel_long ??
+    raw.cuartel_lng ??
+    rootCoords.lng ??
+    rootCoords.lon ??
+    rootCoords.longitude ??
+    null;
+  let lat = rawLat !== null && rawLat !== '' && !isNaN(Number(rawLat)) ? Number(rawLat) : null;
+  let lng = rawLng !== null && rawLng !== '' && !isNaN(Number(rawLng)) ? Number(rawLng) : null;
 
   // Compañías / Cuarteles (Canónico V3 `companias` + espejo `cuarteles`)
   const rawCompanias = (raw.companias && typeof raw.companias === 'object')
@@ -1548,8 +1714,30 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
     if (!v || typeof v !== 'object') return;
     const alias = resolveCompanyIdFromKeyOrData(k, v);
     const prev = companias[alias];
-    const cLat = v.lat ?? v.latitud ?? v.latCuartel ?? null;
-    const cLng = v.lng ?? v.longitud ?? v.lngCuartel ?? null;
+    const vCoords = (v.coordenadas && typeof v.coordenadas === 'object')
+      ? v.coordenadas
+      : ((v.geo && typeof v.geo === 'object') ? v.geo : ((v.ubicacion && typeof v.ubicacion === 'object') ? v.ubicacion : {}));
+    const cLat =
+      v.lat ??
+      v.latitud ??
+      v.latCuartel ??
+      v.cuartelLat ??
+      v.cuartel_lat ??
+      vCoords.lat ??
+      vCoords.latitude ??
+      null;
+    const cLng =
+      v.lng ??
+      v.lon ??
+      v.longitud ??
+      v.lngCuartel ??
+      v.cuartelLng ??
+      v.cuartel_long ??
+      v.cuartel_lng ??
+      vCoords.lng ??
+      vCoords.lon ??
+      vCoords.longitude ??
+      null;
     const incomingNombre = String(v.nombre || '').trim();
     const incomingCuartel = String(v.cuartel || '').trim();
     const incomingDir = String(v.direccion || '').trim();
@@ -1562,6 +1750,27 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
       direccion: incomingDir || prev?.direccion || ''
     };
   });
+
+  // Si `cuartelGeneral` no traía coordenadas explícitas pero una Compañía/Cuartel sí las tiene, heredar la primera coordenada válida
+  if (lat === null || lng === null || Math.abs(lat) < 0.001 || Math.abs(lng) < 0.001) {
+    const firstWithCoords =
+      companias['1'] && companias['1'].lat !== null && companias['1'].lng !== null
+        ? companias['1']
+        : Object.values(companias).find(
+            (c) => c && c.lat !== null && c.lng !== null && !isNaN(Number(c.lat)) && !isNaN(Number(c.lng))
+          );
+    if (firstWithCoords) {
+      if (lat === null || Math.abs(lat) < 0.001) lat = Number(firstWithCoords.lat);
+      if (lng === null || Math.abs(lng) < 0.001) lng = Number(firstWithCoords.lng);
+    }
+  }
+
+  const cuartelGeneral = {
+    nombre: String(cgRaw.nombre || 'Cuartel General').trim(),
+    lat,
+    lng,
+    direccion: String(cgRaw.direccion || '').trim()
+  };
 
   if (Object.keys(companias).length === 0) {
     companias['1'] = {
@@ -1625,10 +1834,14 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
 
   // Firebase Config
   const fc = (raw.firebaseConfig && typeof raw.firebaseConfig === 'object') ? raw.firebaseConfig : {};
+  const cleanProjectId = String(fc.projectId || '').trim();
   const firebaseConfig = {
     apiKey: String(fc.apiKey || '').trim(),
     authDomain: String(fc.authDomain || '').trim(),
-    projectId: String(fc.projectId || '').trim(),
+    projectId: cleanProjectId,
+    databaseURL: String(
+      fc.databaseURL || (cleanProjectId ? `https://${cleanProjectId}-default-rtdb.firebaseio.com` : '')
+    ).trim(),
     storageBucket: String(fc.storageBucket || '').trim(),
     messagingSenderId: String(fc.messagingSenderId || '').trim(),
     appId: String(fc.appId || '').trim()
@@ -2497,6 +2710,28 @@ export function isCanonicalCommander(personDoc = {}) {
 }
 
 /**
+ * Evalúa si un registro de `personal/{idRegistro}` posee habilitado `modoAdmin: true`
+ * (compatible con booleano `true`, string `"True"`/`"true"`/`"SI"` o numérico `1`).
+ */
+export function hasAdminModeFlag(personDoc = {}) {
+  if (!personDoc || typeof personDoc !== 'object') return false;
+  const rawVal = personDoc.modoAdmin ?? personDoc.ModoAdmin ?? personDoc.modoadmin;
+  if (rawVal === undefined || rawVal === null) return false;
+  if (rawVal === true || rawVal === 1) return true;
+  const str = String(rawVal).trim().toLowerCase();
+  return str === 'true' || str === '1' || str === 'si' || str === 'sí' || str === 's';
+}
+
+/**
+ * Evalúa si un bombero posee todas las facultades operativas del Comandante en la app
+ * (`idRadial === "1"` o `modoAdmin: true` en `personal/{idRegistro}`).
+ * Nota: `verifyCommanderAuthorization` para autorizar dispositivos mantiene estricto `idRadial === "1"`.
+ */
+export function hasCommanderPrivileges(personDoc = {}) {
+  return isCanonicalCommander(personDoc) || hasAdminModeFlag(personDoc);
+}
+
+/**
  * Formatea el título institucional canónico para la tarjeta de Login unificada
  * (ej: "Chépica" -> "CUERPO DE BOMBEROS DE CHÉPICA").
  */
@@ -2617,6 +2852,7 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     activo: isActivo,
     conductor: isConductor,
     isConductor,
+    modoAdmin: hasAdminModeFlag(raw),
     estado: normalizedEstado,
     enServicio: String(rawEnServicio ?? '0').trim(),
     contrasena: String(raw.contrasena ?? raw.password ?? '').trim(),
@@ -2665,6 +2901,7 @@ export function normalizeDispatchDoc(docId, raw = {}) {
     estado: String(raw.estado || 'activa').trim(),
     unidades: (raw.unidades && typeof raw.unidades === 'object') ? raw.unidades : {},
     geo: raw.geo || (raw.coords ? { lat: Number(raw.coords.lat), lng: Number(raw.coords.lng) } : null),
+    alertanteGeo: raw.alertanteGeo || raw.alertante?.geo || raw.geolocalizacionAlertante || null,
     visibleMovil: raw.visibleMovil !== false,
     _metaTimestamp: Number(raw._metaTimestamp || 0),
     _fieldTimestamps: (raw._fieldTimestamps && typeof raw._fieldTimestamps === 'object') ? raw._fieldTimestamps : {}
@@ -3617,5 +3854,86 @@ export function buildCanonicalGeoPortalUrl({ licenseKey = '', serviceId = '', ph
   params.set('id', cleanId);
   params.set('t', cleanPhone);
   return `${CANONICAL_GEO_PORTAL_URL}/?${params.toString()}`;
+}
+
+// ============================================================================
+// 10. CORRELATIVOS CANÓNICOS DE DESPACHOS (`AAAA-00000`)
+// ============================================================================
+
+/**
+ * Formatea un año y correlativo en el ID canónico `AAAA-00000` (5 dígitos).
+ */
+export function formatCanonicalDispatchId(year, correlative) {
+  const numYear = parseInt(year, 10) || new Date().getFullYear();
+  const numSeq = Math.max(1, parseInt(correlative, 10) || 1);
+  return `${numYear}-${String(numSeq).padStart(5, '0')}`;
+}
+
+/**
+ * Parsea un ID de despacho (canónico `AAAA-00000`, 4 dígitos `AAAA-0000`, compacto `AAAA00000`
+ * o legado numérico puro `"1"`..`"99999"`). Ignora identificadores que no son despachos (`SPECIAL-*`, claves `10-X`, `SCI-*`).
+ */
+export function parseDispatchIdParts(rawId, fallbackYear = null) {
+  const clean = String(rawId || '').trim();
+  if (!clean || /^(SPECIAL-|SCI-|10-\d+|6-\d+|IC_)/i.test(clean)) {
+    return null;
+  }
+
+  const dashMatch = clean.match(/^(\d{4})-(\d{1,6})$/);
+  if (dashMatch) {
+    const year = parseInt(dashMatch[1], 10);
+    const seq = parseInt(dashMatch[2], 10);
+    if (year >= 2020 && !isNaN(seq) && seq > 0 && seq < 100000) {
+      return {
+        year,
+        seq,
+        isLegacyNumeric: false,
+        canonicalId: formatCanonicalDispatchId(year, seq)
+      };
+    }
+  }
+
+  const pureMatch = clean.match(/^(\d{1,5})$/);
+  if (pureMatch) {
+    const seq = parseInt(pureMatch[1], 10);
+    if (!isNaN(seq) && seq > 0 && seq < 100000) {
+      const resolvedYear = fallbackYear ? parseInt(fallbackYear, 10) : null;
+      return {
+        year: resolvedYear,
+        seq,
+        isLegacyNumeric: true,
+        canonicalId: resolvedYear ? formatCanonicalDispatchId(resolvedYear, seq) : clean
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Calcula el siguiente correlativo canónico `AAAA-00000` exclusivamente a partir de registros/IDs de `despachos`.
+ */
+export function calculateNextCanonicalDispatchId(recordsOrIds = [], dateObj = new Date()) {
+  const d = dateObj instanceof Date ? dateObj : new Date(dateObj || Date.now());
+  const targetYear = d.getFullYear();
+  let maxSeq = 0;
+
+  if (Array.isArray(recordsOrIds)) {
+    recordsOrIds.forEach((item) => {
+      const rawId = typeof item === 'string'
+        ? item
+        : (item?.idServicio || item?.idDespacho || item?.id || '');
+      const createdTs = (item && typeof item === 'object')
+        ? Number(item.createdAt || item.timestamp || item._metaTimestamp || 0)
+        : 0;
+      const itemYear = createdTs > 1000000000 ? new Date(createdTs).getFullYear() : targetYear;
+      const parsed = parseDispatchIdParts(rawId, itemYear);
+      if (parsed && parsed.year === targetYear && parsed.seq > maxSeq) {
+        maxSeq = parsed.seq;
+      }
+    });
+  }
+
+  return formatCanonicalDispatchId(targetYear, maxSeq + 1);
 }
 

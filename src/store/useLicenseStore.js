@@ -1,10 +1,165 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { CENTRAL_FIREBASE_CONFIG, DEFAULT_FIREBASE_CONFIG, parseFirestoreValue } from '../config/firebase';
+import {
+  CENTRAL_FIREBASE_CONFIG,
+  DEFAULT_FIREBASE_CONFIG,
+  parseFirestoreValue,
+  fetchFirestoreWithAuth
+} from '../config/firebase';
 import { normalizeSaasClientDoc } from '../shared/sentinelCore';
 
 const CACHE_KEY = '@sentinel_one_v3_license_cache';
 const LOGO_DATA_URI_KEY = '@sentinel_one_v3_logo_data_uri';
+
+// Guardas anti-bucle para refresco silencioso en segundo plano (máx 1 vez por arranque o cada 5 min)
+let silentSyncInFlight = false;
+let lastSilentSyncTs = 0;
+
+function parseValidCoord(val) {
+  if (val === null || val === undefined || val === '') return null;
+  const num = Number(val);
+  if (!Number.isFinite(num) || Math.abs(num) < 0.001) return null;
+  return num;
+}
+
+function sanitizeCachedCoord(val) {
+  const num = parseValidCoord(val);
+  if (num === null) return null;
+  // Descartar coordenada legada hardcodeada por defecto (-34.637373, -71.125741) si no viene de un cuartel real
+  return num;
+}
+
+function parseFirestoreDocFields(docJson) {
+  const fields = docJson?.fields || {};
+  const out = {};
+  for (const k of Object.keys(fields)) {
+    out[k] = parseFirestoreValue(fields[k]);
+  }
+  return out;
+}
+
+async function resolveTenantStationOverrides(licenseKey, clientFbConfig) {
+  if (!clientFbConfig || !clientFbConfig.projectId || !clientFbConfig.apiKey) {
+    return { tenantSaasFields: null, stationPois: [] };
+  }
+  const projId = String(clientFbConfig.projectId).trim();
+  const apiKey = String(clientFbConfig.apiKey).trim();
+  let tenantSaasFields = null;
+  const stationPois = [];
+
+  // 1. Intentar leer `saas_clientes/{licenseKey}` desde el proyecto propio de la institución (igual que SENTINEL CAD y SENTINEL NAV)
+  if (licenseKey) {
+    try {
+      const tenantSaasUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/saas_clientes/${encodeURIComponent(licenseKey)}?key=${apiKey}`;
+      const tRes = await fetchFirestoreWithAuth(tenantSaasUrl, apiKey);
+      if (tRes && tRes.ok) {
+        const tJson = await tRes.json();
+        if (tJson && tJson.fields) {
+          tenantSaasFields = parseFirestoreDocFields(tJson);
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Respaldo dinámico desde `puntos_interes` (igual que `resolveUnitStationCoords` en SENTINEL NAV)
+  try {
+    const poisUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/puntos_interes?pageSize=250&key=${apiKey}`;
+    const pRes = await fetchFirestoreWithAuth(poisUrl, apiKey);
+    if (pRes && pRes.ok) {
+      const pJson = await pRes.json();
+      const docs = Array.isArray(pJson?.documents) ? pJson.documents : [];
+      for (const docItem of docs) {
+        const d = parseFirestoreDocFields(docItem);
+        const cat = String(d.categoria || d.tipo || d.category || '').trim().toLowerCase();
+        const nom = String(d.nombre || d.titulo || '').trim().toUpperCase();
+        if (!(cat.includes('cuartel') || nom.includes('CUARTEL') || nom.includes('COMPAÑÍA') || nom.includes('COMPANIA'))) {
+          continue;
+        }
+        const geo = d.geo && typeof d.geo === 'object' ? d.geo : {};
+        const coords = d.coords && typeof d.coords === 'object' ? d.coords : {};
+        const ubic = d.ubicacion && typeof d.ubicacion === 'object' ? d.ubicacion : {};
+        const pLat = parseValidCoord(
+          geo.lat ?? geo.latitude ?? coords.lat ?? ubic.lat ?? d.lat ?? d.latitude ?? d.latitud
+        );
+        const pLng = parseValidCoord(
+          geo.lng ?? geo.lon ?? geo.longitude ?? coords.lng ?? ubic.lng ?? d.lng ?? d.lon ?? d.longitude ?? d.longitud
+        );
+        if (pLat !== null && pLng !== null) {
+          stationPois.push({
+            nombre: String(d.nombre || d.titulo || 'CUARTEL').trim(),
+            direccion: String(d.direccion || d.descripcion || '').trim(),
+            compania: String(d.compania || '').trim(),
+            lat: pLat,
+            lng: pLng
+          });
+        }
+      }
+    }
+  } catch (_) {}
+
+  return { tenantSaasFields, stationPois };
+}
+
+function enrichNormalizedStationsWithPois(normalizedClient, stationPois = []) {
+  const companias = { ...(normalizedClient?.companias || normalizedClient?.cuarteles || {}) };
+  let mainLat = parseValidCoord(normalizedClient?.cuartelGeneral?.lat ?? normalizedClient?.lat);
+  let mainLng = parseValidCoord(normalizedClient?.cuartelGeneral?.lng ?? normalizedClient?.lng);
+
+  if (Array.isArray(stationPois) && stationPois.length > 0) {
+    Object.keys(companias).forEach((compKey) => {
+      const comp = companias[compKey];
+      if (!comp || typeof comp !== 'object') return;
+      const cLat = parseValidCoord(comp.lat);
+      const cLng = parseValidCoord(comp.lng);
+      if (cLat !== null && cLng !== null) return;
+
+      const matchedPoi =
+        stationPois.find((p) => {
+          const nom = String(p.nombre || '').toUpperCase();
+          return (
+            String(p.compania || '') === String(compKey) ||
+            nom.includes(`${compKey}ª`) ||
+            nom.includes(`${compKey}°`) ||
+            nom.includes(` ${compKey}`)
+          );
+        }) || (compKey === '1' ? stationPois[0] : null);
+
+      if (matchedPoi) {
+        companias[compKey] = {
+          ...comp,
+          cuartel: comp.cuartel || matchedPoi.nombre,
+          direccion: comp.direccion || matchedPoi.direccion || '',
+          lat: matchedPoi.lat,
+          lng: matchedPoi.lng
+        };
+      }
+    });
+
+    if (mainLat === null || mainLng === null) {
+      mainLat = stationPois[0].lat;
+      mainLng = stationPois[0].lng;
+    }
+  }
+
+  if (mainLat === null || mainLng === null) {
+    const firstWithCoords =
+      (companias['1'] && parseValidCoord(companias['1'].lat) !== null && parseValidCoord(companias['1'].lng) !== null
+        ? companias['1']
+        : Object.values(companias).find(
+            (c) => c && parseValidCoord(c.lat) !== null && parseValidCoord(c.lng) !== null
+          )) || null;
+    if (firstWithCoords) {
+      mainLat = parseValidCoord(firstWithCoords.lat);
+      mainLng = parseValidCoord(firstWithCoords.lng);
+    }
+  }
+
+  return {
+    cuartelesObj: Object.keys(companias).length > 0 ? companias : null,
+    cLat: mainLat,
+    cLng: mainLng
+  };
+}
 
 async function resolveLocalLogoDataUri(rawUrl) {
   const clean = String(rawUrl || '').trim();
@@ -138,8 +293,8 @@ function getInitialCachedLicense() {
             region: parsed.region || '',
             cuarteles: parsed.cuarteles || null,
             totalCompanias: parsed.totalCompanias || 1,
-            cuartelLat: parsed.cuartelLat ?? -34.637373,
-            cuartelLng: parsed.cuartelLng ?? -71.125741,
+            cuartelLat: sanitizeCachedCoord(parsed.cuartelLat),
+            cuartelLng: sanitizeCachedCoord(parsed.cuartelLng),
             isReadOnly: Boolean(parsed.isReadOnly),
             firebaseConfig: parsed.firebaseConfig || null,
             authorized: true,
@@ -216,8 +371,8 @@ export const useLicenseStore = create((set, get) => ({
   region: initialCached?.region || '',
   cuarteles: initialCached?.cuarteles || null,
   totalCompanias: initialCached?.totalCompanias || 1,
-  cuartelLat: initialCached?.cuartelLat ?? -34.637373,
-  cuartelLng: initialCached?.cuartelLng ?? -71.125741,
+  cuartelLat: initialCached?.cuartelLat ?? null,
+  cuartelLng: initialCached?.cuartelLng ?? null,
   isReadOnly: Boolean(initialCached?.isReadOnly),
   firebaseConfig: initialCached?.firebaseConfig || null,
   authorized: Boolean(initialCached?.authorized),
@@ -266,8 +421,8 @@ export const useLicenseStore = create((set, get) => ({
             region: parsed.region || '',
             cuarteles: parsed.cuarteles || null,
             totalCompanias: parsed.totalCompanias || 1,
-            cuartelLat: parsed.cuartelLat ?? -34.637373,
-            cuartelLng: parsed.cuartelLng ?? -71.125741,
+            cuartelLat: sanitizeCachedCoord(parsed.cuartelLat),
+            cuartelLng: sanitizeCachedCoord(parsed.cuartelLng),
             isReadOnly: Boolean(parsed.isReadOnly),
             firebaseConfig: parsed.firebaseConfig || null,
             authorized: true,
@@ -296,6 +451,9 @@ export const useLicenseStore = create((set, get) => ({
             syncNativeStorageKey(CACHE_KEY, JSON.stringify(parsed));
           }
 
+          // Sincronización silenciosa en segundo plano (con guarda anti-bucle) para actualizar coordenadas de cuarteles establecidas
+          get().refreshStationMetadataSilently(parsed.licenseKey).catch(() => {});
+
           return true;
         }
       }
@@ -305,44 +463,62 @@ export const useLicenseStore = create((set, get) => ({
     return false;
   },
 
-  validateLicense: async (rawKey) => {
+  refreshStationMetadataSilently: async (explicitKey = '') => {
+    const now = Date.now();
+    if (silentSyncInFlight || now - lastSilentSyncTs < 30000) return false;
+    const state = get();
+    const key = String(explicitKey || state.licenseKey || '').trim().toUpperCase();
+    if (!key) return false;
+
+    silentSyncInFlight = true;
+    lastSilentSyncTs = now;
+    try {
+      return await get().validateLicense(key, true);
+    } catch (_) {
+      return false;
+    } finally {
+      silentSyncInFlight = false;
+    }
+  },
+
+  validateLicense: async (rawKey, silent = false) => {
     let key = (rawKey || '').trim().toUpperCase();
     if (!key) {
-      set({ errorReason: 'Ingrese una clave de licencia válida.' });
+      if (!silent) set({ errorReason: 'Ingrese una clave de licencia válida.' });
       return false;
     }
 
-    set({ isChecking: true, status: 'verificando', errorReason: '' });
+    if (!silent) {
+      set({ isChecking: true, status: 'verificando', errorReason: '' });
+    }
 
     // CONSULTA REAL A SISBOM CENTRAL (Firestore REST, sin modo de prueba ni bypass)
     try {
       const centralApiKey = CENTRAL_FIREBASE_CONFIG.apiKey;
       const centralProj = CENTRAL_FIREBASE_CONFIG.projectId;
-      const url = `https://firestore.googleapis.com/v1/projects/${centralProj}/databases/(default)/documents/saas_clientes/${key}?key=${centralApiKey}`;
+      const url = `https://firestore.googleapis.com/v1/projects/${centralProj}/databases/(default)/documents/saas_clientes/${encodeURIComponent(key)}?key=${centralApiKey}`;
 
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
 
       if (!res.ok) {
         if (res.status === 404) {
-          set({
-            authorized: false,
-            status: 'no_autorizado',
-            isChecking: false,
-            errorReason: `La clave de licencia "${key}" no existe o es inválida.`
-          });
+          if (!silent) {
+            set({
+              authorized: false,
+              status: 'no_autorizado',
+              isChecking: false,
+              errorReason: `La clave de licencia "${key}" no existe o es inválida.`
+            });
+          }
           return false;
         }
         throw new Error(`HTTP Error ${res.status}`);
       }
 
       const data = await res.json();
-      const fields = data.fields || {};
-      const parsedFields = {};
-      for (const k of Object.keys(fields)) {
-        parsedFields[k] = parseFirestoreValue(fields[k]);
-      }
+      const parsedFields = parseFirestoreDocFields(data);
 
-      const normalizedClient = normalizeSaasClientDoc(key, parsedFields);
+      let normalizedClient = normalizeSaasClientDoc(key, parsedFields);
       const subStatus = normalizedClient.estadoSuscripcion;
       if (subStatus === 'bloqueado' || subStatus === 'suspendido') {
         set({
@@ -361,21 +537,40 @@ export const useLicenseStore = create((set, get) => ({
           : null;
 
       if (!clientFbConfig) {
-        set({
-          authorized: false,
-          status: 'no_autorizado',
-          isChecking: false,
-          errorReason: 'Esta licencia no tiene un proyecto Firebase asignado en el Servidor Central.'
-        });
+        if (!silent) {
+          set({
+            authorized: false,
+            status: 'no_autorizado',
+            isChecking: false,
+            errorReason: 'Esta licencia no tiene un proyecto Firebase asignado en el Servidor Central.'
+          });
+        }
         return false;
       }
-      const cuartelesObj = normalizedClient.companias || normalizedClient.cuarteles || null;
-      const cg = normalizedClient.cuartelGeneral || parsedFields.cuartelGeneral || {};
-      const cLat = Number(cg.lat ?? parsedFields.latCuartel ?? -34.637373) || -34.637373;
-      const cLng = Number(cg.lng ?? parsedFields.lngCuartel ?? -71.125741) || -71.125741;
+
+      // Fusionar coordenadas y metadatos canónicos desde `saas_clientes/{key}` y `puntos_interes` del proyecto de la institución (igual que SENTINEL CAD y SENTINEL NAV)
+      const { tenantSaasFields, stationPois } = await resolveTenantStationOverrides(key, clientFbConfig);
+      if (tenantSaasFields) {
+        const mergedNorm = normalizeSaasClientDoc(key, {
+          ...parsedFields,
+          ...tenantSaasFields,
+          firebaseConfig: clientFbConfig
+        });
+        if (mergedNorm) {
+          normalizedClient = mergedNorm;
+        }
+      }
+
+      const { cuartelesObj, cLat, cLng } = enrichNormalizedStationsWithPois(normalizedClient, stationPois);
 
       const rawRemoteLogo = normalizedClient.logoUrl || '';
-      const localLogoDataUri = rawRemoteLogo ? await resolveLocalLogoDataUri(rawRemoteLogo) : '';
+      const currentLogo = get().logoUrl || '';
+      const localLogoDataUri =
+        silent && currentLogo.startsWith('data:')
+          ? currentLogo
+          : rawRemoteLogo
+            ? await resolveLocalLogoDataUri(rawRemoteLogo)
+            : '';
 
       const licenseData = {
         licenseKey: key,
@@ -410,6 +605,30 @@ export const useLicenseStore = create((set, get) => ({
 
       syncNativeFirebaseConfig(clientFbConfig);
 
+      // En modo silencioso, actualizar el store únicamente si algún dato real cambió (prevención total de re-renders innecesarios o bucles)
+      if (silent) {
+        const cur = get();
+        const prevCuartelesJson = JSON.stringify(cur.cuarteles || null);
+        const nextCuartelesJson = JSON.stringify(licenseData.cuarteles || null);
+        const hasDiff =
+          cur.cuartelLat !== licenseData.cuartelLat ||
+          cur.cuartelLng !== licenseData.cuartelLng ||
+          prevCuartelesJson !== nextCuartelesJson ||
+          cur.comuna !== licenseData.comuna ||
+          cur.region !== licenseData.region ||
+          cur.nombreMostrar !== licenseData.nombreMostrar ||
+          cur.totalCompanias !== licenseData.totalCompanias ||
+          cur.isReadOnly !== licenseData.isReadOnly;
+
+        if (hasDiff) {
+          set({
+            ...licenseData,
+            isChecking: false
+          });
+        }
+        return true;
+      }
+
       set({
         ...licenseData,
         isChecking: false
@@ -418,12 +637,14 @@ export const useLicenseStore = create((set, get) => ({
 
     } catch (err) {
       console.warn('Network error checking license:', err);
-      set({
-        authorized: false,
-        status: 'no_autorizado',
-        isChecking: false,
-        errorReason: 'No fue posible validar la licencia. Revise su conexión a Internet.'
-      });
+      if (!silent) {
+        set({
+          authorized: false,
+          status: 'no_autorizado',
+          isChecking: false,
+          errorReason: 'No fue posible validar la licencia. Revise su conexión a Internet.'
+        });
+      }
       return false;
     }
   },

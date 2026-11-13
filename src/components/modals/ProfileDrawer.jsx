@@ -29,6 +29,7 @@ import * as Haptics from 'expo-haptics';
 import { useAuthStore, formatProfilePhotoUrl } from '../../store/useAuthStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
 import { useDispatchStore } from '../../store/useDispatchStore';
+import { hasCommanderPrivileges } from '../../shared/sentinelCore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.82);
@@ -159,12 +160,22 @@ export const ProfileDrawer = ({ visible, onClose }) => {
   };
 
   const handleOpenDoor = async () => {
+    if (isDoorOpening) return;
     triggerHaptic('success');
     setIsDoorOpening(true);
-    await openDoorIoT();
-    setTimeout(() => {
-      setIsDoorOpening(false);
-    }, 3500);
+    const startedAt = Date.now();
+    try {
+      await Promise.race([
+        openDoorIoT(),
+        new Promise((resolve) => setTimeout(resolve, 3000))
+      ]);
+    } catch (_) {
+    } finally {
+      const remaining = Math.max(0, 2800 - (Date.now() - startedAt));
+      setTimeout(() => {
+        setIsDoorOpening(false);
+      }, remaining);
+    }
   };
 
   const handleCloseCentralSession = async () => {
@@ -201,7 +212,12 @@ export const ProfileDrawer = ({ visible, onClose }) => {
   const idReg = liveUser?.idRegistro || user?.idRegistro || user?.idRadial || '1';
   const idRad = liveUser?.idRadial || user?.idRadial || '1';
 
-  const isComandante = String(idRad).trim() === '1' || String(idRad).trim() === '01' || displayCargo.toUpperCase().includes('COMANDANTE');
+  const isComandante =
+    hasCommanderPrivileges(liveUser) ||
+    hasCommanderPrivileges(user) ||
+    String(idRad).trim() === '1' ||
+    String(idRad).trim() === '01' ||
+    displayCargo.toUpperCase().includes('COMANDANTE');
   const normStr = (s) =>
     String(s || '')
       .normalize('NFD')
@@ -564,7 +580,7 @@ export const ProfileDrawer = ({ visible, onClose }) => {
               </>
             ) : null}
 
-            {/* FOOTER DE VERSIÓN CON LOGO SENTINEL ONE OFICIAL + V.3.0.4 */}
+            {/* FOOTER DE VERSIÓN CON LOGO SENTINEL ONE OFICIAL + V.3.1.0 */}
             <View style={styles.versionFooter}>
               <Image
                 source={
@@ -575,7 +591,7 @@ export const ProfileDrawer = ({ visible, onClose }) => {
                 style={styles.footerLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.versionTitle}>V.3.0.4</Text>
+              <Text style={styles.versionTitle}>V.3.1.0</Text>
             </View>
           </ScrollView>
         </Animated.View>
@@ -606,7 +622,8 @@ const styles = StyleSheet.create({
     elevation: 20
   },
   scrollBody: {
-    flex: 1
+    flex: 1,
+    minHeight: 0
   },
   scrollContent: {
     paddingTop: Platform.OS === 'ios' ? 50 : 40,

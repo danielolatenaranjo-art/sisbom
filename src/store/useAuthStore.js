@@ -15,10 +15,24 @@ import {
 } from '../config/firebase';
 import {
   getEntityMaxTimestamp,
+  hasAdminModeFlag,
   matchPersonnelCredentials,
   sanitizeCanonicalPersonnelUpdate,
   buildCanonicalPersonStatusHistoryDoc
 } from '../shared/sentinelCore';
+
+// Puente síncrono directo hacia useDispatchStore (evita `require()` circular en Metro Web/iOS/Android)
+let dispatchPersonalBridge = {
+  onOptimisticStatus: null,
+  onOptimisticService: null
+};
+
+export function registerPersonalBridge(handlers = {}) {
+  dispatchPersonalBridge = {
+    ...dispatchPersonalBridge,
+    ...handlers
+  };
+}
 
 const USER_SESSION_KEY = '@sentinel_one_v3_user_session';
 const PREFS_KEY = '@sentinel_one_v3_user_prefs';
@@ -163,7 +177,8 @@ async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
   const maskFields = [
     'idRegistro', 'idRadial', 'ficha', 'rut', 'nombreBombero', 'nombre',
     'cargo', 'compania', 'estado', 'enServicio', 'conductor', 'activo',
-    'puerta', 'Puerta', 'contrasena', 'telefono', 'email', 'deviceId',
+    'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'multiDispositivo',
+    'contrasena', 'telefono', 'email', 'deviceId',
     'tokenFcm', 'fcmToken', 'apnsToken', 'hardwareDeviceId',
     'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
   ].map(f => `mask.fieldPaths=${f}`).join('&');
@@ -246,6 +261,10 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     ? parsePersonalBoolean(raw.puerta ?? raw.Puerta)
     : Boolean(fallbackUser.puerta);
 
+  const hasModoAdmin = (raw.modoAdmin !== undefined || raw.ModoAdmin !== undefined || raw.modoadmin !== undefined)
+    ? hasAdminModeFlag(raw)
+    : Boolean(fallbackUser.modoAdmin);
+
   const rawPhoto = raw.foto !== undefined ? raw.foto : (fallbackUser.foto || '');
   const metaTs = Math.max(
     Number(raw._metaTimestamp || 0),
@@ -269,6 +288,11 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     conductor: isConductorVal,
     activo: isActiveVal,
     puerta: hasPuerta,
+    modoAdmin: hasModoAdmin,
+    multiDispositivo:
+      raw.multiDispositivo !== undefined
+        ? parsePersonalBoolean(raw.multiDispositivo)
+        : Boolean(fallbackUser.multiDispositivo),
     foto: formatProfilePhotoUrl(rawPhoto),
     telefono: raw.telefono || fallbackUser.telefono || '',
     email: raw.email || fallbackUser.email || '',
@@ -329,6 +353,7 @@ function resolveSpecialStatusFromUser(u) {
   if (!u) return '';
   if (u.estadoEspecial) return String(u.estadoEspecial);
   const est = String(u.estado || '').toUpperCase().trim();
+  if (est === '0-9' || est === '0-8') return '';
   if (est === 'CDS' || Number(u.cds) === 1 || u.cds === true) return 'CDS';
   if (est === 'SUSPENDIDO' || (u.fechaSuspensionFin && String(u.fechaSuspensionFin).trim() !== '')) return 'SUSPENDIDO';
   if (est === 'LICENCIA' || (u.licenciaMedica && String(u.licenciaMedica).trim() !== '')) return 'LICENCIA';
@@ -477,6 +502,10 @@ export const useAuthStore = create((set, get) => ({
     if (!currentUser) return false;
     const docId = String(currentUser.idRegistro || currentUser.idRadial || '').trim();
     if (!docId) return false;
+
+    if (currentUser.multiDispositivo) {
+      return true;
+    }
 
     if (String(currentUser.deviceId || '').trim() !== cleanToken) {
       const updatedUser = { ...currentUser, deviceId: cleanToken };
@@ -677,6 +706,7 @@ export const useAuthStore = create((set, get) => ({
         updatedUser.enServicio !== currentUser.enServicio ||
         updatedUser.cargo !== currentUser.cargo ||
         updatedUser.puerta !== currentUser.puerta ||
+        updatedUser.modoAdmin !== currentUser.modoAdmin ||
         updatedUser.conductor !== currentUser.conductor ||
         updatedUser.activo !== currentUser.activo ||
         updatedUser.nombreBombero !== currentUser.nombreBombero ||
@@ -702,32 +732,6 @@ export const useAuthStore = create((set, get) => ({
         syncNativeStorageKey(USER_SESSION_KEY, serialized);
         await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
       } catch (e) {}
-      try {
-        const { useDispatchStore, markLocalWrite } = require('./useDispatchStore');
-        if (typeof markLocalWrite === 'function' && docId) {
-          markLocalWrite('personal', String(docId), nowTs);
-        }
-        const dispState = useDispatchStore?.getState?.();
-        if (dispState && Array.isArray(dispState.firefightersList)) {
-          useDispatchStore.setState({
-            firefightersList: dispState.firefightersList.map((f) =>
-              String(f.idRegistro).trim() === String(docId).trim()
-                ? {
-                    ...f,
-                    estado: cleanNewStatus,
-                    ...(cleanNewStatus === '0-8' ? { enServicio: '0' } : {}),
-                    _metaTimestamp: nowTs,
-                    _fieldTimestamps: {
-                      ...(f._fieldTimestamps || {}),
-                      estado: nowTs,
-                      ...(cleanNewStatus === '0-8' ? { enServicio: nowTs } : {})
-                    }
-                  }
-                : f
-            )
-          });
-        }
-      } catch (_) {}
     }
   },
 
@@ -764,8 +768,9 @@ export const useAuthStore = create((set, get) => ({
           return { success: false, error: errMsg };
         }
 
+        const isMultiDeviceAccount = parsePersonalBoolean(foundMatch.multiDispositivo);
         const existingDeviceId = String(foundMatch.deviceId ?? '').trim();
-        if (existingDeviceId !== '' && existingDeviceId.includes(':') && existingDeviceId.length > 60) {
+        if (!isMultiDeviceAccount && existingDeviceId !== '' && existingDeviceId.includes(':') && existingDeviceId.length > 60) {
           const myFcmTok = typeof window !== 'undefined' ? String(window.__SENTINEL_FCM_TOKEN__ || '').trim() : '';
           const myApnsTok = typeof window !== 'undefined' ? String(window.__SENTINEL_APNS_TOKEN__ || '').trim().toLowerCase() : '';
           const lastKcSession = typeof window !== 'undefined' ? String(window.__SENTINEL_KEYCHAIN_LAST_SESSION__ || '').trim() : '';
@@ -837,12 +842,26 @@ export const useAuthStore = create((set, get) => ({
       ? String(currentUser.estado || '0-9').trim().toUpperCase()
       : String(options.previousStatus || '').trim().toUpperCase();
     const cleanNewStatus = String(newStatus || '0-9').trim().toUpperCase();
+    const shouldClearService = cleanNewStatus !== '0-9';
     const nowTs = Date.now();
+    const auxiliaryStatusFields = {
+      ...(shouldClearService ? { enServicio: '0' } : {}),
+      licenciaMedica: cleanNewStatus === 'LICENCIA' ? 'LICENCIA' : '',
+      fechaSuspensionFin: cleanNewStatus === 'SUSPENDIDO' ? 'SUSPENDIDO' : '',
+      permiso: cleanNewStatus === 'PERMISO' ? 1 : 0,
+      cds: cleanNewStatus === 'CDS' ? 1 : 0
+    };
+
+    // Actualización optimista inmediata (0ms) en memoria mediante puente síncrono directo (sin `require()` circular)
+    try {
+      if (typeof dispatchPersonalBridge.onOptimisticStatus === 'function' && docId) {
+        dispatchPersonalBridge.onOptimisticStatus(docId, cleanNewStatus, auxiliaryStatusFields, nowTs);
+      }
+    } catch (_) {}
 
     if (isSelf) {
       pendingStatusValue = cleanNewStatus;
       lastStatusChangeTs = nowTs;
-      // Si el usuario cambia explícitamente a 0-9, desactivar automáticamente el Modo Avión (0-8 Absoluto) igual que en V2
       if (cleanNewStatus === '0-9' && get().isAirplaneMode) {
         set({ isAirplaneMode: false });
         syncNativeAirplaneMode(false);
@@ -857,19 +876,20 @@ export const useAuthStore = create((set, get) => ({
           AsyncStorage.setItem(PREFS_KEY, prefsStr).catch(() => {});
         } catch (_) {}
       }
-      if (cleanNewStatus === '0-8') {
+      if (shouldClearService) {
         pendingServiceValue = '0';
         lastServiceChangeTs = nowTs;
       }
       const updatedUser = {
         ...currentUser,
+        ...auxiliaryStatusFields,
         estado: cleanNewStatus,
-        ...(cleanNewStatus === '0-8' ? { enServicio: '0' } : {}),
+        estadoEspecial: '',
         _metaTimestamp: nowTs,
         _fieldTimestamps: {
           ...(currentUser._fieldTimestamps || {}),
           estado: nowTs,
-          ...(cleanNewStatus === '0-8' ? { enServicio: nowTs } : {})
+          ...(shouldClearService ? { enServicio: nowTs } : {})
         }
       };
       set({ user: updatedUser });
@@ -895,7 +915,7 @@ export const useAuthStore = create((set, get) => ({
       try {
         const serialized = JSON.stringify(updatedUser);
         syncNativeStorageKey(USER_SESSION_KEY, serialized);
-        await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
+        AsyncStorage.setItem(USER_SESSION_KEY, serialized).catch(() => {});
       } catch (e) {}
     }
 
@@ -915,57 +935,52 @@ export const useAuthStore = create((set, get) => ({
           currentUser.idRegistro ||
           ''
       ).trim(),
-      enServicio: cleanNewStatus === '0-8' ? '0' : (isSelf ? String(currentUser.enServicio || '0') : String(options.enServicio || '0')),
+      enServicio: shouldClearService ? '0' : (isSelf ? String(currentUser.enServicio || '0') : String(options.enServicio || '0')),
       timestamp: nowTs
     });
 
-    try {
-      const db = getDb();
-      if (!db) throw new Error('Firestore db not ready');
-      await ensureFirebaseAuth();
-      await Promise.race([
-        updateDoc(doc(db, 'personal', String(docId)), {
-          estado: cleanNewStatus,
-          ...(cleanNewStatus === '0-8' ? { enServicio: '0' } : {}),
-          _changedByCentral: !isSelf,
-          _metaTimestamp: nowTs
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore updateStatus timeout')), 3500))
-      ]);
-      await Promise.race([
-        setDoc(
-          doc(db, 'personal', String(docId), 'estados', String(nowTs)),
-          statusHistoryDoc
-        ),
-        new Promise((resolve) => setTimeout(resolve, 2500))
-      ]).catch((histErr) => {
-        console.warn('Error registrando subcolección estados en Firestore:', histErr);
-      });
-      console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${cleanNewStatus} (historial registrado)`);
-    } catch (dbErr) {
-      reconnectFirebaseNetwork(true).catch(() => {});
+    let restWriteSucceeded = false;
+    const writeViaRestDirect = async () => {
       const fbConfig = useLicenseStore.getState().firebaseConfig;
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const extraMask = cleanNewStatus === '0-8' ? '&updateMask.fieldPaths=enServicio' : '';
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=estado&updateMask.fieldPaths=_changedByCentral&updateMask.fieldPaths=_metaTimestamp${extraMask}`;
+      const maskList = [
+        'estado',
+        '_changedByCentral',
+        '_metaTimestamp',
+        'licenciaMedica',
+        'fechaSuspensionFin',
+        'permiso',
+        'cds',
+        ...(shouldClearService ? ['enServicio'] : [])
+      ];
+      const maskQuery = maskList.map((f) => `updateMask.fieldPaths=${f}`).join('&');
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?${maskQuery}`;
 
-      fetchFirestoreWithAuth(patchUrl, apiKey, {
+      const patchRes = await fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fields: {
             estado: { stringValue: cleanNewStatus },
-            ...(cleanNewStatus === '0-8' ? { enServicio: { stringValue: '0' } } : {}),
+            ...(shouldClearService ? { enServicio: { stringValue: '0' } } : {}),
+            licenciaMedica: { stringValue: auxiliaryStatusFields.licenciaMedica },
+            fechaSuspensionFin: { stringValue: auxiliaryStatusFields.fechaSuspensionFin },
+            permiso: { integerValue: String(auxiliaryStatusFields.permiso) },
+            cds: { integerValue: String(auxiliaryStatusFields.cds) },
             _changedByCentral: { booleanValue: !isSelf },
             _metaTimestamp: { integerValue: String(nowTs) }
           }
         })
-      }).catch(() => {});
+      }).catch(() => null);
+
+      if (patchRes && patchRes.ok) {
+        restWriteSucceeded = true;
+      }
 
       const histUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}/estados?documentId=${encodeURIComponent(String(nowTs))}`;
-      fetchFirestoreWithAuth(histUrl, apiKey, {
+      await fetchFirestoreWithAuth(histUrl, apiKey, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -981,6 +996,34 @@ export const useAuthStore = create((set, get) => ({
           }
         })
       }).catch(() => {});
+    };
+
+    // Ejecutar escritura por canal HTTP REST directo (inmune a cuellos de botella de Long-Polling) + SDK en paralelo
+    const restPromise = writeViaRestDirect().catch(() => {});
+
+    try {
+      const db = getDb();
+      if (!db) return;
+      await ensureFirebaseAuth();
+      await Promise.race([
+        updateDoc(doc(db, 'personal', String(docId)), {
+          estado: cleanNewStatus,
+          ...auxiliaryStatusFields,
+          _changedByCentral: !isSelf,
+          _metaTimestamp: nowTs
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Firestore updateStatus timeout')), 3500))
+      ]);
+      setDoc(
+        doc(db, 'personal', String(docId), 'estados', String(nowTs)),
+        statusHistoryDoc
+      ).catch(() => {});
+      console.log(`✅ [SENTINEL ONE] Bombero ${docId} estado actualizado a ${cleanNewStatus} (historial registrado)`);
+    } catch (dbErr) {
+      await restPromise;
+      if (!restWriteSucceeded) {
+        reconnectFirebaseNetwork(true).catch(() => {});
+      }
     }
   },
 
@@ -1116,27 +1159,8 @@ export const useAuthStore = create((set, get) => ({
       await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
     } catch (e) {}
     try {
-      const { useDispatchStore, markLocalWrite } = require('./useDispatchStore');
-      if (typeof markLocalWrite === 'function' && docId) {
-        markLocalWrite('personal', String(docId), nowTs);
-      }
-      const dispState = useDispatchStore?.getState?.();
-      if (dispState && Array.isArray(dispState.firefightersList)) {
-        useDispatchStore.setState({
-          firefightersList: dispState.firefightersList.map((f) =>
-            String(f.idRegistro).trim() === String(docId).trim()
-              ? {
-                  ...f,
-                  enServicio: newEnServicio,
-                  _metaTimestamp: nowTs,
-                  _fieldTimestamps: {
-                    ...(f._fieldTimestamps || {}),
-                    enServicio: nowTs
-                  }
-                }
-              : f
-          )
-        });
+      if (typeof dispatchPersonalBridge.onOptimisticService === 'function' && docId) {
+        dispatchPersonalBridge.onOptimisticService(docId, newEnServicio, nowTs);
       }
     } catch (_) {}
 
