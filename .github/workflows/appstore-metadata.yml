@@ -2,6 +2,12 @@ name: Publish Metadata & Screenshots to App Store Connect
 
 on:
   workflow_dispatch:
+    inputs:
+      promo_only:
+        description: 'Actualizar solo promotionalText sin tocar el estado WAITING_FOR_REVIEW'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -25,7 +31,11 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
         run: |
-          python3 -u ios/publish_appstore.py | tee ios/asc_report.txt
+          if [ "${{ github.event.inputs.promo_only }}" = "true" ]; then
+            python3 -u ios/publish_appstore.py --promo-only | tee ios/asc_report.txt
+          else
+            python3 -u ios/publish_appstore.py | tee ios/asc_report.txt
+          fi
           git config user.name "Sentinel Bot"
           git config user.email "bot@sisbom.cl"
           git add -f ios/asc_report.txt

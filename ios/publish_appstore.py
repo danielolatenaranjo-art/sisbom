@@ -41,8 +41,8 @@ WHATS_NEW_ES = (
 )
 
 PROMOTIONAL_TEXT_ES = (
-    "Aplicación oficial de operaciones, despacho de emergencias, estados de disponibilidad (0-9/0-8) "
-    "y gestión táctica en tiempo real para Cuerpos de Bomberos."
+    "Plataforma tecnológica privada de operaciones, recepción de despachos, estados de disponibilidad "
+    "(0-9/0-8) y gestión táctica en tiempo real para equipos suscritos."
 )
 
 DESCRIPTION_ES = (
@@ -426,6 +426,23 @@ def main():
             break
     app_id = app_obj["id"]
     print(f"📱 App: {app_obj.get('attributes', {}).get('name')} (id={app_id})")
+
+    if "--promo-only" in sys.argv:
+        _, ver_res = api_request("GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10", token=token)
+        for v in ver_res.get("data", []):
+            if v.get("attributes", {}).get("versionString") == TARGET_VERSION:
+                vid = v["id"]
+                _, loc_res = api_request("GET", f"/v1/appStoreVersions/{vid}/appStoreVersionLocalizations", token=token)
+                for loc in loc_res.get("data", []):
+                    lid = loc["id"]
+                    st_p, _ = api_request(
+                        "PATCH",
+                        f"/v1/appStoreVersionLocalizations/{lid}",
+                        body={"data": {"type": "appStoreVersionLocalizations", "id": lid, "attributes": {"promotionalText": PROMOTIONAL_TEXT_ES}}},
+                        token=token,
+                    )
+                    print(f"✅ promotionalText actualizado sin retirar de revisión (loc={lid}, HTTP {st_p}).")
+        return
 
     # 2. Configurar Derechos sobre el Contenido (Content Rights Declaration) en el recurso App
     print("📄 Configurando Derechos sobre el Contenido (DOES_NOT_USE_THIRD_PARTY_CONTENT)...")
