@@ -409,6 +409,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     private var hiddenVolumeView: MPVolumeView?
     private(set) var lastAlarmStartMs: Int64 = 0
     private var lastPlayedSoundKey: String = ""
+    private var vibrationBurstToken: Int = 0
     private var playedFirstToneDispatchIds = Set<String>()
     private var playedRepeat60sDispatchIds = Set<String>()
 
@@ -539,6 +540,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         if c.hasPrefix("10-9") || c == "C10_9" { return "c10_9" }
         if c == "ALERTA" || c == "ALERTAS" { return "alertas" }
         if c == "IMPORTANTE" { return "importante" }
+        if c == "EVACUACION" || c == "EVACUACION.WAV" { return "evacuacion" }
         return "despacho"
     }
 
@@ -659,6 +661,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "mp3")
+                ?? Bundle.main.url(forResource: fileName, withExtension: "wav")
+                ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "wav")
                 ?? Bundle.main.url(forResource: "despacho", withExtension: "mp3")
                 ?? Bundle.main.url(forResource: "alertas", withExtension: "mp3") else {
             vibrateEmergency()
@@ -726,7 +730,62 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    func playEvacuationLoop() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.playEvacuationLoop()
+            }
+            return
+        }
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "IS_CENTRAL_ACTIVE") {
+            return
+        }
+        if let active = audioPlayer, active.isPlaying, lastPlayedSoundKey == "evacuacion", active.numberOfLoops < 0 {
+            forceHardwareSystemVolumeToMax()
+            return
+        }
+        audioPlayer?.stop()
+        audioPlayer = nil
+        keepAlivePlayer?.stop()
+        keepAlivePlayer = nil
+
+        guard let url = Bundle.main.url(forResource: "evacuacion", withExtension: "wav")
+                ?? Bundle.main.url(forResource: "alertas", withExtension: "mp3") else {
+            vibrateEmergency()
+            return
+        }
+
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try session.setActive(true, options: [])
+        } catch {
+            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers, .duckOthers])
+            try? session.setActive(true)
+        }
+        forceHardwareSystemVolumeToMax()
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: url)
+            player.delegate = self
+            player.volume = 1.0
+            player.numberOfLoops = -1
+            player.prepareToPlay()
+            player.play()
+            self.audioPlayer = player
+            self.lastAlarmStartMs = Int64(Date().timeIntervalSince1970 * 1000)
+            self.lastPlayedSoundKey = "evacuacion"
+            forceHardwareSystemVolumeToMax()
+            vibrateEmergency()
+        } catch {
+            vibrateEmergency()
+            updateBackgroundKeepAlive()
+        }
+    }
+
     func stop() {
+        vibrationBurstToken &+= 1
         audioPlayer?.stop()
         audioPlayer = nil
         lastAlarmStartMs = 0
@@ -735,12 +794,23 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     }
 
     func vibrateEmergency() {
-        AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
-            AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
+        vibrationBurstToken &+= 1
+        let activeToken = vibrationBurstToken
+        let isForeground = AppDelegate.isAppInForeground
+        if isForeground {
+            let gen = UIImpactFeedbackGenerator(style: .heavy)
+            gen.prepare()
+            gen.impactOccurred()
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-            AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
+        AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
+        let delays: [Double] = isForeground
+            ? [0.6, 1.2]
+            : [0.65, 1.3, 2.0, 2.75, 3.5, 4.3, 5.1]
+        for d in delays {
+            DispatchQueue.main.asyncAfter(deadline: .now() + d) { [weak self] in
+                guard let self = self, self.vibrationBurstToken == activeToken else { return }
+                AudioServicesPlayAlertSound(kSystemSoundID_Vibrate)
+            }
         }
     }
 
@@ -1396,6 +1466,19 @@ final class IOSRealtimeService {
                 }
 
                 self.isFirstPersonalSnapshot = false
+
+                // Auto-sanación en tiempo real: si Firestore perdió apnsToken o platform != "ios", restaurarlo de inmediato
+                let localApns = (AppDelegate.cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
+                    ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
+                    ?? SentinelKeychain.get("apns_token_hex")
+                    ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let remoteApns = AppDelegate.stringFromAny(cleanData["apnsToken"]).lowercased()
+                let remotePlat = AppDelegate.stringFromAny(cleanData["platform"]).lowercased()
+                if localApns.count == 64 && (remoteApns != localApns || remotePlat != "ios") {
+                    defaults.removeObject(forKey: "LAST_SYNCED_APNS_COMBO")
+                    defaults.removeObject(forKey: "LAST_SYNCED_FCM_COMBO")
+                    AppDelegate.syncFcmTopicsAndToken(userId: currentMyId)
+                }
             }
         }
 
@@ -1450,8 +1533,9 @@ final class IOSRealtimeService {
     func startCentralSciListenerIfNeeded() {
         let defaults = UserDefaults.standard
         let idRadial = (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let modoAdmin = defaults.bool(forKey: "USER_MODO_ADMIN")
         let licenseKey = (defaults.string(forKey: "LICENSE_KEY") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard idRadial == "1", !licenseKey.isEmpty else {
+        guard (idRadial == "1" || modoAdmin), !licenseKey.isEmpty else {
             sciIncidentesListener?.remove()
             sciIncidentesListener = nil
             for (_, subL) in sciSubcolListeners { subL.remove() }
@@ -1470,9 +1554,10 @@ final class IOSRealtimeService {
             for incDoc in docs {
                 let rawInc = incDoc.data()
                 let estInc = AppDelegate.stringFromAny(rawInc["estado"]).uppercased()
-                let cerrado = (rawInc["cerrado"] as? Bool) == true || ["FINALIZADO", "FINALIZADA", "CERRADO", "CERRADA", "CANCELADO", "CANCELADA"].contains(estInc)
+                let activoFlag = rawInc["activo"] as? Bool
+                let cerrado = activoFlag == false || (rawInc["cerrado"] as? Bool) == true || ["FINALIZADO", "FINALIZADA", "CERRADO", "CERRADA", "CANCELADO", "CANCELADA"].contains(estInc)
                 if cerrado { continue }
-                let origenLic = AppDelegate.stringFromAny(rawInc["licenciaOrigen"] ?? rawInc["cuerpoSolicitanteLicencia"]).uppercased()
+                let origenLic = AppDelegate.stringFromAny(rawInc["licenciaSolicitante"] ?? rawInc["licenciaOrigen"] ?? rawInc["cuerpoSolicitanteLicencia"]).uppercased()
                 if origenLic == myLic { continue }
 
                 let incId = incDoc.documentID
@@ -1488,7 +1573,7 @@ final class IOSRealtimeService {
                         var didAdd = false
                         for solDoc in solDocs {
                             let sData = solDoc.data()
-                            let destLic = AppDelegate.stringFromAny(sData["licenciaDestino"] ?? sData["cuerpoReceptorLicencia"] ?? sData["idCuerpo"]).uppercased()
+                            let destLic = AppDelegate.stringFromAny(sData["licenciaApoyo"] ?? sData["licenciaDestino"] ?? sData["cuerpoReceptorLicencia"] ?? sData["idCuerpo"]).uppercased()
                             if destLic != curLic { continue }
                             let estSol = AppDelegate.stringFromAny(sData["estado"]).uppercased()
                             if ["RECHAZADA", "RECHAZADO", "CANCELADA", "CANCELADO", "CERRADO", "CERRADA"].contains(estSol) { continue }
@@ -1498,17 +1583,16 @@ final class IOSRealtimeService {
                                     self.alertedSciIds.insert(alertKey)
                                     storedIds.insert(alertKey)
                                     didAdd = true
-                                    let cSol = AppDelegate.stringFromAny(sData["cuerpoSolicitanteNombre"] ?? rawInc["cuerpoSolicitanteNombre"], fallback: "Cuerpo Vecino")
+                                    let cSol = AppDelegate.stringFromAny(sData["cuerpoSolicitante"] ?? sData["cuerpoSolicitanteNombre"] ?? rawInc["cuerpoSolicitante"] ?? rawInc["cuerpoSolicitanteNombre"], fallback: "Cuerpo Vecino")
                                     let uSol = AppDelegate.stringFromAny(sData["idCarroSolicitado"] ?? sData["unidad"])
-                                    let claveInc = AppDelegate.stringFromAny(rawInc["clave"], fallback: "SCI")
-                                    let dirInc = AppDelegate.stringFromAny(rawInc["direccion"] ?? rawInc["lugar"])
-                                    let isGeneral = uSol.isEmpty || uSol.uppercased() == "ALERTA GENERAL" || uSol.uppercased() == "CUALQUIERA"
+                                    let claveInc = AppDelegate.stringFromAny(sData["claveEmergencia"] ?? rawInc["claveEmergencia"] ?? rawInc["clave"], fallback: "SCI")
+                                    let dirInc = AppDelegate.stringFromAny(sData["direccionEmergencia"] ?? rawInc["direccionEmergencia"] ?? rawInc["direccion"] ?? rawInc["lugar"])
+                                    let tipoSol = AppDelegate.stringFromAny(sData["tipoSolicitud"]).uppercased()
+                                    let isGeneral = tipoSol == "ALERTA_PREVENTIVA" || uSol.isEmpty || uSol.uppercased() == "ALERTA GENERAL" || uSol.uppercased() == "CUALQUIERA"
                                     let title = !isGeneral ? "🚨 SOLICITUD SCI [\(uSol)] [\(solDoc.documentID)]" : "🚨 ALERTA PREVENTIVA SCI [\(solDoc.documentID)]"
                                     let body = !isGeneral ? "\(cSol) solicita despacho de \(uSol) (\(claveInc) \(dirInc))" : "\(cSol) solicita apoyo inter-cuerpos (\(claveInc) \(dirInc))"
-                                    if AppDelegate.isAppInForeground {
-                                        IOSSoundPlayer.shared.vibrateEmergency()
-                                    } else {
-                                        IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
+                                    IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
+                                    if !AppDelegate.isAppInForeground {
                                         self.postLocalBanner(
                                             id: alertKey,
                                             title: title,
@@ -1598,7 +1682,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     private static let knownIosAppIdsByProject: [String: String] = [
         "sisbom-central": "1:432594591351:ios:a2be8d98704f46d5beb072",
         "pruebas-sisbom": "1:306101642399:ios:a7ba95a2a0a0130c91aeaa",
-        "sisbom-de5f8": "1:39449538456:ios:784ffe39d1b3b8857485ed"
+        "sisbom-de5f8": "1:39449538456:ios:784ffe39d1b3b8857485ed",
+        "sentinel-chepica": "1:283428732908:ios:9aa7a59ccc5e091db60ac9",
+        "sentinel-placilla-oh": "1:31539944174:ios:26b38a3ceb0f87be0531ff",
+        "sentinel-san-fernando": "1:776472119634:ios:ba11d488c2b17a7e3f928b"
     ]
 
     static func resolveValidIosAppId(projectId: String, configDict: [String: Any]) -> String {
@@ -2042,6 +2129,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSLocationService.shared.syncPermissionsToWebView()
         IOSLocationService.shared.updateStandbyKeepAlive()
+        application.registerForRemoteNotifications()
         if Self.currentTenantProjectId != nil {
             Self.activeFirestore().enableNetwork(completion: nil)
             let shouldRefresh = bgSeconds >= 15.0
@@ -2050,6 +2138,10 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     IOSRealtimeService.shared.restartListenersPreservingState()
                 } else {
                     IOSRealtimeService.shared.ensureListenersRunning()
+                }
+                let uid = UserDefaults.standard.string(forKey: "USER_ID") ?? ""
+                if !uid.isEmpty {
+                    Self.syncFcmTopicsAndToken(userId: uid)
                 }
             }
         } else if let tenantDict = Self.resolveStoredTenantConfig() {
@@ -2204,13 +2296,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         Self.cachedApnsDeviceToken = deviceToken
-        let apnsHex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        let apnsHex = deviceToken.map { String(format: "%02x", $0) }.joined().lowercased()
         if !apnsHex.isEmpty {
             UserDefaults.standard.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
             SentinelKeychain.set("apns_token_hex", value: apnsHex)
             DispatchQueue.main.async {
                 if let wv = Self.sharedWebView {
-                    let js = "try { window.__SENTINEL_APNS_TOKEN__ = '\(apnsHex)'; } catch(e) {}"
+                    let js = """
+                    (function() {
+                        try {
+                            window.__SENTINEL_APNS_TOKEN__ = "\(apnsHex)";
+                            window.dispatchEvent(new CustomEvent('sentinelNativeApnsToken', { detail: { token: "\(apnsHex)" } }));
+                        } catch(e) {}
+                    })();
+                    """
                     wv.evaluateJavaScript(js, completionHandler: nil)
                 }
             }
@@ -2250,6 +2349,72 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
     }
 
+    private static var lastNativeTokenPatchMs: Int64 = 0
+    private static var lastNativeTokenPatchSig: String = ""
+
+    private static func isStoredSessionMultiDevice() -> Bool {
+        guard let rawSession = UserDefaults.standard.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
+              let data = rawSession.data(using: .utf8),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return false
+        }
+        if let b = dict["multiDispositivo"] as? Bool { return b }
+        if let n = dict["multiDispositivo"] as? NSNumber { return n.boolValue }
+        if let s = dict["multiDispositivo"] as? String {
+            let lower = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return lower == "true" || lower == "1" || lower == "si" || lower == "sí"
+        }
+        return false
+    }
+
+    private static func patchPersonalTokensViaRest(projectId: String, userId: String, apnsHex: String, fcmToken: String, includeDeviceId: Bool) {
+        guard !projectId.isEmpty, !userId.isEmpty else { return }
+        let apiKey = SentinelKeychain.get("last_api_key") ?? activeFirebaseApp()?.options.apiKey ?? ""
+        guard !apiKey.isEmpty else { return }
+
+        let authUrlStr = "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=\(apiKey)"
+        guard let authUrl = URL(string: authUrlStr) else { return }
+        var authReq = URLRequest(url: authUrl)
+        authReq.httpMethod = "POST"
+        authReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let authBody: [String: Any] = [
+            "email": "v304.app@sisbom.com",
+            "password": "SentinelOne_V304_Auth!2026",
+            "returnSecureToken": true
+        ]
+        authReq.httpBody = try? JSONSerialization.data(withJSONObject: authBody)
+        URLSession.shared.dataTask(with: authReq) { data, _, error in
+            guard let data = data, error == nil,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let idToken = json["idToken"] as? String, !idToken.isEmpty else {
+                return
+            }
+            let encodedUid = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userId
+            var masks = ["platform", "_metaTimestamp"]
+            var fields: [String: Any] = [
+                "platform": ["stringValue": "ios"],
+                "_metaTimestamp": ["integerValue": "\(Int64(Date().timeIntervalSince1970 * 1000))"]
+            ]
+            if !apnsHex.isEmpty {
+                masks.append("apnsToken")
+                fields["apnsToken"] = ["stringValue": apnsHex]
+            }
+            if includeDeviceId && !fcmToken.isEmpty {
+                masks.append("deviceId")
+                fields["deviceId"] = ["stringValue": fcmToken]
+            }
+            let maskQuery = masks.map { "updateMask.fieldPaths=\($0)" }.joined(separator: "&")
+            let patchUrlStr = "https://firestore.googleapis.com/v1/projects/\(projectId)/databases/(default)/documents/personal/\(encodedUid)?\(maskQuery)"
+            guard let patchUrl = URL(string: patchUrlStr) else { return }
+            var patchReq = URLRequest(url: patchUrl)
+            patchReq.httpMethod = "PATCH"
+            patchReq.setValue("Bearer \(idToken)", forHTTPHeaderField: "Authorization")
+            patchReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            patchReq.httpBody = try? JSONSerialization.data(withJSONObject: ["fields": fields])
+            URLSession.shared.dataTask(with: patchReq) { _, _, _ in }.resume()
+        }.resume()
+    }
+
     static func syncFcmTopicsAndToken(userId: String, tokenOverride: String? = nil) {
         guard !userId.isEmpty, FirebaseApp.app() != nil else { return }
         if let apnsTok = cachedApnsDeviceToken {
@@ -2259,10 +2424,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let isConductor = defaults.bool(forKey: "USER_CONDUCTOR")
         let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
         let activePid = currentTenantProjectId ?? FirebaseApp.app()?.options.projectID ?? ""
+        let isMultiDev = isStoredSessionMultiDevice()
 
-        let apnsHex = cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
+        let apnsHex = (cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
             ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
-            ?? ""
+            ?? SentinelKeychain.get("apns_token_hex")
+            ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
 
         // En iOS, cuando hay apnsToken directo (`apnsHex`), las notificaciones push llegan por HTTP/2 directo
         // (`sendDirectApnsToIosUsers`) filtradas por estado 0-9 / 0-8. Desuscribimos los tópicos grupales FCM
@@ -2302,16 +2469,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         let _ = SentinelKeychain.getOrCreateDeviceId()
         if !apnsHex.isEmpty {
             defaults.set(apnsHex, forKey: "APNS_DEVICE_TOKEN_HEX")
+            SentinelKeychain.set("apns_token_hex", value: apnsHex)
             syncTopics()
             DispatchQueue.main.async {
                 if let wv = sharedWebView {
-                    let js = "try { window.__SENTINEL_APNS_TOKEN__ = '\(apnsHex)'; } catch(e) {}"
+                    let js = """
+                    (function() {
+                        try {
+                            window.__SENTINEL_APNS_TOKEN__ = "\(apnsHex)";
+                            window.dispatchEvent(new CustomEvent('sentinelNativeApnsToken', { detail: { token: "\(apnsHex)" } }));
+                        } catch(e) {}
+                    })();
+                    """
                     wv.evaluateJavaScript(js, completionHandler: nil)
                 }
             }
             let lastSyncedApnsKey = "\(activePid):\(userId):\(apnsHex)"
-            if defaults.string(forKey: "LAST_SYNCED_APNS_COMBO") != lastSyncedApnsKey {
-                defaults.set(lastSyncedApnsKey, forKey: "LAST_SYNCED_APNS_COMBO")
+            let nowAttemptMs = Int64(Date().timeIntervalSince1970 * 1000)
+            let recentlyAttemptedSame = (lastNativeTokenPatchSig == lastSyncedApnsKey) && ((nowAttemptMs - lastNativeTokenPatchMs) < 20_000)
+            if !recentlyAttemptedSame && defaults.string(forKey: "LAST_SYNCED_APNS_COMBO") != lastSyncedApnsKey {
+                lastNativeTokenPatchSig = lastSyncedApnsKey
+                lastNativeTokenPatchMs = nowAttemptMs
                 authenticateNativeApp(activeFirebaseApp()) {
                     let db = activeFirestore()
                     let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -2319,7 +2497,19 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                         "apnsToken": apnsHex,
                         "platform": "ios",
                         "_metaTimestamp": nowMs
-                    ], merge: true)
+                    ], merge: true) { err in
+                        if err == nil {
+                            defaults.set(lastSyncedApnsKey, forKey: "LAST_SYNCED_APNS_COMBO")
+                        } else {
+                            patchPersonalTokensViaRest(
+                                projectId: activePid,
+                                userId: userId,
+                                apnsHex: apnsHex,
+                                fcmToken: "",
+                                includeDeviceId: false
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2335,19 +2525,35 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             syncTopics()
             let lastSyncedFcmKey = "\(activePid):\(userId):\(token):\(apnsHex)"
             if tokenOverride != nil || defaults.string(forKey: "LAST_SYNCED_FCM_COMBO") != lastSyncedFcmKey {
-                defaults.set(lastSyncedFcmKey, forKey: "LAST_SYNCED_FCM_COMBO")
                 authenticateNativeApp(activeFirebaseApp()) {
                     let db = activeFirestore()
                     let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                     var patch: [String: Any] = [
-                        "deviceId": token,
                         "platform": "ios",
                         "_metaTimestamp": nowMs
                     ]
+                    if !isMultiDev {
+                        patch["deviceId"] = token
+                    }
                     if !apnsHex.isEmpty {
                         patch["apnsToken"] = apnsHex
                     }
-                    db.collection("personal").document(userId).setData(patch, merge: true)
+                    db.collection("personal").document(userId).setData(patch, merge: true) { err in
+                        if err == nil {
+                            defaults.set(lastSyncedFcmKey, forKey: "LAST_SYNCED_FCM_COMBO")
+                            if !apnsHex.isEmpty {
+                                defaults.set("\(activePid):\(userId):\(apnsHex)", forKey: "LAST_SYNCED_APNS_COMBO")
+                            }
+                        } else {
+                            patchPersonalTokensViaRest(
+                                projectId: activePid,
+                                userId: userId,
+                                apnsHex: apnsHex,
+                                fcmToken: token,
+                                includeDeviceId: !isMultiDev
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -2417,6 +2623,37 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
                     AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
                 }
+            }
+            completionHandler(.newData)
+            return
+        }
+
+        if type == "SCI_ALERT" || type == "SCI_CHAT" {
+            let idRadial = (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let modoAdmin = defaults.bool(forKey: "USER_MODO_ADMIN")
+            if idRadial == "1" || modoAdmin {
+                IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
+            }
+            completionHandler(.newData)
+            return
+        }
+
+        if type == "EVACUATION_ALERT" {
+            if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") {
+                completionHandler(.noData)
+                return
+            }
+            let targetDispatchId = ((userInfo["dispatchId"] as? String) ?? payloadId).trimmingCharacters(in: .whitespacesAndNewlines)
+            let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
+            let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
+            let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let isInIncident = !targetDispatchId.isEmpty &&
+                !declined.contains(targetDispatchId) &&
+                enServicio != "-\(targetDispatchId)" &&
+                enServicio != "0" &&
+                (enServicio == targetDispatchId || attended.contains(targetDispatchId))
+            if isInIncident {
+                IOSSoundPlayer.shared.playEvacuationLoop()
             }
             completionHandler(.newData)
             return
@@ -2548,6 +2785,41 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 defaults.set(nowMs, forKey: "LAST_NOTIFIED_STATUS_TIME")
                 AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
                 completionHandler([.banner, .list, .sound])
+            }
+            return
+        }
+
+        if type == "SCI_ALERT" || type == "SCI_CHAT" {
+            let idRadial = (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let modoAdmin = defaults.bool(forKey: "USER_MODO_ADMIN")
+            if idRadial == "1" || modoAdmin {
+                IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
+                completionHandler([.banner, .list])
+            } else {
+                completionHandler([])
+            }
+            return
+        }
+
+        if type == "EVACUATION_ALERT" {
+            if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") {
+                completionHandler([])
+                return
+            }
+            let targetDispatchId = ((userInfo["dispatchId"] as? String) ?? payloadId).trimmingCharacters(in: .whitespacesAndNewlines)
+            let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
+            let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
+            let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let isInIncident = !targetDispatchId.isEmpty &&
+                !declined.contains(targetDispatchId) &&
+                enServicio != "-\(targetDispatchId)" &&
+                enServicio != "0" &&
+                (enServicio == targetDispatchId || attended.contains(targetDispatchId))
+            if isInIncident {
+                IOSSoundPlayer.shared.playEvacuationLoop()
+                completionHandler([.banner, .list])
+            } else {
+                completionHandler([])
             }
             return
         }
@@ -2982,6 +3254,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 let compania = AppDelegate.stringFromAny(user["compania"], fallback: "1")
                 let estado = AppDelegate.stringFromAny(user["estado"], fallback: "0-9").uppercased()
                 let conductor = (user["conductor"] as? Bool) ?? (user["conductor"] as? NSNumber)?.boolValue ?? false
+                let modoAdmin = (user["modoAdmin"] as? Bool) ?? (user["modoAdmin"] as? NSNumber)?.boolValue ?? false
                 let estadoEspecial = AppDelegate.stringFromAny(user["estadoEspecial"])
                 let enServicio = AppDelegate.stringFromAny(user["enServicio"])
 
@@ -2993,6 +3266,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 defaults.set(compania, forKey: "USER_COMPANIA")
                 defaults.set(estado, forKey: "USER_ESTADO")
                 defaults.set(conductor, forKey: "USER_CONDUCTOR")
+                defaults.set(modoAdmin, forKey: "USER_MODO_ADMIN")
                 defaults.set(estadoEspecial, forKey: "USER_ESTADO_ESPECIAL")
                 defaults.set(enServicio, forKey: "USER_EN_SERVICIO")
 
@@ -3128,26 +3402,35 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             let body = AppDelegate.stringFromAny(dict["body"])
             let soundName = AppDelegate.stringFromAny(dict["soundName"], fallback: "alertas")
             let fileName = IOSSoundPlayer.shared.resolveSoundFileName(for: soundName)
-            if AppDelegate.isAppInForeground {
+            let isSciOrEvac = title.contains("SCI") || title.contains("EVACUAC")
+            if AppDelegate.isAppInForeground && !isSciOrEvac {
                 IOSSoundPlayer.shared.vibrateEmergency()
             } else {
                 IOSSoundPlayer.shared.play(nameOrClave: fileName, forceMaxVolume: true)
-                IOSRealtimeService.shared.postLocalBanner(
-                    id: "local_\(Int(Date().timeIntervalSince1970 * 1000))",
-                    title: title,
-                    body: body,
-                    soundName: "\(fileName).mp3",
-                    playDefaultIfNil: false,
-                    userInfo: ["type": "SCI_ALERT"]
-                )
+                if !AppDelegate.isAppInForeground {
+                    IOSRealtimeService.shared.postLocalBanner(
+                        id: "local_\(Int(Date().timeIntervalSince1970 * 1000))",
+                        title: title,
+                        body: body,
+                        soundName: "\(fileName).mp3",
+                        playDefaultIfNil: false,
+                        userInfo: ["type": "SCI_ALERT"]
+                    )
+                }
             }
+        case "playEvacuationAlarm":
+            IOSSoundPlayer.shared.playEvacuationLoop()
+        case "stopEvacuationAlarm":
+            IOSSoundPlayer.shared.stop()
         case "playSound":
             let soundName = (dict["soundName"] as? String) ?? "despacho"
             let forceMax = (dict["forceMaxVolume"] as? Bool) ?? true
             let upperS = soundName.uppercased()
-            let isAlertMsg = upperS.contains("ALERTA") || upperS.contains("IMPORTANTE")
+            let isAlertMsg = upperS.contains("ALERTA") || upperS.contains("IMPORTANTE") || upperS.contains("EVACUAC")
             if AppDelegate.isAppInForeground && !isAlertMsg {
                 IOSSoundPlayer.shared.vibrateEmergency()
+            } else if upperS.contains("EVACUAC") {
+                IOSSoundPlayer.shared.playEvacuationLoop()
             } else {
                 IOSSoundPlayer.shared.play(nameOrClave: soundName, forceMaxVolume: forceMax)
             }

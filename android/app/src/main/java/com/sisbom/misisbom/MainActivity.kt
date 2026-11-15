@@ -471,11 +471,87 @@ object SoundPlayer {
     fun playByName(context: Context, rawName: String, forceMaxVolume: Boolean = true) {
         val cleanName = rawName.trim().lowercase(Locale.ROOT)
             .removeSuffix(".mp3")
+            .removeSuffix(".wav")
             .replace("-", "_")
             .replace(" ", "_")
+        if (cleanName == "evacuacion") {
+            playEvacuationMaxVolume(context)
+            return
+        }
         val resId = context.resources.getIdentifier(cleanName, "raw", context.packageName)
         val finalResId = if (resId != 0) resId else R.raw.despacho
         play(context, finalResId, forceMaxVolume)
+    }
+
+    @Synchronized
+    fun playEvacuationMaxVolume(context: Context) {
+        val appContext = context.applicationContext
+        val audioManager = appContext.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        lastAlarmStartMs = System.currentTimeMillis()
+
+        try {
+            val pm = appContext.getSystemService(Context.POWER_SERVICE) as PowerManager
+            if (alarmWakeLock == null) {
+                alarmWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentinelOneV3::SoundPlayerWakeLock").apply {
+                    setReferenceCounted(false)
+                }
+            }
+            alarmWakeLock?.acquire(90_000L)
+        } catch (_: Exception) {}
+
+        val evacResId = appContext.resources.getIdentifier("evacuacion", "raw", appContext.packageName)
+            .let { if (it != 0) it else R.raw.alertas }
+
+        try {
+            val activeMp = mediaPlayer
+            if (activeMp != null && activeMp.isPlaying && currentPlayingResId == evacResId && activeMp.isLooping) {
+                enforceMaxVolumes(audioManager)
+                return
+            }
+        } catch (_: Exception) {}
+
+        stopAudioOnly(appContext)
+        lastAlarmStartMs = System.currentTimeMillis()
+        saveAndEnforceMaxVolumes(audioManager)
+        requestExclusiveAlarmAudioFocus(audioManager)
+
+        try {
+            val afd = appContext.resources.openRawResourceFd(evacResId) ?: return
+            val mp = MediaPlayer()
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            try {
+                mp.setWakeMode(appContext, PowerManager.PARTIAL_WAKE_LOCK)
+            } catch (_: Exception) {}
+            mp.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+            afd.close()
+            mp.isLooping = true
+            mp.setVolume(1.0f, 1.0f)
+            mp.prepare()
+            mp.start()
+            mediaPlayer = mp
+            currentPlayingResId = evacResId
+            vibrateStrong(
+                appContext,
+                longArrayOf(0, 1500, 250, 1500, 250, 1500, 250, 1500, 250, 1500)
+            )
+            restoreRunnable?.let { restoreHandler.removeCallbacks(it) }
+            val r = Runnable {
+                try {
+                    stopAudioOnly(appContext)
+                } catch (_: Exception) {}
+            }
+            restoreRunnable = r
+            restoreHandler.postDelayed(r, 90_000L)
+        } catch (e: Exception) {
+            Log.e("SoundPlayer", "Error reproduciendo alarma de evacuación: ${e.message}")
+            abandonAlarmAudioFocus(audioManager)
+            restoreVolumes(appContext)
+        }
     }
 
     @Synchronized
@@ -757,7 +833,8 @@ object NotificationHelper {
         forceVibrateOnly: Boolean = false,
         alertGrade: Int? = null,
         skipSoundBecauseAlreadyPlayed: Boolean = false,
-        claveForRepeat: String? = null
+        claveForRepeat: String? = null,
+        bypassForegroundMute: Boolean = false
     ) {
         val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         val isAirplaneMode = prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)
@@ -849,13 +926,13 @@ object NotificationHelper {
                 effectiveVibrateOnly = true
             }
         } else if (alertGrade == 3) {
-            if (is09) {
+            if (is09 || bypassForegroundMute) {
                 playLoud = true
             } else {
                 playLoud = false
                 effectiveVibrateOnly = true
             }
-        } else if (forceMaxVolume == true && is09) {
+        } else if (forceMaxVolume == true && (is09 || bypassForegroundMute)) {
             playLoud = true
         }
 
@@ -879,7 +956,7 @@ object NotificationHelper {
         //   NO debe sonar el audio (salvo timbre de puerta o chat), SOLO debe vibrar fuerte y mostrar la pantalla sobre pantalla.
         val isUserLookingAtApp = MainActivity.isAppInForeground
         val shouldTriggerFeedback = !skipSoundBecauseAlreadyPlayed && !isReadOnlyUser
-        val shouldPlayAudioTone = shouldTriggerFeedback && (!isUserLookingAtApp || doorRequestId != null || chatId != null || alertGrade == 1)
+        val shouldPlayAudioTone = shouldTriggerFeedback && (!isUserLookingAtApp || bypassForegroundMute || doorRequestId != null || chatId != null || alertGrade == 1)
 
         if (shouldTriggerFeedback) {
             try {
@@ -1335,6 +1412,72 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             return
         }
 
+        if (type == "SCI_ALERT" || type == "SCI_CHAT") {
+            val idRadial = (prefs.getString("USER_ID_RADIAL", "") ?: "").trim()
+            val modoAdmin = prefs.getBoolean("USER_MODO_ADMIN", false)
+            if (idRadial != "1" && !modoAdmin) return
+            val sciTitle = remoteMessage.notification?.title ?: data["title"] ?: "🚨 ALERTA SCI INTER-CUERPOS"
+            val sciBody = remoteMessage.notification?.body ?: data["body"] ?: "Nueva solicitud de apoyo SCI"
+            val sciAlertId = if (type == "SCI_ALERT" && !payloadId.isNullOrBlank()) "sci_req_$payloadId" else "sci_msg_${System.currentTimeMillis()}"
+            val alreadyPlayedSci = PlayedSoundsTracker.hasPlayed(applicationContext, sciAlertId)
+            if (!alreadyPlayedSci) {
+                PlayedSoundsTracker.markPlayed(applicationContext, sciAlertId)
+            }
+            NotificationHelper.sendNotification(
+                context = applicationContext,
+                title = sciTitle,
+                body = sciBody,
+                isCritical = true,
+                customSoundRes = R.raw.alertas,
+                alertId = sciAlertId,
+                forceMaxVolume = true,
+                alertGrade = 3,
+                skipSoundBecauseAlreadyPlayed = alreadyPlayedSci,
+                bypassForegroundMute = true
+            )
+            return
+        }
+
+        if (type == "EVACUATION_ALERT") {
+            if (prefs.getBoolean("IS_CENTRAL_ACTIVE", false)) return
+            val targetDispatchId = (data["dispatchId"] ?: payloadId ?: "").trim()
+            val attendedSet = prefs.getStringSet("ATTENDED_DISPATCH_IDS", emptySet()) ?: emptySet()
+            val declinedSet = prefs.getStringSet("DECLINED_DISPATCH_IDS", emptySet()) ?: emptySet()
+            val curSvc = (prefs.getString("USER_EN_SERVICIO", "") ?: "").trim()
+            val isInTargetIncident = targetDispatchId.isNotEmpty() &&
+                !declinedSet.contains(targetDispatchId) &&
+                curSvc != "-$targetDispatchId" &&
+                curSvc != "0" &&
+                (curSvc == targetDispatchId || attendedSet.contains(targetDispatchId))
+            if (!isInTargetIncident) return
+
+            val evacTitle = remoteMessage.notification?.title ?: data["title"] ?: "🚨 ¡EVACUACIÓN INMEDIATA!"
+            val evacBody = remoteMessage.notification?.body ?: data["instrucciones"] ?: data["body"]
+                ?: "ABANDONAR ZONA DE RIESGO Y DIRIGIRSE AL PUNTO DE EVACUACIÓN"
+            val evacRes = applicationContext.resources.getIdentifier("evacuacion", "raw", applicationContext.packageName)
+                .let { if (it != 0) it else R.raw.alertas }
+            SoundPlayer.playEvacuationMaxVolume(applicationContext)
+            NotificationHelper.sendNotification(
+                context = applicationContext,
+                title = evacTitle,
+                body = evacBody,
+                isCritical = true,
+                customSoundRes = evacRes,
+                alertId = "evac_${targetDispatchId}_${data["triggeredAt"] ?: System.currentTimeMillis()}",
+                forceMaxVolume = true,
+                alertGrade = 3,
+                skipSoundBecauseAlreadyPlayed = true,
+                bypassForegroundMute = true
+            )
+            try {
+                val fullScreenIntent = Intent(this, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                }
+                startActivity(fullScreenIntent)
+            } catch (_: Exception) {}
+            return
+        }
+
         var isLateDispatch = false
         if (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
             // Si el usuario se encuentra de Operador Central activo, NO hacer sonar el teléfono ni abrir pantalla de asistencia
@@ -1675,6 +1818,7 @@ class DispatchForegroundService : Service() {
                         val enServicio = doc.safeString("enServicio")
                         val idRadial = doc.safeString("idRadial")
                         val conductor = doc.safeBool("conductor") || doc.safeBool("esConductor")
+                        val modoAdmin = doc.safeBool("modoAdmin") || doc.safeBool("ModoAdmin")
                         val rango = doc.safeString("rango").ifEmpty { doc.safeString("cargo") }
                         val estadoEspecial = doc.safeString("estadoEspecial")
 
@@ -1688,6 +1832,7 @@ class DispatchForegroundService : Service() {
                             .putString("USER_RANGO", rango)
                             .putString("USER_ESTADO_ESPECIAL", estadoEspecial)
                             .putBoolean("USER_CONDUCTOR", conductor)
+                            .putBoolean("USER_MODO_ADMIN", modoAdmin)
                             .putString("USER_EN_SERVICIO", enServicio)
                         if (idRadial.isNotEmpty()) {
                             editPrefs.putString("USER_ID_RADIAL", idRadial)
@@ -2130,6 +2275,36 @@ class DispatchForegroundService : Service() {
                             lastUnitPersonalReq[key] = pTs
                         }
                     }
+
+                    // 4. Detectar orden canónica `evacuar` exclusivamente para bomberos que están EN el incidente
+                    val evacMap = doc.get("evacuar") as? Map<*, *>
+                    val evacActive = (evacMap?.get("evacuacion") as? Boolean) == true
+                    val evacTs = ((evacMap?.get("triggeredAt") ?: evacMap?.get("updatedAt")) as? Number)?.toLong() ?: 1L
+                    val isInThisIncident = !hasAlreadyDeclined &&
+                        userEnServicio != "-$id" &&
+                        userEnServicio != "0" &&
+                        (isAlreadyAttending || userEnServicio == id)
+                    if (evacActive && isInThisIncident) {
+                        val evacTrackKey = "evac_${id}_$evacTs"
+                        if (!PlayedSoundsTracker.hasPlayed(applicationContext, evacTrackKey)) {
+                            PlayedSoundsTracker.markPlayed(applicationContext, evacTrackKey)
+                            val instrucciones = (evacMap?.get("instrucciones")?.toString() ?: "")
+                                .trim()
+                                .ifEmpty { "ABANDONAR ZONA DE RIESGO DE INMEDIATO Y DIRIGIRSE AL PUNTO DE EVACUACIÓN" }
+                            SoundPlayer.playEvacuationMaxVolume(applicationContext)
+                            NotificationHelper.sendNotification(
+                                context = applicationContext,
+                                title = "🚨 ¡EVACUACIÓN INMEDIATA! [$clave]",
+                                body = instrucciones,
+                                isCritical = true,
+                                alertId = evacTrackKey,
+                                forceMaxVolume = true,
+                                alertGrade = 3,
+                                skipSoundBecauseAlreadyPlayed = true,
+                                bypassForegroundMute = true
+                            )
+                        }
+                    }
                 }
                 } catch (ex: Exception) {
                     Log.w("DispatchService", "Error procesando despachos: ${ex.message}")
@@ -2140,8 +2315,9 @@ class DispatchForegroundService : Service() {
     private fun listenToCentralSciAlertsIfNeeded() {
         val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         val idRadial = (prefs.getString("USER_ID_RADIAL", "") ?: "").trim()
+        val modoAdmin = prefs.getBoolean("USER_MODO_ADMIN", false)
         val licenseKey = (prefs.getString("LICENSE_KEY", "") ?: "").trim().uppercase(Locale.ROOT)
-        if (idRadial != "1" || licenseKey.isEmpty()) {
+        if ((idRadial != "1" && !modoAdmin) || licenseKey.isEmpty()) {
             sciIncidentesListener?.remove()
             sciIncidentesListener = null
             sciSubcolListeners.values.forEach { it.remove() }
@@ -2161,7 +2337,9 @@ class DispatchForegroundService : Service() {
                     val activeIds = mutableSetOf<String>()
                     for (incDoc in snapshots.documents) {
                         val estadoInc = incDoc.safeString("estado").uppercase(Locale.ROOT)
-                        val cerrado = incDoc.safeBool("cerrado") ||
+                        val activoFlag = incDoc.get("activo") as? Boolean
+                        val cerrado = activoFlag == false ||
+                            incDoc.safeBool("cerrado") ||
                             estadoInc == "FINALIZADO" ||
                             estadoInc == "FINALIZADA" ||
                             estadoInc == "CERRADO" ||
@@ -2170,7 +2348,8 @@ class DispatchForegroundService : Service() {
                             estadoInc == "CANCELADA"
                         if (cerrado) continue
 
-                        val origenLic = incDoc.safeString("licenciaOrigen")
+                        val origenLic = incDoc.safeString("licenciaSolicitante")
+                            .ifEmpty { incDoc.safeString("licenciaOrigen") }
                             .ifEmpty { incDoc.safeString("cuerpoSolicitanteLicencia") }
                             .trim().uppercase(Locale.ROOT)
                         if (origenLic == currentLic) continue
@@ -2188,7 +2367,8 @@ class DispatchForegroundService : Service() {
                                         if (myLic.isEmpty() || isAirplane) return@addSnapshotListener
 
                                         for (solDoc in solSnap.documents) {
-                                            val destLic = solDoc.safeString("licenciaDestino")
+                                            val destLic = solDoc.safeString("licenciaApoyo")
+                                                .ifEmpty { solDoc.safeString("licenciaDestino") }
                                                 .ifEmpty { solDoc.safeString("cuerpoReceptorLicencia") }
                                                 .ifEmpty { solDoc.safeString("idCuerpo") }
                                                 .trim().uppercase(Locale.ROOT)
@@ -2202,15 +2382,24 @@ class DispatchForegroundService : Service() {
                                                 val alertId = "sci_req_${solDoc.id}"
                                                 if (!PlayedSoundsTracker.hasPlayed(applicationContext, alertId)) {
                                                     PlayedSoundsTracker.markPlayed(applicationContext, alertId)
-                                                    val cSol = solDoc.safeString("cuerpoSolicitanteNombre")
+                                                    val cSol = solDoc.safeString("cuerpoSolicitante")
+                                                        .ifEmpty { solDoc.safeString("cuerpoSolicitanteNombre") }
+                                                        .ifEmpty { incDoc.safeString("cuerpoSolicitante") }
                                                         .ifEmpty { incDoc.safeString("cuerpoSolicitanteNombre") }
                                                         .ifEmpty { "Cuerpo Vecino" }
                                                     val uSol = solDoc.safeString("idCarroSolicitado")
                                                         .ifEmpty { solDoc.safeString("unidad") }
                                                         .trim()
-                                                    val claveInc = incDoc.safeString("clave").ifEmpty { "SCI" }
-                                                    val dirInc = incDoc.safeString("direccion").ifEmpty { incDoc.safeString("lugar") }
-                                                    val isGeneralAlert = uSol.isEmpty() || uSol.uppercase(Locale.ROOT) == "ALERTA GENERAL" || uSol.uppercase(Locale.ROOT) == "CUALQUIERA"
+                                                    val claveInc = solDoc.safeString("claveEmergencia")
+                                                        .ifEmpty { incDoc.safeString("claveEmergencia") }
+                                                        .ifEmpty { incDoc.safeString("clave") }
+                                                        .ifEmpty { "SCI" }
+                                                    val dirInc = solDoc.safeString("direccionEmergencia")
+                                                        .ifEmpty { incDoc.safeString("direccionEmergencia") }
+                                                        .ifEmpty { incDoc.safeString("direccion") }
+                                                        .ifEmpty { incDoc.safeString("lugar") }
+                                                    val tipoSol = solDoc.safeString("tipoSolicitud").uppercase(Locale.ROOT)
+                                                    val isGeneralAlert = tipoSol == "ALERTA_PREVENTIVA" || uSol.isEmpty() || uSol.uppercase(Locale.ROOT) == "ALERTA GENERAL" || uSol.uppercase(Locale.ROOT) == "CUALQUIERA"
                                                     val title = if (!isGeneralAlert) {
                                                         "🚨 SOLICITUD SCI [$uSol] [${solDoc.id}]"
                                                     } else {
@@ -2229,7 +2418,8 @@ class DispatchForegroundService : Service() {
                                                         customSoundRes = R.raw.alertas,
                                                         alertId = alertId,
                                                         forceMaxVolume = true,
-                                                        alertGrade = 3
+                                                        alertGrade = 3,
+                                                        bypassForegroundMute = true
                                                     )
                                                 }
                                             }
@@ -3117,6 +3307,7 @@ class MainActivity : ComponentActivity() {
                     db.collection("personal").document(userId).set(
                         mapOf(
                             "deviceId" to token,
+                            "apnsToken" to "",
                             "platform" to "android",
                             "_metaTimestamp" to System.currentTimeMillis()
                         ),
@@ -3924,6 +4115,7 @@ class MainActivity : ComponentActivity() {
                 val compania = obj.optString("compania", "1")
                 val estado = obj.optString("estado", if (obj.optBoolean("disponible", false)) "0-9" else "0-8").trim()
                 val conductor = obj.optBoolean("conductor", obj.optBoolean("esConductor", false))
+                val modoAdmin = obj.optBoolean("modoAdmin", obj.optBoolean("ModoAdmin", false))
                 val estadoEspecial = obj.optString("estadoEspecial", "").trim()
                 val enServicio = obj.optString("enServicio", "").trim()
                 val licenseKey = obj.optString("licenseKey", "").trim().uppercase(Locale.ROOT)
@@ -3955,6 +4147,7 @@ class MainActivity : ComponentActivity() {
                     .putString("USER_ESTADO", estado)
                     .putString("IS_UNAVAILABLE", isUnavailable.toString())
                     .putBoolean("USER_CONDUCTOR", conductor)
+                    .putBoolean("USER_MODO_ADMIN", modoAdmin)
                     .putString("USER_ESTADO_ESPECIAL", estadoEspecial)
                     .putString("USER_EN_SERVICIO", enServicio)
                     .putStringSet("ATTENDED_DISPATCH_IDS", attendedSet)
@@ -4160,6 +4353,16 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
+        fun playEvacuationAlarm() {
+            SoundPlayer.playEvacuationMaxVolume(context)
+        }
+
+        @JavascriptInterface
+        fun stopEvacuationAlarm() {
+            SoundPlayer.stop(context)
+        }
+
+        @JavascriptInterface
         fun stopTone() {
             SoundPlayer.stop(context)
         }
@@ -4235,7 +4438,8 @@ class MainActivity : ComponentActivity() {
                 customSoundRes = customRes,
                 alertId = alertId,
                 forceMaxVolume = true,
-                alertGrade = 3
+                alertGrade = 3,
+                bypassForegroundMute = !alertId.isNullOrBlank() || title.contains("SCI") || title.contains("EVACUAC")
             )
         }
 

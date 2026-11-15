@@ -26,7 +26,7 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.1.0"
-TARGET_BUILD_NUMBER = "3033"
+TARGET_BUILD_NUMBER = "3034"
 
 SUPPORT_URL = "https://sistemasentinel.cl/soporte"
 MARKETING_URL = "https://sistemasentinel.cl"
@@ -66,7 +66,7 @@ REVIEW_NOTES = (
     "3. En la pantalla de inicio de sesión del bombero ingrese:\n"
     "   - Usuario: 100\n"
     "   - Clave de Acceso: 1234\n\n"
-    "CORRECCIONES REALIZADAS PARA ESTA REVISIÓN (V3.1.0 / Build 3033):\n"
+    "CORRECCIONES REALIZADAS PARA ESTA REVISIÓN (V3.1.0 / Build 3034):\n"
     "- Directriz 5.1.1(iv): Se eliminó cualquier botón 'Activar' / 'No acepto' en el aviso previo de permisos; ahora muestra únicamente un aviso neutral con botón 'Continuar' que procede siempre a la solicitud nativa de iOS, y nunca redirige a Configuración si el usuario elige 'No permitir'.\n"
     "- Directriz 2.3.3: Se reemplazaron todas las capturas de pantalla de iPhone (6.9\", 6.7\", 6.5\") e iPad Pro (13\" y 12.9\" 2ª gen.) por capturas reales de la aplicación en uso.\n"
     "- Corrección del botón 'Apertura de Puerta' en iOS mediante puente nativo y respaldo REST con restablecimiento inmediato.\n\n"
@@ -539,10 +539,49 @@ def main():
             else:
                 print("   ✅ AgeRatingDeclaration actualizado al 100%.")
 
-    # 4. Obtener la versión TARGET_VERSION, cancelar cualquier reviewSubmission WAITING_FOR_REVIEW o IN_REVIEW previa si se necesita adjuntar un nuevo build, y configurar Copyright + ReleaseType
+    # 4. Consultar estado actual de TARGET_VERSION antes de tocar envíos activos:
+    #    Si Apple ya la tiene IN_REVIEW o READY_FOR_SALE, NO interrumpimos la revisión activa,
+    #    pero SÍ esperamos Build 3034 y marcamos usesNonExemptEncryption=False para TestFlight inmediato.
+    _, ver_pre_res = api_request("GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10", token=token)
+    pre_versions = ver_pre_res.get("data", [])
+    target_ver_state = None
+    for pv in pre_versions:
+        if pv.get("attributes", {}).get("versionString") == TARGET_VERSION:
+            target_ver_state = pv.get("attributes", {}).get("appStoreState") or pv.get("attributes", {}).get("appVersionState")
+            break
+
+    if target_ver_state in ("IN_REVIEW", "READY_FOR_SALE", "PENDING_DEVELOPER_RELEASE", "PROCESSING_FOR_APP_STORE"):
+        print(f"ℹ️ La versión {TARGET_VERSION} está en estado '{target_ver_state}'. Respetando revisión activa y habilitando Build {TARGET_BUILD_NUMBER} en TestFlight...")
+        selected_build = None
+        for attempt in range(44):
+            _, pre_res = api_request("GET", f"/v1/preReleaseVersions?filter[app]={app_id}&include=builds&limit=10", token=token)
+            builds = [inc for inc in pre_res.get("included", []) if inc.get("type") == "builds"]
+            if not builds:
+                _, b_res = api_request("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10", token=token)
+                builds = b_res.get("data", [])
+            for b in builds:
+                if str(b.get("attributes", {}).get("version")) == TARGET_BUILD_NUMBER and b.get("attributes", {}).get("processingState") == "VALID":
+                    selected_build = b
+                    break
+            if selected_build:
+                break
+            print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} para TestFlight (intento {attempt + 1}/44)...")
+            time.sleep(15)
+        if selected_build:
+            b_id = selected_build["id"]
+            api_request(
+                "PATCH",
+                f"/v1/builds/{b_id}",
+                body={"data": {"type": "builds", "id": b_id, "attributes": {"usesNonExemptEncryption": False}}},
+                token=token,
+            )
+            print(f"✅ Build {TARGET_BUILD_NUMBER} habilitado en TestFlight (usesNonExemptEncryption=False).")
+        return
+
+    # 4A. Retirar únicamente envíos WAITING_FOR_REVIEW si se necesita adjuntar el nuevo build
     _, waiting_res = api_request(
         "GET",
-        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=WAITING_FOR_REVIEW,IN_REVIEW",
+        f"/v1/reviewSubmissions?filter[app]={app_id}&filter[state]=WAITING_FOR_REVIEW",
         token=token,
     )
     for w_sub in waiting_res.get("data", []):

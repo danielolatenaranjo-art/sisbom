@@ -14,6 +14,7 @@ setGlobalOptions({maxInstances: 10});
 const APNS_KEY_ID = "5LAKW2U93F";
 const APNS_TEAM_ID = "NFR3L3CC3L";
 const APNS_BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L";
+const APNS_LEGACY_BUNDLE_ID = "com.misisbom.sisbom";
 const APNS_P8_KEY = [
   "-----BEGIN PRIVATE KEY-----",
   "MIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQgZq+ZjJqT3FVw7uPJ",
@@ -41,7 +42,7 @@ function getApnsJwt() {
   return cachedApnsJwt;
 }
 
-function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority = "10") {
+function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority = "10", topic = APNS_BUNDLE_ID) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (res) => {
@@ -64,10 +65,10 @@ function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority =
         ":method": "POST",
         ":path": `/3/device/${apnsToken}`,
         "authorization": `bearer ${getApnsJwt()}`,
-        "apns-topic": APNS_BUNDLE_ID,
+        "apns-topic": String(topic || APNS_BUNDLE_ID),
         "apns-push-type": "alert",
         "apns-priority": String(priority),
-        "apns-expiration": String(Math.floor(Date.now() / 1000) + 300)
+        "apns-expiration": String(Math.floor(Date.now() / 1000) + 3600)
       };
       if (collapseId) {
         headers["apns-collapse-id"] = String(collapseId).slice(0, 64);
@@ -94,10 +95,120 @@ function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority =
 
 async function sendDirectApnsToDevice(apnsToken, payloadObj, collapseId, priority = "10") {
   const cleanHex = String(apnsToken || "").trim().toLowerCase();
-  if (!/^[0-9a-f]{64}$/.test(cleanHex)) return;
-  const prodRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority);
-  if (prodRes.status === 400 && String(prodRes.body || "").includes("BadDeviceToken")) {
-    await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority);
+  if (!/^[0-9a-f]{64}$/.test(cleanHex)) {
+    return {delivered: false, status: 0, body: "InvalidHex", via: "none"};
+  }
+  const prodRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_BUNDLE_ID);
+  if (prodRes.status === 200) {
+    return {delivered: true, status: 200, body: "", via: "apns-prod"};
+  }
+  const prodBodyStr = String(prodRes.body || "");
+  if (prodRes.status === 400 && prodBodyStr.includes("BadDeviceToken")) {
+    const sandRes = await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_BUNDLE_ID);
+    if (sandRes.status === 200) {
+      return {delivered: true, status: 200, body: "", via: "apns-sandbox"};
+    }
+  }
+  if (prodRes.status === 400 && (prodBodyStr.includes("DeviceTokenNotForTopic") || prodBodyStr.includes("BadDeviceToken"))) {
+    const legProdRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_LEGACY_BUNDLE_ID);
+    if (legProdRes.status === 200) {
+      return {delivered: true, status: 200, body: "", via: "apns-legacy"};
+    }
+    if (legProdRes.status === 400 && String(legProdRes.body || "").includes("BadDeviceToken")) {
+      const legSandRes = await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_LEGACY_BUNDLE_ID);
+      if (legSandRes.status === 200) {
+        return {delivered: true, status: 200, body: "", via: "apns-legacy-sandbox"};
+      }
+    }
+  }
+  console.warn("[APNs] Rejected token", cleanHex.slice(0, 12), "status=", prodRes.status, "body=", prodRes.body || prodRes.reason || "");
+  return {delivered: false, status: prodRes.status, body: String(prodRes.body || prodRes.reason || ""), via: "none"};
+}
+
+const APNS_CRITICAL_ALERTS_ENABLED = String(process.env.APNS_CRITICAL_ALERTS_ENABLED || "").trim().toLowerCase() === "true";
+
+function buildApnsApsObject({
+  title,
+  body,
+  sound = "despacho.mp3",
+  category = "EMERGENCY_DISPATCH",
+  interruptionLevel = "active",
+  relevanceScore = 1.0,
+  includeSound = true
+}) {
+  const safeLevel = APNS_CRITICAL_ALERTS_ENABLED && includeSound
+    ? "critical"
+    : (interruptionLevel === "passive" ? "passive" : "active");
+  const aps = {
+    alert: {
+      title: String(title || "SENTINEL ONE"),
+      body: String(body || "")
+    },
+    badge: 1,
+    category: String(category || "EMERGENCY_DISPATCH"),
+    "interruption-level": safeLevel,
+    "relevance-score": Number(relevanceScore || 1.0),
+    "content-available": 1
+  };
+  if (includeSound && sound) {
+    aps.sound = APNS_CRITICAL_ALERTS_ENABLED
+      ? {critical: 1, name: String(sound), volume: 1.0}
+      : String(sound);
+  }
+  return aps;
+}
+
+async function sendIosFcmFallbackToDevice(fcmToken, {
+  title,
+  body,
+  sound = "despacho.mp3",
+  category = "EMERGENCY_DISPATCH",
+  interruptionLevel = "time-sensitive",
+  relevanceScore = 1.0,
+  priority = "10",
+  collapseId = "",
+  data = {},
+  includeSound = true
+}) {
+  const tok = String(fcmToken || "").trim();
+  if (!isValidFcmRegistrationToken(tok)) return false;
+
+  const stringData = {};
+  for (const [k, v] of Object.entries(data || {})) {
+    stringData[k] = String(v ?? "");
+  }
+
+  const aps = buildApnsApsObject({
+    title,
+    body,
+    sound,
+    category,
+    interruptionLevel,
+    relevanceScore,
+    includeSound
+  });
+
+  const apnsHeaders = {
+    "apns-priority": String(priority || "10"),
+    "apns-push-type": "alert"
+  };
+  if (collapseId) {
+    apnsHeaders["apns-collapse-id"] = String(collapseId).slice(0, 64);
+  }
+
+  try {
+    await admin.messaging().send({
+      token: tok,
+      data: stringData,
+      apns: {
+        headers: apnsHeaders,
+        payload: {aps}
+      }
+    });
+    return true;
+  } catch (err) {
+    console.warn("[iOS FCM Fallback] Failed for token", tok.slice(0, 16), err.message);
+    return false;
   }
 }
 
@@ -112,6 +223,7 @@ async function sendDirectApnsToIosUsers({
   collapseId = "",
   data = {},
   targetUserIds = null,
+  excludeUserIds = null,
   onlyConductors = false,
   respectStatus09ForSound = true,
   unrespondedOnlyForDispatchId = "",
@@ -120,7 +232,8 @@ async function sendDirectApnsToIosUsers({
   try {
     const db = admin.firestore();
     let docs = [];
-    if (Array.isArray(targetUserIds) && targetUserIds.length > 0) {
+    if (Array.isArray(targetUserIds)) {
+      if (targetUserIds.length === 0) return;
       const snaps = await Promise.all(
         targetUserIds.map((uid) => db.collection("personal").doc(String(uid).trim()).get().catch(() => null))
       );
@@ -130,12 +243,24 @@ async function sendDirectApnsToIosUsers({
       docs = snap.docs;
     }
 
-    const audibleTokens = new Set();
-    const silentBannerTokens = new Set();
+    const excludeSet = new Set(
+      Array.isArray(excludeUserIds) ? excludeUserIds.map((id) => String(id || "").trim()).filter(Boolean) : []
+    );
+
+    const targetsMap = new Map();
     for (const d of docs) {
       const p = d.data() || {};
+      if (d.id === "init" || p.placeholder === true) continue;
+      const actStr = String(p.activo ?? "SI").trim().toUpperCase();
+      if (p.activo === false || actStr === "NO" || actStr === "0" || actStr === "INACTIVO") continue;
       if (p.modoAvion === true || p.silencioAbsoluto === true) continue;
-      if (onlyConductors && !p.conductor) continue;
+      const docUid = String(p.idRegistro || d.id || "").trim();
+      if (docUid && excludeSet.has(docUid)) continue;
+      const cleanApns = String(p.apnsToken || "").trim().toLowerCase();
+      const hasApns = /^[0-9a-f]{64}$/.test(cleanApns);
+      const rawPlat = String(p.platform || "").trim().toLowerCase();
+      if (rawPlat === "android" && !hasApns) continue;
+      if (onlyConductors && !isConductorFlag(p)) continue;
       const est = String(p.estado || (p.disponible === false ? "0-8" : "0-9")).trim().toUpperCase();
       if (unrespondedOnlyForDispatchId) {
         if (est !== "0-9") continue;
@@ -144,53 +269,281 @@ async function sendDirectApnsToIosUsers({
         const uid = String(p.idRegistro || d.id || "").trim();
         if (respondedUserIds && respondedUserIds.has(uid)) continue;
       }
-      const candidate = String(p.apnsToken || "").trim().toLowerCase();
-      if (!/^[0-9a-f]{64}$/.test(candidate)) continue;
-      if (!respectStatus09ForSound || est === "0-9") {
-        audibleTokens.add(candidate);
-        silentBannerTokens.delete(candidate);
-      } else if (!audibleTokens.has(candidate)) {
-        silentBannerTokens.add(candidate);
+
+      const fcmTok = String(p.deviceId || p.fcmToken || p.tokenFcm || p.tokenIos || "").trim();
+      const hasFcm = isValidFcmRegistrationToken(fcmTok);
+      if (!(rawPlat === "ios" || hasApns)) continue;
+      if (!hasApns && !hasFcm) continue;
+
+      const includeSound = !respectStatus09ForSound || est === "0-9";
+      const targetKey = hasApns ? `apns:${cleanApns}` : `fcm:${fcmTok}`;
+      const prev = targetsMap.get(targetKey);
+      if (!prev) {
+        targetsMap.set(targetKey, {cleanApns, hasApns, fcmTok, hasFcm, includeSound});
+      } else if (includeSound && !prev.includeSound) {
+        prev.includeSound = true;
       }
     }
 
-    if (audibleTokens.size === 0 && silentBannerTokens.size === 0) return;
+    if (targetsMap.size === 0) return;
 
-    const buildApnsPayload = (includeSound) => {
-      const aps = {
-        alert: {
-          title: String(title || "SENTINEL ONE"),
-          body: String(body || "")
-        },
-        badge: 1,
-        category: String(category || "EMERGENCY_DISPATCH"),
-        "interruption-level": String(interruptionLevel || "time-sensitive"),
-        "relevance-score": Number(relevanceScore || 1.0),
-        "content-available": 1,
-        "mutable-content": 1
-      };
-      if (includeSound && sound) {
-        aps.sound = String(sound);
-      }
-      return Object.assign({}, data, {aps});
-    };
+    const buildApnsPayload = (includeSound) => Object.assign({}, data, {
+      aps: buildApnsApsObject({
+        title,
+        body,
+        sound,
+        category,
+        interruptionLevel,
+        relevanceScore,
+        includeSound
+      })
+    });
 
-    const tasks = [];
-    if (audibleTokens.size > 0) {
-      const audiblePayload = buildApnsPayload(true);
-      for (const tok of audibleTokens) {
-        tasks.push(sendDirectApnsToDevice(tok, audiblePayload, collapseId, priority));
+    const audiblePayload = buildApnsPayload(true);
+    const silentPayload = buildApnsPayload(false);
+
+    let apnsOk = 0;
+    let fcmFallbackOk = 0;
+    let failed = 0;
+
+    await Promise.all(Array.from(targetsMap.values()).map(async (target) => {
+      const payloadObj = target.includeSound ? audiblePayload : silentPayload;
+      if (target.hasApns) {
+        const res = await sendDirectApnsToDevice(target.cleanApns, payloadObj, collapseId, priority);
+        if (res.delivered) {
+          apnsOk += 1;
+          return;
+        }
+        if (target.hasFcm) {
+          const okFcm = await sendIosFcmFallbackToDevice(target.fcmTok, {
+            title,
+            body,
+            sound,
+            category,
+            interruptionLevel,
+            relevanceScore,
+            priority,
+            collapseId,
+            data,
+            includeSound: target.includeSound
+          });
+          if (okFcm) {
+            fcmFallbackOk += 1;
+            return;
+          }
+        }
+        failed += 1;
+        return;
       }
-    }
-    if (silentBannerTokens.size > 0) {
-      const silentPayload = buildApnsPayload(false);
-      for (const tok of silentBannerTokens) {
-        tasks.push(sendDirectApnsToDevice(tok, silentPayload, collapseId, priority));
+
+      if (target.hasFcm) {
+        const okFcm = await sendIosFcmFallbackToDevice(target.fcmTok, {
+          title,
+          body,
+          sound,
+          category,
+          interruptionLevel,
+          relevanceScore,
+          priority,
+          collapseId,
+          data,
+          includeSound: target.includeSound
+        });
+        if (okFcm) {
+          fcmFallbackOk += 1;
+        } else {
+          failed += 1;
+        }
       }
-    }
-    await Promise.all(tasks);
+    }));
+
+    console.info("[iOS Push Summary]", JSON.stringify({
+      collapseId,
+      targets: targetsMap.size,
+      apnsOk,
+      fcmFallbackOk,
+      failed
+    }));
   } catch (err) {
     console.warn("APNs direct send warning:", err.message);
+  }
+}
+
+function isConductorFlag(p) {
+  if (!p || typeof p !== "object") return false;
+  if (p.conductor === true || p.esConductor === true) return true;
+  if (typeof p.conductor === "number" && p.conductor !== 0) return true;
+  const s = String(p.conductor ?? p.esConductor ?? "").trim().toUpperCase();
+  return s === "SI" || s === "SÍ" || s === "TRUE" || s === "1";
+}
+
+function isCommanderFlag(p) {
+  if (!p || typeof p !== "object") return false;
+  const rad = String(p.idRadial ?? "").trim();
+  const modoAdmin =
+    p.modoAdmin === true ||
+    p.ModoAdmin === true ||
+    String(p.modoAdmin || "").trim().toUpperCase() === "SI" ||
+    String(p.modoAdmin || "").trim().toUpperCase() === "TRUE";
+  return rad === "1" || parseInt(rad, 10) === 1 || modoAdmin;
+}
+
+async function resolveActiveCentralOperatorId(db) {
+  try {
+    const centralSnap = await db.collection("accesos").doc("central").get();
+    if (!centralSnap || !centralSnap.exists) return "";
+    const cData = centralSnap.data() || {};
+    const estado = String(cData.estado || "").trim().toLowerCase();
+    const idReg = String(cData.idRegistro || "").trim();
+    return (estado === "activo" && idReg) ? idReg : "";
+  } catch (_) {
+    return "";
+  }
+}
+
+async function sendDirectFcmToAndroidUsers({
+  data = {},
+  priority = "high",
+  ttl = 300000,
+  targetUserIds = null,
+  excludeUserIds = null,
+  onlyConductors = false,
+  onlyCentralOperator = false,
+  tag = "push"
+}) {
+  try {
+    const db = admin.firestore();
+    let effectiveTargetIds = targetUserIds;
+
+    if (onlyCentralOperator) {
+      const centralId = await resolveActiveCentralOperatorId(db);
+      if (!centralId) {
+        console.info("[Android Push Summary]", JSON.stringify({
+          tag,
+          targets: 0,
+          successCount: 0,
+          failureCount: 0,
+          reason: "no-active-central-operator"
+        }));
+        return;
+      }
+      effectiveTargetIds = Array.isArray(effectiveTargetIds)
+        ? effectiveTargetIds.filter((id) => String(id).trim() === centralId)
+        : [centralId];
+    }
+
+    let docs = [];
+    if (Array.isArray(effectiveTargetIds)) {
+      const cleanTargets = Array.from(new Set(
+        effectiveTargetIds.map((uid) => String(uid || "").trim()).filter(Boolean)
+      ));
+      if (cleanTargets.length === 0) return;
+      const snaps = await Promise.all(
+        cleanTargets.map((uid) => db.collection("personal").doc(uid).get().catch(() => null))
+      );
+      docs = snaps.filter((s) => s && s.exists);
+      if (docs.length < cleanTargets.length) {
+        const foundIds = new Set(docs.map((s) => {
+          const pd = s.data() || {};
+          return String(pd.idRegistro || s.id || "").trim();
+        }));
+        const missing = cleanTargets.filter((uid) => !foundIds.has(uid));
+        if (missing.length > 0) {
+          const fullSnap = await db.collection("personal").get();
+          const missingSet = new Set(missing);
+          fullSnap.docs.forEach((d) => {
+            const pd = d.data() || {};
+            const pUid = String(pd.idRegistro || d.id || "").trim();
+            if (missingSet.has(pUid)) {
+              docs.push(d);
+            }
+          });
+        }
+      }
+    } else {
+      const snap = await db.collection("personal").get();
+      docs = snap.docs;
+    }
+
+    const excludeSet = new Set(
+      Array.isArray(excludeUserIds)
+        ? excludeUserIds.map((id) => String(id || "").trim()).filter(Boolean)
+        : []
+    );
+
+    const tokenSet = new Set();
+    for (const d of docs) {
+      const p = d.data() || {};
+      if (d.id === "init" || p.placeholder === true) continue;
+      const actStr = String(p.activo ?? "SI").trim().toUpperCase();
+      if (p.activo === false || actStr === "NO" || actStr === "0" || actStr === "INACTIVO") continue;
+      if (p.modoAvion === true || p.silencioAbsoluto === true) continue;
+
+      const uid = String(p.idRegistro || d.id || "").trim();
+      if (uid && excludeSet.has(uid)) continue;
+      if (onlyConductors && !isConductorFlag(p)) continue;
+      if (resolveEffectivePlatform(p) === "ios") continue;
+
+      const fcmTok = String(p.deviceId || p.fcmToken || p.tokenFcm || "").trim();
+      if (isValidFcmRegistrationToken(fcmTok)) {
+        tokenSet.add(fcmTok);
+      }
+    }
+
+    const tokens = Array.from(tokenSet);
+    if (tokens.length === 0) {
+      console.info("[Android Push Summary]", JSON.stringify({
+        tag,
+        targets: 0,
+        successCount: 0,
+        failureCount: 0
+      }));
+      return;
+    }
+
+    const stringData = {};
+    for (const [k, v] of Object.entries(data || {})) {
+      stringData[k] = String(v ?? "");
+    }
+
+    const androidConfig = Number(ttl) > 0
+      ? {priority: String(priority || "high"), ttl: Number(ttl)}
+      : {priority: String(priority || "high")};
+
+    let successCount = 0;
+    let failureCount = 0;
+    const sampleErrors = [];
+
+    for (let i = 0; i < tokens.length; i += 500) {
+      const chunk = tokens.slice(i, i + 500);
+      const batchRes = await admin.messaging().sendEachForMulticast({
+        tokens: chunk,
+        data: stringData,
+        android: androidConfig
+      });
+      successCount += Number(batchRes.successCount || 0);
+      failureCount += Number(batchRes.failureCount || 0);
+      if (Array.isArray(batchRes.responses)) {
+        for (const resp of batchRes.responses) {
+          if (!resp.success && resp.error && sampleErrors.length < 3) {
+            sampleErrors.push({
+              code: resp.error.code || "",
+              message: resp.error.message || ""
+            });
+          }
+        }
+      }
+    }
+
+    console.info("[Android Push Summary]", JSON.stringify({
+      tag,
+      targets: tokens.length,
+      successCount,
+      failureCount,
+      ...(sampleErrors.length > 0 ? {sampleErrors} : {})
+    }));
+  } catch (err) {
+    console.warn("FCM direct send warning:", err.message);
   }
 }
 
@@ -222,7 +575,15 @@ function isValidFcmRegistrationToken(raw) {
   return tok.length > 60 && tok.includes(":");
 }
 
-async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral, platform = "") {
+function resolveEffectivePlatform(docData) {
+  const hasApns = /^[0-9a-f]{64}$/.test(String((docData && docData.apnsToken) || "").trim().toLowerCase());
+  if (hasApns) return "ios";
+  const raw = String((docData && docData.platform) || "").trim().toLowerCase();
+  if (raw === "android" || raw === "ios") return raw;
+  return "";
+}
+
+async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral, platform = "", hasValidApns = false) {
   if (!isValidFcmRegistrationToken(token)) return;
   const cleanId = String(userId || "").trim().replace(/\s+/g, "");
   const topics = ["all", "despachos", "alertas", "alertas_generales"];
@@ -234,8 +595,8 @@ async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral, p
   if (isCentral) topics.push("central_operador");
 
   const isIosDevice = String(platform || "").trim().toLowerCase() === "ios";
-  if (isIosDevice) {
-    // Los dispositivos iOS reciben push directo individualizado vía sendDirectApnsToIosUsers (con filtro 0-9/0-8).
+  if (isIosDevice && hasValidApns) {
+    // Los dispositivos iOS con apnsToken directo reciben push individualizado vía sendDirectApnsToIosUsers (con filtro 0-9/0-8).
     // Desuscribirlos de los tópicos FCM grupales evita recibir doble push y doble audio (eco).
     await Promise.all(
       topics.map((t) =>
@@ -245,11 +606,21 @@ async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral, p
     return;
   }
 
-  await Promise.all(
+  const subResults = await Promise.all(
     topics.map((t) =>
-      admin.messaging().subscribeToTopic([token], t).catch(() => null)
+      admin.messaging().subscribeToTopic([token], t)
+        .then((res) => ({topic: t, res}))
+        .catch((err) => ({topic: t, err: err.message}))
     )
   );
+  for (const item of subResults) {
+    if (item.err) {
+      console.warn("[FCM Topic Subscribe Error]", item.topic, item.err);
+    } else if (item.res && item.res.failureCount > 0) {
+      const firstErr = item.res.errors && item.res.errors[0] ? item.res.errors[0].error : {};
+      console.warn("[FCM Topic Subscribe Warning]", item.topic, JSON.stringify(firstErr));
+    }
+  }
   if (!isConductor) {
     await admin.messaging().unsubscribeFromTopic([token], "conductores").catch(() => null);
   }
@@ -358,11 +729,12 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         createdAt: String(createdAt)
       };
       await Promise.all([
-        admin.messaging().send({
-          topic: "despachos",
+        sendDirectFcmToAndroidUsers({
           data: escData,
-          android: {priority: "high", ttl: 300000}
-        }).catch((e) => console.warn("FCM escalation warning:", e.message)),
+          priority: "high",
+          ttl: 300000,
+          tag: `esc_${dispatchId}`
+        }),
         sendDirectApnsToIosUsers({
           title: `🔥 CAMBIO DE CLAVE A ${newClave}`,
           body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`,
@@ -398,11 +770,13 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         createdAt: new Date().toISOString()
       };
       await Promise.all([
-        admin.messaging().send({
-          topic: "conductores",
+        sendDirectFcmToAndroidUsers({
           data: req1210Data,
-          android: {priority: "high", ttl: 300000}
-        }).catch((e) => console.warn("FCM 12-10 warning:", e.message)),
+          priority: "high",
+          ttl: 300000,
+          onlyConductors: true,
+          tag: `req1210_${dispatchId}_${unitName}`
+        }),
         sendDirectApnsToIosUsers({
           title: `🚨 SOLICITUD 12-10 (${unitName})`,
           body: `Se solicita conductor para unidad ${unitName} en ${direccion}`,
@@ -429,11 +803,12 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         createdAt: new Date().toISOString()
       };
       await Promise.all([
-        admin.messaging().send({
-          topic: "despachos",
+        sendDirectFcmToAndroidUsers({
           data: req66Data,
-          android: {priority: "high", ttl: 300000}
-        }).catch((e) => console.warn("FCM 6-6 warning:", e.message)),
+          priority: "high",
+          ttl: 300000,
+          tag: `req66_${dispatchId}_${unitName}`
+        }),
         sendDirectApnsToIosUsers({
           title: `🚨 SOLICITUD 6-6 (${unitName})`,
           body: `Se solicita personal para unidad ${unitName} en ${direccion}`,
@@ -445,68 +820,252 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
       ]);
     }
   }
+
+  // D. Detectar orden de EVACUACIÓN (`evacuar.evacuacion === true`) — SOLO para bomberos en este incidente
+  const evacBefore = (before.evacuar && typeof before.evacuar === "object")
+    ? before.evacuar
+    : ((before.evacuationAlert && typeof before.evacuationAlert === "object")
+      ? {evacuacion: Boolean(before.evacuationAlert.active), triggeredAt: before.evacuationAlert.triggeredAt}
+      : {});
+  const evacAfter = (after.evacuar && typeof after.evacuar === "object")
+    ? after.evacuar
+    : ((after.evacuationAlert && typeof after.evacuationAlert === "object")
+      ? {
+          evacuacion: Boolean(after.evacuationAlert.active),
+          lat: after.evacuationAlert.lat ?? null,
+          lng: after.evacuationAlert.lng ?? null,
+          instrucciones: after.evacuationAlert.motivo || "",
+          triggeredAt: after.evacuationAlert.triggeredAt || null
+        }
+      : {});
+
+  const isNewEvacOrder =
+    evacAfter.evacuacion === true &&
+    (evacBefore.evacuacion !== true || Number(evacAfter.triggeredAt || 0) !== Number(evacBefore.triggeredAt || 0));
+
+  if (isNewEvacOrder) {
+    try {
+      const db = admin.firestore();
+      const targetUserIdsSet = new Set();
+      const targetRadialsSet = new Set();
+
+      // 1. Asistentes directos en el despacho
+      if (Array.isArray(after.asistentes)) {
+        for (const item of after.asistentes) {
+          if (!item) continue;
+          if (typeof item === "string" || typeof item === "number") {
+            targetUserIdsSet.add(String(item).trim());
+          } else if (typeof item === "object") {
+            const uid = String(item.idRegistro || item.id || item.bomberoId || "").trim();
+            const rad = String(item.idRadial || "").trim().toUpperCase();
+            if (uid) targetUserIdsSet.add(uid);
+            if (rad) targetRadialsSet.add(rad);
+          }
+        }
+      }
+
+      // 2. Tripulación en bitácoras activas (sin h68) de este despacho
+      const bitSnap = await db.collection("bitacora").where("idServicio", "==", String(dispatchId)).get().catch(() => null);
+      if (bitSnap && !bitSnap.empty) {
+        bitSnap.forEach((bDoc) => {
+          const b = bDoc.data() || {};
+          if (b?.tiempos?.h68 || b?.h68 || b?.hora68) return;
+          const extractRad = (v) => {
+            if (!v) return "";
+            if (typeof v === "object") return String(v.idRadial || v.id || "").trim().toUpperCase();
+            return String(v).split(/[•-]/)[0].trim().toUpperCase();
+          };
+          const cRad = extractRad(b.conductor);
+          const oRad = extractRad(b.obac);
+          if (cRad) targetRadialsSet.add(cRad);
+          if (oRad) targetRadialsSet.add(oRad);
+          if (Array.isArray(b.tripulacion)) {
+            for (const m of b.tripulacion) {
+              const mRad = extractRad(m);
+              const mReg = typeof m === "object" ? String(m?.idRegistro || "").trim() : "";
+              if (mRad) targetRadialsSet.add(mRad);
+              if (mReg) targetUserIdsSet.add(mReg);
+            }
+          }
+        });
+      }
+
+      // 3. Personal con `enServicio == dispatchId` o radial en tripulación activa
+      const persSnap = await db.collection("personal").get();
+      persSnap.forEach((pDoc) => {
+        const p = pDoc.data() || {};
+        const uid = String(p.idRegistro || pDoc.id || "").trim();
+        const rad = String(p.idRadial || "").trim().toUpperCase();
+        const enSvc = String(p.enServicio || "").trim();
+        if (!uid) return;
+        if (enSvc === `-${dispatchId}`) return;
+        if (enSvc === String(dispatchId) || (rad && targetRadialsSet.has(rad))) {
+          targetUserIdsSet.add(uid);
+        }
+      });
+
+      const incidentUserIds = Array.from(targetUserIdsSet).filter(Boolean);
+      if (incidentUserIds.length > 0) {
+        const instr = String(
+          evacAfter.instrucciones || "ABANDONAR ZONA DE RIESGO DE INMEDIATO Y DIRIGIRSE AL PUNTO DE EVACUACIÓN"
+        ).trim();
+        const evacPayloadData = {
+          type: "EVACUATION_ALERT",
+          payloadId: String(dispatchId),
+          dispatchId: String(dispatchId),
+          idServicio: String(dispatchId),
+          evacuacion: "true",
+          lat: evacAfter.lat != null ? String(evacAfter.lat) : "",
+          lng: evacAfter.lng != null ? String(evacAfter.lng) : "",
+          instrucciones: instr,
+          triggeredAt: String(evacAfter.triggeredAt || Date.now()),
+          title: `🚨 EVACUACIÓN INMEDIATA (${clave})`,
+          body: instr
+        };
+
+        await Promise.all([
+          sendDirectFcmToAndroidUsers({
+            data: evacPayloadData,
+            priority: "high",
+            ttl: 300000,
+            targetUserIds: incidentUserIds,
+            tag: `evac_${dispatchId}`
+          }),
+          sendDirectApnsToIosUsers({
+            title: `🚨 EVACUACIÓN INMEDIATA (${clave})`,
+            body: instr,
+            sound: "importante.mp3",
+            category: "EMERGENCY_DISPATCH",
+            interruptionLevel: "time-sensitive",
+            relevanceScore: 1.0,
+            priority: "10",
+            collapseId: `evac_${dispatchId}_${evacAfter.triggeredAt || Date.now()}`,
+            targetUserIds: incidentUserIds,
+            respectStatus09ForSound: false,
+            data: evacPayloadData
+          })
+        ]);
+      }
+    } catch (evacErr) {
+      console.warn("Error enviando push selectivo de evacuacion:", evacErr.message);
+    }
+  }
 });
 
-// 3. NUEVA ALERTA U ORDEN DEL DÍA
-const onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
-  const snap = event.data;
-  if (!snap) return;
-  const data = snap.data() || {};
-  const alertId = event.params.alertId;
+// 3. NUEVA ALERTA U ORDEN DEL DÍA (onDocumentWritten para soportar IDs reutilizados como alertas/1)
+const onNewAlert = onDocumentWritten("alertas/{alertId}", async (event) => {
+  const afterSnap = event.data && event.data.after;
+  const beforeSnap = event.data && event.data.before;
+  if (!afterSnap || !afterSnap.exists) return;
 
-  const isOrden = String(data.tipo || "").toLowerCase() === "orden" || Boolean(data.numeroOrden);
-  const titulo = isOrden
-    ? `ORDEN DEL DÍA N° ${data.numeroOrden || ""}`.trim()
-    : (data.titulo || data.razonAlerta || "Nueva Alerta");
-  const mensaje = String(data.cuerpo || data.mensaje || data.mensajeAlerta || "Revisa el muro de alertas")
-    .replace(/\|/g, " ")
-    .slice(0, 140);
-  const grado = isOrden ? "3" : String(data.grado || data.gradoAlerta || "1").replace(/^'+/, "");
-  const destinatarios = data.destinatarios || data.aQuienAlerta || "TC";
+  const after = afterSnap.data() || {};
+  const alertId = String(event.params.alertId || "").trim();
+  if (!alertId || alertId === "init" || after.placeholder === true) return;
+  if (alertId.startsWith("SCI_CHAT_")) return;
 
-  let senderId = String(data.creadorId || data.autorId || "");
-  if (!senderId && data.quienAlerta) {
-    const match = String(data.quienAlerta).match(/\b(\d+)\b/);
-    if (match) senderId = match[1];
+  const isOrden = String(after.tipo || "").toLowerCase() === "orden" || Boolean(after.numeroOrden);
+  const duracionRaw = String(after.duracion ?? "").replace(/^['"]+|['"]+$/g, "").trim();
+  const estadoRaw = String(after.estado || "").trim().toUpperCase();
+  if (
+    duracionRaw.toUpperCase() === "C" ||
+    (after.duracion !== undefined && duracionRaw === "" && !isOrden) ||
+    estadoRaw === "CANCELADA" ||
+    estadoRaw === "ELIMINADA" ||
+    after.eliminada === true ||
+    String(after.oculta || "") === "1"
+  ) {
+    return;
   }
 
-  let topics = [];
-  if (!destinatarios || destinatarios === "TODOS" || destinatarios === "TC") {
-    topics.push("alertas_generales");
-  } else if (Array.isArray(destinatarios)) {
-    topics = destinatarios.map((id) => `usuario_${String(id).trim()}`);
-  } else if (typeof destinatarios === "string") {
-    topics = destinatarios.split(",").map((id) => `usuario_${id.trim()}`).filter((t) => t !== "usuario_");
+  if (beforeSnap && beforeSnap.exists) {
+    const before = beforeSnap.data() || {};
+    const wasPlaceholder = before.placeholder === true;
+    const timeChanged =
+      String(after.fechaAlerta || "") !== String(before.fechaAlerta || "") ||
+      String(after.horaAlerta || "") !== String(before.horaAlerta || "") ||
+      Number(after.timestamp || after.createdAt || 0) !== Number(before.timestamp || before.createdAt || 0);
+    const hasNoConforme = String(after.conforme || "").replace(/^['"]+|['"]+$/g, "").trim() === "";
+    const hasNoLeido = !Array.isArray(after.leidoPor) || after.leidoPor.length === 0;
+    const hasActiveDuracion = duracionRaw !== "";
+    const isFreshOverwrite = wasPlaceholder || (timeChanged && hasNoConforme && hasNoLeido && hasActiveDuracion);
+    if (!isFreshOverwrite) return;
+  }
+
+  const titulo = isOrden
+    ? `ORDEN DEL DÍA N° ${after.numeroOrden || ""}`.trim()
+    : (after.titulo || after.razonAlerta || "Nueva Alerta");
+  const mensaje = String(after.cuerpo || after.mensaje || after.mensajeAlerta || "Revisa el muro de alertas")
+    .replace(/\|/g, " ")
+    .slice(0, 140);
+  const grado = isOrden ? "3" : String(after.grado || after.gradoAlerta || "1").replace(/^['"]+|['"]+$/g, "").trim();
+  const senderId = String(after.creadorId || after.autorId || after.idRegistroEmisor || "").trim();
+
+  const rawDest = after.destinatarios !== undefined ? after.destinatarios : after.aQuienAlerta;
+  let parsedDestList = null;
+  if (Array.isArray(rawDest)) {
+    parsedDestList = rawDest.map((id) => String(id || "").replace(/^['"]+|['"]+$/g, "").trim()).filter(Boolean);
+  } else if (typeof rawDest === "string") {
+    const cleanStr = rawDest.replace(/^['"]+|['"]+$/g, "").trim();
+    if (cleanStr && cleanStr.toUpperCase() !== "TODOS" && cleanStr.toUpperCase() !== "TC") {
+      parsedDestList = cleanStr.split(",").map((id) => id.replace(/^['"]+|['"]+$/g, "").trim()).filter(Boolean);
+    }
+  }
+
+  let targetIds = null;
+  if (Array.isArray(parsedDestList) && parsedDestList.length > 0 && !parsedDestList.some((x) => x.toUpperCase() === "TODOS" || x.toUpperCase() === "TC")) {
+    const db = admin.firestore();
+    const resolvedSet = new Set();
+    for (const tid of parsedDestList) {
+      if (tid === "1") {
+        const p1Snap = await db.collection("personal").doc("1").get().catch(() => null);
+        if (p1Snap && p1Snap.exists) {
+          const p1Data = p1Snap.data() || {};
+          const p1Act = String(p1Data.activo ?? "SI").trim().toUpperCase();
+          if (p1Data.activo !== false && p1Act !== "NO" && p1Act !== "0" && p1Act !== "INACTIVO") {
+            resolvedSet.add(String(p1Data.idRegistro || "1").trim());
+          }
+        }
+        const fullPersSnap = await db.collection("personal").get();
+        fullPersSnap.forEach((docSnap) => {
+          const p = docSnap.data() || {};
+          if (docSnap.id === "init" || p.placeholder === true) return;
+          const actStr = String(p.activo ?? "SI").trim().toUpperCase();
+          if (p.activo === false || actStr === "NO" || actStr === "0" || actStr === "INACTIVO") return;
+          if (isCommanderFlag(p)) {
+            const uid = String(p.idRegistro || docSnap.id || "").trim();
+            if (uid) resolvedSet.add(uid);
+          }
+        });
+      } else {
+        resolvedSet.add(tid);
+      }
+    }
+    if (senderId) resolvedSet.delete(senderId);
+    targetIds = Array.from(resolvedSet);
+    if (targetIds.length === 0) return;
   }
 
   const isG3 = String(grado) === "3";
   const isG2 = String(grado) === "2";
+  const alertTitle = isOrden ? `📋 ${titulo}` : `ALERTA GRADO ${grado}: ${titulo}`;
+  const alertData = {
+    type: isOrden ? "ORDEN" : "ALERT",
+    payloadId: String(alertId),
+    gradoAlerta: String(grado),
+    senderId: String(senderId),
+    title: alertTitle,
+    body: mensaje
+  };
 
-  const promises = topics.map((topic) => {
-    const msg = {
-      topic,
-      data: {
-        type: isOrden ? "ORDEN" : "ALERT",
-        payloadId: String(alertId),
-        gradoAlerta: String(grado),
-        senderId: String(senderId),
-        title: isOrden ? `📋 ${titulo}` : `ALERTA GRADO ${grado}: ${titulo}`,
-        body: mensaje
-      },
-      android: {
-        priority: isG3 || isG2 ? "high" : "normal"
-      }
-    };
-    return admin.messaging().send(msg).catch((e) => console.warn("FCM alert warning:", e.message));
-  });
-
-  const targetIds = (!destinatarios || destinatarios === "TODOS" || destinatarios === "TC")
-    ? null
-    : (Array.isArray(destinatarios)
-      ? destinatarios.map((id) => String(id).trim())
-      : String(destinatarios).split(",").map((id) => id.trim()).filter(Boolean));
-
-  promises.push(
+  await Promise.all([
+    sendDirectFcmToAndroidUsers({
+      data: alertData,
+      priority: (isG3 || isG2) ? "high" : "normal",
+      ttl: 300000,
+      targetUserIds: targetIds,
+      excludeUserIds: senderId ? [senderId] : [],
+      tag: `alert_${alertId}`
+    }),
     sendDirectApnsToIosUsers({
       title: isOrden ? `📋 ${titulo}` : `🔔 ALERTA GRADO ${grado}: ${titulo}`,
       body: mensaje,
@@ -517,18 +1076,10 @@ const onNewAlert = onDocumentCreated("alertas/{alertId}", async (event) => {
       priority: (isG3 || isG2) ? "10" : "5",
       collapseId: `alert_${alertId}`,
       targetUserIds: targetIds,
-      data: {
-        type: isOrden ? "ORDEN" : "ALERT",
-        payloadId: String(alertId),
-        gradoAlerta: String(grado),
-        senderId: String(senderId),
-        title: isOrden ? `📋 ${titulo}` : `ALERTA GRADO ${grado}: ${titulo}`,
-        body: mensaje
-      }
+      excludeUserIds: senderId ? [senderId] : [],
+      data: alertData
     })
-  );
-
-  await Promise.all(promises);
+  ]);
 });
 
 // 4. SINCRONIZACIÓN DE ESTADO DE PERSONAL (0-9 / 0-8) DESDE LA CENTRAL (CON VIBRACIÓN Y NOTIFICACIÓN VISUAL)
@@ -543,7 +1094,6 @@ exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event)
   if (estadoBefore === estadoAfter) return;
   if (after._changedByCentral !== true) return;
 
-  const safeTopic = userId.replace(/\s+/g, "");
   const titleText = "ESTADO ACTUALIZADO";
   const bodyText = `Tu estado ha sido cambiado a ${estadoAfter} por la Central`;
   const statusData = {
@@ -555,14 +1105,13 @@ exports.onPersonalUpdated = onDocumentUpdated("personal/{userId}", async (event)
   };
 
   await Promise.all([
-    admin.messaging().send({
-      topic: `usuario_${safeTopic}`,
+    sendDirectFcmToAndroidUsers({
       data: statusData,
-      android: {
-        priority: "high",
-        ttl: 300000
-      }
-    }).catch((e) => console.warn("FCM status warning:", e.message)),
+      priority: "high",
+      ttl: 300000,
+      targetUserIds: [userId],
+      tag: `status_${userId}`
+    }),
     sendDirectApnsToIosUsers({
       title: titleText,
       body: bodyText,
@@ -583,9 +1132,10 @@ exports.subscribeTokenToTopics = onDocumentCreated("personal/{userId}", async (e
   const userId = String(data.idRegistro || event.params.userId || "").trim();
   const tok = String(data.deviceId || "").trim();
   const isConductor = Boolean(data.conductor);
-  const platform = data.apnsToken ? "ios" : String(data.platform || "");
+  const platform = resolveEffectivePlatform(data);
+  const hasValidApns = /^[0-9a-f]{64}$/.test(String(data.apnsToken || "").trim().toLowerCase());
   if (isValidFcmRegistrationToken(tok)) {
-    await subscribeFcmTokenForUser(tok, userId, isConductor, false, platform);
+    await subscribeFcmTokenForUser(tok, userId, isConductor, false, platform, hasValidApns);
   }
 });
 
@@ -597,10 +1147,15 @@ exports.syncTokenTopicsOnUpdate = onDocumentUpdated("personal/{userId}", async (
   const tokBefore = String(before.deviceId || "").trim();
   const condAfter = Boolean(after.conductor);
   const condBefore = Boolean(before.conductor);
-  const platAfter = after.apnsToken ? "ios" : String(after.platform || "");
-  const platBefore = before.apnsToken ? "ios" : String(before.platform || "");
-  if (isValidFcmRegistrationToken(tokAfter) && (tokAfter !== tokBefore || condAfter !== condBefore || platAfter !== platBefore)) {
-    await subscribeFcmTokenForUser(tokAfter, userId, condAfter, false, platAfter);
+  const platAfter = resolveEffectivePlatform(after);
+  const platBefore = resolveEffectivePlatform(before);
+  const apnsAfterValid = /^[0-9a-f]{64}$/.test(String(after.apnsToken || "").trim().toLowerCase());
+  const apnsBeforeValid = /^[0-9a-f]{64}$/.test(String(before.apnsToken || "").trim().toLowerCase());
+  if (
+    isValidFcmRegistrationToken(tokAfter) &&
+    (tokAfter !== tokBefore || condAfter !== condBefore || platAfter !== platBefore || apnsAfterValid !== apnsBeforeValid)
+  ) {
+    await subscribeFcmTokenForUser(tokAfter, userId, condAfter, false, platAfter, apnsAfterValid);
   }
 });
 
@@ -615,41 +1170,49 @@ const onDoorRequestCreated = onDocumentCreated("solicitudes_puerta/{requestId}",
   if (estado !== "PENDIENTE") return;
 
   const solicitanteNombre = data.solicitanteNombre || data.nombreBombero || data.nombre || "Un bombero";
-  const solicitanteId = data.solicitanteId || data.idRegistro || "";
+  const solicitanteId = String(data.solicitanteId || data.idRegistro || "").trim();
+  const doorBody = `${solicitanteNombre} solicita abrir el portón del cuartel.`;
+  const doorData = {
+    type: "DOOR_REQUEST",
+    payloadId: String(requestId),
+    senderId: solicitanteId,
+    title: "SOLICITUD DE APERTURA DE PUERTA",
+    body: doorBody
+  };
 
-  await admin.messaging().send({
-    topic: "central_operador",
-    data: {
-      type: "DOOR_REQUEST",
-      payloadId: String(requestId),
-      senderId: String(solicitanteId),
-      title: "SOLICITUD DE APERTURA DE PUERTA",
-      body: `${solicitanteNombre} solicita abrir el portón del cuartel.`
-    },
-    android: {priority: "high"},
-    apns: {
-      headers: {
-        "apns-priority": "10",
-        "apns-push-type": "alert",
-        "apns-collapse-id": `door_${requestId}`.slice(0, 64)
-      },
-      payload: {
-        aps: {
-          alert: {
-            title: "🚪 SOLICITUD DE APERTURA DE PUERTA",
-            body: `${solicitanteNombre} solicita abrir el portón del cuartel.`
-          },
-          sound: "importante.mp3",
-          badge: 1,
-          category: "DOOR_REQUEST_ALERT",
-          "interruption-level": "time-sensitive",
-          "relevance-score": 1.0,
-          "content-available": 1,
-          "mutable-content": 1
-        }
-      }
-    }
-  });
+  const db = admin.firestore();
+  const centralId = await resolveActiveCentralOperatorId(db);
+  const excludeIds = solicitanteId ? [solicitanteId] : [];
+  const tasks = [
+    sendDirectFcmToAndroidUsers({
+      data: doorData,
+      priority: "high",
+      ttl: 300000,
+      onlyCentralOperator: true,
+      excludeUserIds: excludeIds,
+      tag: `door_${requestId}`
+    })
+  ];
+
+  if (centralId && centralId !== solicitanteId) {
+    tasks.push(
+      sendDirectApnsToIosUsers({
+        title: "🚪 SOLICITUD DE APERTURA DE PUERTA",
+        body: doorBody,
+        sound: "importante.mp3",
+        category: "DOOR_REQUEST_ALERT",
+        interruptionLevel: "time-sensitive",
+        relevanceScore: 1.0,
+        priority: "10",
+        collapseId: `door_${requestId}`,
+        targetUserIds: [centralId],
+        respectStatus09ForSound: false,
+        data: doorData
+      })
+    );
+  }
+
+  await Promise.all(tasks);
 });
 
 // Alias compatibles con despliegue existente en proyectos Firebase (enviarDespacho / actualizarDespacho / enviarAlerta / etc.)
@@ -682,22 +1245,9 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
   const direccionCanonica = String(after.direccion || after.lugar || "").trim();
   const direccion = direccionCanonica || (estadoAfterLower === "pre-despacho" ? "PRE-DESPACHO EN CURSO" : "Sin ubicación");
   const unidades = extractUnitsString(after);
-  const carrosList = unidades ? unidades.split(" / ").map((s) => s.trim()).filter(Boolean) : [];
   const fechaDespacho = String(after.fechaDespacho || after.fecha || clDt.fechaDespacho).trim();
   const horaDespacho = String(after.horaDespacho || after.hora || clDt.horaDespacho).trim();
   const createdAt = String(epochMs);
-
-  // Backfill automático en Firestore para apps V2.1.0 y V2.2.5
-  const backfillPatch = {};
-  if (!after.fechaDespacho && fechaDespacho) backfillPatch.fechaDespacho = fechaDespacho;
-  if (!after.horaDespacho && horaDespacho) backfillPatch.horaDespacho = horaDespacho;
-  if (direccionCanonica && after.lugar !== direccionCanonica) {
-    backfillPatch.lugar = direccionCanonica;
-  } else if (!after.lugar && direccion) {
-    backfillPatch.lugar = direccion;
-  }
-  if (unidades && after.carrosTexto !== unidades) backfillPatch.carrosTexto = unidades;
-  if (carrosList.length > 0 && !Array.isArray(after.carros)) backfillPatch.carros = carrosList;
 
   // El primer tono suena UNA SOLA VEZ al crearse el despacho (ya sea en pre-despacho o activa).
   // El paso de pre-despacho a activa NO vuelve a disparar tono; el segundo tono es estrictamente a los 60 segundos si no ha respondido.
@@ -709,9 +1259,6 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
     !alreadySent;
 
   if (!shouldSendPush) {
-    if (Object.keys(backfillPatch).length > 0) {
-      await afterSnap.ref.update(backfillPatch);
-    }
     return;
   }
 
@@ -729,47 +1276,45 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
 
   const apnsSound = resolveApnsSound(clave);
 
-  const msg = {
-    topic: "despachos",
-    data: {
-      type: "DISPATCH",
-      payloadId: String(dispatchId),
-      dispatchId: String(dispatchId),
-      idServicio: String(dispatchId),
-      clave: String(clave),
-      key: String(clave),
-      claveApoyo: String(claveApoyo),
-      lugar: String(direccion),
-      direccion: String(direccion),
-      carrosTexto: String(unidades),
-      unidades: String(unidades),
-      estado: String(after.estado || "activa"),
-      title: String(titleText),
-      body: String(bodyText),
-      fechaDespacho,
-      horaDespacho,
-      createdAt: String(createdAt)
-    },
-    android: {
-      priority: "high",
-      ttl: 300000
-    }
+  const dispatchData = {
+    type: "DISPATCH",
+    payloadId: String(dispatchId),
+    dispatchId: String(dispatchId),
+    idServicio: String(dispatchId),
+    clave: String(clave),
+    key: String(clave),
+    claveApoyo: String(claveApoyo),
+    lugar: String(direccion),
+    direccion: String(direccion),
+    carrosTexto: String(unidades),
+    unidades: String(unidades),
+    estado: String(after.estado || "activa"),
+    title: String(titleText),
+    body: String(bodyText),
+    fechaDespacho,
+    horaDespacho,
+    createdAt: String(createdAt)
   };
 
   await Promise.all([
-    admin.messaging().send(msg).catch((e) => console.warn("FCM enviarDespacho warning:", e.message)),
+    sendDirectFcmToAndroidUsers({
+      data: dispatchData,
+      priority: "high",
+      ttl: 300000,
+      tag: `disp_${dispatchId}`
+    }),
     sendDirectApnsToIosUsers({
       title: `🚨 ${titleText}`,
       body: String(bodyText),
       sound: apnsSound,
       category: "EMERGENCY_DISPATCH",
       collapseId: `disp_${dispatchId}`,
-      data: msg.data
+      data: dispatchData
     }),
-    afterSnap.ref.update(Object.assign({}, backfillPatch, {
+    afterSnap.ref.update({
       pushSent: true,
-      pushSentAt: Date.now()
-    }))
+      _metaTimestamp: Date.now()
+    })
   ]);
 
   // Segundo tono exactamente a los 60 segundos después del primer tono,
@@ -819,7 +1364,7 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
       collapseId: `disp_rep60_${dispatchId}`,
       unrespondedOnlyForDispatchId: String(dispatchId),
       respondedUserIds: respondedSet,
-      data: Object.assign({}, msg.data, {
+      data: Object.assign({}, dispatchData, {
         clave: freshClave,
         direccion: freshDir,
         lugar: freshDir,
@@ -838,3 +1383,203 @@ exports.actualizarDespacho = onDispatchUpdated;
 exports.enviarAlerta = onNewAlert;
 exports.actualizarEstadoPersonal = onDocumentUpdated("personal/{userId}", async () => {});
 exports.solicitarAperturaPuerta = onDoorRequestCreated;
+
+// 6. RELAY PUSH DE ALERTAS Y CHAT INTER-CUERPOS SCI DESDE sisbom-central (GARANTIZA SENDER_ID NATIVO EN ANDROID)
+exports.enviarPushSciRelay = onDocumentCreated(
+  "sci_incidentes/{incidentId}/notificaciones_push/{pushId}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return null;
+    const data = snap.data() || {};
+    const title = String(data.title || "🚨 ALERTA SCI").trim();
+    const body = String(data.body || "Nueva notificación en Sistema de Comando de Incidentes").trim();
+    const type = String(data.type || "SCI_ALERT").trim();
+
+    let extra = {};
+    if (typeof data.payloadJson === "string" && data.payloadJson.trim()) {
+      try {
+        extra = JSON.parse(data.payloadJson) || {};
+      } catch (_) {}
+    }
+
+    const db = admin.firestore();
+    const targetIds = new Set();
+    if (Array.isArray(data.commanderIds)) {
+      data.commanderIds.forEach((id) => {
+        const clean = String(id || "").trim();
+        if (clean) targetIds.add(clean);
+      });
+    }
+
+    if (targetIds.size === 0 || (targetIds.size === 1 && targetIds.has("1"))) {
+      targetIds.clear();
+      const persSnap = await db.collection("personal").get();
+      persSnap.forEach((docSnap) => {
+        const p = docSnap.data() || {};
+        if (docSnap.id === "init" || p.placeholder === true) return;
+        const actStr = String(p.activo ?? "SI").trim().toUpperCase();
+        if (p.activo === false || actStr === "NO" || actStr === "0" || actStr === "INACTIVO") return;
+        if (isCommanderFlag(p) && p.modoAvion !== true && p.silencioAbsoluto !== true) {
+          const uid = String(p.idRegistro || docSnap.id || "").trim();
+          if (uid) {
+            targetIds.add(uid);
+          }
+        }
+      });
+    }
+
+    const stringData = {};
+    for (const [k, v] of Object.entries(Object.assign({}, extra, {
+      type,
+      title,
+      body,
+      gradoAlerta: "3"
+    }))) {
+      stringData[k] = String(v ?? "");
+    }
+
+    const targetList = Array.from(targetIds).filter(Boolean);
+    if (targetList.length === 0) return null;
+
+    await Promise.all([
+      sendDirectFcmToAndroidUsers({
+        data: stringData,
+        priority: "high",
+        ttl: 300000,
+        targetUserIds: targetList,
+        tag: `sci_${event.params.pushId}`
+      }),
+      sendDirectApnsToIosUsers({
+        title,
+        body,
+        sound: String(data.sound || "importante.mp3").trim(),
+        category: type === "EVACUATION_ALERT" ? "EMERGENCY_DISPATCH" : "GENERAL_ALERT",
+        interruptionLevel: "time-sensitive",
+        relevanceScore: 1.0,
+        priority: "10",
+        collapseId: String(event.params.pushId || ""),
+        targetUserIds: targetList,
+        respectStatus09ForSound: false,
+        data: stringData
+      })
+    ]);
+    return null;
+  }
+);
+
+// 7. SINCRONIZACION AUTOMATICA FIRESTORE -> FIREBASE AUTH PARA PERSONAL
+// Mantiene creadas/actualizadas las cuentas ${idRegistro}@sisbom.com (${contrasena}_secure_sisbom)
+// sin modificar Firestore (cero riesgo de bucles) cuando se crea o edita personal en CORE/ONE.
+exports.sincronizarAuthPersonal = onDocumentWritten("personal/{userId}", async (event) => {
+  const userId = String(event.params?.userId || "").trim();
+  const afterSnap = event.data && event.data.after;
+  const beforeSnap = event.data && event.data.before;
+
+  if (!afterSnap || !afterSnap.exists) {
+    if (userId && userId !== "init") {
+      await admin.auth().deleteUser(userId).catch(() => {});
+    }
+    return null;
+  }
+
+  const after = afterSnap.data() || {};
+  if (userId === "init" || after.placeholder === true) {
+    return null;
+  }
+
+  const uid = String(after.idRegistro || userId).trim();
+  if (!uid) return null;
+
+  const rawPass = String(after.contrasena ?? "").trim();
+  const actStr = String(after.activo ?? "SI").trim().toUpperCase();
+  const disabled = after.activo === false || actStr === "NO" || actStr === "0" || actStr === "INACTIVO";
+  const displayName = String(after.nombreBombero || after.nombre || uid).trim();
+
+  if (beforeSnap && beforeSnap.exists) {
+    const before = beforeSnap.data() || {};
+    const prevUid = String(before.idRegistro || userId).trim();
+    const prevRawPass = String(before.contrasena ?? "").trim();
+    const prevActStr = String(before.activo ?? "SI").trim().toUpperCase();
+    const prevDisabled = before.activo === false || prevActStr === "NO" || prevActStr === "0" || prevActStr === "INACTIVO";
+    const prevDisplayName = String(before.nombreBombero || before.nombre || prevUid).trim();
+
+    if (
+      prevUid === uid &&
+      prevRawPass === rawPass &&
+      prevDisabled === disabled &&
+      prevDisplayName === displayName
+    ) {
+      return null;
+    }
+  }
+
+  const email = `${uid}@sisbom.com`.toLowerCase();
+  const securePass = rawPass
+    ? (rawPass.endsWith("_secure_sisbom") ? rawPass : `${rawPass}_secure_sisbom`)
+    : "";
+
+  try {
+    if (!securePass || securePass.length < 6) {
+      try {
+        await admin.auth().getUser(uid);
+        await admin.auth().updateUser(uid, { displayName, disabled });
+      } catch (err) {
+        if (err && err.code !== "auth/user-not-found") {
+          console.warn(`sincronizarAuthPersonal update metadata ${uid} warning:`, err.message);
+        }
+      }
+      return null;
+    }
+
+    try {
+      await admin.auth().getUser(uid);
+      await admin.auth().updateUser(uid, {
+        email,
+        emailVerified: true,
+        password: securePass,
+        displayName,
+        disabled
+      });
+    } catch (getErr) {
+      if (!getErr || getErr.code !== "auth/user-not-found") {
+        throw getErr;
+      }
+
+      try {
+        const existingByEmail = await admin.auth().getUserByEmail(email);
+        if (existingByEmail && existingByEmail.uid !== uid) {
+          await admin.auth().deleteUser(existingByEmail.uid);
+        }
+      } catch (_) {}
+
+      try {
+        await admin.auth().createUser({
+          uid,
+          email,
+          emailVerified: true,
+          password: securePass,
+          displayName,
+          disabled
+        });
+      } catch (createErr) {
+        if (createErr && (createErr.code === "auth/uid-already-exists" || createErr.code === "auth/email-already-exists")) {
+          await admin.auth().updateUser(uid, {
+            email,
+            emailVerified: true,
+            password: securePass,
+            displayName,
+            disabled
+          }).catch(() => {});
+        } else {
+          throw createErr;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`sincronizarAuthPersonal(${uid}) error:`, err.message);
+  }
+
+  return null;
+});
+
+

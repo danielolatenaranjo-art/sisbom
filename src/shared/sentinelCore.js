@@ -606,7 +606,10 @@ export function getEntityMaxTimestamp(entity = {}) {
     entity.solicitudConductorTimestamp,
     entity.solicitudPersonalTimestamp,
     entity.aprobadoAt,
-    entity.queuedAt
+    entity.queuedAt,
+    entity.evacuar?.updatedAt,
+    entity.evacuar?.triggeredAt,
+    entity.evacuationAlert?.triggeredAt
   ];
 
   if (entity._fieldTimestamps && typeof entity._fieldTimestamps === 'object') {
@@ -1109,6 +1112,7 @@ export const CANONICAL_DISPATCH_KEYS = new Set([
   'sirena',
   'visibleMovil',
   'pushSent',
+  'evacuar',
   '_allowFinalizedEdit',
   '_metaTimestamp',
   '_fieldTimestamps'
@@ -1118,11 +1122,15 @@ export function sanitizeCanonicalUnidadesMap(unidadesInput = {}, unitsArray = []
   const cleanMap = {};
 
   if (unidadesInput && typeof unidadesInput === 'object' && !Array.isArray(unidadesInput)) {
+    const currentYear = new Date().getFullYear();
     Object.entries(unidadesInput).forEach(([carro, val]) => {
       if (!carro) return;
       const uObj = (typeof val === 'object' && val !== null) ? val : {};
+      const strFallback = typeof val === 'string' && parseBitacoraIdParts(val.trim(), currentYear)
+        ? val.trim()
+        : '';
       const entry = {
-        idSalida: uObj.idSalida ? String(uObj.idSalida).trim() : (typeof val === 'string' ? val.trim() : '')
+        idSalida: uObj.idSalida ? String(uObj.idSalida).trim() : strFallback
       };
       if (uObj.solicitudConductorTimestamp !== undefined) {
         entry.solicitudConductorTimestamp = uObj.solicitudConductorTimestamp ? Number(uObj.solicitudConductorTimestamp) : null;
@@ -1418,6 +1426,12 @@ export function sanitizeCanonicalPersonnelUpdate(partial = {}) {
   if (partial.cargo !== undefined) clean.cargo = String(partial.cargo).trim();
   if (partial.ordenEnLista !== undefined) clean.ordenEnLista = Number(partial.ordenEnLista) || 0;
   if (partial.activo !== undefined) clean.activo = Boolean(partial.activo);
+  if (partial.personalMedico !== undefined || partial.personal_medico !== undefined) {
+    clean.personalMedico = hasMedicalStaffFlag(partial);
+  }
+  if (partial.modoAdmin !== undefined) {
+    clean.modoAdmin = hasAdminModeFlag(partial);
+  }
   if (partial.conductor !== undefined || partial.esConductor !== undefined) {
     clean.conductor = Boolean(partial.conductor ?? partial.esConductor);
   }
@@ -1844,7 +1858,9 @@ export function normalizeSaasClientDoc(docId, raw = {}) {
     ).trim(),
     storageBucket: String(fc.storageBucket || '').trim(),
     messagingSenderId: String(fc.messagingSenderId || '').trim(),
-    appId: String(fc.appId || '').trim()
+    appId: String(fc.appId || '').trim(),
+    ...(fc.androidAppId ? { androidAppId: String(fc.androidAppId).trim() } : {}),
+    ...(fc.iosAppId ? { iosAppId: String(fc.iosAppId).trim() } : {})
   };
 
   // Google Sheets Bitácora (Canónico V3 `googleSheetsBitacora` + fallback V2)
@@ -2256,12 +2272,123 @@ export function normalizeAttendanceFirefighterDoc(docId, raw = {}) {
 }
 
 // ============================================================================
-// 9. DEPARTAMENTO MÉDICO E HISTORIAL CLÍNICO (SENTINEL MED & SENTINEL CORE)
+// 9. FICHA CLÍNICA Y HOJA DE ATENCIÓN RESCATE (SENTINEL MED & SENTINEL CORE)
 // ============================================================================
 
+export const MED_ANTECEDENTES_PERSONALES = [
+  { key: 'hta', label: 'HTA' },
+  { key: 'dm', label: 'DM' },
+  { key: 'resistenciaInsulina', label: 'RESIS. INSULINA' },
+  { key: 'epi', label: 'EPI' },
+  { key: 'cardiopatia', label: 'CARDIOPATIA' },
+  { key: 'epoc', label: 'EPOC' },
+  { key: 'saludMental', label: 'SALUD MENTAL' },
+  { key: 'asma', label: 'ASMA' },
+  { key: 'hitt4', label: 'HIT4' },
+  { key: 'tabaco', label: 'TABACO' },
+  { key: 'alcohol', label: 'ALCOHOL' },
+  { key: 'ocasional', label: 'OCASIONAL' },
+  { key: 'drogas', label: 'DROGAS' },
+  { key: 'ninguna', label: 'NINGUNA' }
+];
+
+export const MED_ANTECEDENTES_FAMILIARES = [
+  { key: 'hta', label: 'HTA' },
+  { key: 'dm', label: 'DM' },
+  { key: 'epi', label: 'EPI' },
+  { key: 'cardiopatia', label: 'CARDIOPATIA' },
+  { key: 'epoc', label: 'EPOC' },
+  { key: 'saludMental', label: 'SALUD MENTAL' },
+  { key: 'asma', label: 'ASMA' },
+  { key: 'hitt4', label: 'HIT4' },
+  { key: 'tabaco', label: 'TABACO' },
+  { key: 'alcohol', label: 'ALCOHOL' },
+  { key: 'drogas', label: 'DROGAS' },
+  { key: 'otras', label: 'OTRAS' }
+];
+
+export const MED_ALERGIAS_OPCIONES = [
+  { key: 'noAplica', label: 'NO' },
+  { key: 'medicamentos', label: 'MEDICAMENTOS' },
+  { key: 'alimentos', label: 'ALIMENTOS' },
+  { key: 'picaduras', label: 'PICADURAS' },
+  { key: 'latex', label: 'LATEX' },
+  { key: 'otros', label: 'OTROS' }
+];
+
+export const MED_VACUNAS_INMUNO = [
+  { key: 'fiebreAmarilla', label: 'FIEBRE AMARILLA' },
+  { key: 'hepatitisA', label: 'HEPATITIS A' },
+  { key: 'hepatitisB', label: 'HEPATITIS B' },
+  { key: 'viruelaMono', label: 'VIRUELA DEL MONO' },
+  { key: 'influenza', label: 'INFLUENZA' },
+  { key: 'covid19', label: 'COVID-19' },
+  { key: 'toxoideTetanico', label: 'TOXOIDE TETANICO' }
+];
+
+export const MED_ANTECEDENTES_MORBIDOS_PACIENTE = [
+  { key: 'hta', label: 'HTA' },
+  { key: 'dm', label: 'DM' },
+  { key: 'dlp', label: 'DLP' },
+  { key: 'epi', label: 'EPI' },
+  { key: 'hitt4', label: 'HIT4' },
+  { key: 'noAplica', label: 'NO APLICA' }
+];
+
+export const MED_LUGARES_SUCESO = [
+  'VIA PUBLICA',
+  'TRABAJO',
+  'LICEO/ESCUELA',
+  'DOMICILIO',
+  'URGENCIA',
+  'AGRICOLA'
+];
+
+export const MED_CINCINNATI_INTERVENCIONES = {
+  0: { codigo: '0/3', interpretacion: 'SIN SIGNOS OBSERVABLES DE ACV', nivel: 'VERDE' },
+  1: { codigo: '1/3', interpretacion: 'ALTA SOSPECHA - ACTIVAR CR Y MONITOREO', nivel: 'AMARILLO' },
+  2: { codigo: '2/3', interpretacion: 'MUY ALTA SOSPECHA - ACTIVAR CODIGO ACV', nivel: 'NARANJA' },
+  3: { codigo: '3/3', interpretacion: 'SOSPECHA CRITICA - TRASLADO INMEDIATO Y NOTIFICACION DIRECTA', nivel: 'ROJO' }
+};
+
+export function classifyBmiObesity(imcValue) {
+  const num = Number(imcValue || 0);
+  if (!num || !Number.isFinite(num) || num <= 0) {
+    return { categoria: '', label: 'SIN CALCULO', esObesidad: false };
+  }
+  if (num < 18.5) return { categoria: 'BAJO_PESO', label: 'BAJO PESO (IMC < 18,5)', esObesidad: false };
+  if (num < 25) return { categoria: 'PESO_NORMAL', label: 'PESO NORMAL (IMC 18,5 - 24,9)', esObesidad: false };
+  if (num < 30) return { categoria: 'SOBREPESO', label: 'SOBREPESO (IMC 25 - 29,9)', esObesidad: false };
+  return { categoria: 'OBESIDAD', label: 'OBESIDAD (IMC >= 30)', esObesidad: true };
+}
+
+export function evaluateCincinnatiScale(caidaFacial = 0, debilidadBrazo = 0, dificultadHabla = 0) {
+  const f = Number(caidaFacial) ? 1 : 0;
+  const b = Number(debilidadBrazo) ? 1 : 0;
+  const h = Number(dificultadHabla) ? 1 : 0;
+  const puntaje = Math.min(3, Math.max(0, f + b + h));
+  const meta = MED_CINCINNATI_INTERVENCIONES[puntaje] || MED_CINCINNATI_INTERVENCIONES[0];
+  return {
+    caidaFacial: f,
+    debilidadBrazo: b,
+    dificultadHabla: h,
+    puntaje,
+    ...meta
+  };
+}
+
+function normalizeBoolFlags(rawObj = {}, keys = []) {
+  const src = (rawObj && typeof rawObj === 'object') ? rawObj : {};
+  const out = {};
+  keys.forEach((k) => {
+    out[k] = Boolean(src[k]);
+  });
+  return out;
+}
+
 /**
- * Normaliza en modo Dual-Read la Ficha Médica de un Bombero combinando la subcolección
- * `personal/{idRegistro}/salud/actual` (V2/V3) y los campos médicos de `personal/{idRegistro}`.
+ * Normaliza en modo Dual-Read la Ficha Clínica de un Bombero leyendo
+ * `personal/{idRegistro}/salud/actual` + datos base de `personal/{idRegistro}`.
  */
 export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPersonal = {}) {
   const s = (rawSalud && typeof rawSalud === 'object') ? rawSalud : {};
@@ -2269,16 +2396,88 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
 
   const cleanId = String(idRegistro || s.idRegistro || p.idRegistro || p.id || '').trim();
   const sangre = String(s.sangre || s.grupoSanguineo || p.grupoSanguineo || p.sangre || '').trim().toUpperCase();
-  const alergias = String(s.alergias || p.alergias || '').trim().toUpperCase();
-  const cronicas = String(s.cronicas || s.enfermedadesCronicas || p.enfermedadesCronicas || p.cronicas || '').trim().toUpperCase();
-  const medicamentos = String(s.medicamentos || p.medicamentos || '').trim().toUpperCase();
+
+  // Sección 1.- Antecedentes Médicos Personales
+  const antPerRaw = (s.antecedentesPersonales && typeof s.antecedentesPersonales === 'object') ? s.antecedentesPersonales : {};
+  const antecedentesPersonales = {
+    ...normalizeBoolFlags(antPerRaw, MED_ANTECEDENTES_PERSONALES.map((x) => x.key)),
+    debilidadOLimitaciones: Boolean(antPerRaw.debilidadOLimitaciones),
+    otrosLimitaciones: String(antPerRaw.otrosLimitaciones || s.otrosLimitaciones || '').trim().toUpperCase()
+  };
+
+  // Sección 1.1.- Antecedentes Médicos Familiares
+  const antFamRaw = (s.antecedentesFamiliares && typeof s.antecedentesFamiliares === 'object') ? s.antecedentesFamiliares : {};
+  const antecedentesFamiliares = {
+    ...normalizeBoolFlags(antFamRaw, MED_ANTECEDENTES_FAMILIARES.map((x) => x.key)),
+    otrasCual: String(antFamRaw.otrasCual || s.antecedentesFamiliaresOtras || '').trim().toUpperCase()
+  };
+
+  // Sección 2.- Medicamentos Actuales (tabla + resumen plano)
+  const medsTableRaw = Array.isArray(s.medicamentosActuales) ? s.medicamentosActuales : [];
+  const medicamentosActuales = medsTableRaw
+    .map((m) => ({
+      medicamento: String(m?.medicamento || '').trim().toUpperCase(),
+      dosis: String(m?.dosis || '').trim().toUpperCase(),
+      frecuencia: String(m?.frecuencia || '').trim().toUpperCase(),
+      motivo: String(m?.motivo || '').trim().toUpperCase()
+    }))
+    .filter((m) => m.medicamento || m.dosis || m.frecuencia || m.motivo);
+  const medsJoined = medicamentosActuales
+    .map((m) => [m.medicamento, m.dosis, m.frecuencia, m.motivo].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('; ');
+  const medicamentos = String(s.medicamentos || medsJoined || '').trim().toUpperCase();
+
+  // Sección 3.- Alergias (checkboxes + especificar + resumen plano)
+  const algDetRaw = (s.alergiasDetalle && typeof s.alergiasDetalle === 'object') ? s.alergiasDetalle : {};
+  const alergiasDetalle = {
+    ...normalizeBoolFlags(algDetRaw, MED_ALERGIAS_OPCIONES.map((x) => x.key)),
+    especificar: String(algDetRaw.especificar || '').trim().toUpperCase()
+  };
+  const activeAlergiaLabels = MED_ALERGIAS_OPCIONES
+    .filter((x) => x.key !== 'noAplica' && alergiasDetalle[x.key])
+    .map((x) => x.label);
+  const alergiasFlat = alergiasDetalle.noAplica
+    ? 'NO REFIERE'
+    : [activeAlergiaLabels.join(', '), alergiasDetalle.especificar].filter(Boolean).join(' - ');
+  const alergias = String(s.alergias || alergiasFlat || '').trim().toUpperCase();
+
+  // Sección 4.- Antecedentes Quirúrgicos
+  const qxRaw = (s.antecedentesQuirurgicos && typeof s.antecedentesQuirurgicos === 'object') ? s.antecedentesQuirurgicos : {};
+  const cirugiasList = Array.isArray(qxRaw.cirugias)
+    ? qxRaw.cirugias.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+  const antecedentesQuirurgicos = {
+    noAplica: Boolean(qxRaw.noAplica) && cirugiasList.length === 0,
+    cirugias: cirugiasList
+  };
+
+  // Sección 5.- Inmuno-Profilaxis (mapa por vacuna con fechas DD-MM-YYYY)
+  const inmRaw = (s.inmunoProfilaxis && typeof s.inmunoProfilaxis === 'object') ? s.inmunoProfilaxis : {};
+  const inmunoProfilaxis = {};
+  MED_VACUNAS_INMUNO.forEach(({ key }) => {
+    const fechas = Array.isArray(inmRaw[key]) ? inmRaw[key] : (Array.isArray(inmRaw[key]?.fechas) ? inmRaw[key].fechas : []);
+    inmunoProfilaxis[key] = fechas.map((f) => String(f || '').trim()).filter(Boolean).slice(0, 7);
+  });
+
+  // Crónicas derivadas de checkboxes + texto legado
+  const checkedPersonalCronicas = MED_ANTECEDENTES_PERSONALES
+    .filter((x) => x.key !== 'ninguna' && antecedentesPersonales[x.key])
+    .map((x) => x.label);
+  const cronicas = String(
+    s.cronicas ||
+    s.enfermedadesCronicas ||
+    (antecedentesPersonales.ninguna ? 'NINGUNA' : checkedPersonalCronicas.join(', ')) ||
+    ''
+  ).trim().toUpperCase();
+
   const previsionSalud = String(s.previsionSalud || s.prevision || p.previsionSalud || p.prevision || '').trim().toUpperCase();
   const seguroAccidentes = String(s.seguroAccidentes || 'SI').trim().toUpperCase();
   const detalleSeguro = String(s.detalleSeguro || '').trim().toUpperCase();
   const contactoNombre = String(s.contactoNombre || s.contactoEmergenciaNombre || p.contactoEmergencia || s.contactoEmergencia || '').trim().toUpperCase();
   const contactoFono = sanitizeChileanPhone(s.contactoFono || s.contactoEmergenciaTelefono || p.telefonoEmergencia || s.telefonoEmergencia || '');
   const contactoParentesco = String(s.contactoEmergenciaParentesco || s.contactoParentesco || '').trim().toUpperCase();
-  const observaciones = String(s.observaciones || s.observacionesMedicas || p.observacionesMedicas || '').trim().toUpperCase();
+  const observaciones = String(s.observaciones || s.observacionesMedicas || '').trim().toUpperCase();
 
   // Licencia médica (soporta tanto objeto V2/MED { activa, inicio, fin, tipoReposo, observaciones } como timestamp/string CORE)
   const rawLicencia = s.licenciaMedica ?? p.licenciaMedica ?? p.licenciaHasta ?? null;
@@ -2317,39 +2516,57 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
     aptitudOperativa = isLicenciaActiva ? 'BAJA_TEMPORAL' : 'APTO';
   }
 
+  // Sección 6.- Control Antropometría y Signos Vitales Base
   const svRaw = (s.signosVitalesBase && typeof s.signosVitalesBase === 'object') ? s.signosVitalesBase : {};
-  const pesoKg = Number(svRaw.pesoKg ?? s.pesoKg ?? 0) || null;
-  const tallaCm = Number(svRaw.tallaCm ?? s.tallaCm ?? s.alturaCm ?? 0) || null;
-  let imc = Number(svRaw.imc ?? s.imc ?? 0) || null;
+  const antroRaw = (s.controlAntropometria && typeof s.controlAntropometria === 'object') ? s.controlAntropometria : {};
+  const pesoKg = Number(antroRaw.pesoKg ?? svRaw.pesoKg ?? s.pesoKg ?? 0) || null;
+  const rawTallaMts = Number(antroRaw.tallaMts ?? 0) || 0;
+  const tallaCm = Number(antroRaw.tallaCm ?? svRaw.tallaCm ?? s.tallaCm ?? s.alturaCm ?? (rawTallaMts > 0 ? Math.round(rawTallaMts * 100) : 0)) || null;
+  const tallaMts = tallaCm ? Number((tallaCm / 100).toFixed(2)) : (rawTallaMts || null);
+  let imc = Number(antroRaw.imc ?? svRaw.imc ?? s.imc ?? 0) || null;
   if (!imc && pesoKg && tallaCm && tallaCm > 50) {
     const m = tallaCm / 100;
     imc = Number((pesoKg / (m * m)).toFixed(1));
   }
+  const clasifImc = classifyBmiObesity(imc);
 
   const signosVitalesBase = {
-    paSistolica: Number(svRaw.paSistolica ?? 0) || null,
-    paDiastolica: Number(svRaw.paDiastolica ?? 0) || null,
-    fc: Number(svRaw.fc ?? 0) || null,
-    spo2: Number(svRaw.spo2 ?? 0) || null,
-    temperatura: Number(svRaw.temperatura ?? 0) || null,
+    paSistolica: Number(antroRaw.paSistolica ?? svRaw.paSistolica ?? 0) || null,
+    paDiastolica: Number(antroRaw.paDiastolica ?? svRaw.paDiastolica ?? 0) || null,
+    fc: Number(antroRaw.fc ?? svRaw.fc ?? 0) || null,
+    fr: Number(antroRaw.fr ?? svRaw.fr ?? 0) || null,
+    spo2: Number(antroRaw.satO2 ?? antroRaw.spo2 ?? svRaw.spo2 ?? 0) || null,
+    temperatura: Number(antroRaw.temperatura ?? svRaw.temperatura ?? 0) || null,
+    hgt: Number(antroRaw.hgt ?? svRaw.hgt ?? 0) || null,
     pesoKg,
     tallaCm,
+    tallaMts,
     imc,
+    clasificacionImc: clasifImc.categoria,
+    comentarios: String(antroRaw.comentarios || s.comentariosAntropometria || '').trim().toUpperCase(),
     timestamp: parseToEpochMs(svRaw.timestamp) || null
   };
 
   const ts = parseToEpochMs(s.timestamp ?? s._metaTimestamp, '', s.fechaActualizacion) || Date.now();
   const proximoControlTimestamp = parseToEpochMs(s.proximoControlTimestamp, '', s.proximoControlFecha) || null;
+  const fechaConfeccionFicha = String(s.fechaConfeccionFicha || formatEpochToDDMMYYYY(ts) || '').trim();
 
   return {
     id: cleanId,
     idRegistro: cleanId,
+    fechaConfeccionFicha,
     sangre,
     grupoSanguineo: sangre,
     alergias,
+    alergiasDetalle,
     cronicas,
     enfermedadesCronicas: cronicas,
     medicamentos,
+    medicamentosActuales,
+    antecedentesPersonales,
+    antecedentesFamiliares,
+    antecedentesQuirurgicos,
+    inmunoProfilaxis,
     previsionSalud,
     prevision: previsionSalud,
     seguroAccidentes,
@@ -2367,7 +2584,10 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
     pesoKg,
     alturaCm: tallaCm,
     tallaCm,
+    tallaMts,
     imc,
+    clasificacionImc: clasifImc.categoria,
+    esObesidad: clasifImc.esObesidad,
     ultimaEvaluacionMedica: String(s.ultimaEvaluacionMedica || '').trim(),
     licenciaMedica: licenciaMedicaObj,
     licenciaMedicaTs,
@@ -2375,9 +2595,10 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
     motivoLicencia,
     isLicenciaActiva,
     signosVitalesBase,
+    controlAntropometria: signosVitalesBase,
     proximoControlTimestamp,
     proximoControlStr: formatEpochToDDMMYYYY(proximoControlTimestamp),
-    actualizadoPor: String(s.actualizadoPor || 'DEPARTAMENTO MEDICO').trim().toUpperCase(),
+    actualizadoPor: String(s.actualizadoPor || 'OFICIAL SANIDAD').trim().toUpperCase(),
     timestamp: ts,
     fechaActualizacionStr: formatEpochToDDMMYYYY(ts),
     _metaTimestamp: Math.max(ts, Number(s._metaTimestamp || 0))
@@ -2385,20 +2606,26 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
 }
 
 /**
- * Construye el payload canónico para `personal/{idRegistro}/salud/actual`
- * manteniendo compatibilidad 100% con V2, SENTINEL CORE y SENTINEL MED.
+ * Construye el payload canónico para `personal/{idRegistro}/salud/actual`.
  */
 export function buildCanonicalFirefighterHealthDoc(raw = {}) {
   const nowMs = Number(raw.timestamp || Date.now());
   const norm = normalizeFirefighterHealthDoc(raw.idRegistro || raw.id, raw, raw);
   return {
     idRegistro: norm.idRegistro,
+    fechaConfeccionFicha: norm.fechaConfeccionFicha,
     sangre: norm.sangre,
     grupoSanguineo: norm.sangre,
     alergias: norm.alergias,
+    alergiasDetalle: norm.alergiasDetalle,
     cronicas: norm.cronicas,
     enfermedadesCronicas: norm.cronicas,
     medicamentos: norm.medicamentos,
+    medicamentosActuales: norm.medicamentosActuales,
+    antecedentesPersonales: norm.antecedentesPersonales,
+    antecedentesFamiliares: norm.antecedentesFamiliares,
+    antecedentesQuirurgicos: norm.antecedentesQuirurgicos,
+    inmunoProfilaxis: norm.inmunoProfilaxis,
     previsionSalud: norm.previsionSalud,
     prevision: norm.previsionSalud,
     seguroAccidentes: norm.seguroAccidentes,
@@ -2414,13 +2641,16 @@ export function buildCanonicalFirefighterHealthDoc(raw = {}) {
     pesoKg: norm.pesoKg,
     alturaCm: norm.alturaCm,
     tallaCm: norm.tallaCm,
+    tallaMts: norm.tallaMts,
     imc: norm.imc,
+    clasificacionImc: norm.clasificacionImc,
     ultimaEvaluacionMedica: norm.ultimaEvaluacionMedica,
     licenciaMedica: norm.licenciaMedica,
     licenciaMedicaTs: norm.licenciaMedicaTs || null,
     motivoLicencia: norm.motivoLicencia || '',
     isLicenciaActiva: norm.isLicenciaActiva,
     signosVitalesBase: norm.signosVitalesBase,
+    controlAntropometria: norm.controlAntropometria,
     proximoControlTimestamp: norm.proximoControlTimestamp || null,
     actualizadoPor: norm.actualizadoPor,
     timestamp: nowMs,
@@ -2430,7 +2660,7 @@ export function buildCanonicalFirefighterHealthDoc(raw = {}) {
 
 /**
  * Calcula el siguiente correlativo canónico `AAAA-00000` (ej: `"2026-00001"`)
- * para registros clínicos de pacientes en `atenciones_medicas`.
+ * para hojas de atención de rescate en `despachos/{idServicio}/atencion_rescate`.
  */
 export function calculateNextCanonicalMedicalRecordId(recordsArray = [], dateObj = new Date()) {
   const d = dateObj instanceof Date ? dateObj : new Date(dateObj || Date.now());
@@ -2451,45 +2681,151 @@ export function calculateNextCanonicalMedicalRecordId(recordsArray = [], dateObj
 }
 
 /**
- * Construye un documento canónico de Atención Clínica de Paciente en Emergencia
- * (`atenciones_medicas/{idAtencion}`) compatible con SENTINEL MED y SENTINEL CORE.
+ * Construye un documento canónico de Hoja de Atención de Unidad de Rescate
+ * (`despachos/{idServicio}/atencion_rescate/{idAtencion}`) compatible con SENTINEL MED y SENTINEL CORE.
  */
 export function buildCanonicalPatientCareDoc(raw = {}) {
   const nowMs = Number(raw.timestamp || Date.now());
   const idAtencion = String(raw.idAtencion || raw.idFicha || raw.id || `${new Date(nowMs).getFullYear()}-00001`).trim();
+  const idServicio = String(raw.idServicio || raw.idDespacho || '').trim();
   const carro = String(raw.carro || raw.unidadMovil || raw.unidad || '').trim().toUpperCase();
   const compania = resolveCompanyFromVehicleId(carro, raw.compania || raw.companiaPaciente);
 
   const pacRaw = (raw.paciente && typeof raw.paciente === 'object') ? raw.paciente : raw;
+  const dmRaw = (raw.datosMedicos && typeof raw.datosMedicos === 'object') ? raw.datosMedicos : {};
+  const morbRaw = (dmRaw.antecedentesMorbidos && typeof dmRaw.antecedentesMorbidos === 'object') ? dmRaw.antecedentesMorbidos : {};
+  const embRaw = (dmRaw.embarazo && typeof dmRaw.embarazo === 'object') ? dmRaw.embarazo : {};
+  const procInvRaw = (raw.procedimientosInvasivos && typeof raw.procedimientosInvasivos === 'object') ? raw.procedimientosInvasivos : {};
+  const tipoAccRaw = (raw.tipoAccidente && typeof raw.tipoAccidente === 'object') ? raw.tipoAccidente : {};
   const abcRaw = (raw.evaluacionABCDE && typeof raw.evaluacionABCDE === 'object') ? raw.evaluacionABCDE : raw;
   const svRaw = (raw.signosVitales && typeof raw.signosVitales === 'object') ? raw.signosVitales : raw;
+  const cincRaw = (raw.escalaCincinnati && typeof raw.escalaCincinnati === 'object') ? raw.escalaCincinnati : raw;
   const trRaw = (raw.traslado615 && typeof raw.traslado615 === 'object') ? raw.traslado615 : raw;
   const atPorRaw = (raw.atendidoPor && typeof raw.atendidoPor === 'object') ? raw.atendidoPor : {};
+  const firmasRaw = (raw.firmas && typeof raw.firmas === 'object') ? raw.firmas : {};
 
-  const glasgowOcular = Math.min(4, Math.max(1, parseInt(String(raw.glasgowOcular ?? abcRaw.glasgowOcular ?? 4), 10) || 4));
-  const glasgowVerbal = Math.min(5, Math.max(1, parseInt(String(raw.glasgowVerbal ?? abcRaw.glasgowVerbal ?? 5), 10) || 5));
-  const glasgowMotor = Math.min(6, Math.max(1, parseInt(String(raw.glasgowMotor ?? abcRaw.glasgowMotor ?? 6), 10) || 6));
-  const glasgowNum = Math.min(
-    15,
-    Math.max(3, parseInt(String(raw.glasgowTotal ?? abcRaw.glasgow ?? (glasgowOcular + glasgowVerbal + glasgowMotor)), 10) || 15)
-  );
-  const evaNum = Math.min(10, Math.max(0, parseInt(String(svRaw.evaDolor ?? raw.evaDolor ?? 0), 10) || 0));
+  const rawGO = raw.glasgowOcular ?? abcRaw.glasgowOcular;
+  const rawGV = raw.glasgowVerbal ?? abcRaw.glasgowVerbal;
+  const rawGM = raw.glasgowMotor ?? abcRaw.glasgowMotor;
+  const glasgowOcular = rawGO !== undefined && rawGO !== null && rawGO !== ''
+    ? Math.min(4, Math.max(1, parseInt(String(rawGO), 10) || 1))
+    : null;
+  const glasgowVerbal = rawGV !== undefined && rawGV !== null && rawGV !== ''
+    ? Math.min(5, Math.max(1, parseInt(String(rawGV), 10) || 1))
+    : null;
+  const glasgowMotor = rawGM !== undefined && rawGM !== null && rawGM !== ''
+    ? Math.min(6, Math.max(1, parseInt(String(rawGM), 10) || 1))
+    : null;
+  const rawGT = raw.glasgowTotal ?? abcRaw.glasgow;
+  const glasgowNum =
+    glasgowOcular && glasgowVerbal && glasgowMotor
+      ? Math.min(15, Math.max(3, glasgowOcular + glasgowVerbal + glasgowMotor))
+      : rawGT !== undefined && rawGT !== null && rawGT !== ''
+        ? Math.min(15, Math.max(3, parseInt(String(rawGT), 10) || 3))
+        : null;
 
-  const triageCanon = String(raw.triageStart || raw.triage || 'VERDE').trim().toUpperCase();
-  const nombrePac = String(pacRaw.nombre || raw.nombrePaciente || pacRaw.nombrePaciente || 'PACIENTE N/N').trim().toUpperCase();
+  const rawEva = svRaw.evaDolor ?? raw.evaDolor;
+  const evaNum = rawEva !== undefined && rawEva !== null && rawEva !== ''
+    ? Math.min(10, Math.max(0, parseInt(String(rawEva), 10) || 0))
+    : null;
+
+  const triageCanon = String(raw.triageStart ?? raw.triage ?? '').trim().toUpperCase();
+  const nombrePac = String(pacRaw.nombre ?? raw.nombrePaciente ?? pacRaw.nombrePaciente ?? '').trim().toUpperCase();
   const rutPac = String(pacRaw.rut || raw.documentoPaciente || pacRaw.rutPaciente || '').trim().toUpperCase();
-  const edadPac = (pacRaw.edad ?? raw.edadPaciente) !== undefined && (pacRaw.edad ?? raw.edadPaciente) !== ''
+  const edadPac = (pacRaw.edad ?? raw.edadPaciente) !== undefined && (pacRaw.edad ?? raw.edadPaciente) !== '' && (pacRaw.edad ?? raw.edadPaciente) !== null
     ? Number(pacRaw.edad ?? raw.edadPaciente) || 0
     : null;
-  const sexoPac = String(pacRaw.sexo || raw.sexoPaciente || 'M').trim().toUpperCase();
+  const sexoPac = String(pacRaw.sexo ?? raw.sexoPaciente ?? '').trim().toUpperCase();
   const alergiasPac = String(pacRaw.alergias || raw.alergiasConocidas || '').trim().toUpperCase();
 
-  const viaAerea = String(abcRaw.viaAerea || raw.viaAerea || 'PERMEABLE').trim().toUpperCase();
-  const ventilacion = String(abcRaw.ventilacion || raw.ventilacion || 'ESPONTANEA NORMAL').trim().toUpperCase();
-  const circulacion = String(abcRaw.circulacion || raw.circulacion || 'PULSO PRESENTE, SIN HEMORRAGIA').trim().toUpperCase();
-  const pupilas = String(abcRaw.pupilas || raw.neurologico || 'ISOCORICAS REACTIVAS').trim().toUpperCase();
+  const diagnostico = String(dmRaw.diagnostico || raw.diagnostico || raw.motivoConsulta || '').trim().toUpperCase();
+  const datosMedicos = {
+    diagnostico,
+    antecedentesMorbidos: normalizeBoolFlags(morbRaw, MED_ANTECEDENTES_MORBIDOS_PACIENTE.map((x) => x.key)),
+    otrosAntecedentes: String(dmRaw.otrosAntecedentes || pacRaw.antecedentes || '').trim().toUpperCase(),
+    estadoEtilico: String(dmRaw.estadoEtilico || raw.estadoEtilico || '').trim().toUpperCase(),
+    embarazo: {
+      aplica: String(embRaw.aplica || '').trim().toUpperCase(),
+      meses: String(embRaw.meses || '').trim()
+    },
+    observacion: String(dmRaw.observacion || '').trim().toUpperCase()
+  };
+
+  const normInvasivoSiNo = (obj = {}) => ({
+    activo: String(obj.activo || '').trim().toUpperCase(),
+    numero: String(obj.numero || '').trim().toUpperCase(),
+    lugar: String(obj.lugar || '').trim().toUpperCase()
+  });
+
+  const procedimientosInvasivos = {
+    vvp1: normInvasivoSiNo(procInvRaw.vvp1),
+    vvp2: normInvasivoSiNo(procInvRaw.vvp2),
+    sondaFoley: {
+      activo: String(procInvRaw.sondaFoley?.activo || '').trim().toUpperCase(),
+      numero: String(procInvRaw.sondaFoley?.numero || '').trim().toUpperCase()
+    },
+    sng: {
+      activo: String(procInvRaw.sng?.activo || '').trim().toUpperCase(),
+      numero: String(procInvRaw.sng?.numero || '').trim().toUpperCase()
+    },
+    oxigenoterapia: {
+      activo: String(procInvRaw.oxigenoterapia?.activo || '').trim().toUpperCase(),
+      fio2: String(procInvRaw.oxigenoterapia?.fio2 || '').trim().toUpperCase()
+    },
+    insumosUtilizados: String(procInvRaw.insumosUtilizados || raw.insumosUtilizados || '').trim().toUpperCase()
+  };
+
+  const tratamientosRaw = Array.isArray(raw.tratamientos) ? raw.tratamientos : [];
+  const tratamientos = tratamientosRaw
+    .map((t) => ({
+      medicamento: String(t?.medicamento || '').trim().toUpperCase(),
+      dosis: String(t?.dosis || '').trim().toUpperCase(),
+      horario: String(t?.horario || '').trim().toUpperCase()
+    }))
+    .filter((t) => t.medicamento || t.dosis || t.horario);
+  const medsJoin = tratamientos
+    .map((t) => [t.medicamento, t.dosis, t.horario].filter(Boolean).join(' '))
+    .filter(Boolean)
+    .join('; ');
+  const medicamentosAdministrados = String(raw.medicamentosAdministrados || medsJoin || '').trim().toUpperCase();
+
+  const lugarSuceso = String(raw.lugarSuceso || '').trim().toUpperCase();
+  const tipoAccidente = {
+    transito: {
+      activo: Boolean(tipoAccRaw.transito?.activo),
+      volcamiento: Boolean(tipoAccRaw.transito?.volcamiento),
+      atropello: Boolean(tipoAccRaw.transito?.atropello),
+      colision: Boolean(tipoAccRaw.transito?.colision),
+      choque: Boolean(tipoAccRaw.transito?.choque),
+      otro: Boolean(tipoAccRaw.transito?.otro)
+    },
+    trauma: {
+      activo: Boolean(tipoAccRaw.trauma?.activo),
+      armaBlanca: Boolean(tipoAccRaw.trauma?.armaBlanca),
+      agresionFisica: Boolean(tipoAccRaw.trauma?.agresionFisica),
+      electrico: Boolean(tipoAccRaw.trauma?.electrico),
+      quemadura: Boolean(tipoAccRaw.trauma?.quemadura),
+      armaFuego: Boolean(tipoAccRaw.trauma?.armaFuego)
+    },
+    otros: {
+      texto: String(tipoAccRaw.otros?.texto || raw.mecanismoLesion || '').trim().toUpperCase(),
+      agresionSexual: Boolean(tipoAccRaw.otros?.agresionSexual),
+      intoxicacion: Boolean(tipoAccRaw.otros?.intoxicacion),
+      explosion: Boolean(tipoAccRaw.otros?.explosion),
+      ahogamiento: Boolean(tipoAccRaw.otros?.ahogamiento),
+      caidaNivel: Boolean(tipoAccRaw.otros?.caidaNivel),
+      caidaAltura: Boolean(tipoAccRaw.otros?.caidaAltura),
+      caidaAlturaMts: String(tipoAccRaw.otros?.caidaAlturaMts || '').trim(),
+      ahorcamiento: Boolean(tipoAccRaw.otros?.ahorcamiento)
+    }
+  };
+
+  const viaAerea = String(abcRaw.viaAerea || raw.viaAerea || '').trim().toUpperCase();
+  const ventilacion = String(abcRaw.ventilacion || raw.ventilacion || '').trim().toUpperCase();
+  const circulacion = String(abcRaw.circulacion || raw.circulacion || '').trim().toUpperCase();
+  const pupilas = String(abcRaw.pupilas || raw.neurologico || '').trim().toUpperCase();
   const exposicionLesiones = String(abcRaw.exposicionLesiones || raw.exposicionLesiones || raw.motivoConsulta || abcRaw.lesiones || '').trim().toUpperCase();
-  const motivoConsulta = String(raw.motivoConsulta || exposicionLesiones || 'EVALUACION PREHOSPITALARIA').trim().toUpperCase();
+  const motivoConsulta = String(raw.motivoConsulta || diagnostico || exposicionLesiones || '').trim().toUpperCase();
 
   const fc = Number(svRaw.fc ?? raw.fc ?? 0) || null;
   const fr = Number(svRaw.fr ?? raw.fr ?? 0) || null;
@@ -2498,19 +2834,46 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
   const spo2 = Number(svRaw.spo2 ?? raw.spo2 ?? 0) || null;
   const temperatura = Number(svRaw.temperatura ?? raw.temperatura ?? 0) || null;
   const hgt = Number(svRaw.hgt ?? raw.glucemia ?? 0) || null;
+  const horaVitales = String(svRaw.hora ?? raw.horaVitales ?? '').trim();
 
+  const hasAnyCinc = ['caidaFacial', 'debilidadBrazo', 'dificultadHabla'].some(
+    (k) => cincRaw[k] !== undefined && cincRaw[k] !== null && cincRaw[k] !== ''
+  );
+  const cincinnatiEval = hasAnyCinc
+    ? evaluateCincinnatiScale(cincRaw.caidaFacial, cincRaw.debilidadBrazo, cincRaw.dificultadHabla)
+    : {
+        caidaFacial: null,
+        debilidadBrazo: null,
+        dificultadHabla: null,
+        puntaje: null,
+        codigo: '',
+        interpretacion: ''
+      };
+  const escalaCincinnati = {
+    ...cincinnatiEval,
+    caidaFacial: cincRaw.caidaFacial === 0 || cincRaw.caidaFacial === '0' ? 0 : cincRaw.caidaFacial === 1 || cincRaw.caidaFacial === '1' || cincRaw.caidaFacial === true ? 1 : null,
+    debilidadBrazo: cincRaw.debilidadBrazo === 0 || cincRaw.debilidadBrazo === '0' ? 0 : cincRaw.debilidadBrazo === 1 || cincRaw.debilidadBrazo === '1' || cincRaw.debilidadBrazo === true ? 1 : null,
+    dificultadHabla: cincRaw.dificultadHabla === 0 || cincRaw.dificultadHabla === '0' ? 0 : cincRaw.dificultadHabla === 1 || cincRaw.dificultadHabla === '1' || cincRaw.dificultadHabla === true ? 1 : null,
+    tiempoTranscurrido: String(cincRaw.tiempoTranscurrido || '').trim().toUpperCase()
+  };
+
+  const rawReqTraslado = trRaw.requiereTraslado;
   const estadoTraslado = String(
     raw.estadoTraslado ||
-    (trRaw.requiereTraslado ? 'EN_TRASLADO_6_15' : 'EN_ESCENA')
+    (rawReqTraslado === true ? 'EN_TRASLADO_6_15' : rawReqTraslado === false ? 'SIN_TRASLADO' : '')
   ).trim().toUpperCase();
   const requiereTraslado =
-    Boolean(trRaw.requiereTraslado) ||
-    estadoTraslado === 'EN_TRASLADO_6_15' ||
-    estadoTraslado === 'ENTREGADO_HOSPITAL';
-  const medioTraslado = String(trRaw.medioTraslado || raw.unidadTraslado || 'SAMU / AMBULANCIA').trim().toUpperCase();
+    rawReqTraslado === true || estadoTraslado === 'EN_TRASLADO_6_15' || estadoTraslado === 'ENTREGADO_HOSPITAL'
+      ? true
+      : rawReqTraslado === false || estadoTraslado === 'SIN_TRASLADO' || estadoTraslado === 'EN_ESCENA'
+        ? false
+        : null;
+  const medioTraslado = String(trRaw.medioTraslado || raw.unidadTraslado || '').trim().toUpperCase();
   const centroAsistencial = String(trRaw.centroAsistencial || raw.centroAsistencialDestino || '').trim().toUpperCase();
   const responsableRecepcion = String(trRaw.responsableRecepcion || raw.medicoReceptor || '').trim().toUpperCase();
-  const evaluadorNombre = String(atPorRaw.nombre || raw.evaluador || raw.atendidoPorNombre || raw.operador || 'OFICIAL SANIDAD').trim().toUpperCase();
+  const evaluadorNombre = String(atPorRaw.nombre || firmasRaw.quienRealizoParte || raw.evaluador || raw.atendidoPorNombre || raw.operador || '').trim().toUpperCase();
+
+  const historiaEvolucion = String(raw.historiaEvolucion || raw.observaciones || raw.observacionesClinicas || '').trim().toUpperCase();
 
   const procedimientos = Array.isArray(raw.procedimientos)
     ? raw.procedimientos.map((p) => String(p).trim().toUpperCase()).filter(Boolean)
@@ -2523,10 +2886,10 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     id: idAtencion,
     idFicha: idAtencion,
     idAtencion,
-    idServicio: String(raw.idServicio || raw.idDespacho || '').trim(),
-    idDespacho: String(raw.idDespacho || raw.idServicio || '').trim(),
-    clave: String(raw.clave || raw.claveEmergencia || '10-4').trim().toUpperCase(),
-    claveEmergencia: String(raw.claveEmergencia || raw.clave || '10-4').trim().toUpperCase(),
+    idServicio,
+    idDespacho: idServicio,
+    clave: String(raw.clave || raw.claveServicio || raw.claveEmergencia || '').trim().toUpperCase(),
+    claveEmergencia: String(raw.claveEmergencia || raw.clave || raw.claveServicio || '').trim().toUpperCase(),
     direccion: String(raw.direccion || raw.direccionIncidente || raw.lugar || '').trim().toUpperCase(),
     direccionIncidente: String(raw.direccionIncidente || raw.direccion || raw.lugar || '').trim().toUpperCase(),
     carro,
@@ -2534,7 +2897,7 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     compania,
     companiaPaciente: String(raw.companiaPaciente || compania || '').trim().toUpperCase(),
     timestamp: nowMs,
-    tipoPaciente: String(raw.tipoPaciente || 'CIVIL').trim().toUpperCase(),
+    tipoPaciente: String(raw.tipoPaciente ?? '').trim().toUpperCase(),
     idRegistroBombero: String(raw.idRegistroBombero || raw.idBomberoAccidentado || '').trim(),
     idBomberoAccidentado: String(raw.idBomberoAccidentado || raw.idRegistroBombero || '').trim(),
     nombrePaciente: nombrePac,
@@ -2545,17 +2908,24 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     paciente: {
       nombre: nombrePac,
       rut: rutPac,
+      direccion: String(pacRaw.direccion || raw.direccionPaciente || '').trim().toUpperCase(),
       edad: edadPac,
       sexo: sexoPac,
+      nacionalidad: String(pacRaw.nacionalidad ?? '').trim().toUpperCase(),
+      prevision: String(pacRaw.prevision || pacRaw.previsionSalud || '').trim().toUpperCase(),
       telefono: sanitizeChileanPhone(pacRaw.telefono || ''),
+      fechaNacimiento: String(pacRaw.fechaNacimiento || '').trim(),
       grupoSanguineo: String(pacRaw.grupoSanguineo || pacRaw.sangre || '').trim().toUpperCase(),
       alergias: alergiasPac,
-      antecedentes: String(pacRaw.antecedentes || '').trim().toUpperCase()
+      antecedentes: datosMedicos.otrosAntecedentes
     },
+    datosMedicos,
     triage: triageCanon,
     triageStart: triageCanon,
     motivoConsulta,
-    mecanismoLesion: String(raw.mecanismoLesion || '').trim().toUpperCase(),
+    mecanismoLesion: String(raw.mecanismoLesion || tipoAccidente.otros.texto || '').trim().toUpperCase(),
+    lugarSuceso,
+    tipoAccidente,
     viaAerea,
     ventilacion,
     circulacion,
@@ -2573,6 +2943,7 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       pupilas,
       exposicionLesiones
     },
+    escalaCincinnati,
     fc,
     fr,
     paSistolica,
@@ -2582,6 +2953,7 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     glucemia: hgt,
     evaDolor: evaNum,
     signosVitales: {
+      hora: horaVitales,
       fc,
       fr,
       paSistolica,
@@ -2593,7 +2965,9 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       timestamp: Number(svRaw.timestamp || nowMs)
     },
     procedimientos,
-    medicamentosAdministrados: String(raw.medicamentosAdministrados || '').trim().toUpperCase(),
+    procedimientosInvasivos,
+    tratamientos,
+    medicamentosAdministrados,
     estadoTraslado,
     centroAsistencialDestino: centroAsistencial,
     unidadTraslado: medioTraslado,
@@ -2610,19 +2984,30 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       idRadial: String(atPorRaw.idRadial || raw.operadorRadial || '').trim().toUpperCase(),
       nombre: evaluadorNombre
     },
-    observaciones: String(raw.observaciones || raw.observacionesClinicas || '').trim().toUpperCase(),
-    observacionesClinicas: String(raw.observacionesClinicas || raw.observaciones || '').trim().toUpperCase(),
+    firmas: {
+      visadoDepMed: String(firmasRaw.visadoDepMed || '').trim().toUpperCase(),
+      quienRealizoParte: String(firmasRaw.quienRealizoParte || evaluadorNombre).trim().toUpperCase(),
+      obacNombre: String(firmasRaw.obacNombre || raw.obacNombre || '').trim().toUpperCase(),
+      obacIdRegistro: String(firmasRaw.obacIdRegistro || '').trim(),
+      obacIdRadial: String(firmasRaw.obacIdRadial || '').trim().toUpperCase(),
+      firmadoPorObacAt: firmasRaw.firmadoPorObacAt ? Number(firmasRaw.firmadoPorObacAt) : null
+    },
+    historiaEvolucion,
+    observaciones: historiaEvolucion,
+    observacionesClinicas: historiaEvolucion,
     _metaTimestamp: Math.max(nowMs, Number(raw._metaTimestamp || 0))
   };
 }
 
 /**
- * Normaliza en modo Dual-Read un documento de `atenciones_medicas/{idAtencion}`.
+ * Normaliza en modo Dual-Read una Hoja de Atención de Unidad de Rescate
+ * almacenada exclusivamente en `despachos/{idServicio}/atencion_rescate/{idAtencion}`.
  */
-export function normalizePatientCareDoc(docId, raw = {}) {
+export function normalizePatientCareDoc(docId, raw = {}, fallbackIdServicio = '') {
   if (!raw || typeof raw !== 'object') return null;
   const canonical = buildCanonicalPatientCareDoc({
     ...raw,
+    idServicio: raw.idServicio || raw.idDespacho || fallbackIdServicio || '',
     idAtencion: raw.idAtencion || raw.idFicha || raw.id || docId
   });
   return {
@@ -2640,9 +3025,9 @@ export function buildCanonicalRehabCheckDoc(raw = {}) {
   const nowMs = Number(raw.timestamp || Date.now());
   const idControl = String(raw.idControl || raw.id || `CTRL-${nowMs}`).trim();
   const idBombero = String(raw.idRegistro || raw.idBombero || '').trim();
-  const faseControl = String(raw.faseControl || raw.contexto || 'ENTRADA_REHAB').trim().toUpperCase();
-  const condicionSalida = String(raw.condicionSalida || raw.estadoRehab || 'APTO_RETORNO').trim().toUpperCase();
-  const hidratacion = String(raw.hidratacionAdministrada || raw.hidratacion || 'ADECUADA').trim().toUpperCase();
+  const faseControl = String(raw.faseControl || raw.contexto || '').trim().toUpperCase();
+  const condicionSalida = String(raw.condicionSalida || raw.estadoRehab || '').trim().toUpperCase();
+  const hidratacion = String(raw.hidratacionAdministrada || raw.hidratacion || '').trim().toUpperCase();
   const cohb = Number(raw.cohb ?? raw.carboxihemoglobina ?? 0) || null;
   const glucemia = Number(raw.glucemia ?? raw.hgt ?? 0) || null;
 
@@ -2668,14 +3053,22 @@ export function buildCanonicalRehabCheckDoc(raw = {}) {
     glucemia,
     carboxihemoglobina: cohb,
     cohb,
-    nivelFatiga: Number(raw.nivelFatiga ?? 1) || 1,
-    minutosExposicionScba: Number(raw.minutosExposicionScba ?? 0) || 0,
+    nivelFatiga:
+      raw.nivelFatiga !== undefined && raw.nivelFatiga !== null && raw.nivelFatiga !== ''
+        ? Number(raw.nivelFatiga) || null
+        : null,
+    minutosExposicionScba:
+      raw.minutosExposicionScba !== undefined &&
+      raw.minutosExposicionScba !== null &&
+      raw.minutosExposicionScba !== ''
+        ? Number(raw.minutosExposicionScba) || 0
+        : null,
     hidratacion,
     hidratacionAdministrada: hidratacion,
     estadoRehab: condicionSalida,
     condicionSalida,
     observaciones: String(raw.observaciones || '').trim().toUpperCase(),
-    evaluador: String(raw.evaluador || 'OFICIAL SANIDAD').trim().toUpperCase(),
+    evaluador: String(raw.evaluador || '').trim().toUpperCase(),
     timestamp: nowMs,
     _metaTimestamp: nowMs
   };
@@ -2711,15 +3104,50 @@ export function isCanonicalCommander(personDoc = {}) {
 
 /**
  * Evalúa si un registro de `personal/{idRegistro}` posee habilitado `modoAdmin: true`
- * (compatible con booleano `true`, string `"True"`/`"true"`/`"SI"` o numérico `1`).
+ * (compatible con booleano `true`, string `"True"`/`"true"`/`"verdadero"`/`"SI"` o numérico `1`).
  */
 export function hasAdminModeFlag(personDoc = {}) {
   if (!personDoc || typeof personDoc !== 'object') return false;
-  const rawVal = personDoc.modoAdmin ?? personDoc.ModoAdmin ?? personDoc.modoadmin;
-  if (rawVal === undefined || rawVal === null) return false;
+  const rawVal =
+    personDoc.modoAdmin ??
+    personDoc.ModoAdmin ??
+    personDoc['modo admin'] ??
+    personDoc.modoadmin;
+  if (rawVal === undefined || rawVal === null || rawVal === false || rawVal === 0) return false;
   if (rawVal === true || rawVal === 1) return true;
   const str = String(rawVal).trim().toLowerCase();
-  return str === 'true' || str === '1' || str === 'si' || str === 'sí' || str === 's';
+  return str === 'true' || str === 'verdadero' || str === '1' || str === 'si' || str === 'sí' || str === 's';
+}
+
+/**
+ * Evalúa si un registro de `personal/{idRegistro}` posee habilitado `personalMedico: true`
+ * (`true` / `"true"` / `"verdadero"`). Si es `false`, `"falso"` o no existe, retorna `false`.
+ */
+export function hasMedicalStaffFlag(personDoc = {}) {
+  if (!personDoc || typeof personDoc !== 'object') return false;
+  const rawVal =
+    personDoc.personalMedico ??
+    personDoc.personal_medico ??
+    personDoc.PersonalMedico ??
+    personDoc['personal medico'] ??
+    personDoc['personal médico'] ??
+    personDoc.personalmedico;
+  if (rawVal === undefined || rawVal === null || rawVal === false || rawVal === 0) return false;
+  if (rawVal === true) return true;
+  const str = String(rawVal).trim().toLowerCase();
+  return str === 'true' || str === 'verdadero';
+}
+
+/**
+ * Evalúa si un bombero está autorizado para ingresar al sistema restringido de SENTINEL MED
+ * (es Comandante `idRadial === "1"`, o posee `personalMedico: true` o `modoAdmin: true` en `personal/{idRegistro}`).
+ */
+export function hasMedSystemAccess(personDoc = {}) {
+  return (
+    isCanonicalCommander(personDoc) ||
+    hasMedicalStaffFlag(personDoc) ||
+    hasAdminModeFlag(personDoc)
+  );
 }
 
 /**
@@ -2852,6 +3280,7 @@ export function normalizeFirefighterDoc(docId, raw = {}) {
     activo: isActivo,
     conductor: isConductor,
     isConductor,
+    personalMedico: hasMedicalStaffFlag(raw),
     modoAdmin: hasAdminModeFlag(raw),
     estado: normalizedEstado,
     enServicio: String(rawEnServicio ?? '0').trim(),
@@ -2930,8 +3359,8 @@ export const SENTINEL_UNIFIED_AUTH_MODES = {
   MED: {
     moduleId: 'MED',
     requiresCommanderAuth: true,
-    postAuthMode: 'OPERATOR_LOGIN',
-    subtitle: 'DEPARTAMENTO MÉDICO INSTITUCIONAL',
+    postAuthMode: 'PUBLIC_RESCUE_OBAC_SIGN',
+    subtitle: 'SANIDAD Y RESCATE',
     logoFile: '/SENTINEL MED.png'
   },
   SCI: {
@@ -3722,6 +4151,18 @@ export function buildCanonicalCentralSciRequestDoc(raw = {}) {
           }
         : null,
     mensajesChat: String(raw.mensajesChat || '').trim(),
+    evacuar: raw.evacuar && typeof raw.evacuar === 'object'
+      ? buildCanonicalEvacuarMap(raw.evacuar)
+      : (raw.evacuationAlert && typeof raw.evacuationAlert === 'object'
+          ? buildCanonicalEvacuarMap({
+              evacuacion: Boolean(raw.evacuationAlert.active),
+              lat: raw.evacuationAlert.lat ?? null,
+              lng: raw.evacuationAlert.lng ?? null,
+              instrucciones: raw.evacuationAlert.instrucciones || raw.evacuationAlert.motivo || '',
+              triggeredAt: raw.evacuationAlert.triggeredAt || null,
+              emitidoPor: raw.evacuationAlert.emitidoPor || ''
+            })
+          : null),
     evacuationAlert:
       raw.evacuationAlert && typeof raw.evacuationAlert === 'object'
         ? {
@@ -3782,6 +4223,18 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
       : null;
 
   const evacRaw = raw.evacuationAlert && typeof raw.evacuationAlert === 'object' ? raw.evacuationAlert : {};
+  const evacCanonical = buildCanonicalEvacuarMap(
+    raw.evacuar && typeof raw.evacuar === 'object'
+      ? raw.evacuar
+      : {
+          evacuacion: Boolean(evacRaw.active),
+          lat: evacRaw.lat ?? null,
+          lng: evacRaw.lng ?? null,
+          instrucciones: evacRaw.instrucciones || evacRaw.motivo || '',
+          triggeredAt: evacRaw.triggeredAt || null,
+          emitidoPor: evacRaw.emitidoPor || raw.comandanteSci || 'CI SCI'
+        }
+  );
   const maydayRaw = raw.maydayState && typeof raw.maydayState === 'object' ? raw.maydayState : {};
 
   return {
@@ -3808,12 +4261,17 @@ export function buildCanonicalCentralSciIncidentDoc(raw = {}) {
           new Set(raw.unidadesEnServicio.map((x) => String(x || '').trim().toUpperCase()).filter(Boolean))
         )
       : [],
+    evacuar: evacCanonical,
     evacuationAlert: {
-      active: Boolean(evacRaw.active),
+      active: Boolean(evacCanonical.evacuacion || evacRaw.active),
       targetSector: String(evacRaw.targetSector || 'TODOS').trim().toUpperCase(),
-      motivo: String(evacRaw.motivo || '').trim(),
-      triggeredAt: evacRaw.active ? Number(evacRaw.triggeredAt || nowMs) : null,
-      emitidoPor: String(evacRaw.emitidoPor || raw.comandanteSci || 'CI SCI').trim().toUpperCase()
+      motivo: String(evacCanonical.instrucciones || evacRaw.motivo || '').trim(),
+      lat: evacCanonical.lat,
+      lng: evacCanonical.lng,
+      triggeredAt: (evacCanonical.evacuacion || evacRaw.active)
+        ? Number(evacCanonical.triggeredAt || evacRaw.triggeredAt || nowMs)
+        : null,
+      emitidoPor: String(evacCanonical.emitidoPor || evacRaw.emitidoPor || raw.comandanteSci || 'CI SCI').trim().toUpperCase()
     },
     maydayState: {
       active: Boolean(maydayRaw.active),
@@ -3936,4 +4394,401 @@ export function calculateNextCanonicalDispatchId(recordsOrIds = [], dateObj = ne
 
   return formatCanonicalDispatchId(targetYear, maxSeq + 1);
 }
+
+// ============================================================================
+// 11. CORRELATIVOS CANÓNICOS DE BITÁCORA (`AAAA-00000`)
+// ============================================================================
+
+/**
+ * Formatea un año y correlativo en el ID canónico de bitácora `AAAA-00000` (5 dígitos).
+ */
+export function formatCanonicalBitacoraId(year, correlative) {
+  const numYear = parseInt(year, 10) || new Date().getFullYear();
+  const numSeq = Math.max(1, parseInt(correlative, 10) || 1);
+  return `${numYear}-${String(numSeq).padStart(5, '0')}`;
+}
+
+/**
+ * Parsea un `idSalida` de bitácora (canónico `AAAA-00000`, legado 4 dígitos `AAAA-0000`
+ * o legado numérico puro `"1"`..`"99999"`). Rechaza tokens no canónicos, prefijos de claves
+ * y sufijos compuestos con nombre de carro (ej. `"2026-00134-B-1"`).
+ */
+export function parseBitacoraIdParts(rawId, fallbackYear = null) {
+  const clean = String(rawId || '').trim();
+  if (!clean || /^(SPECIAL-|SCI-|10-\d+|6-\d+|IC_|__DELETE_FIELD__)/i.test(clean)) {
+    return null;
+  }
+
+  const dashMatch = clean.match(/^(\d{4})-(\d{1,6})$/);
+  if (dashMatch) {
+    const year = parseInt(dashMatch[1], 10);
+    const seq = parseInt(dashMatch[2], 10);
+    if (year >= 2020 && !isNaN(seq) && seq > 0 && seq < 100000) {
+      return {
+        year,
+        seq,
+        isLegacyNumeric: false,
+        canonicalId: formatCanonicalBitacoraId(year, seq)
+      };
+    }
+  }
+
+  const pureMatch = clean.match(/^(\d{1,5})$/);
+  if (pureMatch) {
+    const seq = parseInt(pureMatch[1], 10);
+    if (!isNaN(seq) && seq > 0 && seq < 100000) {
+      const resolvedYear = fallbackYear ? parseInt(fallbackYear, 10) : null;
+      return {
+        year: resolvedYear,
+        seq,
+        isLegacyNumeric: true,
+        canonicalId: resolvedYear ? formatCanonicalBitacoraId(resolvedYear, seq) : clean
+      };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Ordena registros o IDs de bitácora de mayor a menor según año y correlativo secuencial.
+ */
+export function compareBitacoraIdsDesc(a, b) {
+  const idA = (a && typeof a === 'object') ? (a.idSalida || a.ID || a.id || '') : a;
+  const idB = (b && typeof b === 'object') ? (b.idSalida || b.ID || b.id || '') : b;
+  const yearA = (a && typeof a === 'object')
+    ? (Number(a.tiempos?.h60 || a.h60 || a._metaTimestamp || 0) > 1000000000
+        ? new Date(Number(a.tiempos?.h60 || a.h60 || a._metaTimestamp)).getFullYear()
+        : null)
+    : null;
+  const yearB = (b && typeof b === 'object')
+    ? (Number(b.tiempos?.h60 || b.h60 || b._metaTimestamp || 0) > 1000000000
+        ? new Date(Number(b.tiempos?.h60 || b.h60 || b._metaTimestamp)).getFullYear()
+        : null)
+    : null;
+
+  const pA = parseBitacoraIdParts(idA, yearA);
+  const pB = parseBitacoraIdParts(idB, yearB);
+
+  if (pA?.year && pB?.year && pA.year !== pB.year) {
+    return pB.year - pA.year;
+  }
+  const seqA = pA?.seq || 0;
+  const seqB = pB?.seq || 0;
+  if (seqB !== seqA) {
+    return seqB - seqA;
+  }
+  return String(idB || '').localeCompare(String(idA || ''));
+}
+
+/**
+ * Calcula el siguiente correlativo canónico `AAAA-00000` para `bitacora/{idSalida}` a partir
+ * de un Array, Map o Set de registros o identificadores de bitácora.
+ */
+export function calculateNextCanonicalBitacoraId(recordsOrIds = [], dateObj = new Date()) {
+  const d = dateObj instanceof Date ? dateObj : new Date(dateObj || Date.now());
+  const targetYear = d.getFullYear();
+  let maxSeq = 0;
+
+  if (recordsOrIds && typeof recordsOrIds.forEach === 'function') {
+    recordsOrIds.forEach((item) => {
+      const rawId = typeof item === 'string'
+        ? item
+        : (item?.idSalida || item?.ID || item?.id || '');
+      const createdTs = (item && typeof item === 'object')
+        ? Number(item?.tiempos?.h60 || item?.h60 || item?._metaTimestamp || 0)
+        : 0;
+      const itemYear = createdTs > 1000000000 ? new Date(createdTs).getFullYear() : targetYear;
+      const parsed = parseBitacoraIdParts(rawId, itemYear);
+      if (parsed && parsed.year === targetYear && parsed.seq > maxSeq) {
+        maxSeq = parsed.seq;
+      }
+    });
+  }
+
+  return formatCanonicalBitacoraId(targetYear, maxSeq + 1);
+}
+
+// ============================================================================
+// 12. MAPA CANÓNICO DE EVACUACIÓN (`evacuar`) Y FILTRO ESTRICTO DE INCIDENTE ACTIVO
+// ============================================================================
+
+/**
+ * Construye el mapa canónico `evacuar` para `despachos/{idServicio}`, `sci_incidentes/{idServicio}`
+ * y `sisbom-central/sci_incidentes/{LICENCIA}_{idServicio}`:
+ * {
+ *   evacuacion: Boolean,
+ *   lat: Number | null,
+ *   lng: Number | null,
+ *   instrucciones: String,
+ *   triggeredAt: Number | null,
+ *   emitidoPor: String,
+ *   updatedAt: Number
+ * }
+ */
+export function buildCanonicalEvacuarMap(raw = {}) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const nowMs = Number(src.updatedAt || src.timestamp || Date.now()) || Date.now();
+  const evacuacion = Boolean(
+    src.evacuacion !== undefined
+      ? src.evacuacion
+      : src.active !== undefined
+        ? src.active
+        : false
+  );
+  const rawLat = src.lat ?? src.latitude ?? src.latitud ?? null;
+  const rawLng = src.lng ?? src.long ?? src.lon ?? src.longitude ?? src.longitud ?? null;
+  const latNum = rawLat !== null && rawLat !== '' && !isNaN(Number(rawLat)) ? Number(rawLat) : null;
+  const lngNum = rawLng !== null && rawLng !== '' && !isNaN(Number(rawLng)) ? Number(rawLng) : null;
+  const hasValidGeo =
+    latNum !== null &&
+    lngNum !== null &&
+    (Math.abs(latNum) > 0.0001 || Math.abs(lngNum) > 0.0001);
+
+  const rawInstr = String(
+    src.instrucciones ??
+      src.motivo ??
+      src.mensaje ??
+      (evacuacion
+        ? 'ABANDONAR ZONA DE RIESGO DE INMEDIATO Y DIRIGIRSE AL PUNTO DE EVACUACIÓN'
+        : '')
+  ).trim();
+
+  const triggeredAt = evacuacion
+    ? Number(src.triggeredAt || nowMs) || nowMs
+    : null;
+
+  return {
+    evacuacion,
+    lat: hasValidGeo ? latNum : null,
+    lng: hasValidGeo ? lngNum : null,
+    instrucciones: rawInstr,
+    triggeredAt,
+    emitidoPor: String(src.emitidoPor || 'COMANDANTE INCIDENTE').trim().toUpperCase(),
+    updatedAt: nowMs
+  };
+}
+
+/**
+ * Normaliza en modo Dual-Read el mapa `evacuar` (con respaldo a `evacuationAlert` legado).
+ */
+export function normalizeEvacuarMap(docOrMap = {}) {
+  if (!docOrMap || typeof docOrMap !== 'object') {
+    return buildCanonicalEvacuarMap({ evacuacion: false, instrucciones: '', updatedAt: 0 });
+  }
+
+  const directEvac =
+    docOrMap.evacuar && typeof docOrMap.evacuar === 'object'
+      ? docOrMap.evacuar
+      : docOrMap.evacuacion !== undefined
+        ? docOrMap
+        : null;
+
+  const legacyEvac =
+    docOrMap.evacuationAlert && typeof docOrMap.evacuationAlert === 'object'
+      ? docOrMap.evacuationAlert
+      : null;
+
+  if (directEvac && legacyEvac) {
+    const directTs = Number(directEvac.updatedAt || directEvac.triggeredAt || 0);
+    const legacyTs = Number(legacyEvac.updatedAt || legacyEvac.triggeredAt || 0);
+    if (legacyTs > directTs && directEvac.evacuacion === undefined) {
+      return buildCanonicalEvacuarMap({
+        evacuacion: Boolean(legacyEvac.active),
+        lat: legacyEvac.lat ?? null,
+        lng: legacyEvac.lng ?? null,
+        instrucciones: legacyEvac.instrucciones || legacyEvac.motivo || '',
+        triggeredAt: legacyEvac.triggeredAt || null,
+        emitidoPor: legacyEvac.emitidoPor || '',
+        updatedAt: legacyTs
+      });
+    }
+  }
+
+  if (directEvac) {
+    return buildCanonicalEvacuarMap({
+      evacuacion: Boolean(directEvac.evacuacion),
+      lat: directEvac.lat ?? legacyEvac?.lat ?? null,
+      lng: directEvac.lng ?? directEvac.long ?? legacyEvac?.lng ?? null,
+      instrucciones: directEvac.instrucciones ?? legacyEvac?.motivo ?? '',
+      triggeredAt: directEvac.triggeredAt ?? legacyEvac?.triggeredAt ?? null,
+      emitidoPor: directEvac.emitidoPor || legacyEvac?.emitidoPor || 'COMANDANTE INCIDENTE',
+      updatedAt: Number(directEvac.updatedAt || directEvac.triggeredAt || 0)
+    });
+  }
+
+  if (legacyEvac) {
+    return buildCanonicalEvacuarMap({
+      evacuacion: Boolean(legacyEvac.active),
+      lat: legacyEvac.lat ?? null,
+      lng: legacyEvac.lng ?? null,
+      instrucciones: legacyEvac.instrucciones || legacyEvac.motivo || '',
+      triggeredAt: legacyEvac.triggeredAt || null,
+      emitidoPor: legacyEvac.emitidoPor || 'COMANDANTE INCIDENTE',
+      updatedAt: Number(legacyEvac.updatedAt || legacyEvac.triggeredAt || 0)
+    });
+  }
+
+  return buildCanonicalEvacuarMap({ evacuacion: false, instrucciones: '', updatedAt: 0 });
+}
+
+/**
+ * Determina si una unidad (`unitId`) se encuentra activamente trabajando en un incidente activo
+ * (asignada en `dispatch.unidades` o con bitácora abierta sin 6-8 para ese `idServicio`).
+ */
+export function isUnitInActiveIncident(unitId = '', dispatch = null, bitacorasMapOrList = null) {
+  const cleanUnit = String(unitId || '').replace(/-/g, '').trim().toUpperCase();
+  if (!cleanUnit || !dispatch || typeof dispatch !== 'object') return false;
+
+  const estadoDisp = String(dispatch.estado || 'activa').trim().toLowerCase();
+  if (
+    dispatch.finalizadoAt ||
+    estadoDisp === 'cerrado' ||
+    estadoDisp === 'cerrada' ||
+    estadoDisp === 'finalizado' ||
+    estadoDisp === 'finalizada' ||
+    estadoDisp === 'cancelada' ||
+    estadoDisp === 'anulada'
+  ) {
+    return false;
+  }
+
+  const svcId = String(dispatch.idServicio || dispatch.id || '').trim();
+  const unidadesMap = dispatch.unidades && typeof dispatch.unidades === 'object' ? dispatch.unidades : {};
+  let matchedSalidaId = '';
+  let inDispatchMap = false;
+
+  Object.entries(unidadesMap).forEach(([k, val]) => {
+    if (String(k || '').replace(/-/g, '').trim().toUpperCase() === cleanUnit) {
+      inDispatchMap = true;
+      if (val && typeof val === 'object' && val.idSalida) {
+        matchedSalidaId = String(val.idSalida).trim();
+      } else if (typeof val === 'string') {
+        matchedSalidaId = val.trim();
+      }
+    }
+  });
+
+  if (Array.isArray(dispatch.units)) {
+    dispatch.units.forEach((u) => {
+      const uName = String(typeof u === 'string' ? u : (u?.name || u?.carro || '')).replace(/-/g, '').trim().toUpperCase();
+      if (uName === cleanUnit) {
+        if (typeof u === 'object' && (u.epoch68 || u.time68 || u.status === '6-8')) {
+          inDispatchMap = false;
+        } else {
+          inDispatchMap = true;
+          if (typeof u === 'object' && u.idSalida) matchedSalidaId = String(u.idSalida).trim();
+        }
+      }
+    });
+  }
+
+  if (bitacorasMapOrList && typeof bitacorasMapOrList.forEach === 'function') {
+    let foundOpenBitacora = false;
+    let foundClosedBitacora = false;
+    bitacorasMapOrList.forEach((b) => {
+      if (!b || typeof b !== 'object') return;
+      const bCarro = String(b.carro || b.idCarro || '').replace(/-/g, '').trim().toUpperCase();
+      if (bCarro !== cleanUnit) return;
+      const bSalida = String(b.idSalida || b.ID || b.id || '').trim();
+      const bSvc = String(b.idServicio || b.idDespacho || '').trim();
+      if ((matchedSalidaId && bSalida === matchedSalidaId) || (svcId && bSvc === svcId)) {
+        const isClosed = Boolean(b?.tiempos?.h68 || b?.h68 || b?.hora68 || b?.unitStatus === '6-8');
+        if (isClosed) foundClosedBitacora = true;
+        else foundOpenBitacora = true;
+      }
+    });
+    if (foundOpenBitacora) return true;
+    if (foundClosedBitacora) return false;
+  }
+
+  return inDispatchMap;
+}
+
+/**
+ * Determina estrictamente si un bombero (`user`) se encuentra activamente en el incidente (`dispatch`):
+ * - `enServicio == idServicio` (confirmó asistencia al despacho y NO declinó `"-idServicio"` ni está en `"0"`), O
+ * - Figura en `dispatch.asistentes`, O
+ * - Es Conductor, OBAC o Tripulante en una `bitacora` abierta (sin `h68`) de ese incidente.
+ */
+export function isFirefighterInActiveIncident(user = null, dispatch = null, bitacorasMapOrList = null) {
+  if (!user || typeof user !== 'object' || !dispatch || typeof dispatch !== 'object') return false;
+
+  const estadoDisp = String(dispatch.estado || 'activa').trim().toLowerCase();
+  if (
+    dispatch.finalizadoAt ||
+    estadoDisp === 'cerrado' ||
+    estadoDisp === 'cerrada' ||
+    estadoDisp === 'finalizado' ||
+    estadoDisp === 'finalizada' ||
+    estadoDisp === 'cancelada' ||
+    estadoDisp === 'anulada'
+  ) {
+    return false;
+  }
+
+  const svcId = String(dispatch.idServicio || dispatch.id || '').trim();
+  if (!svcId) return false;
+
+  const myRegId = String(user.idRegistro ?? user.id ?? '').trim();
+  const myRadial = String(user.idRadial ?? user.codigoRadial ?? '').trim().toUpperCase();
+  const myEnServicio = String(user.enServicio ?? '').trim();
+
+  // Si declinó explícitamente este despacho ("-2026-00133"), NO está en el incidente
+  if (myEnServicio === `-${svcId}`) {
+    return false;
+  }
+
+  // 1. Confirmación canónica directa: enServicio == idServicio
+  if (myEnServicio && myEnServicio !== '0' && myEnServicio === svcId) {
+    return true;
+  }
+
+  // 2. Lista de asistentes en el documento de despacho
+  if (Array.isArray(dispatch.asistentes)) {
+    const inAsistentes = dispatch.asistentes.some((a) => {
+      if (!a) return false;
+      if (typeof a === 'string' || typeof a === 'number') {
+        const cleanA = String(a).trim();
+        return (myRegId && cleanA === myRegId) || (myRadial && cleanA.toUpperCase() === myRadial);
+      }
+      const aReg = String(a.idRegistro ?? a.id ?? '').trim();
+      const aRad = String(a.idRadial ?? '').trim().toUpperCase();
+      return (myRegId && aReg === myRegId) || (myRadial && aRad === myRadial);
+    });
+    if (inAsistentes) return true;
+  }
+
+  // 3. Tripulación activa (Conductor, OBAC o Tripulación) en una bitácora abierta sin 6-8 del incidente
+  if (bitacorasMapOrList && typeof bitacorasMapOrList.forEach === 'function') {
+    let inActiveCrew = false;
+    bitacorasMapOrList.forEach((b) => {
+      if (!b || typeof b !== 'object' || inActiveCrew) return;
+      const bSvc = String(b.idServicio || b.idDespacho || '').trim();
+      if (bSvc !== svcId) return;
+      const isClosed = Boolean(b?.tiempos?.h68 || b?.h68 || b?.hora68 || b?.unitStatus === '6-8');
+      if (isClosed) return;
+
+      const condRad = extractPersonRadial(b.conductorObj || b.conductor).toUpperCase();
+      const obacRad = extractPersonRadial(b.obacObj || b.obac).toUpperCase();
+      if (myRadial && (condRad === myRadial || obacRad === myRadial)) {
+        inActiveCrew = true;
+        return;
+      }
+      if (Array.isArray(b.tripulacion)) {
+        const matchedMember = b.tripulacion.some((m) => {
+          const mRad = extractPersonRadial(m).toUpperCase();
+          const mReg = String(m?.idRegistro || '').trim();
+          return (myRadial && mRad === myRadial) || (myRegId && mReg === myRegId);
+        });
+        if (matchedMember) inActiveCrew = true;
+      }
+    });
+    if (inActiveCrew) return true;
+  }
+
+  return false;
+}
+
+
 

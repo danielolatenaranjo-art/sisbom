@@ -33,6 +33,7 @@ targets:
       - path: Resources/c_llamadoComandancia.mp3
       - path: Resources/c_llamadocomandancia.mp3
       - path: Resources/despacho.mp3
+      - path: Resources/evacuacion.wav
       - path: Resources/importante.mp3
       - path: Resources/llamado_comandancia.mp3
       - path: Resources/llamadocomandancia.mp3
@@ -54,7 +55,7 @@ targets:
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "3.1.0"
-        CFBundleVersion: "3033"
+        CFBundleVersion: "3034"
         UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true

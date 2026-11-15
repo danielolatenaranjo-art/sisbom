@@ -179,7 +179,7 @@ async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
     'cargo', 'compania', 'estado', 'enServicio', 'conductor', 'activo',
     'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'multiDispositivo',
     'contrasena', 'telefono', 'email', 'deviceId',
-    'tokenFcm', 'fcmToken', 'apnsToken', 'hardwareDeviceId',
+    'tokenFcm', 'fcmToken', 'apnsToken', 'platform', 'hardwareDeviceId',
     'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
   ].map(f => `mask.fieldPaths=${f}`).join('&');
 
@@ -298,6 +298,8 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     email: raw.email || fallbackUser.email || '',
     contrasena: raw.contrasena !== undefined ? String(raw.contrasena) : String(fallbackUser.contrasena || ''),
     deviceId: raw.deviceId !== undefined ? String(raw.deviceId || '') : String(fallbackUser.deviceId || ''),
+    apnsToken: raw.apnsToken !== undefined ? String(raw.apnsToken || '') : String(fallbackUser.apnsToken || ''),
+    platform: raw.platform !== undefined ? String(raw.platform || '') : String(fallbackUser.platform || ''),
     licenciaMedica: raw.licenciaMedica ?? fallbackUser.licenciaMedica ?? '',
     fechaSuspensionFin: raw.fechaSuspensionFin ?? fallbackUser.fechaSuspensionFin ?? '',
     permiso: raw.permiso ?? fallbackUser.permiso ?? 0,
@@ -376,6 +378,7 @@ export function syncNativeUserSession(u) {
       compania: String(u.compania || 1),
       estado: String(u.estado || '0-9'),
       conductor: Boolean(u.conductor),
+      modoAdmin: Boolean(u.modoAdmin),
       estadoEspecial: resolveSpecialStatusFromUser(u),
       enServicio: String(u.enServicio && u.enServicio !== '0' ? u.enServicio : ''),
       licenseKey: licKey
@@ -483,8 +486,11 @@ export const useAuthStore = create((set, get) => ({
           set({ user: parsed, isAuthenticated: true });
           syncNativeUserSession(parsed);
           syncNativeAirplaneMode(get().isAirplaneMode);
-          if (typeof window !== 'undefined' && window.__SENTINEL_FCM_TOKEN__) {
-            setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__), 600);
+          if (
+            typeof window !== 'undefined' &&
+            (window.__SENTINEL_FCM_TOKEN__ || window.__SENTINEL_APNS_TOKEN__ || window.__SENTINEL_PLATFORM__)
+          ) {
+            setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__, window.__SENTINEL_APNS_TOKEN__), 600);
           }
           return true;
         }
@@ -495,27 +501,65 @@ export const useAuthStore = create((set, get) => ({
     return false;
   },
 
-  syncFcmToken: async (rawToken) => {
-    const cleanToken = String(rawToken || (typeof window !== 'undefined' ? window.__SENTINEL_FCM_TOKEN__ : '') || '').trim();
-    if (!cleanToken || cleanToken.length < 20) return false;
+  syncFcmToken: async (rawToken, rawApnsToken) => {
+    const nativePlat = typeof window !== 'undefined'
+      ? String(window.__SENTINEL_PLATFORM__ || '').trim().toLowerCase()
+      : '';
+    const cleanToken = String(
+      rawToken || (typeof window !== 'undefined' ? window.__SENTINEL_FCM_TOKEN__ : '') || ''
+    ).trim();
+    const cleanApns = String(
+      rawApnsToken || (typeof window !== 'undefined' ? window.__SENTINEL_APNS_TOKEN__ : '') || ''
+    ).trim().toLowerCase();
+
+    const hasValidFcm = cleanToken.length >= 20;
+    const hasValidApns = /^[0-9a-f]{64}$/.test(cleanApns);
+
+    if (!hasValidFcm && !(nativePlat === 'ios' && hasValidApns)) return false;
+
     const currentUser = get().user;
     if (!currentUser) return false;
     const docId = String(currentUser.idRegistro || currentUser.idRadial || '').trim();
     if (!docId) return false;
 
-    if (currentUser.multiDispositivo) {
+    const patchFields = {};
+    if (nativePlat === 'ios') {
+      patchFields.platform = 'ios';
+      if (hasValidApns) {
+        patchFields.apnsToken = cleanApns;
+      }
+      if (hasValidFcm && !currentUser.multiDispositivo) {
+        patchFields.deviceId = cleanToken;
+      }
+    } else if (nativePlat === 'android') {
+      if (!currentUser.multiDispositivo) {
+        patchFields.platform = 'android';
+        patchFields.apnsToken = '';
+        if (hasValidFcm) {
+          patchFields.deviceId = cleanToken;
+        }
+      }
+    } else if (hasValidFcm && !currentUser.multiDispositivo) {
+      patchFields.deviceId = cleanToken;
+    }
+
+    const patchKeys = Object.keys(patchFields);
+    if (patchKeys.length === 0) return true;
+
+    const needsSync = patchKeys.some(
+      (k) => String(currentUser[k] ?? '').trim() !== String(patchFields[k] ?? '').trim()
+    );
+    if (!needsSync) {
       return true;
     }
 
-    if (String(currentUser.deviceId || '').trim() !== cleanToken) {
-      const updatedUser = { ...currentUser, deviceId: cleanToken };
-      set({ user: updatedUser });
-      try {
-        const serialized = JSON.stringify(updatedUser);
-        syncNativeStorageKey(USER_SESSION_KEY, serialized);
-        await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
-      } catch (_) {}
-    }
+    const updatedUser = { ...currentUser, ...patchFields };
+    set({ user: updatedUser });
+    try {
+      const serialized = JSON.stringify(updatedUser);
+      syncNativeStorageKey(USER_SESSION_KEY, serialized);
+      await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
+    } catch (_) {}
 
     const isBypass = useLicenseStore.getState().isBypassMode;
     const isReadOnly = useLicenseStore.getState().isReadOnly;
@@ -527,7 +571,7 @@ export const useAuthStore = create((set, get) => ({
       if (db) {
         await ensureFirebaseAuth();
         await updateDoc(doc(db, 'personal', docId), {
-          deviceId: cleanToken,
+          ...patchFields,
           _metaTimestamp: nowTs
         });
         return true;
@@ -537,16 +581,20 @@ export const useAuthStore = create((set, get) => ({
       if (!fbConfig || !fbConfig.projectId || !fbConfig.apiKey) return false;
       const projId = fbConfig.projectId;
       const apiKey = fbConfig.apiKey;
-      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?updateMask.fieldPaths=deviceId&updateMask.fieldPaths=_metaTimestamp`;
+      const maskQuery = [...patchKeys, '_metaTimestamp']
+        .map((f) => `updateMask.fieldPaths=${encodeURIComponent(f)}`)
+        .join('&');
+      const restFields = {
+        _metaTimestamp: { integerValue: String(nowTs) }
+      };
+      for (const k of patchKeys) {
+        restFields[k] = { stringValue: String(patchFields[k] ?? '') };
+      }
+      const patchUrl = `https://firestore.googleapis.com/v1/projects/${projId}/databases/(default)/documents/personal/${encodeURIComponent(docId)}?${maskQuery}`;
       fetchFirestoreWithAuth(patchUrl, apiKey, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            deviceId: { stringValue: cleanToken },
-            _metaTimestamp: { integerValue: String(nowTs) }
-          }
-        })
+        body: JSON.stringify({ fields: restFields })
       }).catch(() => {});
     }
     return true;
@@ -594,6 +642,15 @@ export const useAuthStore = create((set, get) => ({
           syncNativeStorageKey(USER_SESSION_KEY, serialized);
           await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
         } catch (e) {}
+        if (
+          typeof window !== 'undefined' &&
+          window.__SENTINEL_PLATFORM__ === 'ios' &&
+          window.__SENTINEL_APNS_TOKEN__ &&
+          (String(updatedUser.apnsToken || '').trim().toLowerCase() !== String(window.__SENTINEL_APNS_TOKEN__).trim().toLowerCase() ||
+            String(updatedUser.platform || '').trim().toLowerCase() !== 'ios')
+        ) {
+          setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__, window.__SENTINEL_APNS_TOKEN__), 300);
+        }
         return updatedUser;
       }
     } catch (e) {
@@ -818,8 +875,11 @@ export const useAuthStore = create((set, get) => ({
 
         set({ user: userObj, isAuthenticated: true, isLoading: false, error: '' });
         syncNativeUserSession(userObj);
-        if (typeof window !== 'undefined' && window.__SENTINEL_FCM_TOKEN__) {
-          setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__), 600);
+        if (
+          typeof window !== 'undefined' &&
+          (window.__SENTINEL_FCM_TOKEN__ || window.__SENTINEL_APNS_TOKEN__ || window.__SENTINEL_PLATFORM__)
+        ) {
+          setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__, window.__SENTINEL_APNS_TOKEN__), 500);
         }
         return { success: true, user: userObj };
       }
@@ -1491,8 +1551,23 @@ if (typeof window !== 'undefined' && !window.__SENTINEL_FCM_EVENT_BOUND__) {
   window.__SENTINEL_FCM_EVENT_BOUND__ = true;
   window.addEventListener('sentinelNativeFcmToken', (ev) => {
     const tok = ev?.detail?.token || window.__SENTINEL_FCM_TOKEN__;
-    if (tok) {
-      useAuthStore.getState().syncFcmToken(tok);
+    if (tok || window.__SENTINEL_APNS_TOKEN__) {
+      useAuthStore.getState().syncFcmToken(tok, window.__SENTINEL_APNS_TOKEN__);
+    }
+  });
+  window.addEventListener('sentinelNativeApnsToken', (ev) => {
+    const apnsTok = ev?.detail?.token || window.__SENTINEL_APNS_TOKEN__;
+    if (apnsTok) {
+      useAuthStore.getState().syncFcmToken(window.__SENTINEL_FCM_TOKEN__, apnsTok);
+    }
+  });
+  let lastResumeTokenSyncTs = 0;
+  window.addEventListener('sentinelAppResume', () => {
+    const now = Date.now();
+    if (now - lastResumeTokenSyncTs < 15000) return;
+    lastResumeTokenSyncTs = now;
+    if (window.__SENTINEL_FCM_TOKEN__ || window.__SENTINEL_APNS_TOKEN__) {
+      useAuthStore.getState().syncFcmToken(window.__SENTINEL_FCM_TOKEN__, window.__SENTINEL_APNS_TOKEN__);
     }
   });
 }

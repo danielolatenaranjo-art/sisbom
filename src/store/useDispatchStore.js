@@ -53,6 +53,8 @@ import {
   buildCanonicalCentralSciIncidentId,
   buildCanonicalCentralSciIncidentDoc,
   normalizeSaasClientDoc,
+  normalizeEvacuarMap,
+  isFirefighterInActiveIncident,
   getEntityMaxTimestamp,
   mergeServiceUnitByHigherTimestamp
 } from '../shared/sentinelCore';
@@ -86,7 +88,9 @@ const ANDROID_RAW_SOUNDS = {
   'despacho': 'despacho',
   'comandancia': 'c_llamadocomandancia',
   'LLAMADO': 'c_llamadocomandancia',
-  'LLAMADO COMANDANCIA': 'c_llamadocomandancia'
+  'LLAMADO COMANDANCIA': 'c_llamadocomandancia',
+  'evacuacion': 'evacuacion',
+  'EVACUACION': 'evacuacion'
 };
 
 // Mapeo de archivos de audio locales para entorno Web
@@ -114,7 +118,9 @@ const SOUND_FILES = {
   'despacho': require('../../assets/sounds/despacho.mp3'),
   'comandancia': require('../../assets/sounds/c_llamadoComandancia.mp3'),
   'LLAMADO': require('../../assets/sounds/c_llamadoComandancia.mp3'),
-  'LLAMADO COMANDANCIA': require('../../assets/sounds/c_llamadoComandancia.mp3')
+  'LLAMADO COMANDANCIA': require('../../assets/sounds/c_llamadoComandancia.mp3'),
+  'evacuacion': require('../../assets/sounds/evacuacion.wav'),
+  'EVACUACION': require('../../assets/sounds/evacuacion.wav')
 };
 
 const PLAYED_SOUNDS_STORAGE_KEY = '@sentinel_one_v3_played_sounds';
@@ -390,8 +396,15 @@ function mergeDispatchEntitiesByHigherTimestamp(localDisp, incomingDisp) {
   });
 
   const winner = localTs > incomingTs ? { ...incomingDisp, ...localDisp } : { ...localDisp, ...incomingDisp };
+  const localEvacTs = Number(localDisp?.evacuar?.updatedAt || localDisp?.evacuar?.triggeredAt || 0);
+  const incomingEvacTs = Number(incomingDisp?.evacuar?.updatedAt || incomingDisp?.evacuar?.triggeredAt || 0);
+  const resolvedEvacuar =
+    incomingEvacTs >= localEvacTs && incomingDisp?.evacuar
+      ? incomingDisp.evacuar
+      : localDisp?.evacuar || incomingDisp?.evacuar || null;
   return {
     ...winner,
+    ...(resolvedEvacuar ? { evacuar: resolvedEvacuar } : {}),
     unidades: mergedUnits,
     _metaTimestamp: Math.max(localTs, incomingTs)
   };
@@ -892,6 +905,9 @@ export const useDispatchStore = create((set, get) => ({
   dispatchesList: initialCachedDispatches,
   fullscreenDispatchId: null,
   urgentBannerMessage: null,
+  activeEvacuationAlert: null,
+  silencedEvacuationKey: '',
+  isEvacuationAudioLooping: false,
   firefightersList: [],
   vehiclesList: [],
   vehiculosList: [],
@@ -932,6 +948,83 @@ export const useDispatchStore = create((set, get) => ({
   },
 
   clearUrgentBanner: () => set({ urgentBannerMessage: null }),
+
+  acknowledgeEvacuationAlert: () => {
+    const curEvac = get().activeEvacuationAlert;
+    const key = curEvac
+      ? `${curEvac.dispatchId || ''}_${curEvac.triggeredAt || curEvac.updatedAt || 1}`
+      : '';
+    get().stopEvacuationAlarm();
+    if (key) {
+      set({ silencedEvacuationKey: key });
+    }
+  },
+
+  evaluateEvacuationForCurrentUser: (dispatchesOverride = null) => {
+    const isAirplane = useAuthStore.getState().isAirplaneMode;
+    const currentUser = useAuthStore.getState().user;
+    if (isAirplane || get().isCentralActive || !currentUser) {
+      if (get().activeEvacuationAlert || get().isEvacuationAudioLooping) {
+        get().stopEvacuationAlarm();
+        set({ activeEvacuationAlert: null });
+      }
+      return;
+    }
+
+    const dispatches = Array.isArray(dispatchesOverride) ? dispatchesOverride : (get().dispatchesList || []);
+    let matchedAlert = null;
+
+    // 1. Evaluar despachos locales donde el bombero se encuentra participando activamente
+    for (const disp of dispatches) {
+      const evac = normalizeEvacuarMap(disp);
+      if (evac && evac.evacuacion === true && isFirefighterInActiveIncident(currentUser, disp)) {
+        matchedAlert = {
+          dispatchId: String(disp.idServicio || disp.id || '').trim(),
+          clave: String(disp.clave || 'EMERGENCIA').trim(),
+          direccion: String(disp.direccion || disp.lugar || '').trim(),
+          ...evac
+        };
+        break;
+      }
+    }
+
+    // 2. Respaldo inter-cuerpos: si el bombero asiste a un despacho 10-12 de apoyo SCI cuyo incidente central ordenó evacuar
+    if (!matchedAlert) {
+      const myAttendingDisp = dispatches.find((d) => isFirefighterInActiveIncident(currentUser, d));
+      if (myAttendingDisp) {
+        const sciId = String(myAttendingDisp.idIncidenteSci || '').trim();
+        const centralInc = sciId ? latestCentralSciIncidentsMap?.[sciId] : null;
+        const centralEvac = centralInc ? normalizeEvacuarMap(centralInc) : null;
+        if (centralEvac && centralEvac.evacuacion === true) {
+          matchedAlert = {
+            dispatchId: String(myAttendingDisp.idServicio || sciId).trim(),
+            clave: String(myAttendingDisp.clave || centralInc.claveEmergencia || '10-12').trim(),
+            direccion: String(myAttendingDisp.direccion || centralInc.direccionEmergencia || '').trim(),
+            ...centralEvac
+          };
+        }
+      }
+    }
+
+    if (matchedAlert) {
+      const alertKey = `${matchedAlert.dispatchId}_${matchedAlert.triggeredAt || matchedAlert.updatedAt || 1}`;
+      const prevAlert = get().activeEvacuationAlert;
+      const prevKey = prevAlert
+        ? `${prevAlert.dispatchId}_${prevAlert.triggeredAt || prevAlert.updatedAt || 1}`
+        : '';
+      const isSilenced = get().silencedEvacuationKey === alertKey;
+
+      if (prevKey !== alertKey || JSON.stringify(prevAlert) !== JSON.stringify(matchedAlert)) {
+        set({ activeEvacuationAlert: matchedAlert });
+      }
+      if (!isSilenced && !get().isEvacuationAudioLooping) {
+        get().playEvacuationAlarm();
+      }
+    } else if (get().activeEvacuationAlert || get().isEvacuationAudioLooping) {
+      get().stopEvacuationAlarm();
+      set({ activeEvacuationAlert: null, silencedEvacuationKey: '' });
+    }
+  },
 
   dismissFullscreenDispatch: (dispatchId = null) => {
     const targetId = dispatchId || get().fullscreenDispatchId;
@@ -1512,6 +1605,8 @@ export const useDispatchStore = create((set, get) => ({
     } else {
       useAuthStore.getState().stopLiveTelemetry();
     }
+
+    get().evaluateEvacuationForCurrentUser(activeList);
   },
 
   applyPersonalRawDocs: (rawDocsArray = []) => {
@@ -1629,6 +1724,8 @@ export const useDispatchStore = create((set, get) => ({
     } else {
       useAuthStore.getState().stopLiveTelemetry();
     }
+
+    get().evaluateEvacuationForCurrentUser(activeList);
   },
 
   // Actualización optimista inmediata (0ms) en memoria al cambiar el estado de cualquier bombero (propio o desde Disponibles)
@@ -2582,6 +2679,7 @@ export const useDispatchStore = create((set, get) => ({
 
       get().playDispatchSound('alerta', {
         forceMaxVolume: true,
+        bypassForegroundMute: true,
         vibratePatternCsv: '0,1000,300,1000,300,1000'
       });
       try {
@@ -2611,6 +2709,7 @@ export const useDispatchStore = create((set, get) => ({
       const chatBody = String(latestChatMsg?.texto || 'Nuevo mensaje en Canal Directo SCI');
       get().playDispatchSound('alerta', {
         forceMaxVolume: true,
+        bypassForegroundMute: true,
         vibratePatternCsv: '0,800,300,800'
       });
       try {
@@ -2665,6 +2764,7 @@ export const useDispatchStore = create((set, get) => ({
         isSciTabActive
       });
     }
+    get().evaluateEvacuationForCurrentUser();
   },
 
   // Carga instantánea desde caché local al abrir la app + Sincronización incremental ("Delta Sync") al presionar "Sincronizar"
@@ -4623,8 +4723,8 @@ export const useDispatchStore = create((set, get) => ({
       get().triggerNativeVibration(options.vibratePatternCsv);
     }
 
-    // Filtro de sonido en primer plano: si la app está abierta en primer plano no debe sonar, solo vibrar
-    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+    // Filtro de sonido en primer plano: si la app está abierta en primer plano no debe sonar, solo vibrar (salvo alertas críticas SCI o Evacuación)
+    if (!options.bypassForegroundMute && typeof document !== 'undefined' && document.visibilityState === 'visible') {
       if (!options.vibratePatternCsv) {
         get().triggerNativeVibration('0,800,300,800');
       }
@@ -4686,10 +4786,129 @@ export const useDispatchStore = create((set, get) => ({
     }
   },
 
-  stopDispatchSound: async () => {
+  playEvacuationAlarm: async () => {
+    if (useAuthStore.getState().isAirplaneMode || get().isCentralActive) return;
+    get().triggerNativeVibration('0,1500,250,1500,250,1500,250,1500');
+    set({ isEvacuationAudioLooping: true, isAudioPlaying: true });
+
     try {
       if (typeof window !== 'undefined' && window.AndroidApp) {
-        if (typeof window.AndroidApp.stopTone === 'function') {
+        if (typeof window.AndroidApp.playEvacuationAlarm === 'function') {
+          window.AndroidApp.playEvacuationAlarm();
+          return;
+        }
+        if (typeof window.AndroidApp.playToneWithVolume === 'function') {
+          window.AndroidApp.playToneWithVolume('evacuacion', true);
+          return;
+        }
+      }
+
+      if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+        window.webkit.messageHandlers.iOSApp.postMessage({
+          action: 'playEvacuationAlarm',
+          forceMaxVolume: true
+        });
+        return;
+      }
+
+      if (typeof window !== 'undefined') {
+        if (window.__SENTINEL_EVAC_INTERVAL__) {
+          clearInterval(window.__SENTINEL_EVAC_INTERVAL__);
+          window.__SENTINEL_EVAC_INTERVAL__ = null;
+        }
+        const prev = get().soundObject;
+        if (prev && typeof prev.pause === 'function') {
+          try { prev.pause(); } catch (_) {}
+        }
+        const src = SOUND_FILES['evacuacion'] || SOUND_FILES['alerta'];
+        if (typeof src === 'string' && typeof window.Audio !== 'undefined') {
+          const audio = new window.Audio(src);
+          audio.volume = 1.0;
+          audio.loop = true;
+          await audio.play();
+          set({ soundObject: audio });
+          return;
+        }
+        // Respaldo sintetizador WebAudio de máxima presión sonora
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = window.__SENTINEL_EVAC_CTX__ || new AudioCtx();
+          window.__SENTINEL_EVAC_CTX__ = ctx;
+          if (ctx.state === 'suspended') {
+            try { await ctx.resume(); } catch (_) {}
+          }
+          const playBurst = () => {
+            try {
+              const now = ctx.currentTime;
+              const osc1 = ctx.createOscillator();
+              const osc2 = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc1.type = 'sawtooth';
+              osc2.type = 'square';
+              osc1.frequency.setValueAtTime(880, now);
+              osc1.frequency.linearRampToValueAtTime(1560, now + 0.35);
+              osc1.frequency.linearRampToValueAtTime(880, now + 0.70);
+              osc2.frequency.setValueAtTime(1776, now);
+              osc2.frequency.linearRampToValueAtTime(3120, now + 0.35);
+              osc2.frequency.linearRampToValueAtTime(1776, now + 0.70);
+              gain.gain.setValueAtTime(1.0, now);
+              osc1.connect(gain);
+              osc2.connect(gain);
+              gain.connect(ctx.destination);
+              osc1.start(now);
+              osc2.start(now);
+              osc1.stop(now + 0.72);
+              osc2.stop(now + 0.72);
+            } catch (_) {}
+          };
+          playBurst();
+          window.__SENTINEL_EVAC_INTERVAL__ = setInterval(playBurst, 740);
+        }
+      }
+    } catch (e) {
+      console.warn('Evacuation alarm playback error:', e);
+    }
+  },
+
+  stopEvacuationAlarm: () => {
+    try {
+      if (typeof window !== 'undefined') {
+        if (window.__SENTINEL_EVAC_INTERVAL__) {
+          clearInterval(window.__SENTINEL_EVAC_INTERVAL__);
+          window.__SENTINEL_EVAC_INTERVAL__ = null;
+        }
+        if (window.AndroidApp?.stopEvacuationAlarm) {
+          window.AndroidApp.stopEvacuationAlarm();
+        } else if (window.AndroidApp?.stopTone) {
+          window.AndroidApp.stopTone();
+        }
+        if (window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+          window.webkit.messageHandlers.iOSApp.postMessage({
+            action: 'stopEvacuationAlarm'
+          });
+        }
+      }
+      const currentSound = get().soundObject;
+      if (currentSound && typeof currentSound.pause === 'function') {
+        currentSound.loop = false;
+        currentSound.pause();
+      }
+    } catch (_) {}
+    set({ soundObject: null, isAudioPlaying: false, isEvacuationAudioLooping: false });
+  },
+
+  stopDispatchSound: async () => {
+    try {
+      if (typeof window !== 'undefined') {
+        if (window.__SENTINEL_EVAC_INTERVAL__) {
+          clearInterval(window.__SENTINEL_EVAC_INTERVAL__);
+          window.__SENTINEL_EVAC_INTERVAL__ = null;
+        }
+      }
+      if (typeof window !== 'undefined' && window.AndroidApp) {
+        if (typeof window.AndroidApp.stopEvacuationAlarm === 'function') {
+          window.AndroidApp.stopEvacuationAlarm();
+        } else if (typeof window.AndroidApp.stopTone === 'function') {
           window.AndroidApp.stopTone();
         } else if (typeof window.AndroidApp.stopSound === 'function') {
           window.AndroidApp.stopSound();
@@ -4705,10 +4924,11 @@ export const useDispatchStore = create((set, get) => ({
       }
       const currentSound = get().soundObject;
       if (currentSound && typeof currentSound.pause === 'function') {
+        currentSound.loop = false;
         currentSound.pause();
       }
     } catch (e) {}
-    set({ soundObject: null, isAudioPlaying: false });
+    set({ soundObject: null, isAudioPlaying: false, isEvacuationAudioLooping: false });
   }
 }));
 
@@ -4740,6 +4960,9 @@ registerPersonalBridge({
         )
       });
     }
+    setTimeout(() => {
+      try { useDispatchStore.getState().evaluateEvacuationForCurrentUser(); } catch (_) {}
+    }, 0);
     return nowTs;
   }
 });

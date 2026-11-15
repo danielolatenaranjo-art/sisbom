@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Check, X } from 'lucide-react-native';
 import { useLicenseStore } from '../../store/useLicenseStore';
 import { useAuthStore } from '../../store/useAuthStore';
+import { normalizeEvacuarMap } from '../../shared/sentinelCore';
 
 function latLngToTile(lat, lng, zoom = 15) {
   const n = Math.pow(2, zoom);
@@ -317,6 +318,16 @@ export const TacticalDispatchMap = ({
   // Pre-informe
   const rawPreinforme = String(dispatch?.preinforme || '').trim().replace(/---/g, '').trim();
   const hasPreinforme = rawPreinforme.length > 0 && !rawPreinforme.toLowerCase().includes('a la espera');
+  const evacInfo = normalizeEvacuarMap(dispatch);
+  const hasEvacPoint = Boolean(
+    evacInfo?.evacuacion &&
+    Number.isFinite(Number(evacInfo?.lat)) &&
+    Number.isFinite(Number(evacInfo?.lng)) &&
+    Math.abs(Number(evacInfo.lat)) > 0.0001 &&
+    Math.abs(Number(evacInfo.lng)) > 0.0001
+  );
+  const evacLat = hasEvacPoint ? Number(evacInfo.lat) : 0;
+  const evacLng = hasEvacPoint ? Number(evacInfo.lng) : 0;
 
   const handleOpenExternalMaps = () => {
     if (!hasValidGps && !cleanLugar) return;
@@ -445,6 +456,27 @@ export const TacticalDispatchMap = ({
         `
             : ''
         }
+        ${
+          hasEvacPoint
+            ? `
+        const evacIcon = L.divIcon({
+          className: 'custom-evac-pin',
+          html: '<div style="display:flex;flex-direction:column;align-items:center;"><div style="background:#10B981;color:#fff;font-weight:900;font-size:10px;padding:3px 7px;border-radius:8px;border:2px solid #fff;box-shadow:0 3px 10px rgba(0,0,0,0.65);white-space:nowrap;">🛡️ EVACUACIÓN</div><div style="width:14px;height:14px;border-radius:50%;background:#10B981;border:2.5px solid #fff;margin-top:2px;"></div></div>',
+          iconSize: [110, 42],
+          iconAnchor: [55, 36]
+        });
+        L.marker([${evacLat}, ${evacLng}], { icon: evacIcon }).addTo(map);
+        if (${hasValidGps ? 'true' : 'false'}) {
+          L.polyline([[targetLat, targetLng], [${evacLat}, ${evacLng}]], {
+            color: '#10B981',
+            weight: 3.5,
+            dashArray: '8, 6',
+            opacity: 0.95
+          }).addTo(map);
+        }
+        `
+            : ''
+        }
         function recenterToVisibleWindow() {
           map.invalidateSize({ animate: false });
           if (targetYPx > 0) {
@@ -473,7 +505,7 @@ export const TacticalDispatchMap = ({
     <View style={styles.mapLayer} pointerEvents="none">
       {Platform.OS === 'web' ? (
         <iframe
-          key={`map_${lat}_${lng}_${hasValidGps ? '1' : '0'}_${isDark ? 'd' : 'l'}_${pinHex}_${targetMarkerYPx}`}
+          key={`map_${lat}_${lng}_${hasValidGps ? '1' : '0'}_${hasEvacPoint ? `${evacLat}_${evacLng}` : '0'}_${isDark ? 'd' : 'l'}_${pinHex}_${targetMarkerYPx}`}
           srcDoc={mapHtml}
           style={styles.iframe}
           title="IncidentMapPreview"

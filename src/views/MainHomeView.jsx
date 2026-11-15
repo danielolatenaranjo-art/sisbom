@@ -428,6 +428,9 @@ export const MainHomeView = ({ onLogout }) => {
     dismissFullscreenDispatch,
     clearUrgentBanner,
     stopDispatchSound,
+    activeEvacuationAlert,
+    isEvacuationAudioLooping,
+    acknowledgeEvacuationAlert,
     interCorpsAlert,
     sciRequestsList,
     activeSciNeighborCorps,
@@ -7559,6 +7562,108 @@ export const MainHomeView = ({ onLogout }) => {
           ) : null}
         </View>
       </View>
+
+      {/* ===================================================================== */}
+      {/* ALERTA CRÍTICA DE EVACUACIÓN INMEDIATA (SOLO PERSONAL EN INCIDENTE)   */}
+      {/* ===================================================================== */}
+      {activeEvacuationAlert && !isAirplaneMode && !isMeCentralOperator ? (
+        <View
+          style={{
+            position: 'absolute',
+            top: Platform.OS === 'ios' ? 46 : 42,
+            left: 12,
+            right: 12,
+            zIndex: 9800,
+            backgroundColor: '#7F1D1D',
+            borderRadius: 18,
+            borderWidth: 2.5,
+            borderColor: '#FDE047',
+            padding: 14,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: 10 },
+            shadowOpacity: 0.75,
+            shadowRadius: 16,
+            elevation: 20
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <Text style={{ color: '#FDE047', fontSize: 15, fontWeight: '900', letterSpacing: 0.5 }}>
+              🚨 ¡EVACUACIÓN INMEDIATA!
+            </Text>
+            <Text style={{ color: '#FECACA', fontSize: 11, fontWeight: '800' }}>
+              {activeEvacuationAlert.clave || 'SCI'}
+            </Text>
+          </View>
+          <Text style={{ color: '#FFFFFF', fontSize: 13.5, fontWeight: '800', lineHeight: 18, marginBottom: 8 }}>
+            {activeEvacuationAlert.instrucciones || 'ABANDONAR ZONA DE RIESGO DE INMEDIATO Y DIRIGIRSE AL PUNTO DE EVACUACIÓN'}
+          </Text>
+          {Number.isFinite(Number(activeEvacuationAlert.lat)) &&
+          Number.isFinite(Number(activeEvacuationAlert.lng)) &&
+          Math.abs(Number(activeEvacuationAlert.lat)) > 0.0001 ? (
+            <Text style={{ color: '#A7F3D0', fontSize: 11.5, fontWeight: '700', marginBottom: 10 }}>
+              🛡️ Punto Seguro: {Number(activeEvacuationAlert.lat).toFixed(5)}, {Number(activeEvacuationAlert.lng).toFixed(5)}
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {Number.isFinite(Number(activeEvacuationAlert.lat)) &&
+            Number.isFinite(Number(activeEvacuationAlert.lng)) &&
+            Math.abs(Number(activeEvacuationAlert.lat)) > 0.0001 ? (
+              <TouchableOpacity
+                onPress={() => {
+                  const eLat = Number(activeEvacuationAlert.lat);
+                  const eLng = Number(activeEvacuationAlert.lng);
+                  const label = encodeURIComponent('PUNTO DE EVACUACION SEGURO');
+                  const geoUrl = `geo:${eLat},${eLng}?q=${eLat},${eLng}(${label})`;
+                  const iosUrl = `http://maps.apple.com/?daddr=${eLat},${eLng}&dirflg=w`;
+                  const webUrl = `https://www.google.com/maps/dir/?api=1&destination=${eLat},${eLng}&travelmode=walking`;
+                  try {
+                    if (typeof window !== 'undefined' && window.AndroidApp?.openExternalUrl) {
+                      window.AndroidApp.openExternalUrl(geoUrl);
+                      return;
+                    }
+                    if (typeof window !== 'undefined' && window.webkit?.messageHandlers?.iOSApp?.postMessage) {
+                      window.webkit.messageHandlers.iOSApp.postMessage({ action: 'openExternalUrl', url: iosUrl });
+                      return;
+                    }
+                  } catch (_) {}
+                  Linking.openURL(webUrl).catch(() => {});
+                }}
+                style={{
+                  flex: 1,
+                  backgroundColor: '#10B981',
+                  paddingVertical: 10,
+                  paddingHorizontal: 10,
+                  borderRadius: 10,
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '900' }}>
+                  🛡️ RUTA A PUNTO SEGURO
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={() => acknowledgeEvacuationAlert()}
+              style={{
+                flex: 1,
+                backgroundColor: isEvacuationAudioLooping ? '#F59E0B' : 'rgba(0,0,0,0.45)',
+                borderWidth: 1,
+                borderColor: isEvacuationAudioLooping ? '#FDE68A' : 'rgba(255,255,255,0.25)',
+                paddingVertical: 10,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '900' }}>
+                {isEvacuationAudioLooping ? '🔇 SILENCIAR TONO' : '✓ ENTERADO'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
 
       {/* ===================================================================== */}
       {/* BANNER URGENTE DE SOLICITUDES 12-10 / 6-6 / ESCALAMIENTO              */}

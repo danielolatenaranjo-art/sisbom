@@ -27,7 +27,7 @@ function cleanOldFiles() {
     const iosResDir = path.join(__dirname, 'ios', 'Resources');
     [assetsSoundsDir, androidRawDir, iosResDir].forEach((d) => fs.mkdirSync(d, { recursive: true }));
 
-    const mp3s = fs.readdirSync(sonidosSrcDir).filter((f) => f.toLowerCase().endsWith('.mp3'));
+    const mp3s = fs.readdirSync(sonidosSrcDir).filter((f) => /\.(mp3|wav)$/i.test(f));
     for (const f of mp3s) {
       const src = path.join(sonidosSrcDir, f);
       const lower = f.toLowerCase();

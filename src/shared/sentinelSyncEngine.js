@@ -31,7 +31,10 @@ import {
   buildCanonicalCadAlertDoc,
   buildCanonicalCentralSciIncidentId,
   formatCanonicalDispatchId,
-  parseDispatchIdParts
+  parseDispatchIdParts,
+  formatCanonicalBitacoraId,
+  parseBitacoraIdParts,
+  buildCanonicalEvacuarMap
 } from './sentinelCore';
 
 // ============================================================================
@@ -738,3 +741,233 @@ export async function generateNextCanonicalDispatchId(
 
   return nextId;
 }
+
+/**
+ * Genera el siguiente correlativo canónico `AAAA-00000` para `bitacora/{idSalida}`
+ * consultando Firestore primero para evitar colisiones entre carros o estaciones,
+ * y reconciliando contadores locales obsoletos en `localStorage`.
+ */
+export async function generateNextCanonicalBitacoraId(
+  db,
+  {
+    localBitacoras = [],
+    year = null,
+    storageKeyPrefix = 'sentinel_last_bitacora_seq',
+    ensureAuthFn = null
+  } = {}
+) {
+  const targetYear = parseInt(year, 10) || new Date().getFullYear();
+  let maxSeq = 0;
+  let firestoreOk = false;
+
+  const inspectRecord = (rawId, data = null, isRemote = false) => {
+    const cleanDocId = String(rawId || '').trim();
+    const h60Ts = Number(data?.tiempos?.h60 || data?.h60 || data?._metaTimestamp || 0);
+    const fallbackYear = h60Ts > 1000000000 ? new Date(h60Ts).getFullYear() : (isRemote ? targetYear : targetYear);
+
+    const parsedDoc = parseBitacoraIdParts(cleanDocId, fallbackYear);
+    if (parsedDoc && parsedDoc.year === targetYear && parsedDoc.seq > maxSeq) {
+      maxSeq = parsedDoc.seq;
+    }
+    const fieldId = String(data?.idSalida || data?.ID || '').trim();
+    if (fieldId && fieldId !== cleanDocId) {
+      const parsedField = parseBitacoraIdParts(fieldId, fallbackYear);
+      if (parsedField && parsedField.year === targetYear && parsedField.seq > maxSeq) {
+        maxSeq = parsedField.seq;
+      }
+    }
+  };
+
+  if (db) {
+    try {
+      if (typeof ensureAuthFn === 'function') {
+        await ensureAuthFn().catch(() => {});
+      }
+      const startId = `${targetYear}-0000`;
+      const endId = `${targetYear}-99999`;
+      const q = query(
+        collection(db, 'bitacora'),
+        where(documentId(), '>=', startId),
+        where(documentId(), '<=', endId)
+      );
+      const snap = await getDocs(q);
+      firestoreOk = true;
+      snap.forEach((docSnap) => {
+        inspectRecord(docSnap.id, docSnap.data() || {}, true);
+      });
+
+      if (snap.empty) {
+        const fullSnap = await getDocs(collection(db, 'bitacora'));
+        fullSnap.forEach((docSnap) => {
+          inspectRecord(docSnap.id, docSnap.data() || {}, true);
+        });
+      }
+    } catch (e) {
+      firestoreOk = false;
+      console.warn('[sentinelSyncEngine] Error consultando correlativo de bitacora en Firestore:', e?.message || e);
+    }
+  }
+
+  if (localBitacoras && typeof localBitacoras.forEach === 'function') {
+    localBitacoras.forEach((b) => {
+      if (!b || typeof b !== 'object') return;
+      const isClosed = Boolean(b?.tiempos?.h68 || b?.h68 || b?.hora68);
+      if (!firestoreOk || !isClosed) {
+        const bId = String(b.idSalida || b.ID || b.id || '').trim();
+        inspectRecord(bId, b, false);
+      }
+    });
+  }
+
+  if (!firestoreOk && typeof localStorage !== 'undefined') {
+    try {
+      const localLastMain = parseInt(localStorage.getItem(`${storageKeyPrefix}_${targetYear}`) || '0', 10);
+      const localLastNav = parseInt(localStorage.getItem(`sentinel_nav_last_bitacora_seq_${targetYear}`) || '0', 10);
+      [localLastMain, localLastNav].forEach((val) => {
+        if (!isNaN(val) && val > maxSeq && val < 100000) {
+          maxSeq = val;
+        }
+      });
+    } catch (_) {}
+  }
+
+  const nextSeq = maxSeq + 1;
+  const nextId = formatCanonicalBitacoraId(targetYear, nextSeq);
+
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem(`${storageKeyPrefix}_${targetYear}`, String(nextSeq));
+      localStorage.setItem(`sentinel_nav_last_bitacora_seq_${targetYear}`, String(nextSeq));
+    } catch (_) {}
+  }
+
+  return nextId;
+}
+
+// ============================================================================
+// 8. ORDEN TRANSVERSAL DE EVACUACIÓN (`evacuar`) ENTRE SCI, ONE Y NAV
+// ============================================================================
+
+/**
+ * Emite o desactiva el mapa canónico `evacuar` de forma atómica en:
+ * 1. `despachos/{idServicio}` (para `SENTINEL ONE` y `SENTINEL NAV` del Cuerpo local + Cloud Function push)
+ * 2. `sci_incidentes/{idServicio}` (estado táctico local de `SENTINEL SCI` y `SENTINEL NAV`)
+ * 3. `sisbom-central/sci_incidentes/{LICENCIA}_{idServicio}` y subcolección `solicitudes` activas (para unidades/personal en apoyo inter-cuerpos)
+ */
+export async function emitEvacuationOrderCrossSystem({
+  tenantDb = null,
+  centralDb = null,
+  idServicio = '',
+  licenciaSolicitante = '',
+  evacuacion = true,
+  lat = null,
+  lng = null,
+  instrucciones = '',
+  emitidoPor = 'COMANDANTE INCIDENTE',
+  targetSector = 'TODOS',
+  activeInterCorpsRequestIds = []
+} = {}) {
+  const cleanServiceId = String(idServicio || '').trim();
+  if (!cleanServiceId) {
+    return { ok: false, error: 'Sin idServicio activo para evacuar' };
+  }
+
+  const nowMs = Date.now();
+  const evacuarMap = buildCanonicalEvacuarMap({
+    evacuacion: Boolean(evacuacion),
+    lat,
+    lng,
+    instrucciones,
+    triggeredAt: evacuacion ? nowMs : null,
+    emitidoPor,
+    updatedAt: nowMs
+  });
+
+  const legacyEvacuationAlert = {
+    active: evacuarMap.evacuacion,
+    targetSector: String(targetSector || 'TODOS').trim().toUpperCase(),
+    motivo: evacuarMap.instrucciones,
+    lat: evacuarMap.lat,
+    lng: evacuarMap.lng,
+    triggeredAt: evacuarMap.triggeredAt,
+    emitidoPor: evacuarMap.emitidoPor,
+    updatedAt: nowMs
+  };
+
+  const tasks = [];
+
+  if (tenantDb) {
+    tasks.push(
+      setDoc(
+        doc(tenantDb, 'despachos', cleanServiceId),
+        {
+          evacuar: evacuarMap,
+          _fieldTimestamps: { evacuar: nowMs },
+          _metaTimestamp: nowMs
+        },
+        { merge: true }
+      ).catch((e) => {
+        console.warn('[sentinelSyncEngine] Error escribiendo evacuar en despachos:', e?.message || e);
+      })
+    );
+
+    tasks.push(
+      setDoc(
+        doc(tenantDb, 'sci_incidentes', cleanServiceId),
+        {
+          idServicio: cleanServiceId,
+          evacuar: evacuarMap,
+          evacuationAlert: legacyEvacuationAlert,
+          updatedAt: nowMs,
+          _fieldTimestamps: { evacuar: nowMs },
+          _metaTimestamp: nowMs
+        },
+        { merge: true }
+      ).catch((e) => {
+        console.warn('[sentinelSyncEngine] Error escribiendo evacuar en sci_incidentes local:', e?.message || e);
+      })
+    );
+  }
+
+  const cleanOwnLic = String(licenciaSolicitante || '').trim().toUpperCase();
+  if (centralDb && cleanOwnLic) {
+    const centralIncId = buildCanonicalCentralSciIncidentId(cleanOwnLic, cleanServiceId);
+    tasks.push(
+      setDoc(
+        doc(centralDb, 'sci_incidentes', centralIncId),
+        {
+          evacuar: evacuarMap,
+          evacuationAlert: legacyEvacuationAlert,
+          updatedAt: nowMs,
+          _metaTimestamp: nowMs
+        },
+        { merge: true }
+      ).catch((e) => {
+        console.warn('[sentinelSyncEngine] Error escribiendo evacuar en sisbom-central/sci_incidentes:', e?.message || e);
+      })
+    );
+
+    if (Array.isArray(activeInterCorpsRequestIds)) {
+      activeInterCorpsRequestIds.forEach((reqId) => {
+        const cleanReqId = String(reqId || '').trim();
+        if (!cleanReqId) return;
+        tasks.push(
+          setDoc(
+            doc(centralDb, 'sci_incidentes', centralIncId, 'solicitudes', cleanReqId),
+            {
+              evacuar: evacuarMap,
+              evacuationAlert: legacyEvacuationAlert,
+              updatedAt: nowMs,
+              _metaTimestamp: nowMs
+            },
+            { merge: true }
+          ).catch(() => {})
+        );
+      });
+    }
+  }
+
+  await Promise.all(tasks);
+  return { ok: true, evacuar: evacuarMap, evacuationAlert: legacyEvacuationAlert };
+}
+

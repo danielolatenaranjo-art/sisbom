@@ -91,8 +91,8 @@ def main():
 
         if bundle_res_id:
             print(f"   Bundle Resource ID encontrado: {bundle_res_id}")
-            # Habilitar PUSH_NOTIFICATIONS y TIME_SENSITIVE_NOTIFICATIONS
-            for cap_type in ("PUSH_NOTIFICATIONS", "TIME_SENSITIVE_NOTIFICATIONS"):
+            # Habilitar PUSH_NOTIFICATIONS en App Store Connect API
+            for cap_type in ("PUSH_NOTIFICATIONS",):
                 cap_body = {
                     "data": {
                         "type": "bundleIdCapabilities",
@@ -174,6 +174,8 @@ def main():
         }
         if "com.apple.developer.usernotifications.time-sensitive" in entitlements:
             ent_dict["com.apple.developer.usernotifications.time-sensitive"] = True
+        if "com.apple.developer.usernotifications.critical-alerts" in entitlements:
+            ent_dict["com.apple.developer.usernotifications.critical-alerts"] = True
 
         ent_path = os.path.join(ios_dir, "SisBom.entitlements")
         with open(ent_path, "wb") as f:
