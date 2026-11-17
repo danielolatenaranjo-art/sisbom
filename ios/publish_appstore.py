@@ -26,7 +26,7 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.1.0"
-TARGET_BUILD_NUMBER = "3034"
+TARGET_BUILD_NUMBER = "3035"
 
 SUPPORT_URL = "https://sistemasentinel.cl/soporte"
 MARKETING_URL = "https://sistemasentinel.cl"
@@ -66,7 +66,7 @@ REVIEW_NOTES = (
     "3. En la pantalla de inicio de sesión del bombero ingrese:\n"
     "   - Usuario: 100\n"
     "   - Clave de Acceso: 1234\n\n"
-    "CORRECCIONES REALIZADAS PARA ESTA REVISIÓN (V3.1.0 / Build 3034):\n"
+    "CORRECCIONES REALIZADAS PARA ESTA REVISIÓN (V3.1.0 / Build 3035):\n"
     "- Directriz 5.1.1(iv): Se eliminó cualquier botón 'Activar' / 'No acepto' en el aviso previo de permisos; ahora muestra únicamente un aviso neutral con botón 'Continuar' que procede siempre a la solicitud nativa de iOS, y nunca redirige a Configuración si el usuario elige 'No permitir'.\n"
     "- Directriz 2.3.3: Se reemplazaron todas las capturas de pantalla de iPhone (6.9\", 6.7\", 6.5\") e iPad Pro (13\" y 12.9\" 2ª gen.) por capturas reales de la aplicación en uso.\n"
     "- Corrección del botón 'Apertura de Puerta' en iOS mediante puente nativo y respaldo REST con restablecimiento inmediato.\n\n"

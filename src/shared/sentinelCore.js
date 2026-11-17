@@ -1027,6 +1027,8 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
   const time610 = b.hora610 || ex.time610 || '';
   const time68 = b.hora68 || ex.time68 || '';
 
+  const rawMovil = String(b.estadoMovil || '').trim().toLowerCase();
+  const returnedToScene = rawMovil === 'en lugar' || rawMovil === '6-3';
   let status = ex.status || 'pending_departure';
   if (time68 || b.tiempos?.h68) {
     status = '6-8';
@@ -1034,7 +1036,7 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
     status = 'finalizado';
   } else if (time69 || b.tiempos?.h69) {
     status = 'retorno';
-  } else if ((departureTime615 || b.tiempos?.h615) && (!b.tiempos?.h63 || !b.tiempos?.h615 || b.tiempos.h615 >= b.tiempos.h63)) {
+  } else if (!returnedToScene && (departureTime615 || b.tiempos?.h615) && (!b.tiempos?.h63 || !b.tiempos?.h615 || b.tiempos.h615 >= b.tiempos.h63)) {
     status = '6-15';
   } else if (arrivalTime || b.tiempos?.h63) {
     status = 'en_lugar';
@@ -1066,7 +1068,7 @@ export function bitacoraToServiceUnit(bitacoraNorm, existingUnit = {}, dispatchU
     epoch69: b.tiempos?.h69 || null,
     epoch610: b.tiempos?.h610 || null,
     epoch68: b.tiempos?.h68 || null,
-    is615: status === '6-15' || Boolean((b.tiempos?.h615 || ex.is615) && !time69 && !time610 && !time68),
+    is615: status === '6-15',
     solicitudConductorTimestamp: meta.solicitudConductorTimestamp || ex.solicitudConductorTimestamp || null,
     solicitudPersonalTimestamp: meta.solicitudPersonalTimestamp || ex.solicitudPersonalTimestamp || null,
     dirigirse: b.dirigirse || meta.dirigirse || ex.dirigirse || null,
@@ -1299,10 +1301,17 @@ export function buildCanonicalBitacoraPayload(svc = {}, unit = {}, vehicles = []
     sourceUnit.fecha615 || baseRefDate
   );
 
+  const explicitReturnedToScene =
+    sourceUnit.is615 === false &&
+    (sourceUnit.status === 'en_lugar' ||
+      String(sourceUnit.estadoMovil || '').trim().toLowerCase() === 'en lugar' ||
+      sourceUnit.estadoMovil === '6-3');
+
   let estadoMovil = 'en cuartel';
   if (h68) estadoMovil = 'en cuartel';
   else if (h610) estadoMovil = 'en cuartel';
   else if (h69) estadoMovil = 'retorno';
+  else if (explicitReturnedToScene && h63) estadoMovil = 'en lugar';
   else if (h615 && (!h63 || h615 >= h63)) estadoMovil = '6-15 hospital';
   else if (h63) estadoMovil = 'en lugar';
   else if (h60) estadoMovil = 'en trayecto';

@@ -201,7 +201,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete v3.1.0-ipa --yes || true
-          gh release create v3.1.0-ipa "${{ steps.locate-ios.outputs.ios_path }}/output/SENTINEL_ONE.ipa#SENTINEL_ONE_V3.ipa" --title "SENTINEL ONE V3.1.0 (Build 3034)" --notes "Build 3034 iOS IPA" --latest=false || true
+          gh release create v3.1.0-ipa "${{ steps.locate-ios.outputs.ios_path }}/output/SENTINEL_ONE.ipa#SENTINEL_ONE_V3.ipa" --title "SENTINEL ONE V3.1.0 (Build 3035)" --notes "Build 3035 iOS IPA" --latest=false || true
 
       - name: Limpiar llavero temporal
         if: always()

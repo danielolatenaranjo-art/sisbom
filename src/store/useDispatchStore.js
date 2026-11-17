@@ -174,7 +174,7 @@ export function resolveSoundKeyForClave(clave) {
 export function isDispatchTooOld(dispatch) {
   if (!dispatch) return true;
   const now = Date.now();
-  const createdMs = Number(dispatch.createdAt || dispatch.timestamp || dispatch.horaCreacion || 0);
+  const createdMs = Number(dispatch.createdAt || dispatch.creadoEn || dispatch.timestamp || dispatch.horaCreacion || 0);
   if (createdMs > 1_000_000_000_000) {
     return (now - createdMs) > MAX_DISPATCH_AGE_MS;
   }
@@ -199,7 +199,7 @@ export function isDispatchTooOld(dispatch) {
       }
     }
   }
-  return false;
+  return true;
 }
 
 export function hasUserRespondedToDispatch(dispatch, user) {
@@ -1049,8 +1049,11 @@ export const useDispatchStore = create((set, get) => ({
   scheduleRepeatAlert: (dispatchId, clave) => {
     if (!dispatchId) return;
     get().cancelRepeatAlertsForDispatch(dispatchId);
+    const scheduledAt = Date.now();
     repeatTimersByKey[dispatchId] = setTimeout(() => {
       delete repeatTimersByKey[dispatchId];
+      const elapsed = Date.now() - scheduledAt;
+      if (elapsed > 95000) return;
       const { isAirplaneMode, user } = useAuthStore.getState();
       if (isAirplaneMode || get().isCentralActive || !user) return;
       const userEstado = String(user.estado || '0-9').trim();
@@ -1059,7 +1062,7 @@ export const useDispatchStore = create((set, get) => ({
       if (cargoUp === 'BOMBERO HONORARIO') return;
 
       const disp = (get().dispatchesList || []).find((d) => String(d.idServicio) === String(dispatchId));
-      if (!disp) return;
+      if (!disp || isDispatchTooOld(disp)) return;
       if (hasUserRespondedToDispatch(disp, user)) return;
 
       const soundKey = resolveSoundKeyForClave(clave || disp.clave);
@@ -1077,15 +1080,17 @@ export const useDispatchStore = create((set, get) => ({
       clearTimeout(repeatTimersByKey[timerKey]);
       delete repeatTimersByKey[timerKey];
     }
+    const scheduledAt = Date.now();
     repeatTimersByKey[timerKey] = setTimeout(() => {
       delete repeatTimersByKey[timerKey];
+      if ((Date.now() - scheduledAt) > 95000) return;
       const { isAirplaneMode, user } = useAuthStore.getState();
       if (isAirplaneMode || get().isCentralActive || !user) return;
       if (String(user.estado || '0-9').trim() !== '0-9') return;
       if (is1210 && !user.conductor) return;
 
       const disp = (get().dispatchesList || []).find((d) => String(d.idServicio) === String(dispatchId));
-      if (!disp || isUserAttendingDispatch(disp, user)) return;
+      if (!disp || isDispatchTooOld(disp) || isUserAttendingDispatch(disp, user)) return;
       const uObj = disp.unidades?.[unitId];
       if (!uObj) return;
       const uEstado = String(uObj.estado || '').trim();

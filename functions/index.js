@@ -42,7 +42,16 @@ function getApnsJwt() {
   return cachedApnsJwt;
 }
 
-function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority = "10", topic = APNS_BUNDLE_ID) {
+function sendSingleApnsHttp2(
+  host,
+  apnsToken,
+  payloadObj,
+  collapseId,
+  priority = "10",
+  topic = APNS_BUNDLE_ID,
+  ttlSeconds = 300,
+  pushType = "alert"
+) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (res) => {
@@ -61,14 +70,15 @@ function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority =
         try { client.close(); } catch (_) {}
         finish({status: 0, reason: "timeout"});
       });
+      const safeTtl = Math.max(60, Math.min(3600, Number(ttlSeconds) || 300));
       const headers = {
         ":method": "POST",
         ":path": `/3/device/${apnsToken}`,
         "authorization": `bearer ${getApnsJwt()}`,
         "apns-topic": String(topic || APNS_BUNDLE_ID),
-        "apns-push-type": "alert",
+        "apns-push-type": String(pushType || "alert"),
         "apns-priority": String(priority),
-        "apns-expiration": String(Math.floor(Date.now() / 1000) + 3600)
+        "apns-expiration": String(Math.floor(Date.now() / 1000) + safeTtl)
       };
       if (collapseId) {
         headers["apns-collapse-id"] = String(collapseId).slice(0, 64);
@@ -93,29 +103,36 @@ function sendSingleApnsHttp2(host, apnsToken, payloadObj, collapseId, priority =
   });
 }
 
-async function sendDirectApnsToDevice(apnsToken, payloadObj, collapseId, priority = "10") {
+async function sendDirectApnsToDevice(
+  apnsToken,
+  payloadObj,
+  collapseId,
+  priority = "10",
+  ttlSeconds = 300,
+  pushType = "alert"
+) {
   const cleanHex = String(apnsToken || "").trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(cleanHex)) {
     return {delivered: false, status: 0, body: "InvalidHex", via: "none"};
   }
-  const prodRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_BUNDLE_ID);
+  const prodRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_BUNDLE_ID, ttlSeconds, pushType);
   if (prodRes.status === 200) {
     return {delivered: true, status: 200, body: "", via: "apns-prod"};
   }
   const prodBodyStr = String(prodRes.body || "");
   if (prodRes.status === 400 && prodBodyStr.includes("BadDeviceToken")) {
-    const sandRes = await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_BUNDLE_ID);
+    const sandRes = await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_BUNDLE_ID, ttlSeconds, pushType);
     if (sandRes.status === 200) {
       return {delivered: true, status: 200, body: "", via: "apns-sandbox"};
     }
   }
   if (prodRes.status === 400 && (prodBodyStr.includes("DeviceTokenNotForTopic") || prodBodyStr.includes("BadDeviceToken"))) {
-    const legProdRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_LEGACY_BUNDLE_ID);
+    const legProdRes = await sendSingleApnsHttp2("https://api.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_LEGACY_BUNDLE_ID, ttlSeconds, pushType);
     if (legProdRes.status === 200) {
       return {delivered: true, status: 200, body: "", via: "apns-legacy"};
     }
     if (legProdRes.status === 400 && String(legProdRes.body || "").includes("BadDeviceToken")) {
-      const legSandRes = await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_LEGACY_BUNDLE_ID);
+      const legSandRes = await sendSingleApnsHttp2("https://api.sandbox.push.apple.com", cleanHex, payloadObj, collapseId, priority, APNS_LEGACY_BUNDLE_ID, ttlSeconds, pushType);
       if (legSandRes.status === 200) {
         return {delivered: true, status: 200, body: "", via: "apns-legacy-sandbox"};
       }
@@ -168,7 +185,9 @@ async function sendIosFcmFallbackToDevice(fcmToken, {
   priority = "10",
   collapseId = "",
   data = {},
-  includeSound = true
+  includeSound = true,
+  ttlSeconds = 300,
+  silentBackgroundOnly = false
 }) {
   const tok = String(fcmToken || "").trim();
   if (!isValidFcmRegistrationToken(tok)) return false;
@@ -178,19 +197,23 @@ async function sendIosFcmFallbackToDevice(fcmToken, {
     stringData[k] = String(v ?? "");
   }
 
-  const aps = buildApnsApsObject({
-    title,
-    body,
-    sound,
-    category,
-    interruptionLevel,
-    relevanceScore,
-    includeSound
-  });
+  const safeTtl = Math.max(60, Math.min(3600, Number(ttlSeconds) || 300));
+  const aps = silentBackgroundOnly
+    ? {"content-available": 1}
+    : buildApnsApsObject({
+        title,
+        body,
+        sound,
+        category,
+        interruptionLevel,
+        relevanceScore,
+        includeSound
+      });
 
   const apnsHeaders = {
-    "apns-priority": String(priority || "10"),
-    "apns-push-type": "alert"
+    "apns-priority": silentBackgroundOnly ? "5" : String(priority || "10"),
+    "apns-push-type": silentBackgroundOnly ? "background" : "alert",
+    "apns-expiration": String(Math.floor(Date.now() / 1000) + safeTtl)
   };
   if (collapseId) {
     apnsHeaders["apns-collapse-id"] = String(collapseId).slice(0, 64);
@@ -227,7 +250,9 @@ async function sendDirectApnsToIosUsers({
   onlyConductors = false,
   respectStatus09ForSound = true,
   unrespondedOnlyForDispatchId = "",
-  respondedUserIds = null
+  respondedUserIds = null,
+  ttlSeconds = 300,
+  silentBackgroundOnly = false
 }) {
   try {
     const db = admin.firestore();
@@ -288,28 +313,39 @@ async function sendDirectApnsToIosUsers({
     if (targetsMap.size === 0) return;
 
     const buildApnsPayload = (includeSound) => Object.assign({}, data, {
-      aps: buildApnsApsObject({
-        title,
-        body,
-        sound,
-        category,
-        interruptionLevel,
-        relevanceScore,
-        includeSound
-      })
+      aps: silentBackgroundOnly
+        ? {"content-available": 1}
+        : buildApnsApsObject({
+            title,
+            body,
+            sound,
+            category,
+            interruptionLevel,
+            relevanceScore,
+            includeSound
+          })
     });
 
     const audiblePayload = buildApnsPayload(true);
     const silentPayload = buildApnsPayload(false);
+    const effectivePriority = silentBackgroundOnly ? "5" : priority;
+    const effectivePushType = silentBackgroundOnly ? "background" : "alert";
 
     let apnsOk = 0;
     let fcmFallbackOk = 0;
     let failed = 0;
 
     await Promise.all(Array.from(targetsMap.values()).map(async (target) => {
-      const payloadObj = target.includeSound ? audiblePayload : silentPayload;
+      const payloadObj = (target.includeSound && !silentBackgroundOnly) ? audiblePayload : silentPayload;
       if (target.hasApns) {
-        const res = await sendDirectApnsToDevice(target.cleanApns, payloadObj, collapseId, priority);
+        const res = await sendDirectApnsToDevice(
+          target.cleanApns,
+          payloadObj,
+          collapseId,
+          effectivePriority,
+          ttlSeconds,
+          effectivePushType
+        );
         if (res.delivered) {
           apnsOk += 1;
           return;
@@ -322,10 +358,12 @@ async function sendDirectApnsToIosUsers({
             category,
             interruptionLevel,
             relevanceScore,
-            priority,
+            priority: effectivePriority,
             collapseId,
             data,
-            includeSound: target.includeSound
+            includeSound: target.includeSound,
+            ttlSeconds,
+            silentBackgroundOnly
           });
           if (okFcm) {
             fcmFallbackOk += 1;
@@ -344,10 +382,12 @@ async function sendDirectApnsToIosUsers({
           category,
           interruptionLevel,
           relevanceScore,
-          priority,
+          priority: effectivePriority,
           collapseId,
           data,
-          includeSound: target.includeSound
+          includeSound: target.includeSound,
+          ttlSeconds,
+          silentBackgroundOnly
         });
         if (okFcm) {
           fcmFallbackOk += 1;
@@ -576,11 +616,64 @@ function isValidFcmRegistrationToken(raw) {
 }
 
 function resolveEffectivePlatform(docData) {
-  const hasApns = /^[0-9a-f]{64}$/.test(String((docData && docData.apnsToken) || "").trim().toLowerCase());
-  if (hasApns) return "ios";
   const raw = String((docData && docData.platform) || "").trim().toLowerCase();
-  if (raw === "android" || raw === "ios") return raw;
+  if (raw === "android") return "android";
+  const hasApns = /^[0-9a-f]{64}$/.test(String((docData && docData.apnsToken) || "").trim().toLowerCase());
+  if (hasApns || raw === "ios") return "ios";
   return "";
+}
+
+const MAX_DISPATCH_PUSH_AGE_MS = 5 * 60 * 1000; // 5 minutos máximo (Idéntico a TimeValidation.kt de Android)
+const MAX_UNIT_REQ_PUSH_AGE_MS = 90 * 1000; // 90s máximo para solicitudes 12-10 y 6-6
+
+function parseDispatchEpochMs(data) {
+  if (!data || typeof data !== "object") return 0;
+  const candidates = [data.createdAt, data.timestamp, data.creadoEn, data.horaCreacion];
+  for (const val of candidates) {
+    if (val === null || val === undefined) continue;
+    if (typeof val === "number" && Number.isFinite(val) && val > 1000000000000) {
+      return Math.floor(val);
+    }
+    if (typeof val === "object" && typeof val.toMillis === "function") {
+      const ms = val.toMillis();
+      if (ms > 1000000000000) return ms;
+    }
+    if (typeof val === "object" && typeof val.seconds === "number") {
+      const ms = val.seconds * 1000;
+      if (ms > 1000000000000) return ms;
+    }
+    if (typeof val === "string") {
+      const clean = val.trim();
+      if (/^\d{13,15}(\.\d+)?$/.test(clean)) {
+        return Math.floor(Number(clean));
+      }
+      const isoMs = Date.parse(clean);
+      if (!Number.isNaN(isoMs) && isoMs > 1000000000000) {
+        return isoMs;
+      }
+    }
+  }
+  return 0;
+}
+
+function isDispatchDataTooOld(data, maxAgeMs = MAX_DISPATCH_PUSH_AGE_MS) {
+  const createdMs = parseDispatchEpochMs(data);
+  if (createdMs <= 0) return false;
+  return (Date.now() - createdMs) > maxAgeMs;
+}
+
+function isDispatchClosedState(data) {
+  if (!data || typeof data !== "object") return true;
+  const est = String(data.estado || "").toLowerCase().trim();
+  const opFinal = String(data.operadorFinal || "").trim();
+  const finAt = Number(data.finalizadoAt || 0);
+  return (
+    data.cerrado === true ||
+    data.visibleMovil === false ||
+    (opFinal !== "" && opFinal !== "null" && opFinal !== "<null>") ||
+    finAt > 0 ||
+    ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "anulado", "anulada", "terminado", "terminada"].includes(est)
+  );
 }
 
 async function subscribeFcmTokenForUser(token, userId, isConductor, isCentral, platform = "", hasValidApns = false) {
@@ -696,23 +789,22 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
   const after = event.data.after.data() || {};
   const dispatchId = event.params.dispatchId;
 
-  const estadoAfter = String(after.estado || "").toUpperCase().trim();
-  const finalizadoAt = Number(after.finalizadoAt || 0);
-  if ((after.operadorFinal && String(after.operadorFinal).trim() !== "") || finalizadoAt > 0 || estadoAfter === "CERRADO") return;
+  if (isDispatchClosedState(after)) return;
 
+  const estadoAfter = String(after.estado || "").toUpperCase().trim();
   const clave = after.clave || "Emergencia";
   const direccion = after.direccion || after.lugar || (estadoAfter === "PRE-DESPACHO" ? "Pre-despacho en preparación..." : "Sin dirección");
   const unidadesStr = extractUnitsString(after);
   const fechaDespacho = String(after.fechaDespacho || after.fecha || "");
   const horaDespacho = String(after.horaDespacho || after.hora || "");
-  const createdAt = after.timestamp || after.createdAt
-    ? String(after.timestamp || after.createdAt)
-    : new Date().toISOString();
+  const nowEpochMs = Date.now();
+  const baseEpochMs = parseDispatchEpochMs(after) || nowEpochMs;
 
   // B. Detectar escalamiento (10-30 / ALARMA FORESTAL)
   const oldClave = String(before.clave || "").trim();
   const newClave = String(after.clave || "").trim();
-  if (oldClave && oldClave !== newClave) {
+  const metaTsAfter = Number(after._metaTimestamp || nowEpochMs);
+  if (oldClave && oldClave !== newClave && (nowEpochMs - metaTsAfter) <= MAX_DISPATCH_PUSH_AGE_MS) {
     const isEscalation =
       newClave.includes("10-30") ||
       newClave.includes("FORESTAL") ||
@@ -726,7 +818,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         body: `${direccion} (${unidadesStr}) - ¡SE REQUIERE PERSONAL!`,
         fechaDespacho,
         horaDespacho,
-        createdAt: String(createdAt)
+        createdAt: String(nowEpochMs)
       };
       await Promise.all([
         sendDirectFcmToAndroidUsers({
@@ -742,13 +834,14 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
           category: "EMERGENCY_DISPATCH",
           collapseId: `esc_${dispatchId}_${newClave}`,
           respectStatus09ForSound: false,
+          ttlSeconds: 300,
           data: escData
         })
       ]);
     }
   }
 
-  // C. Detectar solicitudes 12-10 (Conductor) y 6-6 (Personal) en unidades o unidadesEnServicio
+  // C. Detectar solicitudes 12-10 (Conductor) y 6-6 (Personal) en unidades o unidadesEnServicio (solo si el timestamp es reciente <= 90s)
   const uBefore = before.unidadesEnServicio || (typeof before.unidades === "object" && !Array.isArray(before.unidades) ? before.unidades : {});
   const uAfter = after.unidadesEnServicio || (typeof after.unidades === "object" && !Array.isArray(after.unidades) ? after.unidades : {});
 
@@ -758,7 +851,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
 
     const cTsBefore = Number(unitB.solicitudConductorTimestamp || 0);
     const cTsAfter = Number(unitA.solicitudConductorTimestamp || 0);
-    if (cTsAfter > cTsBefore && cTsAfter > 0) {
+    if (cTsAfter > cTsBefore && cTsAfter > 0 && (nowEpochMs - cTsAfter) <= MAX_UNIT_REQ_PUSH_AGE_MS) {
       const req1210Data = {
         type: "DISPATCH_UPDATE",
         payloadId: String(dispatchId),
@@ -767,13 +860,13 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         body: `Se solicita conductor para unidad ${unitName} en ${direccion}`,
         fechaDespacho,
         horaDespacho,
-        createdAt: new Date().toISOString()
+        createdAt: String(cTsAfter)
       };
       await Promise.all([
         sendDirectFcmToAndroidUsers({
           data: req1210Data,
           priority: "high",
-          ttl: 300000,
+          ttl: 180000,
           onlyConductors: true,
           tag: `req1210_${dispatchId}_${unitName}`
         }),
@@ -784,6 +877,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
           category: "EMERGENCY_DISPATCH",
           collapseId: `req1210_${dispatchId}_${unitName}`,
           onlyConductors: true,
+          ttlSeconds: 180,
           data: req1210Data
         })
       ]);
@@ -791,7 +885,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
 
     const pTsBefore = Number(unitB.solicitudPersonalTimestamp || 0);
     const pTsAfter = Number(unitA.solicitudPersonalTimestamp || 0);
-    if (pTsAfter > pTsBefore && pTsAfter > 0) {
+    if (pTsAfter > pTsBefore && pTsAfter > 0 && (nowEpochMs - pTsAfter) <= MAX_UNIT_REQ_PUSH_AGE_MS) {
       const req66Data = {
         type: "DISPATCH_UPDATE",
         payloadId: String(dispatchId),
@@ -800,13 +894,13 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
         body: `Se solicita personal para unidad ${unitName} en ${direccion}`,
         fechaDespacho,
         horaDespacho,
-        createdAt: new Date().toISOString()
+        createdAt: String(pTsAfter)
       };
       await Promise.all([
         sendDirectFcmToAndroidUsers({
           data: req66Data,
           priority: "high",
-          ttl: 300000,
+          ttl: 180000,
           tag: `req66_${dispatchId}_${unitName}`
         }),
         sendDirectApnsToIosUsers({
@@ -815,6 +909,7 @@ const onDispatchUpdated = onDocumentUpdated("despachos/{dispatchId}", async (eve
           sound: "importante.mp3",
           category: "EMERGENCY_DISPATCH",
           collapseId: `req66_${dispatchId}_${unitName}`,
+          ttlSeconds: 180,
           data: req66Data
         })
       ]);
@@ -1226,19 +1321,31 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
   const dispatchId = event.params.dispatchId;
 
   const estadoAfterLower = String(after.estado || "").toLowerCase().trim();
-  const finalizadoAt = Number(after.finalizadoAt || 0);
-  if (
-    (after.operadorFinal && String(after.operadorFinal).trim() !== "") ||
-    finalizadoAt > 0 ||
-    estadoAfterLower === "cerrado" ||
-    estadoAfterLower === "finalizado" ||
-    estadoAfterLower === "cancelada" ||
-    estadoAfterLower === "anulado"
-  ) {
+  const wasOpenBefore = before ? !isDispatchClosedState(before) : false;
+  const isClosedAfter = isDispatchClosedState(after);
+
+  if (isClosedAfter) {
+    // Si el despacho o pre-despacho acaba de cerrarse o cancelarse, enviar señal background 100% silenciosa
+    // a los iPhones para que cancelen cualquier temporizador local de 60s o banner pendiente sin emitir sonido.
+    if (wasOpenBefore) {
+      await sendDirectApnsToIosUsers({
+        title: "",
+        body: "",
+        collapseId: `disp_close_${dispatchId}`,
+        ttlSeconds: 180,
+        silentBackgroundOnly: true,
+        respectStatus09ForSound: false,
+        data: {
+          type: "DISPATCH_CLOSED",
+          payloadId: String(dispatchId),
+          dispatchId: String(dispatchId)
+        }
+      });
+    }
     return;
   }
 
-  const epochMs = Number(after.createdAt || after.timestamp || Date.now());
+  const epochMs = parseDispatchEpochMs(after) || Date.now();
   const clDt = getChileDateTimeStrings(epochMs);
   const clave = String(after.clave || after.key || "10-0").trim();
   const claveApoyo = String(after.claveApoyo || "").trim();
@@ -1252,13 +1359,21 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
   // El primer tono suena UNA SOLA VEZ al crearse el despacho (ya sea en pre-despacho o activa).
   // El paso de pre-despacho a activa NO vuelve a disparar tono; el segundo tono es estrictamente a los 60 segundos si no ha respondido.
   const alreadySent = after.pushSent === true || (before && before.pushSent === true);
+  const tooOldForPush = isDispatchDataTooOld(after, MAX_DISPATCH_PUSH_AGE_MS);
 
   const shouldSendPush =
     (estadoAfterLower === "pre-despacho" || estadoAfterLower === "activa" || estadoAfterLower === "activo" || estadoAfterLower === "en curso") &&
     after.visibleMovil !== false &&
-    !alreadySent;
+    !alreadySent &&
+    !tooOldForPush;
 
   if (!shouldSendPush) {
+    if (tooOldForPush && !alreadySent) {
+      await afterSnap.ref.update({
+        pushSent: true,
+        _metaTimestamp: Date.now()
+      }).catch(() => {});
+    }
     return;
   }
 
@@ -1309,6 +1424,7 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
       sound: apnsSound,
       category: "EMERGENCY_DISPATCH",
       collapseId: `disp_${dispatchId}`,
+      ttlSeconds: 300,
       data: dispatchData
     }),
     afterSnap.ref.update({
@@ -1325,13 +1441,7 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
     const freshSnap = await afterSnap.ref.get();
     if (!freshSnap || !freshSnap.exists) return;
     const fresh = freshSnap.data() || {};
-    const freshEstado = String(fresh.estado || "").toLowerCase().trim();
-    const freshFinalizadoAt = Number(fresh.finalizadoAt || 0);
-    if (
-      (fresh.operadorFinal && String(fresh.operadorFinal).trim() !== "") ||
-      freshFinalizadoAt > 0 ||
-      ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "anulado", "terminado", "terminada"].includes(freshEstado)
-    ) {
+    if (isDispatchClosedState(fresh) || isDispatchDataTooOld(fresh, MAX_DISPATCH_PUSH_AGE_MS)) {
       return;
     }
 
@@ -1362,6 +1472,7 @@ exports.enviarDespacho = onDocumentWritten({document: "despachos/{dispatchId}", 
       sound: freshSound,
       category: "EMERGENCY_DISPATCH",
       collapseId: `disp_rep60_${dispatchId}`,
+      ttlSeconds: 180,
       unrespondedOnlyForDispatchId: String(dispatchId),
       respondedUserIds: respondedSet,
       data: Object.assign({}, dispatchData, {

@@ -399,42 +399,237 @@ final class IOSLocationService: NSObject, CLLocationManagerDelegate {
 }
 
 // ============================================================================
-// 2. GESTOR DE SONIDOS Y VIBRACIÓN TÁCTICA EN iOS (BYPASS SILENT SWITCH EN 0-9)
+// 2. VALIDADOR TEMPORAL ANTI-FALSAS ALARMAS Y GESTOR DE SONIDOS EN iOS
 // ============================================================================
+enum IOSDispatchTimeValidator {
+    static let maxDispatchAgeMs: Int64 = 5 * 60 * 1000 // 5 minutos máximo (paridad 100% con Android TimeValidation)
+    static let maxLateBannerAgeMs: Int64 = 15 * 60 * 1000 // > 15 min: descartar en silencio absoluto (sin vibrar ni banner)
+
+    static func parseEpochMs(_ raw: Any?) -> Int64 {
+        guard let raw = raw, !(raw is NSNull) else { return 0 }
+        if let ts = raw as? Timestamp {
+            return Int64(ts.dateValue().timeIntervalSince1970 * 1000.0)
+        }
+        if let dt = raw as? Date {
+            return Int64(dt.timeIntervalSince1970 * 1000.0)
+        }
+        if let num = raw as? NSNumber {
+            let d = num.doubleValue
+            if d > 1_000_000_000_000 { return Int64(d) }
+            if d > 1_000_000_000 { return Int64(d * 1000.0) }
+            return 0
+        }
+        if let str = raw as? String {
+            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty || trimmed == "null" || trimmed == "<null>" { return 0 }
+            if let d = Double(trimmed) {
+                if d > 1_000_000_000_000 { return Int64(d) }
+                if d > 1_000_000_000 { return Int64(d * 1000.0) }
+            }
+            let isoFrac = ISO8601DateFormatter()
+            isoFrac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let dt = isoFrac.date(from: trimmed) {
+                return Int64(dt.timeIntervalSince1970 * 1000.0)
+            }
+            let isoPlain = ISO8601DateFormatter()
+            isoPlain.formatOptions = [.withInternetDateTime]
+            if let dt = isoPlain.date(from: trimmed) {
+                return Int64(dt.timeIntervalSince1970 * 1000.0)
+            }
+        }
+        return 0
+    }
+
+    static func resolveEpochMs(from data: [AnyHashable: Any]) -> Int64 {
+        for key in ["createdAt", "creadoEn", "timestamp", "horaCreacion", "horaDespachoUnix"] {
+            let v = parseEpochMs(data[key])
+            if v > 1_000_000_000_000 { return v }
+        }
+        let rawHoraNum = parseEpochMs(data["horaDespacho"])
+        if rawHoraNum > 1_000_000_000_000 { return rawHoraNum }
+
+        let fecha = AppDelegate.stringFromAny(data["fechaDespacho"] ?? data["fecha"])
+        let hora = AppDelegate.stringFromAny(data["horaDespacho"] ?? data["hora"])
+        if !fecha.isEmpty && !hora.isEmpty {
+            let combined = "\(fecha) \(hora)"
+            let tz = TimeZone(identifier: "America/Santiago") ?? .current
+            let formats = [
+                "dd-MM-yyyy HH:mm:ss",
+                "dd-MM-yyyy HH:mm",
+                "dd/MM/yyyy HH:mm:ss",
+                "dd/MM/yyyy HH:mm",
+                "yyyy-MM-dd HH:mm:ss",
+                "yyyy-MM-dd HH:mm"
+            ]
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.timeZone = tz
+            for fmt in formats {
+                df.dateFormat = fmt
+                if let dt = df.date(from: combined) {
+                    return Int64(dt.timeIntervalSince1970 * 1000.0)
+                }
+            }
+        }
+        return 0
+    }
+
+    static func isTooOld(data: [AnyHashable: Any], maxAgeMs: Int64 = maxDispatchAgeMs) -> Bool {
+        let createdMs = resolveEpochMs(from: data)
+        guard createdMs > 1_000_000_000_000 else {
+            // Jamás confiar en un documento o push sin marca temporal válida como si fuera nuevo
+            return true
+        }
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000.0)
+        return (nowMs - createdMs) > maxAgeMs
+    }
+
+    static func isDispatchClosed(_ data: [AnyHashable: Any]) -> Bool {
+        if let cerr = data["cerrado"] as? Bool, cerr { return true }
+        if let cerrNum = data["cerrado"] as? NSNumber, cerrNum.boolValue { return true }
+        if let vis = data["visibleMovil"] as? Bool, vis == false { return true }
+        if let visNum = data["visibleMovil"] as? NSNumber, visNum.boolValue == false { return true }
+        let opFinal = AppDelegate.stringFromAny(data["operadorFinal"])
+        if !opFinal.isEmpty { return true }
+        if parseEpochMs(data["finalizadoAt"]) > 0 { return true }
+        let est = AppDelegate.stringFromAny(data["estado"]).lowercased()
+        return [
+            "cerrado", "cerrada",
+            "finalizado", "finalizada",
+            "cancelado", "cancelada",
+            "anulado", "anulada",
+            "terminado", "terminada"
+        ].contains(est)
+    }
+
+    static func hasUserRespondedInDoc(_ data: [AnyHashable: Any], userId: String) -> Bool {
+        let uid = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else { return false }
+        for field in ["asistentes", "noAsistentes"] {
+            if let strArr = data[field] as? [String], strArr.contains(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == uid }) {
+                return true
+            }
+            if let anyArr = data[field] as? [Any] {
+                for item in anyArr {
+                    if let s = item as? String, s.trimmingCharacters(in: .whitespacesAndNewlines) == uid {
+                        return true
+                    }
+                    if let dict = item as? [String: Any] {
+                        let cand = AppDelegate.stringFromAny(dict["idRegistro"] ?? dict["id"] ?? dict["bomberoId"])
+                        if cand == uid { return true }
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    static func isSilentUserRoleOrSpecialStatus(_ defaults: UserDefaults = .standard) -> Bool {
+        if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "IS_CENTRAL_ACTIVE") || defaults.bool(forKey: "SILENCIO_ABSOLUTO") {
+            return true
+        }
+        let rango = (defaults.string(forKey: "USER_RANGO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let cargo = (defaults.string(forKey: "USER_CARGO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if rango == "BOMBERO HONORARIO" || cargo == "BOMBERO HONORARIO" {
+            return true
+        }
+        let silentStates: Set<String> = ["CDS", "SUSPENDIDO", "LICENCIA", "SILENCIO_ABSOLUTO", "PERMISO", "COMISION_SERVICIO"]
+        let est = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let estEsp = (defaults.string(forKey: "USER_ESTADO_ESPECIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if silentStates.contains(est) || silentStates.contains(estEsp) {
+            return true
+        }
+        return false
+    }
+}
+
 final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     static let shared = IOSSoundPlayer()
+    private static let kPlayedFirstToneKey = "PLAYED_FIRST_TONE_IDS"
+    private static let kPlayedRepeat60sKey = "PLAYED_REPEAT_60S_IDS"
+    private static let kPlayedUnitReqKey = "PLAYED_UNIT_REQ_IDS"
+
     private var audioPlayer: AVAudioPlayer?
     private var keepAlivePlayer: AVAudioPlayer?
     private var repeatTimers: [String: Timer] = [:]
+    private var repeatScheduledAtMs: [String: Int64] = [:]
     private var hiddenVolumeView: MPVolumeView?
     private(set) var lastAlarmStartMs: Int64 = 0
     private var lastPlayedSoundKey: String = ""
     private var vibrationBurstToken: Int = 0
     private var playedFirstToneDispatchIds = Set<String>()
     private var playedRepeat60sDispatchIds = Set<String>()
+    private var playedUnitReqIds = Set<String>()
+
+    private func persistOrderedSet(_ value: String, into set: inout Set<String>, defaultsKey: String) {
+        set.insert(value)
+        let defaults = UserDefaults.standard
+        var arr = defaults.stringArray(forKey: defaultsKey) ?? []
+        if !arr.contains(value) {
+            arr.append(value)
+        }
+        if arr.count > 300 {
+            arr = Array(arr.suffix(200))
+            set = Set(arr)
+        }
+        defaults.set(arr, forKey: defaultsKey)
+    }
+
+    func hasAlreadySeenOrPlayedFirstTone(dispatchId: String) -> Bool {
+        let clean = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        if playedFirstToneDispatchIds.contains(clean) { return true }
+        let alerted = UserDefaults.standard.stringArray(forKey: "ALERTED_DISPATCH_IDS") ?? []
+        return alerted.contains(clean)
+    }
+
+    func markDispatchSeenSilently(dispatchId: String) {
+        let clean = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        persistOrderedSet(clean, into: &playedFirstToneDispatchIds, defaultsKey: Self.kPlayedFirstToneKey)
+    }
 
     func claimFirstToneIfNeeded(dispatchId: String) -> Bool {
         let clean = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return true }
+        guard !clean.isEmpty else { return false }
         if playedFirstToneDispatchIds.contains(clean) {
             return false
         }
-        playedFirstToneDispatchIds.insert(clean)
+        persistOrderedSet(clean, into: &playedFirstToneDispatchIds, defaultsKey: Self.kPlayedFirstToneKey)
         return true
     }
 
     func claimRepeat60sIfNeeded(dispatchId: String) -> Bool {
         let clean = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !clean.isEmpty else { return true }
+        guard !clean.isEmpty else { return false }
         if playedRepeat60sDispatchIds.contains(clean) {
             return false
         }
-        playedRepeat60sDispatchIds.insert(clean)
+        persistOrderedSet(clean, into: &playedRepeat60sDispatchIds, defaultsKey: Self.kPlayedRepeat60sKey)
+        return true
+    }
+
+    func claimUnitRequestIfNeeded(reqKey: String) -> Bool {
+        let clean = reqKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return false }
+        if playedUnitReqIds.contains(clean) {
+            return false
+        }
+        persistOrderedSet(clean, into: &playedUnitReqIds, defaultsKey: Self.kPlayedUnitReqKey)
         return true
     }
 
     override init() {
         super.init()
+        let defaults = UserDefaults.standard
+        let storedFirst = defaults.stringArray(forKey: Self.kPlayedFirstToneKey) ?? []
+        let storedAlerted = defaults.stringArray(forKey: "ALERTED_DISPATCH_IDS") ?? []
+        let storedRepeat = defaults.stringArray(forKey: Self.kPlayedRepeat60sKey) ?? []
+        let storedUnitReq = defaults.stringArray(forKey: Self.kPlayedUnitReqKey) ?? []
+        playedFirstToneDispatchIds = Set(storedFirst).union(storedAlerted)
+        playedRepeat60sDispatchIds = Set(storedRepeat)
+        playedUnitReqIds = Set(storedUnitReq)
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleAudioInterruption(_:)),
@@ -584,11 +779,9 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
     func updateBackgroundKeepAlive() {
         let defaults = UserDefaults.standard
-        let isAirplane = defaults.bool(forKey: "MODO_AVION")
-        let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
         let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard !isAirplane && !isCentral && estado == "0-9" else {
+        guard !IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) && estado == "0-9" else {
             stopBackgroundKeepAlive()
             return
         }
@@ -637,10 +830,11 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
         let defaults = UserDefaults.standard
         let upper = nameOrClave.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if defaults.bool(forKey: "MODO_AVION") {
+        if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "SILENCIO_ABSOLUTO") {
             return
         }
-        if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && upper != "ALERTA" && upper != "ALERTAS" && upper != "IMPORTANTE" {
+        let isAdminOrEvacTone = (upper == "ALERTA" || upper == "ALERTAS" || upper == "IMPORTANTE" || upper.contains("EVACUAC"))
+        if IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) && !isAdminOrEvacTone {
             return
         }
         let fileName = resolveSoundFileName(for: nameOrClave)
@@ -821,10 +1015,12 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             for k in keys {
                 self.repeatTimers[k]?.invalidate()
                 self.repeatTimers.removeValue(forKey: k)
+                self.repeatScheduledAtMs.removeValue(forKey: k)
             }
-            let notifId = "repeat_60s_\(dispatchId)"
-            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notifId])
-            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notifId])
+            self.repeatScheduledAtMs.removeValue(forKey: dispatchId)
+            let notifIds = ["repeat_60s_\(dispatchId)", "disp_rep60_\(dispatchId)"]
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: notifIds)
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: notifIds)
         }
         if Thread.isMainThread {
             cancelBlock()
@@ -833,53 +1029,149 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    func cancelAllRepeats() {
+        let clearBlock: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            var legacyNotifIds: [String] = []
+            for (k, t) in self.repeatTimers {
+                t.invalidate()
+                legacyNotifIds.append("repeat_60s_\(k)")
+                legacyNotifIds.append("disp_rep60_\(k)")
+            }
+            self.repeatTimers.removeAll()
+            self.repeatScheduledAtMs.removeAll()
+            let center = UNUserNotificationCenter.current()
+            if !legacyNotifIds.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: legacyNotifIds)
+                center.removeDeliveredNotifications(withIdentifiers: legacyNotifIds)
+            }
+            center.getPendingNotificationRequests { reqs in
+                let staleIds = reqs.map(\.identifier).filter { $0.hasPrefix("repeat_60s_") || $0.hasPrefix("disp_rep60_") }
+                if !staleIds.isEmpty {
+                    center.removePendingNotificationRequests(withIdentifiers: staleIds)
+                }
+            }
+        }
+        if Thread.isMainThread {
+            clearBlock()
+        } else {
+            DispatchQueue.main.async(execute: clearBlock)
+        }
+    }
+
+    func pruneExpiredRepeatTimers() {
+        let pruneBlock: () -> Void = { [weak self] in
+            guard let self = self else { return }
+            let nowMs = Int64(Date().timeIntervalSince1970 * 1000.0)
+            var expiredKeys: [String] = []
+            for (k, _) in self.repeatTimers {
+                let scheduledAt = self.repeatScheduledAtMs[k] ?? 0
+                if scheduledAt <= 0 || (nowMs - scheduledAt) > 95_000 {
+                    expiredKeys.append(k)
+                }
+            }
+            for k in expiredKeys {
+                self.repeatTimers[k]?.invalidate()
+                self.repeatTimers.removeValue(forKey: k)
+                self.repeatScheduledAtMs.removeValue(forKey: k)
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["repeat_60s_\(k)", "disp_rep60_\(k)"])
+            }
+            let center = UNUserNotificationCenter.current()
+            center.getPendingNotificationRequests { reqs in
+                let legacyIds = reqs.map(\.identifier).filter { $0.hasPrefix("repeat_60s_") }
+                if !legacyIds.isEmpty {
+                    center.removePendingNotificationRequests(withIdentifiers: legacyIds)
+                }
+            }
+        }
+        if Thread.isMainThread {
+            pruneBlock()
+        } else {
+            DispatchQueue.main.async(execute: pruneBlock)
+        }
+    }
+
     func scheduleRepeat(dispatchId: String, clave: String) {
+        let cleanId = dispatchId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanId.isEmpty else { return }
         let scheduleBlock: () -> Void = { [weak self] in
             guard let self = self else { return }
-            self.cancelRepeat(for: dispatchId)
-
-            // 1. Respaldo del sistema iOS a los 60s exactos por si el dispositivo bloqueado congela el proceso
-            let fileName = self.resolveSoundFileName(for: clave)
-            let content = UNMutableNotificationContent()
-            content.title = "🚨 RECORDATORIO DESPACHO \(clave)"
-            content.body = "Aún no has confirmado asistencia (ASISTIR / NO ASISTIR)"
-            content.categoryIdentifier = "EMERGENCY_DISPATCH"
-            content.userInfo = ["type": "DISPATCH", "payloadId": dispatchId, "clave": clave, "isRepeat60s": "true"]
-            content.sound = UNNotificationSound(named: UNNotificationSoundName("\(fileName).mp3"))
-            if #available(iOS 15.0, *) {
-                content.interruptionLevel = .timeSensitive
-                content.relevanceScore = 1.0
+            if self.playedRepeat60sDispatchIds.contains(cleanId) {
+                return
             }
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 60.0, repeats: false)
-            let req = UNNotificationRequest(identifier: "repeat_60s_\(dispatchId)", content: content, trigger: trigger)
-            UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+            self.cancelRepeat(for: cleanId)
 
-            // 2. Timer en RunLoop.main (.common) para disparar el segundo tono al 100% de volumen saltando modo silencio
+            // IMPORTANTE ANTI-FALSAS ALARMAS iOS:
+            // Jamás registrar UNTimeIntervalNotificationTrigger local con sonido ciego a 60s, porque si el operador
+            // cancela el pre-despacho mientras el iPhone está suspendido o sin señal, iOS reproduciría el MP3 igual.
+            // Si el proceso está suspendido, Cloud Functions (`enviarDespacho`) verifica Firestore en vivo a los 60s y envía
+            // un APNs con TTL corto; si el proceso sigue activo, este Timer consulta el servidor en vivo (`source: .server`)
+            // y valida reloj de pared (`elapsedMs <= 95_000`) para descartar timers congelados que despierten horas después.
+            let scheduledAtMs = Int64(Date().timeIntervalSince1970 * 1000.0)
+            self.repeatScheduledAtMs[cleanId] = scheduledAtMs
+
             let timer = Timer(timeInterval: 60.0, repeats: false) { [weak self] _ in
                 guard let self = self else { return }
-                self.repeatTimers.removeValue(forKey: dispatchId)
-                let notifId = "repeat_60s_\(dispatchId)"
-                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [notifId])
-                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [notifId])
+                self.repeatTimers.removeValue(forKey: cleanId)
+                self.repeatScheduledAtMs.removeValue(forKey: cleanId)
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ["repeat_60s_\(cleanId)"])
+
+                // 1. Candado estricto de reloj real (evita que un RunLoop congelado en segundo plano suene minutos u horas después)
+                let nowMs = Int64(Date().timeIntervalSince1970 * 1000.0)
+                let elapsedMs = nowMs - scheduledAtMs
+                guard elapsedMs >= 45_000 && elapsedMs <= 95_000 else { return }
 
                 let defaults = UserDefaults.standard
-                if defaults.bool(forKey: "MODO_AVION") || defaults.bool(forKey: "IS_CENTRAL_ACTIVE") { return }
+                if IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) { return }
                 let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-8").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                 if estado != "0-9" { return }
                 let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
                 let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
-                if declined.contains(dispatchId) || attended.contains(dispatchId) { return }
+                if declined.contains(cleanId) || attended.contains(cleanId) { return }
 
                 let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if enServicio == dispatchId || enServicio == "-\(dispatchId)" { return }
+                if enServicio == cleanId || enServicio == "-\(cleanId)" { return }
+                if self.playedRepeat60sDispatchIds.contains(cleanId) { return }
 
-                guard self.claimRepeat60sIfNeeded(dispatchId: dispatchId) else { return }
-                // El segundo tono a los 60 segundos SIEMPRE debe sonar una sola vez al 100% si el bombero sigue en 0-9 sin responder
-                self.play(nameOrClave: clave, forceMaxVolume: true)
-                AppDelegate.dispatchNativeIntentToWebView(dispatchId: dispatchId, showFullscreen: true)
+                let myUserId = (defaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard AppDelegate.currentTenantProjectId != nil || FirebaseApp.app() != nil else { return }
+
+                // 2. Verificación obligatoria contra el servidor en vivo (paridad 100% con MainActivity.kt en Android):
+                // si el despacho fue cancelado/cerrado, tiene > 7 min o falla la red, NO suena jamás.
+                AppDelegate.activeFirestore().collection("despachos").document(cleanId).getDocument(source: .server) { [weak self] snap, err in
+                    guard let self = self else { return }
+                    guard err == nil, let snap = snap, snap.exists, let raw = snap.data() else { return }
+
+                    let postFetchNowMs = Int64(Date().timeIntervalSince1970 * 1000.0)
+                    guard (postFetchNowMs - scheduledAtMs) <= 105_000 else { return }
+                    guard !IOSDispatchTimeValidator.isDispatchClosed(raw) else { return }
+                    guard !IOSDispatchTimeValidator.isTooOld(data: raw, maxAgeMs: 420_000) else { return }
+                    if !myUserId.isEmpty && IOSDispatchTimeValidator.hasUserRespondedInDoc(raw, userId: myUserId) {
+                        return
+                    }
+
+                    let curDefaults = UserDefaults.standard
+                    if IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(curDefaults) { return }
+                    let curEst = (curDefaults.string(forKey: "USER_ESTADO") ?? "0-8").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                    guard curEst == "0-9" else { return }
+                    let curDeclined = curDefaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
+                    let curAttended = curDefaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
+                    if curDeclined.contains(cleanId) || curAttended.contains(cleanId) { return }
+                    let curSvc = (curDefaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    if curSvc == cleanId || curSvc == "-\(cleanId)" { return }
+
+                    guard self.claimRepeat60sIfNeeded(dispatchId: cleanId) else { return }
+                    let freshClave = AppDelegate.stringFromAny(raw["clave"], fallback: clave)
+                    if AppDelegate.isAppInForeground {
+                        self.vibrateEmergency()
+                    } else {
+                        self.play(nameOrClave: freshClave, forceMaxVolume: true)
+                    }
+                    AppDelegate.dispatchNativeIntentToWebView(dispatchId: cleanId, showFullscreen: true)
+                }
             }
             RunLoop.main.add(timer, forMode: .common)
-            self.repeatTimers[dispatchId] = timer
+            self.repeatTimers[cleanId] = timer
         }
         if Thread.isMainThread {
             scheduleBlock()
@@ -906,6 +1198,7 @@ final class IOSRealtimeService {
     private var isFirstDispatchSnapshot = true
     private var isFirstPersonalSnapshot = true
     private var knownDispatchIds = Set<String>()
+    private var activeOpenDispatchIds = Set<String>()
     private var lastDispatchClaves: [String: String] = [:]
     private var lastDispatchEstados: [String: String] = [:]
     private var lastUnitConductorReq: [String: Int64] = [:]
@@ -918,7 +1211,12 @@ final class IOSRealtimeService {
     private var latestPersonalSelfPayload: [String: Any]?
     private var lastNativeSnapshotAt: TimeInterval = 0
 
-    private init() {}
+    private init() {
+        let defaults = UserDefaults.standard
+        let alerted = defaults.stringArray(forKey: "ALERTED_DISPATCH_IDS") ?? []
+        let played = defaults.stringArray(forKey: "PLAYED_FIRST_TONE_IDS") ?? []
+        knownDispatchIds = Set(alerted).union(played)
+    }
 
     func sanitizeFirestoreValue(_ val: Any?) -> Any {
         guard let v = val else { return NSNull() }
@@ -1070,7 +1368,7 @@ final class IOSRealtimeService {
         // 2. Listener nativo de despachos activos
         despachosListener = db.collection("despachos")
             .whereField("estado", in: ["activa", "ACTIVA", "activo", "ACTIVO", "pre-despacho", "PRE-DESPACHO", "en curso", "EN CURSO"])
-            .addSnapshotListener { [weak self] snap, error in
+            .addSnapshotListener(includeMetadataChanges: true) { [weak self] snap, error in
             guard let self = self else { return }
             if error != nil {
                 self.despachosListener?.remove()
@@ -1082,12 +1380,35 @@ final class IOSRealtimeService {
                 }
                 return
             }
-            self.lastNativeSnapshotAt = Date().timeIntervalSince1970
-            guard let documents = snap?.documents else { return }
+            guard let snap = snap else { return }
+            let isFromCache = snap.metadata.isFromCache
+            if !isFromCache {
+                self.lastNativeSnapshotAt = Date().timeIntervalSince1970
+            }
+            let documents = snap.documents
             var rawDocsArray: [[String: Any]] = []
+            for doc in documents {
+                rawDocsArray.append([
+                    "id": doc.documentID,
+                    "data": self.sanitizeDoc(doc.data()),
+                    "hasPendingWrites": doc.metadata.hasPendingWrites
+                ])
+            }
+
+            // REGLA CRÍTICA ANTI-FALSAS ALARMAS iOS:
+            // Al reconectar o despertar en segundo plano, Firestore iOS SDK emite primero documentos viejos desde caché SQLite
+            // (`isFromCache == true`) antes de consultar al servidor. Jamás emitir audio, vibración, banners ni programar
+            // timers de 60s con datos de caché local; solo actualizar la vista UI y esperar confirmación real del servidor.
+            if isFromCache {
+                self.latestDespachosPayload = rawDocsArray
+                self.pushSnapshotToWebView(collection: "despachos", payload: rawDocsArray)
+                return
+            }
+
             let defaults = UserDefaults.standard
-            let isAirplane = defaults.bool(forKey: "MODO_AVION")
-            let isCentral = defaults.bool(forKey: "IS_CENTRAL_ACTIVE")
+            let isSilentUser = IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults)
+            let myUserId = (defaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let isCommanderDevice = ((defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == "1") || defaults.bool(forKey: "USER_MODO_ADMIN")
             let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
             let is09 = (userEstado == "0-9")
             let isConductor = defaults.bool(forKey: "USER_CONDUCTOR")
@@ -1097,47 +1418,31 @@ final class IOSRealtimeService {
             var didModifyAlerted = false
             let userEnServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+            var currentOpenIds = Set<String>()
 
-            for doc in documents {
-                let docId = doc.documentID
-                let cleanData = self.sanitizeDoc(doc.data())
-                rawDocsArray.append([
-                    "id": docId,
-                    "data": cleanData,
-                    "hasPendingWrites": doc.metadata.hasPendingWrites
-                ])
+            for item in rawDocsArray {
+                guard let docId = item["id"] as? String,
+                      let cleanData = item["data"] as? [String: Any] else { continue }
 
-                let estado = ((cleanData["estado"] as? String) ?? "activa").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                let rawOpFinal = ((cleanData["operadorFinal"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                let opFinal = (rawOpFinal == "<null>" || rawOpFinal == "null") ? "" : rawOpFinal
-                let finalizadoAt = (cleanData["finalizadoAt"] as? NSNumber)?.int64Value ?? 0
-                let cerrado = (cleanData["cerrado"] as? Bool) ?? false
-                let isClosed = cerrado || !opFinal.isEmpty || finalizadoAt > 0 || ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "terminado", "terminada"].contains(estado)
-                if isClosed {
+                if IOSDispatchTimeValidator.isDispatchClosed(cleanData) {
                     IOSSoundPlayer.shared.cancelRepeat(for: docId)
+                    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["disp_\(docId)", "repeat_60s_\(docId)", "disp_rep60_\(docId)"])
                     continue
                 }
 
+                currentOpenIds.insert(docId)
+                let estado = ((cleanData["estado"] as? String) ?? "activa").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 let clave = ((cleanData["clave"] as? String) ?? "10-0").trimmingCharacters(in: .whitespacesAndNewlines)
                 let rawDir = ((cleanData["direccion"] as? String) ?? (cleanData["lugar"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let direccion = !rawDir.isEmpty ? rawDir : (estado == "pre-despacho" ? "Pre-despacho en preparación..." : "Ubicación en curso")
 
-                var createdTs: Int64 = 0
-                if let n = cleanData["createdAt"] as? NSNumber {
-                    createdTs = n.int64Value
-                } else if let s = cleanData["createdAt"] as? String, let v = Int64(s) {
-                    createdTs = v
-                } else if let n = cleanData["creadoEn"] as? NSNumber {
-                    createdTs = n.int64Value
-                } else if let n = cleanData["timestamp"] as? NSNumber {
-                    createdTs = n.int64Value
-                } else if let s = cleanData["timestamp"] as? String, let v = Int64(s) {
-                    createdTs = v
-                }
-                let isLateFiveMin: Bool = (createdTs > 1_000_000_000_000) && ((nowMs - createdTs) > 300_000) // > 5 minutos
-
+                let isLateFiveMin = IOSDispatchTimeValidator.isTooOld(data: cleanData, maxAgeMs: IOSDispatchTimeValidator.maxDispatchAgeMs)
+                let isVeryOld15Min = IOSDispatchTimeValidator.isTooOld(data: cleanData, maxAgeMs: IOSDispatchTimeValidator.maxLateBannerAgeMs)
+                let isSciCommanderSilent = !AppDelegate.stringFromAny(cleanData["idIncidenteSci"]).isEmpty && isCommanderDevice
+                let respondedInDoc = IOSDispatchTimeValidator.hasUserRespondedInDoc(cleanData, userId: myUserId)
                 let isAttending = attendedIds.contains(docId) || userEnServicio == docId
-                let hasDeclined = declinedIds.contains(docId) || userEnServicio == "-\(docId)"
+                let hasDeclined = declinedIds.contains(docId) || userEnServicio == "-\(docId)" || respondedInDoc
+                let alreadySeenOrPlayed = alertedIds.contains(docId) || IOSSoundPlayer.shared.hasAlreadySeenOrPlayedFirstTone(dispatchId: docId)
 
                 if self.isFirstDispatchSnapshot {
                     self.knownDispatchIds.insert(docId)
@@ -1146,20 +1451,21 @@ final class IOSRealtimeService {
                     if let unidades = (cleanData["unidades"] as? [String: Any]) ?? (cleanData["unidadesEnServicio"] as? [String: Any]) {
                         for (uName, uVal) in unidades {
                             if let uMap = uVal as? [String: Any] {
-                                let cTs = (uMap["solicitudConductorTimestamp"] as? NSNumber)?.int64Value ?? 0
-                                let pTs = (uMap["solicitudPersonalTimestamp"] as? NSNumber)?.int64Value ?? 0
+                                let cTs = IOSDispatchTimeValidator.parseEpochMs(uMap["solicitudConductorTimestamp"])
+                                let pTs = IOSDispatchTimeValidator.parseEpochMs(uMap["solicitudPersonalTimestamp"])
                                 self.lastUnitConductorReq["\(docId)_\(uName)"] = cTs
                                 self.lastUnitPersonalReq["\(docId)_\(uName)"] = pTs
                             }
                         }
                     }
-                    // Al abrir la app por primera vez:
-                    // - Si el despacho tiene < 5 min y la app está en primer plano: solo vibrar y abrir pantalla sobre pantalla.
-                    // - Si el despacho tiene > 5 min (llegó tardío por mala señal): NO sonar sirena, solo vibrar y mostrar notificación silenciosa.
-                    if !alertedIds.contains(docId) && !isAttending && !hasDeclined && !isAirplane && !isCentral {
+                    if !alreadySeenOrPlayed && !isAttending && !hasDeclined && !isSilentUser && !isSciCommanderSilent {
                         alertedIds.append(docId)
                         didModifyAlerted = true
-                        if isLateFiveMin {
+                        if isVeryOld15Min {
+                            // Despacho antiguo (> 15 min o sin timestamp): registrar como visto en silencio total
+                            IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
+                        } else if isLateFiveMin {
+                            IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                             IOSSoundPlayer.shared.vibrateEmergency()
                             if !AppDelegate.isAppInForeground {
                                 self.postLocalBanner(
@@ -1172,6 +1478,7 @@ final class IOSRealtimeService {
                                 )
                             }
                         } else if AppDelegate.isAppInForeground {
+                            IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                             IOSSoundPlayer.shared.vibrateEmergency()
                             if is09 {
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
@@ -1184,6 +1491,7 @@ final class IOSRealtimeService {
                                 }
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             } else {
+                                IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                                 IOSSoundPlayer.shared.vibrateEmergency()
                             }
                             self.postLocalBanner(
@@ -1195,14 +1503,17 @@ final class IOSRealtimeService {
                                 userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
                             )
                         }
+                    } else {
+                        IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                     }
                     continue
                 }
 
-                if isAirplane || isCentral {
+                if isSilentUser || isSciCommanderSilent {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
                     self.lastDispatchEstados[docId] = estado
+                    IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                     if !alertedIds.contains(docId) {
                         alertedIds.append(docId)
                         didModifyAlerted = true
@@ -1210,7 +1521,7 @@ final class IOSRealtimeService {
                     continue
                 }
 
-                    // A. Nuevo despacho o pre-despacho en vivo (Primer tono + programación del segundo tono a los 60s; si tiene > 5 min por mala señal, solo vibrar y mostrar notificación)
+                // A. Nuevo despacho o pre-despacho en vivo confirmado por el servidor
                 if !self.knownDispatchIds.contains(docId) {
                     self.knownDispatchIds.insert(docId)
                     self.lastDispatchClaves[docId] = clave
@@ -1219,8 +1530,11 @@ final class IOSRealtimeService {
                         alertedIds.append(docId)
                         didModifyAlerted = true
                     }
-                    if !isAttending && !hasDeclined {
-                        if isLateFiveMin {
+                    if !alreadySeenOrPlayed && !isAttending && !hasDeclined {
+                        if isVeryOld15Min {
+                            IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
+                        } else if isLateFiveMin {
+                            IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                             IOSSoundPlayer.shared.vibrateEmergency()
                             self.postLocalBanner(
                                 id: "disp_\(docId)",
@@ -1231,6 +1545,7 @@ final class IOSRealtimeService {
                                 userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
                             )
                         } else if AppDelegate.isAppInForeground {
+                            IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                             IOSSoundPlayer.shared.vibrateEmergency()
                             if is09 {
                                 IOSSoundPlayer.shared.scheduleRepeat(dispatchId: docId, clave: clave)
@@ -1244,6 +1559,7 @@ final class IOSRealtimeService {
                                 }
                                 AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             } else {
+                                IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                                 IOSSoundPlayer.shared.vibrateEmergency()
                             }
                             self.postLocalBanner(
@@ -1255,6 +1571,8 @@ final class IOSRealtimeService {
                                 userInfo: ["type": "DISPATCH", "payloadId": docId, "clave": clave]
                             )
                         }
+                    } else {
+                        IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: docId)
                     }
                 } else {
                     // A2. Transición de pre-despacho -> activa / en curso:
@@ -1262,17 +1580,19 @@ final class IOSRealtimeService {
                     let prevEstado = self.lastDispatchEstados[docId] ?? ""
                     self.lastDispatchEstados[docId] = estado
                     let isPreToActive = (prevEstado == "pre-despacho") && (estado == "activa" || estado == "activo" || estado == "en curso")
-                    if isPreToActive && !isAttending && !hasDeclined && is09 {
+                    if isPreToActive && !isAttending && !hasDeclined && is09 && !isLateFiveMin {
                         AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                     }
 
-                    // B. Escalamiento (10-30 / FORESTAL / 9-0)
+                    // B. Escalamiento (10-30 / FORESTAL / 9-0) — exige cambio reciente (<= 5 min)
                     let prevClave = self.lastDispatchClaves[docId] ?? ""
                     if !prevClave.isEmpty && prevClave != clave {
                         self.lastDispatchClaves[docId] = clave
                         let cUp = clave.uppercased()
                         let isEscalation = cUp.contains("10-30") || cUp.contains("FORESTAL") || cUp.contains("9-0") || cUp.contains("COMANDANCIA")
-                        if isEscalation && !isAttending {
+                        let metaTs = IOSDispatchTimeValidator.parseEpochMs(cleanData["_metaTimestamp"])
+                        let isRecentEsc = (metaTs > 1_000_000_000_000 && (nowMs - metaTs) <= 300_000) || !isLateFiveMin
+                        if isEscalation && !isAttending && isRecentEsc && IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: "esc_\(docId)_\(clave)") {
                             AppDelegate.dispatchNativeIntentToWebView(dispatchId: docId, showFullscreen: true)
                             if AppDelegate.isAppInForeground {
                                 IOSSoundPlayer.shared.vibrateEmergency()
@@ -1293,18 +1613,21 @@ final class IOSRealtimeService {
                     }
                 }
 
-                // C. Solicitudes 12-10 (Conductor) y 6-6 (Personal)
+                // C. Solicitudes 12-10 (Conductor) y 6-6 (Personal) — solo si la marca temporal tiene <= 90 segundos
                 if let unidades = (cleanData["unidades"] as? [String: Any]) ?? (cleanData["unidadesEnServicio"] as? [String: Any]) {
                     for (uName, uVal) in unidades {
                         guard let uMap = uVal as? [String: Any] else { continue }
-                        let cTs = (uMap["solicitudConductorTimestamp"] as? NSNumber)?.int64Value ?? 0
-                        let pTs = (uMap["solicitudPersonalTimestamp"] as? NSNumber)?.int64Value ?? 0
+                        let uEst = AppDelegate.stringFromAny(uMap["estado"]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if uEst == "6-9" || uEst == "6-10" { continue }
+                        let cTs = IOSDispatchTimeValidator.parseEpochMs(uMap["solicitudConductorTimestamp"])
+                        let pTs = IOSDispatchTimeValidator.parseEpochMs(uMap["solicitudPersonalTimestamp"])
                         let key = "\(docId)_\(uName)"
 
                         let prevCTs = self.lastUnitConductorReq[key] ?? 0
                         if cTs > prevCTs && cTs > 0 {
                             self.lastUnitConductorReq[key] = cTs
-                            if isConductor && !isAttending && !hasDeclined {
+                            let isFresh1210 = (nowMs - cTs) >= -15_000 && (nowMs - cTs) <= 90_000
+                            if isFresh1210 && isConductor && !isAttending && !hasDeclined && IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: "req1210_\(key)_\(cTs)") {
                                 if AppDelegate.isAppInForeground {
                                     IOSSoundPlayer.shared.vibrateEmergency()
                                     if is09 {
@@ -1322,7 +1645,7 @@ final class IOSRealtimeService {
                                         title: "🚨 SOLICITUD 12-10 (\(uName))",
                                         body: "Se solicita conductor para unidad \(uName) en \(direccion)",
                                         soundName: nil,
-                                        playDefaultIfNil: !is09,
+                                        playDefaultIfNil: false,
                                         userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
                                     )
                                 }
@@ -1334,7 +1657,8 @@ final class IOSRealtimeService {
                         let prevPTs = self.lastUnitPersonalReq[key] ?? 0
                         if pTs > prevPTs && pTs > 0 {
                             self.lastUnitPersonalReq[key] = pTs
-                            if !isAttending && !hasDeclined {
+                            let isFresh66 = (nowMs - pTs) >= -15_000 && (nowMs - pTs) <= 90_000
+                            if isFresh66 && !isAttending && !hasDeclined && IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: "req66_\(key)_\(pTs)") {
                                 if AppDelegate.isAppInForeground {
                                     IOSSoundPlayer.shared.vibrateEmergency()
                                     if is09 {
@@ -1352,7 +1676,7 @@ final class IOSRealtimeService {
                                         title: "🚨 SOLICITUD 6-6 (\(uName))",
                                         body: "Se solicita personal para unidad \(uName) en \(direccion)",
                                         soundName: nil,
-                                        playDefaultIfNil: !is09,
+                                        playDefaultIfNil: false,
                                         userInfo: ["type": "DISPATCH_UPDATE", "payloadId": docId, "clave": clave]
                                     )
                                 }
@@ -1364,23 +1688,24 @@ final class IOSRealtimeService {
                 }
             }
 
+            // CRÍTICO: Cuando un pre-despacho o despacho pasa a "cancelado" o "finalizado", desaparece de `whereField("estado", in: ...)`.
+            // Debemos cancelar de inmediato su Timer de 60s y limpiar sus notificaciones para que jamás suene atrasado.
+            let closedOrRemovedIds = self.activeOpenDispatchIds.subtracting(currentOpenIds)
+            for closedId in closedOrRemovedIds {
+                IOSSoundPlayer.shared.cancelRepeat(for: closedId)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["disp_\(closedId)", "repeat_60s_\(closedId)", "disp_rep60_\(closedId)"])
+            }
+            self.activeOpenDispatchIds = currentOpenIds
+
             if didModifyAlerted {
-                if alertedIds.count > 100 {
-                    alertedIds = Array(alertedIds.suffix(100))
+                if alertedIds.count > 200 {
+                    alertedIds = Array(alertedIds.suffix(150))
                 }
                 defaults.set(alertedIds, forKey: "ALERTED_DISPATCH_IDS")
             }
 
-            let hasAnyOpenDispatch = rawDocsArray.contains { item in
-                guard let d = item["data"] as? [String: Any] else { return false }
-                let est = ((d["estado"] as? String) ?? "activa").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                let rawOp = ((d["operadorFinal"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                let opF = (rawOp == "<null>" || rawOp == "null") ? "" : rawOp
-                let finAt = (d["finalizadoAt"] as? NSNumber)?.int64Value ?? 0
-                let cerr = (d["cerrado"] as? Bool) ?? false
-                return !(cerr || !opF.isEmpty || finAt > 0 || ["cerrado", "cerrada", "finalizado", "finalizada", "cancelado", "cancelada", "terminado", "terminada"].contains(est))
-            }
-            if !hasAnyOpenDispatch {
+            if currentOpenIds.isEmpty {
+                IOSSoundPlayer.shared.cancelAllRepeats()
                 let curSvc = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "0").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !curSvc.isEmpty && curSvc != "0" {
                     defaults.set("0", forKey: "USER_EN_SERVICIO")
@@ -1398,7 +1723,7 @@ final class IOSRealtimeService {
         let currentDefaults = UserDefaults.standard
         let currentMyId = (currentDefaults.string(forKey: "USER_ID") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !currentMyId.isEmpty {
-            personalListener = db.collection("personal").document(currentMyId).addSnapshotListener { [weak self] doc, error in
+            personalListener = db.collection("personal").document(currentMyId).addSnapshotListener(includeMetadataChanges: true) { [weak self] doc, error in
                 guard let self = self else { return }
                 if error != nil {
                     self.personalListener?.remove()
@@ -1406,13 +1731,31 @@ final class IOSRealtimeService {
                     return
                 }
                 guard let doc = doc, doc.exists, let rawData = doc.data() else { return }
+                let isFromCache = doc.metadata.isFromCache
                 let defaults = UserDefaults.standard
                 let cleanData = self.sanitizeDoc(rawData)
+                let rawCargo = AppDelegate.stringFromAny(cleanData["cargo"])
+                if !rawCargo.isEmpty {
+                    defaults.set(rawCargo, forKey: "USER_CARGO")
+                }
+                let rawRango = AppDelegate.stringFromAny(cleanData["rango"])
+                if !rawRango.isEmpty {
+                    defaults.set(rawRango, forKey: "USER_RANGO")
+                }
+                let silencioAbs = (cleanData["silencioAbsoluto"] as? Bool) ?? false
+                defaults.set(silencioAbs, forKey: "SILENCIO_ABSOLUTO")
+                if silencioAbs {
+                    IOSSoundPlayer.shared.stop()
+                    IOSSoundPlayer.shared.cancelAllRepeats()
+                }
                 let rawEst = ((cleanData["estado"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 let newEst = (!rawEst.isEmpty ? rawEst : (((cleanData["disponible"] as? Bool) == true) ? "0-9" : "0-8")).uppercased()
                 let oldEst = (defaults.string(forKey: "USER_ESTADO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                 let newSvc = AppDelegate.stringFromAny(cleanData["enServicio"])
                 defaults.set(newSvc, forKey: "USER_EN_SERVICIO")
+                if newEst != "0-9" {
+                    IOSSoundPlayer.shared.cancelAllRepeats()
+                }
                 if newEst != "0-9" || newSvc.isEmpty || newSvc == "0" || newSvc.hasPrefix("-") {
                     IOSLocationService.shared.stopTracking()
                 }
@@ -1423,7 +1766,7 @@ final class IOSRealtimeService {
                     IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                     IOSLocationService.shared.updateStandbyKeepAlive()
 
-                    if !self.isFirstPersonalSnapshot && changedByCentral {
+                    if !isFromCache && !self.isFirstPersonalSnapshot && changedByCentral {
                         let lastSelfStatus = (defaults.string(forKey: "LAST_SELF_STATUS_CHANGE") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                         let lastSelfTime = defaults.double(forKey: "LAST_SELF_STATUS_TIME")
                         let nowMs = Date().timeIntervalSince1970 * 1000.0
@@ -1465,7 +1808,9 @@ final class IOSRealtimeService {
                     }
                 }
 
-                self.isFirstPersonalSnapshot = false
+                if !isFromCache {
+                    self.isFirstPersonalSnapshot = false
+                }
 
                 // Auto-sanación en tiempo real: si Firestore perdió apnsToken o platform != "ios", restaurarlo de inmediato
                 let localApns = (AppDelegate.cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
@@ -1563,8 +1908,10 @@ final class IOSRealtimeService {
                 let incId = incDoc.documentID
                 activeIds.insert(incId)
                 if self.sciSubcolListeners[incId] == nil {
-                    let subL = centralDb.collection("sci_incidentes").document(incId).collection("solicitudes").addSnapshotListener { [weak self] solSnap, solErr in
-                        guard let self = self, solErr == nil, let solDocs = solSnap?.documents else { return }
+                    let subL = centralDb.collection("sci_incidentes").document(incId).collection("solicitudes").addSnapshotListener(includeMetadataChanges: true) { [weak self] solSnap, solErr in
+                        guard let self = self, solErr == nil, let solSnap = solSnap else { return }
+                        if solSnap.metadata.isFromCache { return }
+                        let solDocs = solSnap.documents
                         let curLic = (UserDefaults.standard.string(forKey: "LICENSE_KEY") ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
                         let isAirplane = UserDefaults.standard.bool(forKey: "MODO_AVION")
                         guard !curLic.isEmpty, !isAirplane else { return }
@@ -1583,6 +1930,9 @@ final class IOSRealtimeService {
                                     self.alertedSciIds.insert(alertKey)
                                     storedIds.insert(alertKey)
                                     didAdd = true
+                                    if IOSDispatchTimeValidator.isTooOld(data: sData, maxAgeMs: 300_000) {
+                                        continue
+                                    }
                                     let cSol = AppDelegate.stringFromAny(sData["cuerpoSolicitante"] ?? sData["cuerpoSolicitanteNombre"] ?? rawInc["cuerpoSolicitante"] ?? rawInc["cuerpoSolicitanteNombre"], fallback: "Cuerpo Vecino")
                                     let uSol = AppDelegate.stringFromAny(sData["idCarroSolicitado"] ?? sData["unidad"])
                                     let claveInc = AppDelegate.stringFromAny(sData["claveEmergencia"] ?? rawInc["claveEmergencia"] ?? rawInc["clave"], fallback: "SCI")
@@ -2073,6 +2423,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         configureNotificationCategories()
         requestNotificationPermissions(application: application)
         Self.scheduleDailyReminders()
+        IOSSoundPlayer.shared.pruneExpiredRepeatTimers()
         IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
         IOSLocationService.shared.updateStandbyKeepAlive()
@@ -2095,6 +2446,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if Self.lastBackgroundTimestamp == 0 {
             Self.lastBackgroundTimestamp = Date().timeIntervalSince1970
         }
+        IOSSoundPlayer.shared.pruneExpiredRepeatTimers()
         IOSSoundPlayer.shared.updateBackgroundKeepAlive()
         IOSLocationService.shared.updateStandbyKeepAlive()
         if bgTaskId != .invalid {
@@ -2103,6 +2455,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         bgTaskId = application.beginBackgroundTask(withName: "SentinelRealtimeKeepAlive") { [weak self] in
             guard let self = self else { return }
+            IOSSoundPlayer.shared.pruneExpiredRepeatTimers()
             IOSSoundPlayer.shared.updateBackgroundKeepAlive()
             IOSLocationService.shared.updateStandbyKeepAlive()
             if self.bgTaskId != .invalid {
@@ -2120,6 +2473,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             application.endBackgroundTask(bgTaskId)
             bgTaskId = .invalid
         }
+        IOSSoundPlayer.shared.pruneExpiredRepeatTimers()
         // Al abrir o volver a la app en primer plano: NUNCA debe sonar la alarma fuerte, se detiene el audio y solo vibra
         let wasPlaying = IOSSoundPlayer.shared.isPlayingAlarm
         IOSSoundPlayer.shared.stop()
@@ -2601,16 +2955,35 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         let type = (userInfo["type"] as? String) ?? ""
-        let payloadId = (userInfo["payloadId"] as? String) ?? (userInfo["dispatchId"] as? String) ?? ""
+        let payloadId = ((userInfo["payloadId"] as? String) ?? (userInfo["dispatchId"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let clave = (userInfo["clave"] as? String) ?? ""
         let title = (userInfo["title"] as? String) ?? ""
         let body = (userInfo["body"] as? String) ?? ""
         let is1210or66 = title.contains("12-10") || title.contains("6-6") || body.contains("12-10") || body.contains("6-6")
 
+        IOSSoundPlayer.shared.pruneExpiredRepeatTimers()
+
+        if type == "DISPATCH_CLOSED" {
+            if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [
+                    "disp_\(payloadId)",
+                    "repeat_60s_\(payloadId)",
+                    "disp_rep60_\(payloadId)"
+                ])
+            }
+            IOSSoundPlayer.shared.stop()
+            completionHandler(.newData)
+            return
+        }
+
         if type == "STATUS_CHANGE" {
             let newStatus = ((userInfo["newStatus"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             if !newStatus.isEmpty {
                 defaults.set(newStatus, forKey: "USER_ESTADO")
+                if newStatus != "0-9" {
+                    IOSSoundPlayer.shared.cancelAllRepeats()
+                }
                 IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                 IOSLocationService.shared.updateStandbyKeepAlive()
 
@@ -2631,7 +3004,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if type == "SCI_ALERT" || type == "SCI_CHAT" {
             let idRadial = (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let modoAdmin = defaults.bool(forKey: "USER_MODO_ADMIN")
-            if idRadial == "1" || modoAdmin {
+            if (idRadial == "1" || modoAdmin) && !IOSDispatchTimeValidator.isTooOld(data: userInfo, maxAgeMs: 300_000) {
                 IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
             }
             completionHandler(.newData)
@@ -2659,21 +3032,29 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
 
-        // Si el usuario es el Operador Central activo, NO hacer sonar el teléfono ni levantar alerta de asistencia en despachos
-        if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && (type == "DISPATCH" || type == "DISPATCH_UPDATE" || type.isEmpty) {
+        // Si el usuario es Operador Central activo, Honorario o tiene estado especial silencioso, NO hacer sonar el teléfono
+        if IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) && (type == "DISPATCH" || type == "DISPATCH_UPDATE" || type.isEmpty) {
             if !payloadId.isEmpty {
                 IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
             }
             completionHandler(.noData)
             return
         }
-        let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased()
+        if IOSDispatchTimeValidator.isDispatchClosed(userInfo) {
+            if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+            }
+            completionHandler(.noData)
+            return
+        }
+
+        let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let is09 = (userEstado == "0-9")
         let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL") || clave.contains("9-0"))
 
         let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
         let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
-        let enServicio = defaults.string(forKey: "USER_EN_SERVICIO") ?? ""
+        let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let isAttending = !payloadId.isEmpty && (attended.contains(payloadId) || enServicio == payloadId)
         let hasDeclined = !payloadId.isEmpty && (declined.contains(payloadId) || enServicio == "-\(payloadId)")
 
@@ -2691,20 +3072,20 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
 
         let isRepeat60s = ((userInfo["isRepeat60s"] as? String) == "true")
-        var createdMs: Int64 = 0
-        if let s = userInfo["createdAt"] as? String, let v = Int64(s) {
-            createdMs = v
-        } else if let n = userInfo["createdAt"] as? NSNumber {
-            createdMs = n.int64Value
-        } else if let s = userInfo["timestamp"] as? String, let v = Int64(s) {
-            createdMs = v
-        } else if let n = userInfo["timestamp"] as? NSNumber {
-            createdMs = n.int64Value
-        }
-        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        let isLateDispatch: Bool = !isRepeat60s && !isEscalation && !is1210or66 && (createdMs > 1_000_000_000_000) && ((nowMs - createdMs) > 300_000)
+        let maxAgeForPush: Int64 = isRepeat60s ? 420_000 : IOSDispatchTimeValidator.maxDispatchAgeMs
+        let isLateDispatch = IOSDispatchTimeValidator.isTooOld(data: userInfo, maxAgeMs: maxAgeForPush)
+        let isVeryOldPush = IOSDispatchTimeValidator.isTooOld(data: userInfo, maxAgeMs: IOSDispatchTimeValidator.maxLateBannerAgeMs)
 
         if is1210or66 {
+            guard !isLateDispatch else {
+                completionHandler(.noData)
+                return
+            }
+            let reqDedupKey = "push_121066_\(payloadId)_\(IOSDispatchTimeValidator.resolveEpochMs(from: userInfo))"
+            guard IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: reqDedupKey) else {
+                completionHandler(.noData)
+                return
+            }
             if Self.isAppInForeground {
                 IOSSoundPlayer.shared.vibrateEmergency()
             } else if is09 {
@@ -2714,10 +3095,25 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
         } else if (type == "DISPATCH" || isEscalation) && (is09 || isEscalation) {
+            if isVeryOldPush {
+                if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: payloadId)
+                }
+                completionHandler(.noData)
+                return
+            }
             if isLateDispatch {
-                // Si el despacho llega tardío (> 5 min) por mala señal: NO sonar sirena, solo vibrar
-                IOSSoundPlayer.shared.vibrateEmergency()
+                // Si llega tardío (entre 5 y 15 min) y no es repetición: NO sonar sirena, solo vibrar una vez
+                if !isRepeat60s {
+                    if !payloadId.isEmpty {
+                        IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: payloadId)
+                    }
+                    IOSSoundPlayer.shared.vibrateEmergency()
+                }
             } else if Self.isAppInForeground && !isRepeat60s {
+                if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: payloadId)
+                }
                 IOSSoundPlayer.shared.vibrateEmergency()
                 if !payloadId.isEmpty {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
@@ -2726,7 +3122,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             } else {
                 let shouldPlayNow: Bool
                 if isEscalation {
-                    shouldPlayNow = true
+                    shouldPlayNow = IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: "esc_\(payloadId)_\(clave)")
                 } else if isRepeat60s {
                     if !payloadId.isEmpty {
                         IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
@@ -2757,12 +3153,28 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     ) {
         let userInfo = notification.request.content.userInfo
         let type = (userInfo["type"] as? String) ?? ""
-        let payloadId = (userInfo["payloadId"] as? String) ?? (userInfo["dispatchId"] as? String) ?? ""
+        let payloadId = ((userInfo["payloadId"] as? String) ?? (userInfo["dispatchId"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let clave = (userInfo["clave"] as? String) ?? ""
         let isRepeat60s = ((userInfo["isRepeat60s"] as? String) == "true")
         let defaults = UserDefaults.standard
 
+        IOSSoundPlayer.shared.pruneExpiredRepeatTimers()
+
         if defaults.bool(forKey: "MODO_AVION") {
+            completionHandler([])
+            return
+        }
+
+        if type == "DISPATCH_CLOSED" {
+            if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [
+                    "disp_\(payloadId)",
+                    "repeat_60s_\(payloadId)",
+                    "disp_rep60_\(payloadId)"
+                ])
+            }
+            IOSSoundPlayer.shared.stop()
             completionHandler([])
             return
         }
@@ -2771,6 +3183,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             let newStatus = ((userInfo["newStatus"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
             if !newStatus.isEmpty {
                 defaults.set(newStatus, forKey: "USER_ESTADO")
+                if newStatus != "0-9" {
+                    IOSSoundPlayer.shared.cancelAllRepeats()
+                }
                 IOSSoundPlayer.shared.updateBackgroundKeepAlive()
                 IOSLocationService.shared.updateStandbyKeepAlive()
             }
@@ -2792,7 +3207,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         if type == "SCI_ALERT" || type == "SCI_CHAT" {
             let idRadial = (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let modoAdmin = defaults.bool(forKey: "USER_MODO_ADMIN")
-            if idRadial == "1" || modoAdmin {
+            if (idRadial == "1" || modoAdmin) && !IOSDispatchTimeValidator.isTooOld(data: userInfo, maxAgeMs: 300_000) {
                 IOSSoundPlayer.shared.play(nameOrClave: "alertas", forceMaxVolume: true)
                 completionHandler([.banner, .list])
             } else {
@@ -2824,7 +3239,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             return
         }
 
-        if defaults.bool(forKey: "IS_CENTRAL_ACTIVE") && (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
+        if IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) && (type == "DISPATCH" || type == "DISPATCH_UPDATE") {
+            if !payloadId.isEmpty {
+                IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
+            }
+            completionHandler([])
+            return
+        }
+        if IOSDispatchTimeValidator.isDispatchClosed(userInfo) {
             if !payloadId.isEmpty {
                 IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
             }
@@ -2834,34 +3256,41 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
         let attended = defaults.stringArray(forKey: "ATTENDED_DISPATCH_IDS") ?? []
         let declined = defaults.stringArray(forKey: "DECLINED_DISPATCH_IDS") ?? []
-        let enServicio = defaults.string(forKey: "USER_EN_SERVICIO") ?? ""
+        let enServicio = (defaults.string(forKey: "USER_EN_SERVICIO") ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let isAttending = !payloadId.isEmpty && (attended.contains(payloadId) || enServicio == payloadId)
         let hasDeclined = !payloadId.isEmpty && (declined.contains(payloadId) || enServicio == "-\(payloadId)")
 
-        let userEstado = defaults.string(forKey: "USER_ESTADO") ?? "0-9"
+        let userEstado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let is09 = (userEstado == "0-9")
         let isEscalation = type == "DISPATCH_UPDATE" && (clave.contains("10-30") || clave.contains("FORESTAL") || clave.contains("9-0"))
+        let title = notification.request.content.title
+        let body = notification.request.content.body
+        let is1210or66 = title.contains("12-10") || title.contains("6-6") || body.contains("12-10") || body.contains("6-6")
 
         if type == "DISPATCH" || type == "DISPATCH_UPDATE" {
-            if isAttending || (type == "DISPATCH_UPDATE" && !isEscalation) || (hasDeclined && !isEscalation) {
+            if isAttending || (type == "DISPATCH_UPDATE" && !isEscalation && !is1210or66) || (hasDeclined && !isEscalation) {
                 completionHandler([])
                 return
             }
-            var createdMs: Int64 = 0
-            if let s = userInfo["createdAt"] as? String, let v = Int64(s) {
-                createdMs = v
-            } else if let n = userInfo["createdAt"] as? NSNumber {
-                createdMs = n.int64Value
-            } else if let s = userInfo["timestamp"] as? String, let v = Int64(s) {
-                createdMs = v
-            } else if let n = userInfo["timestamp"] as? NSNumber {
-                createdMs = n.int64Value
-            }
-            let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-            let isLateDispatch: Bool = !isRepeat60s && !isEscalation && (createdMs > 1_000_000_000_000) && ((nowMs - createdMs) > 300_000)
+            let maxAgeForPush: Int64 = isRepeat60s ? 420_000 : IOSDispatchTimeValidator.maxDispatchAgeMs
+            let isLateDispatch = IOSDispatchTimeValidator.isTooOld(data: userInfo, maxAgeMs: maxAgeForPush)
+            let isVeryOldPush = IOSDispatchTimeValidator.isTooOld(data: userInfo, maxAgeMs: IOSDispatchTimeValidator.maxLateBannerAgeMs)
 
+            if isVeryOldPush {
+                if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: payloadId)
+                }
+                completionHandler([])
+                return
+            }
             if isLateDispatch {
-                // Si el despacho llega tardío (> 5 min) por mala señal: NO sonar sirena, solo vibrar y mostrar notificación sin sonido
+                if isRepeat60s || is1210or66 {
+                    completionHandler([])
+                    return
+                }
+                if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: payloadId)
+                }
                 IOSSoundPlayer.shared.vibrateEmergency()
                 completionHandler([.banner, .list])
                 return
@@ -2870,8 +3299,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 Self.dispatchNativeIntentToWebView(dispatchId: payloadId, showFullscreen: true)
             }
             if Self.isAppInForeground && !isRepeat60s {
+                if !payloadId.isEmpty {
+                    IOSSoundPlayer.shared.markDispatchSeenSilently(dispatchId: payloadId)
+                }
                 IOSSoundPlayer.shared.vibrateEmergency()
-                if !payloadId.isEmpty && is09 {
+                if !payloadId.isEmpty && is09 && !is1210or66 {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                 }
                 completionHandler([])
@@ -2879,8 +3311,11 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             }
             if is09 || isEscalation {
                 let shouldPlayNow: Bool
-                if isEscalation {
-                    shouldPlayNow = true
+                if is1210or66 {
+                    let reqDedupKey = "push_121066_\(payloadId)_\(IOSDispatchTimeValidator.resolveEpochMs(from: userInfo))"
+                    shouldPlayNow = IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: reqDedupKey)
+                } else if isEscalation {
+                    shouldPlayNow = IOSSoundPlayer.shared.claimUnitRequestIfNeeded(reqKey: "esc_\(payloadId)_\(clave)")
                 } else if isRepeat60s {
                     if !payloadId.isEmpty {
                         IOSSoundPlayer.shared.cancelRepeat(for: payloadId)
@@ -2892,7 +3327,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 if shouldPlayNow {
                     IOSSoundPlayer.shared.play(nameOrClave: clave.isEmpty ? "despacho" : clave, forceMaxVolume: true)
                 }
-                if !payloadId.isEmpty && !isRepeat60s && !isEscalation {
+                if !payloadId.isEmpty && !isRepeat60s && !isEscalation && !is1210or66 {
                     IOSSoundPlayer.shared.scheduleRepeat(dispatchId: payloadId, clave: clave)
                 }
                 completionHandler([.banner, .list])
@@ -3251,10 +3686,12 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 let licenseKey = AppDelegate.stringFromAny(user["licenseKey"]).uppercased()
                 let nombre = AppDelegate.stringFromAny(user["nombre"], fallback: "Bombero")
                 let rango = AppDelegate.stringFromAny(user["rango"], fallback: "Voluntario")
+                let cargo = AppDelegate.stringFromAny(user["cargo"])
                 let compania = AppDelegate.stringFromAny(user["compania"], fallback: "1")
                 let estado = AppDelegate.stringFromAny(user["estado"], fallback: "0-9").uppercased()
                 let conductor = (user["conductor"] as? Bool) ?? (user["conductor"] as? NSNumber)?.boolValue ?? false
                 let modoAdmin = (user["modoAdmin"] as? Bool) ?? (user["modoAdmin"] as? NSNumber)?.boolValue ?? false
+                let silencioAbs = (user["silencioAbsoluto"] as? Bool) ?? (user["silencioAbsoluto"] as? NSNumber)?.boolValue ?? false
                 let estadoEspecial = AppDelegate.stringFromAny(user["estadoEspecial"])
                 let enServicio = AppDelegate.stringFromAny(user["enServicio"])
 
@@ -3263,12 +3700,17 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 if !licenseKey.isEmpty { defaults.set(licenseKey, forKey: "LICENSE_KEY") }
                 defaults.set(nombre, forKey: "USER_NOMBRE")
                 defaults.set(rango, forKey: "USER_RANGO")
+                if !cargo.isEmpty { defaults.set(cargo, forKey: "USER_CARGO") }
                 defaults.set(compania, forKey: "USER_COMPANIA")
                 defaults.set(estado, forKey: "USER_ESTADO")
                 defaults.set(conductor, forKey: "USER_CONDUCTOR")
                 defaults.set(modoAdmin, forKey: "USER_MODO_ADMIN")
+                defaults.set(silencioAbs, forKey: "SILENCIO_ABSOLUTO")
                 defaults.set(estadoEspecial, forKey: "USER_ESTADO_ESPECIAL")
                 defaults.set(enServicio, forKey: "USER_EN_SERVICIO")
+                if estado != "0-9" || silencioAbs {
+                    IOSSoundPlayer.shared.cancelAllRepeats()
+                }
 
                 if !userId.isEmpty {
                     SentinelKeychain.set("last_user_id", value: userId)
