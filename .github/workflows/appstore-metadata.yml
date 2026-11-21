@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   publish-metadata:
-    name: Configure & Submit SENTINEL ONE 3.1.0
+    name: Configure & Submit SENTINEL ONE 3.2.0
     runs-on: ubuntu-latest
 
     steps:

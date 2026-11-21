@@ -19,6 +19,14 @@ import {
   LocationDisclosureModal,
   readNativePermissionsStatus
 } from './src/components/modals/LocationDisclosureModal';
+import {
+  FirstLaunchIntroVideo,
+  INTRO_VIDEO_SEEN_KEY,
+  GUIDED_TOUR_SEEN_KEY,
+  isSentinelOneEcosystemMode,
+  readOnboardingFlagAsync,
+  readOnboardingFlagSync
+} from './src/components/onboarding/FirstLaunchIntroVideo';
 
 import { useLicenseStore } from './src/store/useLicenseStore';
 import { useAuthStore } from './src/store/useAuthStore';
@@ -50,6 +58,23 @@ export default function App() {
   const { init: initDispatch } = useDispatchStore();
 
   const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [showFirstLaunchVideo, setShowFirstLaunchVideo] = useState(false);
+  const [introCardReveal, setIntroCardReveal] = useState(0);
+  const [introTargetLogoRect, setIntroTargetLogoRect] = useState(null);
+  const [suppressBootSpinner] = useState(() => {
+    try {
+      if (!isSentinelOneEcosystemMode()) return false;
+      if (readOnboardingFlagSync(INTRO_VIDEO_SEEN_KEY)) return false;
+      if (typeof window !== 'undefined' && window.localStorage) {
+        if (window.localStorage.getItem('@sentinel_one_v3_license_cache')) return false;
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  });
+  const [isGuidedTourActive, setIsGuidedTourActive] = useState(false);
+  const [tourFinishTick, setTourFinishTick] = useState(0);
   const [bgStage, setBgStage] = useState('login');
   const [isBooting, setIsBooting] = useState(true);
   const bootFadeAnim = useRef(new Animated.Value(1)).current;
@@ -59,32 +84,51 @@ export default function App() {
     let isMounted = true;
     const startup = async () => {
       const startTime = Date.now();
-      const licOk = await initLicense();
-      const authOk = await initAuth();
+      const [licOk, authOk, introSeen] = await Promise.all([
+        initLicense(),
+        initAuth(),
+        readOnboardingFlagAsync(INTRO_VIDEO_SEEN_KEY)
+      ]);
       setBgStage('login');
+
+      const shouldPlayFirstVideo = Boolean(
+        !licOk && !introSeen && isSentinelOneEcosystemMode()
+      );
+      if (isMounted && shouldPlayFirstVideo) {
+        setIntroCardReveal(0);
+        setShowFirstLaunchVideo(true);
+      }
 
       if (licOk && authOk) {
         initDispatch(false);
+        const minWaitPromise = new Promise((r) => setTimeout(r, 850));
+        await Promise.all([
+          minWaitPromise,
+          useDispatchStore.getState().waitForInitialBootData(4500)
+        ]);
+        // Permitir que React renderice el Operador Central, emergencias activas, carros y personal en MainHomeView debajo del Loader antes de desvanecerlo
+        await new Promise((r) => setTimeout(r, 65));
+      } else if (!shouldPlayFirstVideo) {
+        const elapsed = Date.now() - startTime;
+        const remaining = Math.max(0, 650 - elapsed);
+        if (remaining > 0) {
+          await new Promise((r) => setTimeout(r, remaining));
+        }
+      } else {
+        await new Promise((r) => setTimeout(r, 60));
       }
 
-      // Dar tiempo para que la sesión y los listeners de Firebase conecten en segundo plano sin mostrar la pantalla de licencia ni estados desconectados
-      const elapsed = Date.now() - startTime;
-      const minBootDuration = licOk && authOk ? 1150 : 650;
-      const remaining = Math.max(0, minBootDuration - elapsed);
-
-      setTimeout(() => {
-        if (!isMounted) return;
-        Animated.timing(bootFadeAnim, {
-          toValue: 0,
-          duration: 280,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true
-        }).start(() => {
-          if (isMounted) {
-            setIsBooting(false);
-          }
-        });
-      }, remaining);
+      if (!isMounted) return;
+      Animated.timing(bootFadeAnim, {
+        toValue: 0,
+        duration: shouldPlayFirstVideo ? 180 : 280,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true
+      }).start(() => {
+        if (isMounted) {
+          setIsBooting(false);
+        }
+      });
     };
     startup();
     return () => {
@@ -103,6 +147,12 @@ export default function App() {
     initDispatch(false);
 
     if (isBooting) return;
+
+    // Mientras corre la presentación guiada de primera vez, esperar a que finalice para no superponer modales
+    if (isGuidedTourActive || !readOnboardingFlagSync(GUIDED_TOUR_SEEN_KEY)) {
+      setLocationModalVisible(false);
+      return;
+    }
 
     let cancelled = false;
     const isIosRuntime =
@@ -179,7 +229,12 @@ export default function App() {
         window.removeEventListener('sentinelPermissionsChanged', onPermsChanged);
       }
     };
-  }, [authorized, isAuthenticated, isBooting]);
+  }, [authorized, isAuthenticated, isBooting, isGuidedTourActive, tourFinishTick]);
+
+  const handleIntroVideoComplete = () => {
+    setIntroCardReveal(1);
+    setShowFirstLaunchVideo(false);
+  };
 
   const triggerWindBurstToLogin = () => {
     setBgStage('wind-gust');
@@ -207,6 +262,7 @@ export default function App() {
 
   const handleFullLogout = async () => {
     useDispatchStore.getState().unsubscribeRealtime();
+    useDispatchStore.getState().resetBootReadiness?.();
     setBgStage('wind-gust');
     await logout();
     setTimeout(() => setBgStage('login'), 650);
@@ -226,9 +282,21 @@ export default function App() {
       >
         {!authorized ? (
           isBooting ? null : (
-            <LicenseActivationView
-              onActivationSuccess={triggerWindBurstToLogin}
-            />
+            <View style={{ flex: 1 }}>
+              <LicenseActivationView
+                onActivationSuccess={triggerWindBurstToLogin}
+                introMode={showFirstLaunchVideo}
+                introCardReveal={introCardReveal}
+                onTopLogoRect={setIntroTargetLogoRect}
+              />
+              {showFirstLaunchVideo ? (
+                <FirstLaunchIntroVideo
+                  targetLogoRect={introTargetLogoRect}
+                  onCardRevealProgress={setIntroCardReveal}
+                  onComplete={handleIntroVideoComplete}
+                />
+              ) : null}
+            </View>
           )
         ) : !isAuthenticated ? (
           isBooting ? null : (
@@ -238,6 +306,9 @@ export default function App() {
           )
         ) : (
           <MainHomeView
+            isBooting={isBooting}
+            onTourActiveChange={setIsGuidedTourActive}
+            onTourFinished={() => setTourFinishTick((n) => n + 1)}
             onLogout={handleFullLogout}
           />
         )}
@@ -249,6 +320,7 @@ export default function App() {
           style={[styles.bootLoaderOverlay, { opacity: bootFadeAnim }]}
           pointerEvents="auto"
         >
+          {suppressBootSpinner ? null : (
           <SentinelBackground stage="login" theme="dark">
             <View style={styles.bootLoaderContainer}>
               {/* Zona Superior: Logo del Cuerpo de Bomberos más arriba */}
@@ -281,6 +353,7 @@ export default function App() {
               </View>
             </View>
           </SentinelBackground>
+          )}
         </Animated.View>
       ) : null}
 

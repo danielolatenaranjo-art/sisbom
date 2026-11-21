@@ -550,7 +550,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     private static let kPlayedUnitReqKey = "PLAYED_UNIT_REQ_IDS"
 
     private var audioPlayer: AVAudioPlayer?
-    private var keepAlivePlayer: AVAudioPlayer?
     private var repeatTimers: [String: Timer] = [:]
     private var repeatScheduledAtMs: [String: Int64] = [:]
     private var hiddenVolumeView: MPVolumeView?
@@ -629,24 +628,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         playedFirstToneDispatchIds = Set(storedFirst).union(storedAlerted)
         playedRepeat60sDispatchIds = Set(storedRepeat)
         playedUnitReqIds = Set(storedUnitReq)
-
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAudioInterruption(_:)),
-            name: AVAudioSession.interruptionNotification,
-            object: AVAudioSession.sharedInstance()
-        )
-    }
-
-    @objc private func handleAudioInterruption(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let typeVal = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeVal) else { return }
-        if type == .ended {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                self?.updateBackgroundKeepAlive()
-            }
-        }
     }
 
     var isPlayingAlarm: Bool {
@@ -739,86 +720,13 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         return "despacho"
     }
 
-    private static func makeSilentWavData() -> Data {
-        let sampleRate: UInt32 = 8000
-        let numSamples: UInt32 = 8000 // 1 segundo de silencio digital puro (muestras PCM = 0)
-        let bytesPerSample: UInt16 = 2
-        let numChannels: UInt16 = 1
-        let dataSize: UInt32 = numSamples * UInt32(bytesPerSample)
-        let riffChunkSize: UInt32 = 36 + dataSize
-        let byteRate: UInt32 = sampleRate * UInt32(numChannels) * UInt32(bytesPerSample)
-        let blockAlign: UInt16 = numChannels * bytesPerSample
-        let bitsPerSample: UInt16 = 16
-
-        var data = Data(capacity: Int(44 + dataSize))
-        data.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
-        var leRiff = riffChunkSize.littleEndian
-        withUnsafeBytes(of: &leRiff) { data.append(contentsOf: $0) }
-        data.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
-        data.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
-        var subchunk1Size: UInt32 = 16
-        withUnsafeBytes(of: &subchunk1Size) { data.append(contentsOf: $0) }
-        var audioFormat: UInt16 = 1 // PCM
-        withUnsafeBytes(of: &audioFormat) { data.append(contentsOf: $0) }
-        var leChannels = numChannels.littleEndian
-        withUnsafeBytes(of: &leChannels) { data.append(contentsOf: $0) }
-        var leSampleRate = sampleRate.littleEndian
-        withUnsafeBytes(of: &leSampleRate) { data.append(contentsOf: $0) }
-        var leByteRate = byteRate.littleEndian
-        withUnsafeBytes(of: &leByteRate) { data.append(contentsOf: $0) }
-        var leBlockAlign = blockAlign.littleEndian
-        withUnsafeBytes(of: &leBlockAlign) { data.append(contentsOf: $0) }
-        var leBits = bitsPerSample.littleEndian
-        withUnsafeBytes(of: &leBits) { data.append(contentsOf: $0) }
-        data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
-        var leDataSize = dataSize.littleEndian
-        withUnsafeBytes(of: &leDataSize) { data.append(contentsOf: $0) }
-        data.append(Data(count: Int(dataSize))) // 100% muestras en 0 (silencio absoluto)
-        return data
-    }
-
     func updateBackgroundKeepAlive() {
-        let defaults = UserDefaults.standard
-        let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) && estado == "0-9" else {
-            stopBackgroundKeepAlive()
-            return
-        }
-
-        // En primer plano NO necesitamos reproducir ningún stream keep-alive
-        if AppDelegate.isAppInForeground {
-            stopBackgroundKeepAlive()
-            return
-        }
-
-        // Si ya está sonando la alarma real o ya está corriendo el keep-alive silencioso, mantener activo
-        if let active = audioPlayer, active.isPlaying {
-            return
-        }
-        if let ka = keepAlivePlayer, ka.isPlaying {
-            ka.volume = 0.0
-            return
-        }
-
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
-            try? session.setActive(true)
-            let silentWav = Self.makeSilentWavData()
-            let player = try AVAudioPlayer(data: silentWav, fileTypeHint: AVFileType.wav.rawValue)
-            // Silencio PCM puro (muestras = 0) + volumen 0.0: jamás emite ningún tono ni ruido por el parlante
-            player.volume = 0.0
-            player.numberOfLoops = -1
-            player.prepareToPlay()
-            player.play()
-            self.keepAlivePlayer = player
-        } catch {}
+        // Guideline 2.5.4 compliance: silent background audio keep-alive removed.
+        // Background dispatch alerts are delivered via standard APNs remote notifications.
     }
 
     func stopBackgroundKeepAlive() {
-        keepAlivePlayer?.stop()
-        keepAlivePlayer = nil
+        // No-op: background keep-alive audio player removed for App Store Guideline 2.5.4 compliance.
     }
 
     func play(nameOrClave: String, forceMaxVolume: Bool = true) {
@@ -850,8 +758,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
         audioPlayer?.stop()
         audioPlayer = nil
-        keepAlivePlayer?.stop()
-        keepAlivePlayer = nil
 
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "mp3")
@@ -941,8 +847,6 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
         audioPlayer?.stop()
         audioPlayer = nil
-        keepAlivePlayer?.stop()
-        keepAlivePlayer = nil
 
         guard let url = Bundle.main.url(forResource: "evacuacion", withExtension: "wav")
                 ?? Bundle.main.url(forResource: "alertas", withExtension: "mp3") else {
@@ -1812,14 +1716,21 @@ final class IOSRealtimeService {
                     self.isFirstPersonalSnapshot = false
                 }
 
-                // Auto-sanación en tiempo real: si Firestore perdió apnsToken o platform != "ios", restaurarlo de inmediato
+                // Auto-sanación en tiempo real: si Firestore perdió apnsToken, restaurarlo sin pisar sesiones Android en cuentas multiDispositivo/Admin
                 let localApns = (AppDelegate.cachedApnsDeviceToken?.map { String(format: "%02x", $0) }.joined()
                     ?? defaults.string(forKey: "APNS_DEVICE_TOKEN_HEX")
                     ?? SentinelKeychain.get("apns_token_hex")
                     ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 let remoteApns = AppDelegate.stringFromAny(cleanData["apnsToken"]).lowercased()
                 let remotePlat = AppDelegate.stringFromAny(cleanData["platform"]).lowercased()
-                if localApns.count == 64 && (remoteApns != localApns || remotePlat != "ios") {
+                let isMultiOrAdmin = (cleanData["multiDispositivo"] as? Bool) == true
+                    || (cleanData["modoAdmin"] as? Bool) == true
+                    || AppDelegate.stringFromAny(cleanData["idRadial"]) == "1"
+                    || defaults.bool(forKey: "USER_MODO_ADMIN")
+                let needsHeal = isMultiOrAdmin
+                    ? (remoteApns != localApns)
+                    : (remoteApns != localApns || remotePlat != "ios")
+                if !isFromCache && localApns.count == 64 && needsHeal {
                     defaults.removeObject(forKey: "LAST_SYNCED_APNS_COMBO")
                     defaults.removeObject(forKey: "LAST_SYNCED_FCM_COMBO")
                     AppDelegate.syncFcmTopicsAndToken(userId: currentMyId)
@@ -2707,21 +2618,27 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     private static var lastNativeTokenPatchSig: String = ""
 
     private static func isStoredSessionMultiDevice() -> Bool {
-        guard let rawSession = UserDefaults.standard.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "USER_MODO_ADMIN") || (defaults.string(forKey: "USER_ID_RADIAL") ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == "1" {
+            return true
+        }
+        guard let rawSession = defaults.string(forKey: "WEBSTORAGE_@sentinel_one_v3_user_session"),
               let data = rawSession.data(using: .utf8),
               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return false
         }
-        if let b = dict["multiDispositivo"] as? Bool { return b }
-        if let n = dict["multiDispositivo"] as? NSNumber { return n.boolValue }
+        if let b = dict["multiDispositivo"] as? Bool, b { return true }
+        if let n = dict["multiDispositivo"] as? NSNumber, n.boolValue { return true }
         if let s = dict["multiDispositivo"] as? String {
             let lower = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return lower == "true" || lower == "1" || lower == "si" || lower == "sí"
+            if lower == "true" || lower == "1" || lower == "si" || lower == "sí" { return true }
         }
+        if let b = dict["modoAdmin"] as? Bool, b { return true }
+        if AppDelegate.stringFromAny(dict["idRadial"]) == "1" { return true }
         return false
     }
 
-    private static func patchPersonalTokensViaRest(projectId: String, userId: String, apnsHex: String, fcmToken: String, includeDeviceId: Bool) {
+    private static func patchPersonalTokensViaRest(projectId: String, userId: String, apnsHex: String, fcmToken: String, includeDeviceId: Bool, isMultiDev: Bool = false) {
         guard !projectId.isEmpty, !userId.isEmpty else { return }
         let apiKey = SentinelKeychain.get("last_api_key") ?? activeFirebaseApp()?.options.apiKey ?? ""
         guard !apiKey.isEmpty else { return }
@@ -2744,11 +2661,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 return
             }
             let encodedUid = userId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userId
-            var masks = ["platform", "_metaTimestamp"]
+            var masks = ["_metaTimestamp"]
             var fields: [String: Any] = [
-                "platform": ["stringValue": "ios"],
                 "_metaTimestamp": ["integerValue": "\(Int64(Date().timeIntervalSince1970 * 1000))"]
             ]
+            if !isMultiDev {
+                masks.append("platform")
+                fields["platform"] = ["stringValue": "ios"]
+            }
             if !apnsHex.isEmpty {
                 masks.append("apnsToken")
                 fields["apnsToken"] = ["stringValue": apnsHex]
@@ -2847,11 +2767,14 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                 authenticateNativeApp(activeFirebaseApp()) {
                     let db = activeFirestore()
                     let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-                    db.collection("personal").document(userId).setData([
+                    var apnsPatch: [String: Any] = [
                         "apnsToken": apnsHex,
-                        "platform": "ios",
                         "_metaTimestamp": nowMs
-                    ], merge: true) { err in
+                    ]
+                    if !isMultiDev {
+                        apnsPatch["platform"] = "ios"
+                    }
+                    db.collection("personal").document(userId).setData(apnsPatch, merge: true) { err in
                         if err == nil {
                             defaults.set(lastSyncedApnsKey, forKey: "LAST_SYNCED_APNS_COMBO")
                         } else {
@@ -2860,7 +2783,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 userId: userId,
                                 apnsHex: apnsHex,
                                 fcmToken: "",
-                                includeDeviceId: false
+                                includeDeviceId: false,
+                                isMultiDev: isMultiDev
                             )
                         }
                     }
@@ -2877,16 +2801,16 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             SentinelKeychain.set("last_user_id", value: userId)
             emitFcmTokenToWebView(token)
             syncTopics()
-            let lastSyncedFcmKey = "\(activePid):\(userId):\(token):\(apnsHex)"
+            let lastSyncedFcmKey = "\(activePid):\(userId):\(token):\(apnsHex):\(isMultiDev)"
             if tokenOverride != nil || defaults.string(forKey: "LAST_SYNCED_FCM_COMBO") != lastSyncedFcmKey {
                 authenticateNativeApp(activeFirebaseApp()) {
                     let db = activeFirestore()
                     let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
                     var patch: [String: Any] = [
-                        "platform": "ios",
                         "_metaTimestamp": nowMs
                     ]
                     if !isMultiDev {
+                        patch["platform"] = "ios"
                         patch["deviceId"] = token
                     }
                     if !apnsHex.isEmpty {
@@ -2904,7 +2828,8 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                                 userId: userId,
                                 apnsHex: apnsHex,
                                 fcmToken: token,
-                                includeDeviceId: !isMultiDev
+                                includeDeviceId: !isMultiDev,
+                                isMultiDev: isMultiDev
                             )
                         }
                     }
@@ -3916,6 +3841,18 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                     }
                 }.resume()
             }
+        case "printDocument":
+            let jobTitle = AppDelegate.stringFromAny(dict["title"], fallback: "SENTINEL_MED_Documento")
+            DispatchQueue.main.async {
+                guard let wv = AppDelegate.sharedWebView else { return }
+                let printInfo = UIPrintInfo(dictionary: nil)
+                printInfo.jobName = jobTitle
+                printInfo.outputType = .general
+                let printController = UIPrintInteractionController.shared
+                printController.printInfo = printInfo
+                printController.printFormatter = wv.viewPrintFormatter()
+                printController.present(animated: true, completionHandler: nil)
+            }
         default:
             break
         }
@@ -3995,7 +3932,7 @@ final class SentinelLocalAssetSchemeHandler: NSObject, WKURLSchemeHandler {
         let mime: String
         switch ext {
         case "html": mime = "text/html"
-        case "js": mime = "application/javascript"
+        case "js", "mjs": mime = "application/javascript"
         case "css": mime = "text/css"
         case "json": mime = "application/json"
         case "png": mime = "image/png"
@@ -4004,10 +3941,41 @@ final class SentinelLocalAssetSchemeHandler: NSObject, WKURLSchemeHandler {
         case "svg": mime = "image/svg+xml"
         case "ico": mime = "image/x-icon"
         case "mp3": mime = "audio/mpeg"
+        case "wav": mime = "audio/wav"
+        case "mp4": mime = "video/mp4"
+        case "webm": mime = "video/webm"
         case "ttf": mime = "font/ttf"
         case "woff": mime = "font/woff"
         case "woff2": mime = "font/woff2"
         default: mime = "application/octet-stream"
+        }
+
+        if let rangeHeader = urlSchemeTask.request.value(forHTTPHeaderField: "Range"),
+           rangeHeader.hasPrefix("bytes="),
+           data.count > 0 {
+            let spec = String(rangeHeader.dropFirst("bytes=".count))
+            let parts = spec.split(separator: "-", omittingEmptySubsequences: false)
+            let start = Int(parts.first ?? "") ?? 0
+            let requestedEnd = (parts.count > 1 && !parts[1].isEmpty) ? (Int(parts[1]) ?? (data.count - 1)) : (data.count - 1)
+            let clampedStart = max(0, min(start, data.count - 1))
+            let clampedEnd = max(clampedStart, min(requestedEnd, data.count - 1))
+            let slice = data.subdata(in: clampedStart..<(clampedEnd + 1))
+            let partialResponse = HTTPURLResponse(
+                url: url,
+                statusCode: 206,
+                httpVersion: "HTTP/1.1",
+                headerFields: [
+                    "Content-Type": mime,
+                    "Content-Length": "\(slice.count)",
+                    "Content-Range": "bytes \(clampedStart)-\(clampedEnd)/\(data.count)",
+                    "Accept-Ranges": "bytes",
+                    "Access-Control-Allow-Origin": "*"
+                ]
+            )!
+            urlSchemeTask.didReceive(partialResponse)
+            urlSchemeTask.didReceive(slice)
+            urlSchemeTask.didFinish()
+            return
         }
 
         let response = HTTPURLResponse(
@@ -4017,6 +3985,7 @@ final class SentinelLocalAssetSchemeHandler: NSObject, WKURLSchemeHandler {
             headerFields: [
                 "Content-Type": mime,
                 "Content-Length": "\(data.count)",
+                "Accept-Ranges": "bytes",
                 "Access-Control-Allow-Origin": "*"
             ]
         )!
@@ -4046,7 +4015,9 @@ struct SentinelWebViewContainer: UIViewRepresentable {
             "@sentinel_one_v3_logo_data_uri",
             "@sentinel_one_v3_user_session",
             "@sentinel_one_v3_user_prefs",
-            "@sentinel_one_location_disclosed_v3"
+            "@sentinel_one_location_disclosed_v3",
+            "@sentinel_one_intro_video_seen_v3",
+            "@sentinel_one_guided_tour_seen_v3"
         ]
         var storageMap: [String: String] = [:]
         for k in storageKeys {

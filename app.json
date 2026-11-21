@@ -2,7 +2,7 @@
   "expo": {
     "name": "SENTINEL ONE",
     "slug": "sentinel-one",
-    "version": "3.1.0",
+    "version": "3.2.0",
     "orientation": "portrait",
     "icon": "./assets/Logo.png",
     "userInterfaceStyle": "dark",
@@ -14,14 +14,13 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.misisbom.sisbom.NFR3L3CC3L",
-      "buildNumber": "3035",
+      "buildNumber": "3036",
       "infoPlist": {
         "CFBundleDisplayName": "SENTINEL ONE",
         "NSLocationWhenInUseUsageDescription": "SENTINEL ONE utiliza su ubicación para rutar la respuesta hacia la emergencia de bomberos y confirmar llegada al cuartel.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "SENTINEL ONE recopila datos de ubicación durante un despacho activo para el cálculo de rutas tácticas y seguridad del bombero, incluso con la app cerrada.",
         "UIBackgroundModes": [
           "location",
-          "audio",
           "remote-notification",
           "fetch"
         ]
@@ -29,7 +28,7 @@
     },
     "android": {
       "package": "com.sisbom.misisbom",
-      "versionCode": 3026,
+      "versionCode": 3027,
       "adaptiveIcon": {
         "foregroundImage": "./assets/Logo.png",
         "backgroundColor": "#060911"

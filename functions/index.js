@@ -296,7 +296,7 @@ async function sendDirectApnsToIosUsers({
       }
 
       const fcmTok = String(p.deviceId || p.fcmToken || p.tokenFcm || p.tokenIos || "").trim();
-      const hasFcm = isValidFcmRegistrationToken(fcmTok);
+      const hasFcm = rawPlat !== "android" && isValidFcmRegistrationToken(fcmTok);
       if (!(rawPlat === "ios" || hasApns)) continue;
       if (!hasApns && !hasFcm) continue;
 
@@ -512,6 +512,7 @@ async function sendDirectFcmToAndroidUsers({
     );
 
     const tokenSet = new Set();
+    const tokenOwnerByTok = new Map();
     for (const d of docs) {
       const p = d.data() || {};
       if (d.id === "init" || p.placeholder === true) continue;
@@ -522,11 +523,37 @@ async function sendDirectFcmToAndroidUsers({
       const uid = String(p.idRegistro || d.id || "").trim();
       if (uid && excludeSet.has(uid)) continue;
       if (onlyConductors && !isConductorFlag(p)) continue;
-      if (resolveEffectivePlatform(p) === "ios") continue;
 
-      const fcmTok = String(p.deviceId || p.fcmToken || p.tokenFcm || "").trim();
-      if (isValidFcmRegistrationToken(fcmTok)) {
-        tokenSet.add(fcmTok);
+      const rawMulti = p.multiDispositivo;
+      const isMulti =
+        rawMulti === true ||
+        ["true", "1", "si", "sí"].includes(String(rawMulti || "").trim().toLowerCase()) ||
+        isCommanderFlag(p);
+
+      // Si es usuario multi-dispositivo / Comandante / modoAdmin, permitir que su Android reciba FCM
+      // aunque también tenga iniciada sesión en iOS (apnsToken / platform === "ios").
+      if (!isMulti && resolveEffectivePlatform(p) === "ios") continue;
+
+      if (isMulti) {
+        const candidates = [
+          p.deviceId,
+          p.fcmToken,
+          p.tokenFcm,
+          ...(Array.isArray(p.deviceIds) ? p.deviceIds : [])
+        ];
+        for (const cand of candidates) {
+          const cleanTok = String(cand || "").trim();
+          if (isValidFcmRegistrationToken(cleanTok)) {
+            tokenSet.add(cleanTok);
+            if (!tokenOwnerByTok.has(cleanTok)) tokenOwnerByTok.set(cleanTok, uid);
+          }
+        }
+      } else {
+        const fcmTok = String(p.deviceId || p.fcmToken || p.tokenFcm || "").trim();
+        if (isValidFcmRegistrationToken(fcmTok)) {
+          tokenSet.add(fcmTok);
+          if (!tokenOwnerByTok.has(fcmTok)) tokenOwnerByTok.set(fcmTok, uid);
+        }
       }
     }
 
@@ -564,9 +591,11 @@ async function sendDirectFcmToAndroidUsers({
       successCount += Number(batchRes.successCount || 0);
       failureCount += Number(batchRes.failureCount || 0);
       if (Array.isArray(batchRes.responses)) {
-        for (const resp of batchRes.responses) {
-          if (!resp.success && resp.error && sampleErrors.length < 3) {
+        for (let idx = 0; idx < batchRes.responses.length; idx++) {
+          const resp = batchRes.responses[idx];
+          if (!resp.success && resp.error && sampleErrors.length < 5) {
             sampleErrors.push({
+              uid: tokenOwnerByTok.get(chunk[idx]) || "",
               code: resp.error.code || "",
               message: resp.error.message || ""
             });

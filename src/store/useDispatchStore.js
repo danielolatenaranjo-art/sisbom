@@ -900,9 +900,49 @@ function readInitialAttendanceFromLocalStorage() {
 
 const initialCachedDispatches = readInitialActiveDispatchesFromLocalStorage();
 
+// Barrera de precarga inicial mientras se muestra el Loader de apertura:
+// espera a que estén sincronizados `personal`, `accesos/central` (operador), `vehiculos`, `alertas` y `despachos`
+// antes de desvanecer el Loader, evitando saltos tardíos de 2s al entrar a la app.
+const initialBootCollectionsLoaded = {
+  central: false,
+  dispatches: false,
+  vehicles: false,
+  personal: false,
+  alerts: false
+};
+const bootDataWaiters = new Set();
+
+function isAllInitialBootCollectionsReady() {
+  return Boolean(
+    initialBootCollectionsLoaded.central &&
+    initialBootCollectionsLoaded.dispatches &&
+    initialBootCollectionsLoaded.vehicles &&
+    initialBootCollectionsLoaded.personal &&
+    initialBootCollectionsLoaded.alerts
+  );
+}
+
+function markBootCollectionReady(colKey, storeSetFn = null) {
+  if (!colKey || !(colKey in initialBootCollectionsLoaded)) return;
+  initialBootCollectionsLoaded[colKey] = true;
+  if (isAllInitialBootCollectionsReady()) {
+    if (typeof storeSetFn === 'function') {
+      storeSetFn({ isInitialBootDataReady: true });
+    }
+    if (bootDataWaiters.size > 0) {
+      const resolvers = Array.from(bootDataWaiters);
+      bootDataWaiters.clear();
+      resolvers.forEach((fn) => {
+        try { fn(true); } catch (_) {}
+      });
+    }
+  }
+}
+
 export const useDispatchStore = create((set, get) => ({
   activeDispatch: initialCachedDispatches[0] || null,
   dispatchesList: initialCachedDispatches,
+  isInitialBootDataReady: false,
   fullscreenDispatchId: null,
   urgentBannerMessage: null,
   activeEvacuationAlert: null,
@@ -1612,6 +1652,7 @@ export const useDispatchStore = create((set, get) => ({
     }
 
     get().evaluateEvacuationForCurrentUser(activeList);
+    markBootCollectionReady('dispatches', set);
   },
 
   applyPersonalRawDocs: (rawDocsArray = []) => {
@@ -1730,7 +1771,8 @@ export const useDispatchStore = create((set, get) => ({
       useAuthStore.getState().stopLiveTelemetry();
     }
 
-    get().evaluateEvacuationForCurrentUser(activeList);
+    get().evaluateEvacuationForCurrentUser();
+    markBootCollectionReady('personal', set);
   },
 
   // Actualización optimista inmediata (0ms) en memoria al cambiar el estado de cualquier bombero (propio o desde Disponibles)
@@ -1818,6 +1860,7 @@ export const useDispatchStore = create((set, get) => ({
 
     vList.sort((a, b) => a.idCarro.localeCompare(b.idCarro));
     set({ vehiclesList: vList, vehiculosList: vList });
+    markBootCollectionReady('vehicles', set);
   },
 
   applyAlertsRawDocs: (rawDocsArray = []) => {
@@ -1860,17 +1903,47 @@ export const useDispatchStore = create((set, get) => ({
     });
 
     set(splitAlertsAndOrders(aList, get().activeChatAlert));
+    markBootCollectionReady('alerts', set);
   },
 
   applyCentralRawDoc: (rawData = {}) => {
     const incomingData = rawData && typeof rawData === 'object' ? rawData : {};
     if (lastCentralRawData && shouldKeepLocalByTimestamp('accesos', 'central', lastCentralRawData, incomingData)) {
       get().recomputeCentralState(lastCentralRawData);
+      markBootCollectionReady('central', set);
       return;
     }
     lastCentralRawData = incomingData;
     get().recomputeCentralState(incomingData);
     isFirstCentralSnapshot = false;
+    markBootCollectionReady('central', set);
+  },
+
+  waitForInitialBootData: (timeoutMs = 4500) => {
+    if (isAllInitialBootCollectionsReady()) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      let settled = false;
+      const done = (ok) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        bootDataWaiters.delete(done);
+        resolve(Boolean(ok));
+      };
+      const timer = setTimeout(() => done(false), Math.max(800, Number(timeoutMs) || 4500));
+      bootDataWaiters.add(done);
+    });
+  },
+
+  resetBootReadiness: () => {
+    initialBootCollectionsLoaded.central = false;
+    initialBootCollectionsLoaded.dispatches = false;
+    initialBootCollectionsLoaded.vehicles = false;
+    initialBootCollectionsLoaded.personal = false;
+    initialBootCollectionsLoaded.alerts = false;
+    set({ isInitialBootDataReady: false });
   },
 
   // Hidratación inicial por Firestore REST (solo 1 vez al abrir la app / iniciar sesión, con cooldown mínimo estricto)
@@ -1947,22 +2020,43 @@ export const useDispatchStore = create((set, get) => ({
         return null;
       };
 
-      const [centralRes, despDocs, vehRes, alertRes] = await Promise.all([
+      const shouldFetchPersonal = (get().firefightersList || []).length === 0 || !initialBootCollectionsLoaded.personal;
+      const maskFields = [
+        'idRegistro', 'idRadial', 'nombreBombero', 'nombre', 'cargo',
+        'compania', 'estado', 'enServicio', 'conductor', 'activo', 'ACTIVO', 'Activo',
+        'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'telefono', 'licenciaMedica',
+        'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
+      ].map((f) => `mask.fieldPaths=${f}`).join('&');
+
+      const [centralRes, despDocs, vehRes, alertRes, persRes] = await Promise.all([
         fetchFirestoreWithAuth(`${baseUrl}/accesos/central`, apiKey).catch(() => null),
         fetchDespachosRest(),
         fetchFirestoreWithAuth(`${baseUrl}/vehiculos?pageSize=100`, apiKey).catch(() => null),
-        fetchFirestoreWithAuth(`${baseUrl}/alertas?pageSize=100`, apiKey).catch(() => null)
+        fetchFirestoreWithAuth(`${baseUrl}/alertas?pageSize=100`, apiKey).catch(() => null),
+        shouldFetchPersonal
+          ? fetchFirestoreWithAuth(`${baseUrl}/personal?pageSize=300&${maskFields}`, apiKey).catch(() => null)
+          : Promise.resolve(null)
       ]);
 
-      if (centralRes && centralRes.ok) {
-        const cJson = await centralRes.json();
-        if (cJson && cJson.fields) {
-          get().applyCentralRawDoc(parseRestDocFields(cJson));
-        }
+      // 1. Aplicar primero `personal` y `accesos/central` para que el estado del bombero (0-9/0-8) y el Operador Central
+      //    ya estén resueltos antes de evaluar los despachos activos.
+      if (persRes && persRes.ok) {
+        const pJson = await persRes.json();
+        const pDocs = (pJson?.documents || []).map((docItem) => ({
+          id: docItem.name.split('/').pop(),
+          data: parseRestDocFields(docItem),
+          hasPendingWrites: false
+        }));
+        get().applyPersonalRawDocs(pDocs);
       }
 
-      if (Array.isArray(despDocs)) {
-        get().applyDispatchesRawDocs(despDocs);
+      if (centralRes) {
+        if (centralRes.ok) {
+          const cJson = await centralRes.json();
+          get().applyCentralRawDoc(cJson && cJson.fields ? parseRestDocFields(cJson) : {});
+        } else if (centralRes.status === 404) {
+          get().applyCentralRawDoc({});
+        }
       }
 
       if (vehRes && vehRes.ok) {
@@ -1972,9 +2066,7 @@ export const useDispatchStore = create((set, get) => ({
           data: parseRestDocFields(docItem),
           hasPendingWrites: false
         }));
-        if (docs.length > 0) {
-          get().applyVehiclesRawDocs(docs);
-        }
+        get().applyVehiclesRawDocs(docs);
       }
 
       if (alertRes && alertRes.ok) {
@@ -1987,26 +2079,8 @@ export const useDispatchStore = create((set, get) => ({
         get().applyAlertsRawDocs(docs);
       }
 
-      // Si aún no se ha cargado la lista inicial de personal, hidratar resumen ligero por REST una sola vez (luego unsubPersonal transmite deltas)
-      if ((get().firefightersList || []).length === 0) {
-        const maskFields = [
-          'idRegistro', 'idRadial', 'nombreBombero', 'nombre', 'cargo',
-          'compania', 'estado', 'enServicio', 'conductor', 'activo', 'ACTIVO', 'Activo',
-          'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'telefono', 'licenciaMedica',
-          'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
-        ].map((f) => `mask.fieldPaths=${f}`).join('&');
-        const persRes = await fetchFirestoreWithAuth(`${baseUrl}/personal?pageSize=300&${maskFields}`, apiKey).catch(() => null);
-        if (persRes && persRes.ok) {
-          const pJson = await persRes.json();
-          const pDocs = (pJson?.documents || []).map((docItem) => ({
-            id: docItem.name.split('/').pop(),
-            data: parseRestDocFields(docItem),
-            hasPendingWrites: false
-          }));
-          if (pDocs.length > 0) {
-            get().applyPersonalRawDocs(pDocs);
-          }
-        }
+      if (Array.isArray(despDocs)) {
+        get().applyDispatchesRawDocs(despDocs);
       }
     } catch (err) {
       console.warn('⚠️ [SENTINEL ONE] Advertencia en hydrateFromFirestoreRest:', err?.message || err);
@@ -2061,21 +2135,22 @@ export const useDispatchStore = create((set, get) => ({
         set({ isLoading: true });
       }
 
+      // Disparar en paralelo la hidratación HTTP/2 REST de las 5 colecciones mientras conecta el SDK en tiempo real
+      get().hydrateFromFirestoreRest(false);
+
       await reinitFirebaseWithConfig(fbConfig);
 
-      // Asegurar autenticación primero para que los tokens REST y onSnapshot tengan permisos válidos
+      // Asegurar autenticación para que los canales onSnapshot tengan permisos válidos
       await ensureFirebaseAuth(null, null, null, force).catch(() => {});
 
       const db = getDb();
       if (!db) {
         console.warn('⚠️ [useDispatchStore] Firestore db no disponible.');
         set({ isLoading: false });
-        get().hydrateFromFirestoreRest(false);
         return;
       }
 
       console.log(`📡 [SENTINEL ONE] Conectando 6 listeners onSnapshot en vivo a: ${fbConfig.projectId}`);
-      get().hydrateFromFirestoreRest(false);
 
       // =====================================================================
       // 1. LISTENER EN TIEMPO REAL: DESPACHOS ACTIVOS (`despachos`)

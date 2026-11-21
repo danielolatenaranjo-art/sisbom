@@ -498,24 +498,41 @@ export function resolveCoreUnitStatusInfo(
     }
 
     const cleanClave = rawServ === '1' ? 'ACTO' : rawServ.toUpperCase();
+    const unitMetaTs = Number(unitObj?._metaTimestamp || 0);
 
     // Si es una salida especial ("6-14", "10-9", "6-13") y tenemos bitácoras cargadas,
     // verificar que tenga al menos una bitácora abierta sin timestamp de cierre 6-8 (h68 / tiempos.h68).
-    // Si todas las bitácoras de ese carro están cerradas con 6-8, el carro está disponible (0-9).
+    // Si todas las bitácoras de ese carro están cerradas con 6-8 (y la asignación del vehículo no acaba de
+    // ocurrir hace <120s con _metaTimestamp posterior al último cierre mientras llega el snapshot de bitácora),
+    // el carro está disponible (0-9).
     if ((cleanClave === '6-14' || cleanClave === '10-9' || cleanClave === '6-13') && bitacoraMapOrList && typeof bitacoraMapOrList.forEach === 'function') {
       let hasAnyBitacoraForCarro = false;
       let hasOpenBitacoraForCarro = false;
+      let maxClosedBitacoraTs = 0;
       bitacoraMapOrList.forEach(b => {
         const bCarro = String(b?.carro || b?.idCarro || '').replace(/-/g, '').trim().toUpperCase();
         if (bCarro === normUnitId) {
           hasAnyBitacoraForCarro = true;
-          const isClosed = Boolean(b?.tiempos?.h68 || b?.h68 || b?.hora68);
+          const closedTs = Number(b?.tiempos?.h68 || b?.h68 || 0);
+          const rawH68Str = String(b?.hora68 || b?.time68 || '').trim();
+          const hasH68Str = Boolean(rawH68Str && rawH68Str !== '--:--' && rawH68Str !== '-');
+          const isClosed = closedTs > 0 || hasH68Str || String(b?.unitStatus || b?.status || '').trim() === '6-8';
           if (!isClosed) {
             hasOpenBitacoraForCarro = true;
+          } else {
+            const candidateTs = Math.max(closedTs, Number(b?._metaTimestamp || 0));
+            if (candidateTs > maxClosedBitacoraTs) {
+              maxClosedBitacoraTs = candidateTs;
+            }
           }
         }
       });
-      if (hasAnyBitacoraForCarro && !hasOpenBitacoraForCarro) {
+      const isFreshVehicleAssignmentInFlight =
+        unitMetaTs > 0 &&
+        unitMetaTs > maxClosedBitacoraTs &&
+        Math.abs(Date.now() - unitMetaTs) < 120_000;
+
+      if (hasAnyBitacoraForCarro && !hasOpenBitacoraForCarro && !isFreshVehicleAssignmentInFlight) {
         return {
           isAvailable: true,
           is08: false,
@@ -543,6 +560,53 @@ export function resolveCoreUnitStatusInfo(
       activeServiceId: rawServ,
       badgeLabel: `EN ${cleanClave}`
     };
+  }
+
+  // 4. Respaldo canónico para salidas especiales activas ("6-14", "10-9", "6-13") en `bitacora`:
+  // Si el carro aún tiene una salida especial del día abierta sin 6-8 (`!h68`, últimas 24h) pero `vehiculos.enServicio`
+  // llegó desfasado o quedó en "0", mantener la unidad como `EN {CLAVE}` hasta que se registre su 6-8 real.
+  if (bitacoraMapOrList && typeof bitacoraMapOrList.forEach === 'function') {
+    const MAX_OPEN_SPECIAL_AGE_MS = 24 * 60 * 60 * 1000;
+    const nowMs = Date.now();
+    let newestOpenSpecialClave = '';
+    let newestOpenSpecialTs = 0;
+
+    bitacoraMapOrList.forEach(b => {
+      if (!b || typeof b !== 'object') return;
+      const bCarro = String(b.carro || b.idCarro || '').replace(/-/g, '').trim().toUpperCase();
+      if (bCarro !== normUnitId) return;
+      const bSvcId = String(b.idServicio || '').trim();
+      const bClave = String(b.clave || b.tipo || '').trim().toUpperCase();
+      if (bSvcId || (bClave !== '6-14' && bClave !== '10-9' && bClave !== '6-13')) return;
+
+      const closedTs = Number(b.tiempos?.h68 || b.h68 || 0);
+      const rawH68Str = String(b.hora68 || b.time68 || '').trim();
+      const hasH68Str = Boolean(rawH68Str && rawH68Str !== '--:--' && rawH68Str !== '-');
+      if (closedTs > 0 || hasH68Str || String(b.unitStatus || b.status || '').trim() === '6-8') return;
+
+      const startTs = Number(b.tiempos?.h60 || b.h60 || b._metaTimestamp || 0);
+      if (!startTs || (nowMs - startTs) > MAX_OPEN_SPECIAL_AGE_MS) return;
+
+      if (startTs >= newestOpenSpecialTs) {
+        newestOpenSpecialTs = startTs;
+        newestOpenSpecialClave = bClave;
+      }
+    });
+
+    if (newestOpenSpecialClave) {
+      return {
+        isAvailable: false,
+        is08: false,
+        is08Unit: false,
+        isOut08: false,
+        isInService: true,
+        isBusy: true,
+        category: 'emergencia',
+        activeClave: newestOpenSpecialClave,
+        activeServiceId: newestOpenSpecialClave,
+        badgeLabel: `EN ${newestOpenSpecialClave}`
+      };
+    }
   }
 
   return {
@@ -3027,7 +3091,7 @@ export function normalizePatientCareDoc(docId, raw = {}, fallbackIdServicio = ''
 }
 
 /**
- * Construye un registro canónico de Monitoreo / Rehabilitación Táctica de Bombero (NFPA 1584)
+ * Construye un registro canónico de Monitoreo / Rehabilitación Táctica de Bombero
  * en `personal/{idRegistro}/controles_salud/{idControl}`.
  */
 export function buildCanonicalRehabCheckDoc(raw = {}) {
@@ -3369,7 +3433,7 @@ export const SENTINEL_UNIFIED_AUTH_MODES = {
     moduleId: 'MED',
     requiresCommanderAuth: true,
     postAuthMode: 'PUBLIC_RESCUE_OBAC_SIGN',
-    subtitle: 'SANIDAD Y RESCATE',
+    subtitle: 'DEPARTAMENTO MÉDICO',
     logoFile: '/SENTINEL MED.png'
   },
   SCI: {

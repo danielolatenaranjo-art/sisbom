@@ -58,6 +58,7 @@ import {
   resolveCoreUnitStatusInfo,
   isCanonicalCommander,
   hasAdminModeFlag,
+  hasMedSystemAccess,
   hasCommanderPrivileges,
   parseCanonicalChatMessages,
   buildCanonicalGeoPortalUrl
@@ -65,6 +66,13 @@ import {
 import { TacticalDispatchMap } from '../components/dispatch/TacticalDispatchMap';
 import { CommanderTacticalNavMap } from '../components/dispatch/CommanderTacticalNavMap';
 import { ProfileDrawer } from '../components/modals/ProfileDrawer';
+import { SentinelMedEmbeddedModal } from '../components/modals/SentinelMedEmbeddedModal';
+import { SentinelSpotlightTour } from '../components/onboarding/SentinelSpotlightTour';
+import {
+  GUIDED_TOUR_SEEN_KEY,
+  readOnboardingFlagAsync,
+  readOnboardingFlagSync
+} from '../components/onboarding/FirstLaunchIntroVideo';
 import { FirefighterModal } from '../components/modals/FirefighterModal';
 import { AttendanceDetailModal } from '../components/modals/AttendanceDetailModal';
 import { OrdenDetailModal } from '../components/modals/OrdenDetailModal';
@@ -382,7 +390,12 @@ const INTERROGATION_GUIDES = {
   ]
 };
 
-export const MainHomeView = ({ onLogout }) => {
+export const MainHomeView = ({
+  onLogout,
+  isBooting = false,
+  onTourActiveChange,
+  onTourFinished
+}) => {
   const { user, isDarkMode = true, isAirplaneMode = false, updateStatus, setEmergencyResponse } = useAuthStore();
   const {
     licenseKey,
@@ -456,6 +469,48 @@ export const MainHomeView = ({ onLogout }) => {
   const [createModalMode, setCreateModalMode] = useState(null); // null | 'orden' | 'alerta'
   const [gateState, setGateState] = useState('IDLE'); // 'IDLE' | 'TOCADO'
   const [profileDrawerVisible, setProfileDrawerVisible] = useState(false);
+  const [sentinelMedModalVisible, setSentinelMedModalVisible] = useState(false);
+  const [guidedTourVisible, setGuidedTourVisible] = useState(false);
+  const tourProfileRef = useRef(null);
+  const tourStatusRef = useRef(null);
+  const tourActivityRef = useRef(null);
+  const tourBottomBarRef = useRef(null);
+  const tourTargetRefs = useMemo(
+    () => ({
+      profile: tourProfileRef,
+      status: tourStatusRef,
+      activity: tourActivityRef,
+      bottomBar: tourBottomBarRef
+    }),
+    []
+  );
+
+  useEffect(() => {
+    if (onTourActiveChange) {
+      onTourActiveChange(Boolean(guidedTourVisible));
+    }
+  }, [guidedTourVisible, onTourActiveChange]);
+
+  useEffect(() => {
+    if (isBooting) return;
+    if (readOnboardingFlagSync(GUIDED_TOUR_SEEN_KEY)) return;
+    let cancelled = false;
+    let timerId = null;
+    readOnboardingFlagAsync(GUIDED_TOUR_SEEN_KEY).then((alreadySeen) => {
+      if (cancelled || alreadySeen) return;
+      timerId = setTimeout(() => {
+        if (!cancelled) {
+          setCurrentTab('actividad');
+          scrollBodyRef.current?.scrollTo?.({ y: 0, animated: false });
+          setGuidedTourVisible(true);
+        }
+      }, 520);
+    });
+    return () => {
+      cancelled = true;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [isBooting]);
   const [isCommanderFleetExpanded, setIsCommanderFleetExpanded] = useState(false);
   const [isCommanderGpsModalOpen, setIsCommanderGpsModalOpen] = useState(false);
   const [expandedCommanderCompanyIds, setExpandedCommanderCompanyIds] = useState({});
@@ -870,6 +925,10 @@ export const MainHomeView = ({ onLogout }) => {
         setProfileDrawerVisible(false);
         return;
       }
+      if (sentinelMedModalVisible) {
+        setSentinelMedModalVisible(false);
+        return;
+      }
       if (showCentralConsole) {
         setShowCentralConsole(false);
         return;
@@ -897,6 +956,7 @@ export const MainHomeView = ({ onLogout }) => {
     chatModalVisible,
     createModalMode,
     profileDrawerVisible,
+    sentinelMedModalVisible,
     showCentralConsole,
     currentTab
   ]);
@@ -925,7 +985,8 @@ export const MainHomeView = ({ onLogout }) => {
         selectedBomberoModal ||
         chatModalVisible ||
         createModalMode ||
-        profileDrawerVisible
+        profileDrawerVisible ||
+        sentinelMedModalVisible
     )
   };
 
@@ -7005,6 +7066,8 @@ export const MainHomeView = ({ onLogout }) => {
           <View style={styles.profileRow}>
             {/* Foto + Nombre + Cargo (Al tocar abre el Drawer lateral) */}
             <TouchableOpacity
+              ref={tourProfileRef}
+              collapsable={false}
               style={styles.profileRowLeft}
               onPress={() => {
                 triggerHaptic('medium');
@@ -7052,6 +7115,7 @@ export const MainHomeView = ({ onLogout }) => {
             </TouchableOpacity>
 
             {/* Botones 09 y 08 (54x44, borderRadius: 8) o Estado Especial (Doble toque en LICENCIA / CDS / PERMISO habilita cambio a 0-8 o 0-9) */}
+            <View ref={tourStatusRef} collapsable={false}>
             {isRestrictedStatus && !(isRemovableRestrictedStatus && unlockRestrictedToggle) ? (
               isRemovableRestrictedStatus ? (
                 <TouchableOpacity
@@ -7188,6 +7252,7 @@ export const MainHomeView = ({ onLogout }) => {
                 </TouchableOpacity>
               </View>
             )}
+            </View>
           </View>
 
           {/* Divisor horizontal + Título alineado a la izquierda (MainScreen.kt líneas 726-760) */}
@@ -7207,6 +7272,18 @@ export const MainHomeView = ({ onLogout }) => {
 
       {/* Cuerpo desplazable con transición horizontal limpia (translateX + opacity sin scale) */}
       <View style={styles.scrollBodyViewport}>
+        <View
+          ref={tourActivityRef}
+          collapsable={false}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            top: 48,
+            left: 0,
+            right: 0,
+            height: 176
+          }}
+        />
         <ScrollView
           ref={scrollBodyRef}
           style={styles.scrollBody}
@@ -7263,7 +7340,21 @@ export const MainHomeView = ({ onLogout }) => {
       <ProfileDrawer
         visible={profileDrawerVisible}
         onClose={() => setProfileDrawerVisible(false)}
+        onOpenSentinelMed={() => setSentinelMedModalVisible(true)}
+        onStartGuidedTour={() => {
+          setCurrentTab('actividad');
+          scrollBodyRef.current?.scrollTo?.({ y: 0, animated: false });
+          setTimeout(() => {
+            setGuidedTourVisible(true);
+          }, 120);
+        }}
         onLogout={onLogout}
+      />
+
+      {/* SISTEMA SENTINEL MED INTEGRADO DENTRO DE SENTINEL ONE (ANDROID + iOS) */}
+      <SentinelMedEmbeddedModal
+        visible={sentinelMedModalVisible}
+        onClose={() => setSentinelMedModalVisible(false)}
       />
 
       {/* MODAL GPS DE UNIDADES Y PERSONAL EN SERVICIO (SIEMPRE PANTALLA COMPLETA — INSTANCIA ÚNICA) */}
@@ -7322,6 +7413,8 @@ export const MainHomeView = ({ onLogout }) => {
       {/* ===================================================================== */}
       <View style={styles.v2BottomBarContainer}>
         <View
+          ref={tourBottomBarRef}
+          collapsable={false}
           style={[
             styles.v2BottomBar,
             {
@@ -8004,6 +8097,30 @@ export const MainHomeView = ({ onLogout }) => {
           </View>
         );
       })()}
+
+      {/* RECORRIDO GUIADO INTERACTIVO SPOTLIGHT (PRIMERA VEZ POST-LOGIN O DESDE MENÚ LATERAL) */}
+      <SentinelSpotlightTour
+        visible={Boolean(
+          guidedTourVisible &&
+            !isBooting &&
+            !fullscreenDispatchId &&
+            !activeEvacuationAlert
+        )}
+        targetRefs={tourTargetRefs}
+        userEstado={userEstado}
+        canOpenMed={Boolean(hasMedSystemAccess(user))}
+        isCommanderOrAdmin={Boolean(hasCommanderPrivileges(user))}
+        onEnsureHomeTop={() => {
+          if (currentTab !== 'actividad') {
+            setCurrentTab('actividad');
+          }
+          scrollBodyRef.current?.scrollTo?.({ y: 0, animated: false });
+        }}
+        onFinish={(info) => {
+          setGuidedTourVisible(false);
+          if (onTourFinished) onTourFinished(info);
+        }}
+      />
     </View>
   );
 };
@@ -8620,7 +8737,12 @@ const styles = StyleSheet.create({
     elevation: 20,
     paddingHorizontal: 10,
     paddingTop: 4,
-    paddingBottom: Platform.OS === 'ios' ? 18 : 12
+    paddingBottom:
+      Platform.OS === 'web'
+        ? 'max(12px, var(--sentinel-safe-bottom, env(safe-area-inset-bottom, 12px)))'
+        : Platform.OS === 'ios'
+          ? 18
+          : 12
   },
   v2BottomBar: {
     height: 68,

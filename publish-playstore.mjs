@@ -121,7 +121,7 @@ function resolveAabPath() {
 export async function uploadAabToPlayConsole({
   track = trackArg,
   releaseStatus = statusArg,
-  releaseNotes = 'SENTINEL ONE V3.1.0 - GPS de Unidades y Personal en Servicio a pantalla completa con coordenadas exactas de cuartel, sincronización instantánea de estados (incluyendo modoAdmin y doble toque para liberar permisos/licencias/CDS) y mejoras de estabilidad.'
+  releaseNotes = 'SENTINEL ONE V3.2.0 - Integración completa con SENTINEL MED, carga instantánea en segundo plano detrás del inicio, barras inmersivas integradas con el sistema y mejoras de estabilidad operativa.'
 } = {}) {
   console.log('====================================================');
   console.log(' SUBIDA DIRECTA A GOOGLE PLAY CONSOLE (SIN GITHUB)');
@@ -205,7 +205,7 @@ export async function uploadAabToPlayConsole({
     track,
     releases: [
       {
-        name: `3.1.0 (${versionCode})`,
+        name: `3.2.0 (${versionCode})`,
         versionCodes: [String(versionCode)],
         status,
         releaseNotes: [

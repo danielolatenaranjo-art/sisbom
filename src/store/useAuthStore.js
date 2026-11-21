@@ -379,6 +379,7 @@ export function syncNativeUserSession(u) {
       estado: String(u.estado || '0-9'),
       conductor: Boolean(u.conductor),
       modoAdmin: Boolean(u.modoAdmin),
+      multiDispositivo: Boolean(u.multiDispositivo || u.modoAdmin || String(u.idRadial || '').trim() === '1'),
       estadoEspecial: resolveSpecialStatusFromUser(u),
       enServicio: String(u.enServicio && u.enServicio !== '0' ? u.enServicio : ''),
       licenseKey: licKey
@@ -522,24 +523,31 @@ export const useAuthStore = create((set, get) => ({
     const docId = String(currentUser.idRegistro || currentUser.idRadial || '').trim();
     if (!docId) return false;
 
+    const isMulti = Boolean(
+      currentUser.multiDispositivo ||
+      currentUser.modoAdmin ||
+      String(currentUser.idRadial || '').trim() === '1'
+    );
     const patchFields = {};
     if (nativePlat === 'ios') {
-      patchFields.platform = 'ios';
       if (hasValidApns) {
         patchFields.apnsToken = cleanApns;
       }
-      if (hasValidFcm && !currentUser.multiDispositivo) {
-        patchFields.deviceId = cleanToken;
-      }
-    } else if (nativePlat === 'android') {
-      if (!currentUser.multiDispositivo) {
-        patchFields.platform = 'android';
-        patchFields.apnsToken = '';
+      if (!isMulti) {
+        patchFields.platform = 'ios';
         if (hasValidFcm) {
           patchFields.deviceId = cleanToken;
         }
       }
-    } else if (hasValidFcm && !currentUser.multiDispositivo) {
+    } else if (nativePlat === 'android') {
+      if (hasValidFcm) {
+        patchFields.deviceId = cleanToken;
+      }
+      if (!isMulti) {
+        patchFields.platform = 'android';
+        patchFields.apnsToken = '';
+      }
+    } else if (hasValidFcm && !isMulti) {
       patchFields.deviceId = cleanToken;
     }
 
@@ -642,12 +650,17 @@ export const useAuthStore = create((set, get) => ({
           syncNativeStorageKey(USER_SESSION_KEY, serialized);
           await AsyncStorage.setItem(USER_SESSION_KEY, serialized);
         } catch (e) {}
+        const isMultiRefresh = Boolean(
+          updatedUser.multiDispositivo ||
+          updatedUser.modoAdmin ||
+          String(updatedUser.idRadial || '').trim() === '1'
+        );
         if (
           typeof window !== 'undefined' &&
           window.__SENTINEL_PLATFORM__ === 'ios' &&
           window.__SENTINEL_APNS_TOKEN__ &&
           (String(updatedUser.apnsToken || '').trim().toLowerCase() !== String(window.__SENTINEL_APNS_TOKEN__).trim().toLowerCase() ||
-            String(updatedUser.platform || '').trim().toLowerCase() !== 'ios')
+            (!isMultiRefresh && String(updatedUser.platform || '').trim().toLowerCase() !== 'ios'))
         ) {
           setTimeout(() => get().syncFcmToken(window.__SENTINEL_FCM_TOKEN__, window.__SENTINEL_APNS_TOKEN__), 300);
         }

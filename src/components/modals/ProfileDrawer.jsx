@@ -23,18 +23,20 @@ import {
   BellOff, 
   CheckCircle, 
   AlertCircle,
+  HeartPulse,
+  Compass,
   Power
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { useAuthStore, formatProfilePhotoUrl } from '../../store/useAuthStore';
 import { useLicenseStore } from '../../store/useLicenseStore';
 import { useDispatchStore } from '../../store/useDispatchStore';
-import { hasCommanderPrivileges } from '../../shared/sentinelCore';
+import { hasCommanderPrivileges, hasMedSystemAccess } from '../../shared/sentinelCore';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const DRAWER_WIDTH = Math.min(320, SCREEN_WIDTH * 0.82);
 
-export const ProfileDrawer = ({ visible, onClose }) => {
+export const ProfileDrawer = ({ visible, onClose, onOpenSentinelMed, onStartGuidedTour }) => {
   const { 
     user, 
     isDarkMode, 
@@ -248,6 +250,7 @@ export const ProfileDrawer = ({ visible, onClose }) => {
     String(liveUser?.puerta ?? '').trim().toUpperCase() === 'SI';
 
   const canOpenDoor = isComandante || isMyCentralTurn || isCentralActive || hasPuertaPermission;
+  const canOpenMed = Boolean(hasMedSystemAccess(liveUser) || hasMedSystemAccess(user));
   const canCloseOp = Boolean(centralOperatorName) && (isComandante || isMyCentralTurn || displayCargo.toUpperCase().includes('OPERADOR'));
 
   const photoUri = formatProfilePhotoUrl(liveUser?.foto || user?.foto);
@@ -562,25 +565,120 @@ export const ProfileDrawer = ({ visible, onClose }) => {
               </View>
             )}
 
-            {/* SECCIÓN 5: ACCESOS (APERTURA DE PUERTA IOT) */}
-            {canOpenDoor ? (
+            {/* SECCIÓN 5: ACCESOS (APERTURA DE PUERTA IOT Y SENTINEL MED) */}
+            {canOpenDoor || canOpenMed ? (
               <>
                 <Text style={styles.sectionTitle}>ACCESOS</Text>
-                <TouchableOpacity 
-                  style={[styles.btnDoor, isDoorOpening && styles.btnDoorActive]} 
-                  onPress={handleOpenDoor}
-                  disabled={isDoorOpening}
-                  activeOpacity={0.8}
+                {canOpenDoor ? (
+                  <TouchableOpacity 
+                    style={[styles.btnDoor, isDoorOpening && styles.btnDoorActive]} 
+                    onPress={handleOpenDoor}
+                    disabled={isDoorOpening}
+                    activeOpacity={0.8}
+                  >
+                    <LockOpen size={16} color="#ffffff" style={{ marginRight: 8 }} />
+                    <Text style={styles.btnDoorText}>
+                      {isDoorOpening ? 'ABRIENDO PUERTA...' : 'APERTURA DE PUERTA'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {canOpenMed ? (
+                  <TouchableOpacity
+                    style={[styles.btnSentinelMed, canOpenDoor && { marginTop: 10 }]}
+                    onPress={() => {
+                      triggerHaptic('medium');
+                      if (isClosingRef.current) return;
+                      isClosingRef.current = true;
+                      slideAnim.stopAnimation();
+                      fadeAnim.stopAnimation();
+                      Animated.parallel([
+                        Animated.timing(slideAnim, {
+                          toValue: -DRAWER_WIDTH,
+                          duration: 220,
+                          easing: Easing.inOut(Easing.cubic),
+                          useNativeDriver: true
+                        }),
+                        Animated.timing(fadeAnim, {
+                          toValue: 0,
+                          duration: 220,
+                          easing: Easing.inOut(Easing.cubic),
+                          useNativeDriver: true
+                        })
+                      ]).start(() => {
+                        isClosingRef.current = false;
+                        setIsRendered(false);
+                        if (onClose) onClose();
+                        if (onOpenSentinelMed) onOpenSentinelMed();
+                      });
+                    }}
+                    activeOpacity={0.82}
+                  >
+                    <HeartPulse size={17} color="#ffffff" style={{ marginRight: 8 }} />
+                    <Text style={styles.btnSentinelMedText}>SENTINEL MED</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </>
+            ) : null}
+
+            {/* SECCIÓN 6: AYUDA Y RECORRIDO GUIADO */}
+            {onStartGuidedTour ? (
+              <>
+                <Text style={styles.sectionTitle}>GUÍA DE USO</Text>
+                <TouchableOpacity
+                  style={[
+                    styles.btnGuidedTour,
+                    {
+                      backgroundColor: isDarkMode ? 'rgba(30, 41, 59, 0.55)' : '#F8FAFC',
+                      borderColor: isDarkMode ? 'rgba(239, 68, 68, 0.35)' : '#CBD5E1'
+                    }
+                  ]}
+                  onPress={() => {
+                    triggerHaptic('medium');
+                    if (isClosingRef.current) return;
+                    isClosingRef.current = true;
+                    slideAnim.stopAnimation();
+                    fadeAnim.stopAnimation();
+                    Animated.parallel([
+                      Animated.timing(slideAnim, {
+                        toValue: -DRAWER_WIDTH,
+                        duration: 220,
+                        easing: Easing.inOut(Easing.cubic),
+                        useNativeDriver: true
+                      }),
+                      Animated.timing(fadeAnim, {
+                        toValue: 0,
+                        duration: 220,
+                        easing: Easing.inOut(Easing.cubic),
+                        useNativeDriver: true
+                      })
+                    ]).start(() => {
+                      isClosingRef.current = false;
+                      setIsRendered(false);
+                      if (onClose) onClose();
+                      onStartGuidedTour();
+                    });
+                  }}
+                  activeOpacity={0.82}
                 >
-                  <LockOpen size={16} color="#ffffff" style={{ marginRight: 8 }} />
-                  <Text style={styles.btnDoorText}>
-                    {isDoorOpening ? 'ABRIENDO PUERTA...' : 'APERTURA DE PUERTA'}
+                  <Compass
+                    size={16}
+                    color={isDarkMode ? '#F87171' : '#DC2626'}
+                    style={{ marginRight: 8 }}
+                  />
+                  <Text
+                    style={[
+                      styles.btnGuidedTourText,
+                      { color: isDarkMode ? '#FFFFFF' : '#0F172A' }
+                    ]}
+                  >
+                    RECORRIDO INTERACTIVO
                   </Text>
                 </TouchableOpacity>
               </>
             ) : null}
 
-            {/* FOOTER DE VERSIÓN CON LOGO SENTINEL ONE OFICIAL + V.3.1.0 */}
+            {/* FOOTER DE VERSIÓN CON LOGO SENTINEL ONE OFICIAL + V.3.2.0 */}
             <View style={styles.versionFooter}>
               <Image
                 source={
@@ -591,7 +689,7 @@ export const ProfileDrawer = ({ visible, onClose }) => {
                 style={styles.footerLogoImage}
                 resizeMode="contain"
               />
-              <Text style={styles.versionTitle}>V.3.1.0</Text>
+              <Text style={styles.versionTitle}>V.3.2.0</Text>
             </View>
           </ScrollView>
         </Animated.View>
@@ -879,6 +977,40 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#ffffff',
     letterSpacing: 0.5
+  },
+  btnSentinelMed: {
+    backgroundColor: '#DC2626',
+    borderRadius: 16,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(248, 113, 113, 0.45)',
+    shadowColor: '#DC2626',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 5
+  },
+  btnSentinelMedText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#ffffff',
+    letterSpacing: 0.6
+  },
+  btnGuidedTour: {
+    borderRadius: 16,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1
+  },
+  btnGuidedTourText: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.6
   },
   btnCloseCentral: {
     backgroundColor: '#b91c1c',

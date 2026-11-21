@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,27 +11,101 @@ import {
   Platform,
   ScrollView
 } from 'react-native';
-import { KeyRound, AlertCircle } from 'lucide-react-native';
+import { KeyRound, ShieldCheck, AlertCircle } from 'lucide-react-native';
 import { useLicenseStore } from '../store/useLicenseStore';
 import { useAuthStore } from '../store/useAuthStore';
 
-export const LicenseActivationView = ({ onActivationSuccess }) => {
+export const LicenseActivationView = ({
+  onActivationSuccess,
+  introMode = false,
+  introCardReveal = 1,
+  onTopLogoRect
+}) => {
   const { validateLicense, isChecking, errorReason } = useLicenseStore();
   const [inputKey, setInputKey] = useState('');
   const [localError, setLocalError] = useState('');
   const [isValidatedSuccess, setIsValidatedSuccess] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const licenseInputRef = useRef(null);
+  const topLogoRef = useRef(null);
+  const isIosRuntime =
+    typeof window !== 'undefined' &&
+    Boolean(window.webkit?.messageHandlers?.iOSApp || window.__SENTINEL_PLATFORM__ === 'ios');
+
+  const measureTopLogo = useCallback(() => {
+    if (!onTopLogoRect || !topLogoRef.current) return;
+    try {
+      const node = topLogoRef.current;
+      if (typeof node.getBoundingClientRect === 'function') {
+        const r = node.getBoundingClientRect();
+        if (r && r.width > 10 && r.height > 10) {
+          onTopLogoRect({ x: r.left, y: r.top, width: r.width, height: r.height });
+          return;
+        }
+      }
+      if (typeof node.measureInWindow === 'function') {
+        node.measureInWindow((x, y, width, height) => {
+          if (width > 10 && height > 10) {
+            onTopLogoRect({ x, y, width, height });
+          }
+        });
+      }
+    } catch (_) {}
+  }, [onTopLogoRect]);
+
+  useEffect(() => {
+    if (!introMode) return;
+    const t1 = setTimeout(measureTopLogo, 30);
+    const t2 = setTimeout(measureTopLogo, 180);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', measureTopLogo);
+    }
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', measureTopLogo);
+      }
+    };
+  }, [introMode, measureTopLogo]);
+
+  const clampedReveal = introMode ? Math.max(0, Math.min(1, introCardReveal)) : 1;
 
   const isFloated = isFocused || Boolean(inputKey && inputKey.length > 0);
 
   const handleActivate = async (keyToUse) => {
     const key = (keyToUse || inputKey).trim().toUpperCase();
     if (!key) {
-      setLocalError('Ingrese una Clave de Licencia.');
+      setLocalError(isIosRuntime ? 'Ingrese el Código de Institución.' : 'Ingrese una Clave de Licencia.');
       return;
     }
     setLocalError('');
+
+    // Códigos Maestros de Transformación de Sistema (EXCLUSIVO EN ANDROID — deshabilitado en iOS)
+    const isAndroidNativeRuntime =
+      typeof window !== 'undefined' &&
+      Boolean(window.AndroidApp && typeof window.AndroidApp.switchEcosystemAppMode === 'function') &&
+      !window.webkit?.messageHandlers?.iOSApp &&
+      window.__SENTINEL_PLATFORM__ !== 'ios';
+
+    if (isAndroidNativeRuntime) {
+      const modeMap = {
+        SENTINELNAV: 'NAV',
+        SENTINELMED: 'MED',
+        SENTINELCREW: 'CREW'
+      };
+      const targetEcosystemMode = modeMap[key];
+      if (targetEcosystemMode) {
+        setIsValidatedSuccess(true);
+        try {
+          window.AndroidApp.switchEcosystemAppMode(targetEcosystemMode);
+        } catch (err) {
+          setIsValidatedSuccess(false);
+          setLocalError('No se pudo activar el modo solicitado.');
+        }
+        return;
+      }
+    }
 
     const success = await validateLicense(key);
     if (success) {
@@ -52,14 +126,39 @@ export const LicenseActivationView = ({ onActivationSuccess }) => {
     >
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
         {/* Tarjeta Unificada #login-box (Sin título ni subtítulo en Paso 1) */}
-        <View style={styles.loginBoxCard}>
+        <View
+          style={[
+            styles.loginBoxCard,
+            introMode && {
+              backgroundColor: `rgba(15, 23, 42, ${(0.85 * clampedReveal).toFixed(3)})`,
+              borderColor: `rgba(30, 41, 59, ${(0.8 * clampedReveal).toFixed(3)})`,
+              shadowOpacity: 0.65 * clampedReveal
+            }
+          ]}
+        >
           {/* Logo superior transparente LOGO.png (Sin círculo) */}
-          <Image
-            source={require('../../assets/LOGO_SENTINEL.png')}
-            style={styles.topLogo}
-            resizeMode="contain"
-          />
+          <View
+            ref={topLogoRef}
+            collapsable={false}
+            onLayout={measureTopLogo}
+            style={[styles.topLogo, introMode && { opacity: 0 }]}
+          >
+            <Image
+              source={require('../../assets/LOGO_SENTINEL.png')}
+              style={styles.topLogoImg}
+              resizeMode="contain"
+            />
+          </View>
 
+          <View
+            style={{
+              width: '100%',
+              alignItems: 'center',
+              opacity: clampedReveal,
+              transform: [{ translateY: (1 - clampedReveal) * 14 }]
+            }}
+            pointerEvents={introMode && clampedReveal < 0.95 ? 'none' : 'auto'}
+          >
           {/* Campo Clave de Licencia: Todo el rectángulo es táctil */}
           <TouchableOpacity
             activeOpacity={1}
@@ -84,7 +183,11 @@ export const LicenseActivationView = ({ onActivationSuccess }) => {
             />
 
             <View pointerEvents="none" style={styles.floatingInputIconBox}>
-              <KeyRound size={18} color={isFocused ? '#ef4444' : '#64748b'} />
+              {isIosRuntime ? (
+                <ShieldCheck size={18} color={isFocused ? '#ef4444' : '#64748b'} />
+              ) : (
+                <KeyRound size={18} color={isFocused ? '#ef4444' : '#64748b'} />
+              )}
             </View>
 
             <Text
@@ -94,7 +197,7 @@ export const LicenseActivationView = ({ onActivationSuccess }) => {
                 isFloated ? styles.floatingLabelFloated : styles.floatingLabelResting
               ]}
             >
-              Clave de Licencia
+              {isIosRuntime ? 'Código de Institución' : 'Clave de Licencia'}
             </Text>
           </TouchableOpacity>
 
@@ -124,14 +227,15 @@ export const LicenseActivationView = ({ onActivationSuccess }) => {
             )}
           </TouchableOpacity>
 
-          {/* Pie de Versión con Logo Oficial SENTINEL ONE + V.3.1.0 */}
+          {/* Pie de Versión con Logo Oficial SENTINEL ONE + V.3.2.0 */}
           <View style={styles.footerVersionRow}>
             <Image
               source={require('../../assets/SENTINEL_ONE.png')}
               style={styles.moduleFooterLogo}
               resizeMode="contain"
             />
-            <Text style={styles.versionTagText}>V.3.1.0</Text>
+            <Text style={styles.versionTagText}>V.3.2.0</Text>
+          </View>
           </View>
         </View>
       </ScrollView>
@@ -167,6 +271,10 @@ const styles = StyleSheet.create({
     width: 156,
     height: 117,
     marginBottom: 19.5
+  },
+  topLogoImg: {
+    width: '100%',
+    height: '100%'
   },
   floatingInputWrapper: {
     width: '100%',

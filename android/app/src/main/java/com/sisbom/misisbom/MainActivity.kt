@@ -2,16 +2,23 @@ package com.sisbom.misisbom
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.ActivityManager
+import android.app.ActivityOptions
 import android.app.AlarmManager
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.PictureInPictureParams
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Rect
+import android.print.PrintAttributes
+import android.print.PrintManager
 import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -62,6 +69,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.webkit.WebViewAssetLoader
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -83,6 +91,8 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -1328,6 +1338,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
         MainActivity.initializeDynamicFirebase(applicationContext)
         val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         if (prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)) return
@@ -1618,6 +1629,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     override fun onNewToken(token: String) {
+        if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
         MainActivity.initializeDynamicFirebase(applicationContext)
         val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         prefs.edit().putString("FCM_TOKEN", token).apply()
@@ -1638,6 +1650,7 @@ class DispatchForegroundService : Service() {
 
         fun evaluateLocationTrackingNow(context: Context) {
             val appCtx = context.applicationContext
+            if (MainActivity.getEcosystemAppMode(appCtx) != "ONE") return
             Handler(Looper.getMainLooper()).post {
                 try {
                     val prefs = appCtx.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
@@ -1692,6 +1705,10 @@ class DispatchForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") {
+            stopSelf()
+            return
+        }
         instance = this
         try {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -2281,9 +2298,9 @@ class DispatchForegroundService : Service() {
                     val evacActive = (evacMap?.get("evacuacion") as? Boolean) == true
                     val evacTs = ((evacMap?.get("triggeredAt") ?: evacMap?.get("updatedAt")) as? Number)?.toLong() ?: 1L
                     val isInThisIncident = !hasAlreadyDeclined &&
-                        userEnServicio != "-$id" &&
-                        userEnServicio != "0" &&
-                        (isAlreadyAttending || userEnServicio == id)
+                        enServicio != "-$id" &&
+                        enServicio != "0" &&
+                        (isAlreadyAttending || enServicio == id)
                     if (evacActive && isInThisIncident) {
                         val evacTrackKey = "evac_${id}_$evacTs"
                         if (!PlayedSoundsTracker.hasPlayed(applicationContext, evacTrackKey)) {
@@ -2569,6 +2586,10 @@ class DispatchForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startForegroundServiceNotification()
         if (despachosListener == null) {
             authenticateAndListen()
@@ -2581,6 +2602,7 @@ class DispatchForegroundService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         try {
+            if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
             val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
             val userId = prefs.getString("USER_ID", null)
             if (!userId.isNullOrBlank()) {
@@ -2776,26 +2798,48 @@ class DailyReminderReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        MainActivity.initializeDynamicFirebase(context.applicationContext)
+        val appCtx = context.applicationContext
+        val ecoMode = MainActivity.getEcosystemAppMode(appCtx)
+        val isBootOrUpdate = intent.action == Intent.ACTION_BOOT_COMPLETED ||
+            intent.action == "android.intent.action.QUICKBOOT_POWERON" ||
+            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
+
+        if (isBootOrUpdate) {
+            MainActivity.applyLauncherAliasForMode(appCtx, ecoMode)
+            if (ecoMode == "NAV") {
+                val navPrefs = appCtx.getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
+                val navFbCfg = navPrefs.getString("saas_firebase_config", "") ?: ""
+                val navUnit = (navPrefs.getString("selected_unit_id", "") ?: "").trim()
+                if (navFbCfg.isNotEmpty()) {
+                    MainActivity.initializeDynamicFirebase(appCtx, navFbCfg)
+                }
+                if (navUnit.isNotEmpty()) {
+                    NavGpsTrackingService.startService(appCtx)
+                }
+                return
+            }
+            if (ecoMode != "ONE") return
+        }
+
+        if (ecoMode != "ONE") return
+
+        MainActivity.initializeDynamicFirebase(appCtx)
         // Re-programar siempre los 3 horarios para el día siguiente
-        scheduleAllReminders(context.applicationContext)
+        scheduleAllReminders(appCtx)
 
         val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         val userId = prefs.getString("USER_ID", null)
 
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == "android.intent.action.QUICKBOOT_POWERON" ||
-            intent.action == Intent.ACTION_MY_PACKAGE_REPLACED
-        ) {
+        if (isBootOrUpdate) {
             if (!userId.isNullOrBlank()) {
                 try {
-                    val svcIntent = Intent(context.applicationContext, DispatchForegroundService::class.java)
+                    val svcIntent = Intent(appCtx, DispatchForegroundService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        context.applicationContext.startForegroundService(svcIntent)
+                        appCtx.startForegroundService(svcIntent)
                     } else {
-                        context.applicationContext.startService(svcIntent)
+                        appCtx.startService(svcIntent)
                     }
-                    MainActivity.registerFcmTokenInFirestore(context.applicationContext, userId)
+                    MainActivity.registerFcmTokenInFirestore(appCtx, userId)
                 } catch (_: Exception) {}
             }
             return
@@ -2983,6 +3027,11 @@ class SisBomApplication : android.app.Application() {
 class MainActivity : ComponentActivity() {
 
     private var webView: WebView? = null
+    private var rootContainerRef: android.widget.FrameLayout? = null
+    @Volatile
+    private var lastSafeTopCss: Int = 38
+    @Volatile
+    private var lastSafeBottomCss: Int = 16
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile
     private var pendingIntentJson: String? = null
@@ -2991,6 +3040,9 @@ class MainActivity : ComponentActivity() {
         @Volatile
         var isAppInForeground: Boolean = false
         @Volatile
+        private var mainInstanceRef: java.lang.ref.WeakReference<MainActivity>? = null
+        private var navDispatchWakeLock: PowerManager.WakeLock? = null
+        @Volatile
         private var dynamicFirebaseApp: FirebaseApp? = null
         @Volatile
         private var currentTenantProjectId: String? = null
@@ -2998,6 +3050,175 @@ class MainActivity : ComponentActivity() {
         private var activeWebView: WebView? = null
         @Volatile
         private var lastNativeDispatchesMsgJson: String? = null
+
+        fun normalizeEcosystemMode(raw: String?): String {
+            return when ((raw ?: "ONE").trim().uppercase(Locale.ROOT)) {
+                "NAV", "SENTINELNAV" -> "NAV"
+                "MED", "SENTINELMED" -> "MED"
+                "CREW", "SENTINELCREW" -> "CREW"
+                else -> "ONE"
+            }
+        }
+
+        fun getEcosystemAppMode(context: Context): String {
+            return try {
+                val prefs = context.applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                normalizeEcosystemMode(prefs.getString("APP_ECOSYSTEM_MODE", "ONE"))
+            } catch (_: Exception) {
+                "ONE"
+            }
+        }
+
+        fun getEcosystemEntryUrl(mode: String): String {
+            return when (normalizeEcosystemMode(mode)) {
+                "NAV" -> "https://appassets.androidplatform.net/nav/index.html"
+                "MED" -> "https://appassets.androidplatform.net/med/index.html"
+                "CREW" -> "https://appassets.androidplatform.net/crew/index.html"
+                else -> "https://appassets.androidplatform.net/index.html"
+            }
+        }
+
+        fun getEcosystemDisplayLabel(mode: String): String {
+            return when (normalizeEcosystemMode(mode)) {
+                "NAV" -> "SENTINEL NAV"
+                "MED" -> "SENTINEL MED"
+                "CREW" -> "SENTINEL CREW"
+                else -> "SENTINEL ONE"
+            }
+        }
+
+        fun applyLauncherAliasForMode(context: Context, rawMode: String) {
+            try {
+                val appCtx = context.applicationContext
+                val pm = appCtx.packageManager
+                val pkg = appCtx.packageName
+                val mode = normalizeEcosystemMode(rawMode)
+                val aliasByMode = mapOf(
+                    "ONE" to "$pkg.LauncherOne",
+                    "NAV" to "$pkg.LauncherNav",
+                    "MED" to "$pkg.LauncherMed",
+                    "CREW" to "$pkg.LauncherCrew"
+                )
+                val targetClass = aliasByMode[mode] ?: "$pkg.LauncherOne"
+
+                // 1. Habilitar primero el alias destino antes de deshabilitar los demás
+                val targetComp = ComponentName(pkg, targetClass)
+                val currentTargetState = pm.getComponentEnabledSetting(targetComp)
+                val isDefaultOneAlreadyEnabled = (mode == "ONE" && currentTargetState == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
+                if (currentTargetState != PackageManager.COMPONENT_ENABLED_STATE_ENABLED && !isDefaultOneAlreadyEnabled) {
+                    pm.setComponentEnabledSetting(
+                        targetComp,
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        PackageManager.DONT_KILL_APP
+                    )
+                }
+
+                // 2. Deshabilitar los otros 3 aliases solo si no están ya deshabilitados
+                for ((otherMode, className) in aliasByMode) {
+                    if (otherMode == mode) continue
+                    val comp = ComponentName(pkg, className)
+                    val st = pm.getComponentEnabledSetting(comp)
+                    val isDefaultAlreadyDisabled = (otherMode != "ONE" && st == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT)
+                    if (st != PackageManager.COMPONENT_ENABLED_STATE_DISABLED && !isDefaultAlreadyDisabled) {
+                        pm.setComponentEnabledSetting(
+                            comp,
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("SENTINEL_MODE", "No se pudo cambiar alias del launcher: ${e.message}")
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        fun acquireNavHardwareScreenWakeLock(context: Context, durationMs: Long = 60_000L) {
+            try {
+                val pm = context.applicationContext.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
+                val wl = navDispatchWakeLock ?: pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                        PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                        PowerManager.ON_AFTER_RELEASE,
+                    "SisBomCar:DispatchScreenWakeLock"
+                ).apply {
+                    setReferenceCounted(false)
+                }.also {
+                    navDispatchWakeLock = it
+                }
+                wl.acquire(durationMs)
+            } catch (_: Exception) {}
+        }
+
+        fun notifyNavWebViewNetworkReconnected() {
+            try {
+                mainInstanceRef?.get()?.let { activity ->
+                    activity.runOnUiThread {
+                        try {
+                            activity.webView?.onResume()
+                            activity.webView?.resumeTimers()
+                            activity.webView?.evaluateJavascript(
+                                "window.dispatchEvent(new CustomEvent('sentinel-network-reconnected'));",
+                                null
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        fun pushNativeNavFirestoreSyncToWebView(jsonPayload: String) {
+            try {
+                val safeQuoted = JSONObject.quote(jsonPayload)
+                mainInstanceRef?.get()?.let { activity ->
+                    activity.runOnUiThread {
+                        try {
+                            activity.webView?.evaluateJavascript(
+                                "if(window.__onSentinelNativeDispatchSync){window.__onSentinelNativeDispatchSync($safeQuoted);}",
+                                null
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+
+        fun wakeUpNavScreenAndStayAwake(context: Context? = null) {
+            val ctx = context ?: mainInstanceRef?.get()
+            if (ctx != null) {
+                acquireNavHardwareScreenWakeLock(ctx, 60_000L)
+            }
+            try {
+                mainInstanceRef?.get()?.let { activity ->
+                    activity.runOnUiThread {
+                        activity.wakeUpNavScreenInternal()
+                        activity.updateNavScreenAwakeState(true)
+                        try {
+                            val lp = activity.window.attributes
+                            lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                            activity.window.attributes = lp
+                            activity.webView?.onResume()
+                            activity.webView?.resumeTimers()
+                            activity.webView?.evaluateJavascript(
+                                "window.dispatchEvent(new CustomEvent('sentinel-native-wakeup'));",
+                                null
+                            )
+                        } catch (_: Exception) {}
+                    }
+                }
+            } catch (_: Exception) {}
+
+            try {
+                ctx?.let { c ->
+                    val intent = Intent(c, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                    }
+                    c.startActivity(intent)
+                }
+            } catch (_: Exception) {}
+        }
 
         private fun anyToJsonValue(value: Any?): Any {
             return when (value) {
@@ -3265,6 +3486,11 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        @Volatile
+        private var lastAndroidTokenPatchMs: Long = 0L
+        @Volatile
+        private var lastAndroidTokenPatchSig: String = ""
+
         fun registerFcmTokenInFirestore(context: Context, userId: String, tokenOverride: String? = null) {
             if (userId.isBlank()) return
             val appContext = context.applicationContext
@@ -3274,6 +3500,9 @@ class MainActivity : ComponentActivity() {
             val prefs = appContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
             val isConductor = prefs.getBoolean("USER_CONDUCTOR", false)
             val isCentral = prefs.getBoolean("IS_CENTRAL_ACTIVE", false)
+            val isMultiDev = prefs.getBoolean("USER_MULTI_DISPOSITIVO", false) ||
+                prefs.getBoolean("USER_MODO_ADMIN", false) ||
+                (prefs.getString("USER_ID_RADIAL", "")?.trim() == "1")
             val activePid = currentTenantProjectId ?: try { FirebaseApp.getInstance().options.projectId ?: "" } catch (_: Exception) { "" }
 
             val applyToken: (String) -> Unit = { token ->
@@ -3302,25 +3531,41 @@ class MainActivity : ComponentActivity() {
                 if (!isConductor) fm.unsubscribeFromTopic("conductores")
                 if (!isCentral) fm.unsubscribeFromTopic("central_operador")
 
-                val writeTokenDoc: () -> Unit = {
-                    val db = getActiveFirestore(appContext)
-                    db.collection("personal").document(userId).set(
-                        mapOf(
+                val comboSig = "$activePid:$userId:$token:$isMultiDev"
+                val nowMs = System.currentTimeMillis()
+                val alreadySynced = prefs.getString("LAST_SYNCED_FCM_COMBO", "") == comboSig
+                val throttled = (lastAndroidTokenPatchSig == comboSig) && ((nowMs - lastAndroidTokenPatchMs) < 20_000L)
+
+                if (tokenOverride != null || (!alreadySynced && !throttled)) {
+                    lastAndroidTokenPatchSig = comboSig
+                    lastAndroidTokenPatchMs = nowMs
+
+                    val writeTokenDoc: () -> Unit = {
+                        val db = getActiveFirestore(appContext)
+                        val patchMap = mutableMapOf<String, Any>(
                             "deviceId" to token,
-                            "apnsToken" to "",
                             "platform" to "android",
                             "_metaTimestamp" to System.currentTimeMillis()
-                        ),
-                        SetOptions.merge()
-                    )
-                }
+                        )
+                        // En cuentas multiDispositivo / modoAdmin / Comandante NO borrar apnsToken para que iPhone + Android coexistan sin pisarse
+                        if (!isMultiDev) {
+                            patchMap["apnsToken"] = ""
+                        }
+                        db.collection("personal").document(userId).set(
+                            patchMap,
+                            SetOptions.merge()
+                        ).addOnSuccessListener {
+                            prefs.edit().putString("LAST_SYNCED_FCM_COMBO", comboSig).apply()
+                        }
+                    }
 
-                val auth = getActiveAuth(appContext)
-                if (auth.currentUser != null && auth.currentUser?.isAnonymous == false) {
-                    writeTokenDoc()
-                } else {
-                    auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
-                        .addOnCompleteListener { writeTokenDoc() }
+                    val auth = getActiveAuth(appContext)
+                    if (auth.currentUser != null && auth.currentUser?.isAnonymous == false) {
+                        writeTokenDoc()
+                    } else {
+                        auth.signInWithEmailAndPassword("v304.app@sisbom.com", "SentinelOne_V304_Auth!2026")
+                            .addOnCompleteListener { writeTokenDoc() }
+                    }
                 }
             }
 
@@ -3367,11 +3612,16 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { _ ->
         notifyWebViewPermissionsChanged()
+        pushNavGpsRequirementStatusToWebView()
+        if (getEcosystemAppMode(this) == "NAV" && hasStrictNavGpsRequirements()) {
+            NavGpsTrackingService.startService(this)
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        mainInstanceRef = java.lang.ref.WeakReference(this)
 
         // Permitir despertar la pantalla sobre bloqueo en caso de despacho
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
@@ -3386,12 +3636,17 @@ class MainActivity : ComponentActivity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
+        val initialEcoMode = getEcosystemAppMode(this)
+        applyLauncherAliasForMode(this, initialEcoMode)
+        updateTaskRecentsLabel(initialEcoMode)
+
         val barBgColor = android.graphics.Color.parseColor("#060911")
         WindowCompat.setDecorFitsSystemWindows(window, false)
         enableEdgeToEdge(
-            statusBarStyle = SystemBarStyle.dark(barBgColor),
-            navigationBarStyle = SystemBarStyle.dark(barBgColor)
+            statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
         )
+        applyModeWindowChrome(initialEcoMode)
 
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
@@ -3402,56 +3657,108 @@ class MainActivity : ComponentActivity() {
             acquire(15 * 60 * 1000L)
         }
 
-        initializeDynamicFirebase(this)
-        NotificationHelper.ensureChannels(this)
-        captureIncomingIntent(intent)
-
-        // Si ya hay sesión activa, asegurar que el servicio en segundo plano esté corriendo
-        val prefs = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-        val savedUserId = prefs.getString("USER_ID", null)
-        val locationDisclosed = prefs.getBoolean("LOCATION_DISCLOSED_V3", false)
-        if (!savedUserId.isNullOrBlank()) {
-            if (locationDisclosed) {
-                requestNotificationPermissionOnly()
+        if (initialEcoMode == "NAV") {
+            val navFb = getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
+                .getString("saas_firebase_config", null)
+            if (!navFb.isNullOrBlank()) {
+                initializeDynamicFirebase(this, navFb)
+            } else {
+                initializeDynamicFirebase(this)
             }
-            startDispatchForegroundServiceSafely()
-            scheduleDailyReminder()
-            registerFcmTokenInFirestore(this, savedUserId)
+        } else {
+            initializeDynamicFirebase(this)
+        }
+        NotificationHelper.ensureChannels(this)
+
+        if (initialEcoMode == "ONE") {
+            captureIncomingIntent(intent)
+            val prefs = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+            val savedUserId = prefs.getString("USER_ID", null)
+            val locationDisclosed = prefs.getBoolean("LOCATION_DISCLOSED_V3", false)
+            if (!savedUserId.isNullOrBlank()) {
+                if (locationDisclosed) {
+                    requestNotificationPermissionOnly()
+                }
+                startDispatchForegroundServiceSafely()
+                scheduleDailyReminder()
+                registerFcmTokenInFirestore(this, savedUserId)
+            }
+        } else {
+            stopDispatchForegroundServiceSafely()
+            if (initialEcoMode == "NAV") {
+                NavGpsTrackingService.onNativeGpsFixListener = { fix ->
+                    pushNativeNavGpsFixToWebView(fix)
+                }
+                checkAndRequestNavPermissions()
+            } else {
+                NavGpsTrackingService.stopService(this)
+            }
+        }
+
+        val resolveLocalAssetResponse: (String) -> WebResourceResponse? = resolveAsset@{ rawPath ->
+            val decoded = try {
+                java.net.URLDecoder.decode(rawPath.trimStart('/'), "UTF-8")
+            } catch (_: Exception) {
+                rawPath.trimStart('/')
+            }
+            val cleanPath = decoded.ifEmpty { "index.html" }
+            val activeMode = getEcosystemAppMode(this@MainActivity)
+            val candidatePaths = mutableListOf<String>()
+
+            if (activeMode != "ONE") {
+                val modePrefix = activeMode.lowercase(Locale.ROOT)
+                if (!cleanPath.startsWith("$modePrefix/")) {
+                    val swappedSub = if (cleanPath.startsWith("_expo/")) {
+                        "expo_bundle/" + cleanPath.removePrefix("_expo/")
+                    } else {
+                        cleanPath
+                    }
+                    candidatePaths.add("www/$modePrefix/$swappedSub")
+                }
+            }
+
+            if (cleanPath.startsWith("_expo/")) {
+                candidatePaths.add("www/expo_bundle/" + cleanPath.removePrefix("_expo/"))
+            }
+            candidatePaths.add("www/$cleanPath")
+            candidatePaths.add(cleanPath.removePrefix("assets/"))
+            candidatePaths.add(cleanPath)
+
+            for (assetPath in candidatePaths) {
+                try {
+                    val stream = assets.open(assetPath)
+                    val mimeType = when {
+                        assetPath.endsWith(".html", true) -> "text/html"
+                        assetPath.endsWith(".js", true) || assetPath.endsWith(".mjs", true) -> "application/javascript"
+                        assetPath.endsWith(".css", true) -> "text/css"
+                        assetPath.endsWith(".json", true) -> "application/json"
+                        assetPath.endsWith(".png", true) -> "image/png"
+                        assetPath.endsWith(".jpg", true) || assetPath.endsWith(".jpeg", true) -> "image/jpeg"
+                        assetPath.endsWith(".gif", true) -> "image/gif"
+                        assetPath.endsWith(".svg", true) -> "image/svg+xml"
+                        assetPath.endsWith(".ico", true) -> "image/x-icon"
+                        assetPath.endsWith(".mp3", true) -> "audio/mpeg"
+                        assetPath.endsWith(".wav", true) -> "audio/wav"
+                        assetPath.endsWith(".mp4", true) -> "video/mp4"
+                        assetPath.endsWith(".webm", true) -> "video/webm"
+                        assetPath.endsWith(".ttf", true) -> "font/ttf"
+                        assetPath.endsWith(".woff", true) -> "font/woff"
+                        assetPath.endsWith(".woff2", true) -> "font/woff2"
+                        else -> "application/octet-stream"
+                    }
+                    val headers = mapOf(
+                        "Access-Control-Allow-Origin" to "*",
+                        "Cache-Control" to "no-cache"
+                    )
+                    return@resolveAsset WebResourceResponse(mimeType, "UTF-8", 200, "OK", headers, stream)
+                } catch (_: Exception) {}
+            }
+            null
         }
 
         val assetLoader = WebViewAssetLoader.Builder()
             .setDomain("appassets.androidplatform.net")
-            .addPathHandler("/") { path ->
-                val cleanPath = path.trimStart('/').ifEmpty { "index.html" }
-                val candidatePaths = listOf(
-                    "www/$cleanPath",
-                    cleanPath.removePrefix("assets/"),
-                    cleanPath
-                )
-                for (assetPath in candidatePaths) {
-                    try {
-                        val stream = assets.open(assetPath)
-                        val mimeType = when {
-                            assetPath.endsWith(".html", true) -> "text/html"
-                            assetPath.endsWith(".js", true) -> "application/javascript"
-                            assetPath.endsWith(".css", true) -> "text/css"
-                            assetPath.endsWith(".json", true) -> "application/json"
-                            assetPath.endsWith(".png", true) -> "image/png"
-                            assetPath.endsWith(".jpg", true) || assetPath.endsWith(".jpeg", true) -> "image/jpeg"
-                            assetPath.endsWith(".gif", true) -> "image/gif"
-                            assetPath.endsWith(".svg", true) -> "image/svg+xml"
-                            assetPath.endsWith(".ico", true) -> "image/x-icon"
-                            assetPath.endsWith(".mp3", true) -> "audio/mpeg"
-                            assetPath.endsWith(".ttf", true) -> "font/ttf"
-                            assetPath.endsWith(".woff", true) -> "font/woff"
-                            assetPath.endsWith(".woff2", true) -> "font/woff2"
-                            else -> "application/octet-stream"
-                        }
-                        return@addPathHandler WebResourceResponse(mimeType, "UTF-8", stream)
-                    } catch (_: Exception) {}
-                }
-                null
-            }
+            .addPathHandler("/") { path -> resolveLocalAssetResponse(path) }
             .build()
 
         val wv = WebView(this).apply {
@@ -3460,6 +3767,7 @@ class MainActivity : ComponentActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(android.graphics.Color.parseColor("#060911"))
+            keepScreenOn = true
 
             // Regla 8 AGENTS.md: Prohibición absoluta del roller de selección de texto y pantalla fija
             isLongClickable = false
@@ -3486,6 +3794,7 @@ class MainActivity : ComponentActivity() {
             }
 
             addJavascriptInterface(WebAppInterface(this@MainActivity), "AndroidApp")
+            addJavascriptInterface(SentinelAndroidBridge(this@MainActivity), "SentinelAndroidBridge")
 
             webViewClient = object : WebViewClient() {
                 override fun shouldInterceptRequest(
@@ -3493,6 +3802,14 @@ class MainActivity : ComponentActivity() {
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
                     val url = request?.url ?: return null
+                    val host = (url.host ?: "").lowercase(Locale.ROOT)
+                    if (host == "appassets.local") {
+                        return resolveLocalAssetResponse(url.path ?: "/index.html")
+                    }
+                    if (host.contains("google.com") && (url.path?.contains("/vt") == true)) {
+                        val cachedTile = interceptAndCacheGoogleMapTile(url)
+                        if (cachedTile != null) return cachedTile
+                    }
                     return assetLoader.shouldInterceptRequest(url)
                 }
 
@@ -3558,6 +3875,7 @@ class MainActivity : ComponentActivity() {
                         "try { window.__SENTINEL_HW_DEVICE_ID__ = '$hwId'; if ('$fcmTok') window.__SENTINEL_FCM_TOKEN__ = '$fcmTok'; } catch(e) {}",
                         null
                     )
+                    injectSafeAreaCssInsetsToWebView()
                     val cachedDispatchesJson = lastNativeDispatchesMsgJson
                     if (!cachedDispatchesJson.isNullOrBlank()) {
                         view?.evaluateJavascript(
@@ -3582,7 +3900,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            loadUrl("https://appassets.androidplatform.net/index.html")
+            loadUrl(getEcosystemEntryUrl(initialEcoMode))
         }
 
         webView = wv
@@ -3595,12 +3913,33 @@ class MainActivity : ComponentActivity() {
             setBackgroundColor(barBgColor)
             addView(wv)
         }
+        rootContainerRef = rootContainer
         setContentView(rootContainer)
         ViewCompat.setOnApplyWindowInsetsListener(rootContainer) { view, windowInsets ->
-            val insets = windowInsets.getInsets(
-                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
+            val modeNow = getEcosystemAppMode(this@MainActivity)
+            val sysBars = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
             )
-            view.setPadding(insets.left, 0, insets.right, insets.bottom)
+            val imeInsets = windowInsets.getInsets(WindowInsetsCompat.Type.ime())
+            val density = resources.displayMetrics.density.coerceAtLeast(1f)
+            lastSafeTopCss = kotlin.math.ceil((sysBars.top / density).toDouble()).toInt()
+            lastSafeBottomCss = kotlin.math.ceil((sysBars.bottom / density).toDouble()).toInt()
+            injectSafeAreaCssInsetsToWebView()
+
+            val keyboardBottomOnly = if (imeInsets.bottom > sysBars.bottom) imeInsets.bottom else 0
+            when (modeNow) {
+                "CREW" -> {
+                    val bottomPad = maxOf(sysBars.bottom, imeInsets.bottom)
+                    view.setPadding(sysBars.left, sysBars.top, sysBars.right, bottomPad)
+                }
+                "NAV" -> {
+                    view.setPadding(0, 0, 0, imeInsets.bottom)
+                }
+                else -> {
+                    // ONE y MED: 100% inmersivo edge-to-edge (las barras superior e inferior del sistema se mezclan transparentes con la interfaz)
+                    view.setPadding(sysBars.left, 0, sysBars.right, keyboardBottomOnly)
+                }
+            }
             wv.requestLayout()
             WindowInsetsCompat.CONSUMED
         }
@@ -3608,13 +3947,25 @@ class MainActivity : ComponentActivity() {
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 val view = webView
+                val modeNow = getEcosystemAppMode(this@MainActivity)
                 if (view != null) {
                     val currentUrl = view.url ?: ""
-                    if (currentUrl.isNotBlank() && !currentUrl.startsWith("https://appassets.androidplatform.net")) {
+                    if (currentUrl.isNotBlank() &&
+                        !currentUrl.startsWith("https://appassets.androidplatform.net") &&
+                        !currentUrl.startsWith("https://appassets.local")
+                    ) {
                         if (view.canGoBack()) {
                             view.goBack()
                         } else {
-                            view.loadUrl("https://appassets.androidplatform.net/index.html")
+                            view.loadUrl(getEcosystemEntryUrl(modeNow))
+                        }
+                        return
+                    }
+                    if (modeNow == "CREW") {
+                        if (view.canGoBack()) {
+                            view.goBack()
+                        } else {
+                            moveTaskToBack(true)
                         }
                         return
                     }
@@ -3813,7 +4164,15 @@ class MainActivity : ComponentActivity() {
         } else if (!SoundPlayer.isAlarmProtectedFromAutoStop()) {
             SoundPlayer.stopAudioOnly(this)
         }
+        val modeNow = getEcosystemAppMode(this)
+        applyModeWindowChrome(modeNow)
         notifyWebViewPermissionsChanged()
+        if (modeNow == "NAV") {
+            pushNavGpsRequirementStatusToWebView()
+            if (hasStrictNavGpsRequirements()) {
+                NavGpsTrackingService.startService(this)
+            }
+        }
         if (bgSec >= 15L) {
             webView?.post {
                 webView?.evaluateJavascript(
@@ -3830,6 +4189,12 @@ class MainActivity : ComponentActivity() {
             lastPauseTimestampMs = System.currentTimeMillis()
         }
         super.onPause()
+        if (getEcosystemAppMode(this) == "NAV") {
+            try {
+                webView?.onResume()
+                webView?.resumeTimers()
+            } catch (_: Exception) {}
+        }
     }
 
     override fun onPictureInPictureModeChanged(
@@ -3867,6 +4232,7 @@ class MainActivity : ComponentActivity() {
                 null
             )
         }
+        pushNavGpsRequirementStatusToWebView()
     }
 
     private fun requestNotificationPermissionOnly() {
@@ -4032,7 +4398,423 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
+    private fun updateTaskRecentsLabel(mode: String) {
+        try {
+            val label = getEcosystemDisplayLabel(mode)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                setTaskDescription(ActivityManager.TaskDescription.Builder().setLabel(label).build())
+            } else {
+                @Suppress("DEPRECATION")
+                setTaskDescription(ActivityManager.TaskDescription(label))
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun injectSafeAreaCssInsetsToWebView() {
+        val wv = webView ?: return
+        val topPx = lastSafeTopCss
+        val botPx = lastSafeBottomCss
+        wv.post {
+            try {
+                val js = """
+                    (function() {
+                        try {
+                            window.__SENTINEL_SAFE_INSETS__ = { top: $topPx, bottom: $botPx };
+                            document.documentElement.style.setProperty('--sentinel-safe-top', '${topPx}px');
+                            document.documentElement.style.setProperty('--sentinel-safe-bottom', '${botPx}px');
+                            var frames = document.querySelectorAll('iframe');
+                            for (var i = 0; i < frames.length; i++) {
+                                try {
+                                    var fd = frames[i].contentDocument;
+                                    if (fd && fd.documentElement) {
+                                        fd.documentElement.style.setProperty('--sentinel-safe-top', '${topPx}px');
+                                        fd.documentElement.style.setProperty('--sentinel-safe-bottom', '${botPx}px');
+                                    }
+                                    if (frames[i].contentWindow) {
+                                        frames[i].contentWindow.postMessage({ type: 'SENTINEL_SAFE_INSETS', top: $topPx, bottom: $botPx }, '*');
+                                    }
+                                } catch (e2) {}
+                            }
+                        } catch (e) {}
+                    })();
+                """.trimIndent()
+                wv.evaluateJavascript(js, null)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun applyModeWindowChrome(mode: String) {
+        try {
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
+                window.isNavigationBarContrastEnforced = false
+            }
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            if (normalizeEcosystemMode(mode) == "NAV") {
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                controller.isAppearanceLightStatusBars = false
+                controller.isAppearanceLightNavigationBars = false
+            }
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } catch (_: Exception) {}
+    }
+
+    private fun switchEcosystemModeOnDevice(rawMode: String) {
+        val targetMode = normalizeEcosystemMode(rawMode)
+        val prefs = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+        val oldUserId = prefs.getString("USER_ID", null)
+        prefs.edit()
+            .putString("APP_ECOSYSTEM_MODE", targetMode)
+            .remove("USER_ID")
+            .remove("LAST_TENANT_USER_ID")
+            .remove("USER_NOMBRE")
+            .remove("USER_RANGO")
+            .remove("USER_ESTADO")
+            .remove("USER_EN_SERVICIO")
+            .commit()
+
+        if (targetMode != "ONE") {
+            try {
+                val fm = FirebaseMessaging.getInstance()
+                listOf("all", "despachos", "alertas", "alertas_generales", "conductores", "central_operador").forEach {
+                    fm.unsubscribeFromTopic(it)
+                }
+                if (!oldUserId.isNullOrBlank()) {
+                    fm.unsubscribeFromTopic("usuario_$oldUserId")
+                    fm.unsubscribeFromTopic("personal_$oldUserId")
+                }
+            } catch (_: Exception) {}
+
+            try {
+                val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+                for (code in listOf(101, 102, 103, 2300)) {
+                    val pi = PendingIntent.getBroadcast(
+                        this,
+                        code,
+                        Intent(this, DailyReminderReceiver::class.java),
+                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_NO_CREATE
+                    )
+                    if (pi != null) alarmManager.cancel(pi)
+                }
+            } catch (_: Exception) {}
+
+            DispatchForegroundService.instance?.stopLocationTracking()
+            SoundPlayer.stop(this)
+            stopDispatchForegroundServiceSafely()
+            try {
+                val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                nm.cancelAll()
+            } catch (_: Exception) {}
+        }
+
+        if (targetMode != "NAV") {
+            NavGpsTrackingService.stopService(this)
+        }
+
+        applyLauncherAliasForMode(this, targetMode)
+
+        runOnUiThread {
+            updateTaskRecentsLabel(targetMode)
+            applyModeWindowChrome(targetMode)
+            rootContainerRef?.let { ViewCompat.requestApplyInsets(it) }
+
+            if (targetMode == "NAV") {
+                NavGpsTrackingService.onNativeGpsFixListener = { fix ->
+                    pushNativeNavGpsFixToWebView(fix)
+                }
+                checkAndRequestNavPermissions()
+            }
+
+            webView?.let { wv ->
+                wv.stopLoading()
+                wv.clearHistory()
+                wv.loadUrl(getEcosystemEntryUrl(targetMode))
+            }
+        }
+    }
+
+    private fun pushNativeNavGpsFixToWebView(fix: NavGpsFixData) {
+        val wv = webView ?: return
+        wv.post {
+            try {
+                val js = String.format(
+                    Locale.US,
+                    "if(window.__onSentinelNativeGps){window.__onSentinelNativeGps(%.7f,%.7f,%.2f,%.2f,%.1f,%d);}",
+                    fix.lat,
+                    fix.lng,
+                    fix.speedKmH,
+                    fix.heading,
+                    fix.accuracy,
+                    fix.timestamp
+                )
+                wv.evaluateJavascript(js, null)
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun isHardwareGpsProviderEnabled(): Boolean {
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager ?: return false
+            lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun hasStrictNavGpsRequirements(): Boolean {
+        val hasFine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasBg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        return hasFine && hasBg && isHardwareGpsProviderEnabled()
+    }
+
+    private fun buildNavGpsRequirementsStatusJson(): String {
+        val hasFine = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasCoarse = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+        val hasBg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+        val gpsEnabled = isHardwareGpsProviderEnabled()
+        val allMet = hasFine && hasBg && gpsEnabled
+        return "{\"hasFine\":$hasFine,\"hasCoarse\":$hasCoarse,\"hasBackground\":$hasBg,\"gpsEnabled\":$gpsEnabled,\"allMet\":$allMet}"
+    }
+
+    private fun pushNavGpsRequirementStatusToWebView() {
+        if (getEcosystemAppMode(this) != "NAV") return
+        val wv = webView ?: return
+        val json = buildNavGpsRequirementsStatusJson()
+        wv.post {
+            try {
+                wv.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('sentinel-gps-permission-status', { detail: $json }));",
+                    null
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun checkAndRequestNavPermissions() {
+        val fineGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val coarseGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!fineGranted || !coarseGranted) {
+            requestLocationAlwaysFlow()
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_BACKGROUND_LOCATION) != PackageManager.PERMISSION_GRANTED
+            ) {
+                requestBackgroundLocationStep()
+            }
+            NavGpsTrackingService.startService(this)
+        }
+        pushNavGpsRequirementStatusToWebView()
+    }
+
+    private fun openDeviceLocationSettings() {
+        try {
+            val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            startActivity(intent)
+        } catch (_: Exception) {}
+    }
+
+    private fun buildCompactSecondaryBoundsBundle(): Bundle? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return null
+        return try {
+            val dm = resources.displayMetrics
+            val w = dm.widthPixels
+            val h = dm.heightPixels
+            val isLandscape = w >= h
+            val rect = if (isLandscape) {
+                val compactW = (w * 0.25f).toInt().coerceAtLeast((180 * dm.density).toInt())
+                Rect(w - compactW, 0, w, h)
+            } else {
+                val compactH = (h * 0.25f).toInt().coerceAtLeast((180 * dm.density).toInt())
+                Rect(0, h - compactH, w, h)
+            }
+            val opts = ActivityOptions.makeBasic()
+            opts.launchBounds = rect
+            opts.toBundle()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun isPackageInstalled(pm: PackageManager, pkg: String): Boolean {
+        return try {
+            pm.getPackageInfo(pkg, 0)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun launchWhatsAppSplitScreen(targetUrl: String? = null) {
+        try {
+            val pm = packageManager
+            val waPkg = when {
+                isPackageInstalled(pm, "com.whatsapp") -> "com.whatsapp"
+                isPackageInstalled(pm, "com.whatsapp.w4b") -> "com.whatsapp.w4b"
+                else -> null
+            }
+            val splitFlags = Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT or
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+            val optionsBundle = buildCompactSecondaryBoundsBundle()
+
+            if (!targetUrl.isNullOrBlank() && (targetUrl.contains("wa.me") || targetUrl.contains("whatsapp"))) {
+                val chatIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                    if (waPkg != null) setPackage(waPkg)
+                    addFlags(splitFlags)
+                }
+                startActivity(chatIntent, optionsBundle)
+                return
+            }
+
+            val waIntent = waPkg?.let { pm.getLaunchIntentForPackage(it) }
+            if (waIntent != null) {
+                waIntent.addFlags(splitFlags)
+                startActivity(waIntent, optionsBundle)
+            } else {
+                val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://web.whatsapp.com")).apply {
+                    addFlags(splitFlags)
+                }
+                startActivity(webIntent, optionsBundle)
+            }
+        } catch (_: Exception) {}
+    }
+
+    fun updateNavScreenAwakeState(keepAwake: Boolean) {
+        runOnUiThread {
+            try {
+                webView?.keepScreenOn = keepAwake
+                if (keepAwake) {
+                    window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                } else {
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    fun wakeUpNavScreenInternal() {
+        try {
+            acquireNavHardwareScreenWakeLock(this, 60_000L)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+                setShowWhenLocked(true)
+                setTurnScreenOn(true)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+                km?.requestDismissKeyguard(this, null)
+            }
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            )
+        } catch (_: Exception) {}
+    }
+
+    private fun interceptAndCacheGoogleMapTile(uri: Uri): WebResourceResponse? {
+        val lyrsRaw = uri.getQueryParameter("lyrs") ?: "m"
+        val lyrs = lyrsRaw.replace(Regex("[^a-zA-Z0-9_-]"), "").ifEmpty { "m" }
+        val apistyleRaw = uri.getQueryParameter("apistyle") ?: ""
+        val styleTag = if (apistyleRaw.isNotEmpty()) "_clean" else ""
+        val tileLayerDir = "$lyrs$styleTag"
+        val z = uri.getQueryParameter("z")?.replace(Regex("[^0-9]"), "") ?: return null
+        val x = uri.getQueryParameter("x")?.replace(Regex("[^0-9]"), "") ?: return null
+        val y = uri.getQueryParameter("y")?.replace(Regex("[^0-9]"), "") ?: return null
+
+        val tileFile = File(filesDir, "sentinel_map_tiles/$tileLayerDir/$z/$x/$y.tile")
+        val headers = mapOf(
+            "Access-Control-Allow-Origin" to "*",
+            "Cache-Control" to "public, max-age=31536000, immutable"
+        )
+
+        if (tileFile.exists() && tileFile.length() > 64L) {
+            return try {
+                val mime = if (lyrs.startsWith("y") || lyrs.startsWith("s")) "image/jpeg" else "image/png"
+                WebResourceResponse(mime, null, 200, "OK", headers, FileInputStream(tileFile))
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        var conn: HttpURLConnection? = null
+        return try {
+            val url = URL(uri.toString())
+            conn = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 5000
+                readTimeout = 6000
+                requestMethod = "GET"
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36")
+            }
+            if (conn.responseCode == 200) {
+                val bytes = conn.inputStream.use { it.readBytes() }
+                if (bytes.size > 64) {
+                    try {
+                        tileFile.parentFile?.mkdirs()
+                        val tmpFile = File(tileFile.parentFile, "${tileFile.name}.tmp")
+                        FileOutputStream(tmpFile).use { it.write(bytes) }
+                        tmpFile.renameTo(tileFile)
+                    } catch (_: Exception) {}
+                    val mime = conn.contentType?.substringBefore(";")
+                        ?: if (lyrs.startsWith("y") || lyrs.startsWith("s")) "image/jpeg" else "image/png"
+                    return WebResourceResponse(mime, null, 200, "OK", headers, java.io.ByteArrayInputStream(bytes))
+                }
+            }
+            null
+        } catch (_: Exception) {
+            if (tileFile.exists() && tileFile.length() > 64L) {
+                try {
+                    val mime = if (lyrs.startsWith("y") || lyrs.startsWith("s")) "image/jpeg" else "image/png"
+                    WebResourceResponse(mime, null, 200, "OK", headers, FileInputStream(tileFile))
+                } catch (_: Exception) {
+                    null
+                }
+            } else {
+                null
+            }
+        } finally {
+            try { conn?.disconnect() } catch (_: Exception) {}
+        }
+    }
+
     inner class WebAppInterface(private val context: Context) {
+
+        private fun getPermanentLogoFile(): File {
+            val dir = File(context.filesDir, "sentinel_logos")
+            if (!dir.exists()) dir.mkdirs()
+            return File(dir, "permanent_client_logo.b64")
+        }
 
         private fun getLogoCacheFile(url: String): File {
             val digest = MessageDigest.getInstance("SHA-256").digest(url.trim().toByteArray(Charsets.UTF_8))
@@ -4043,20 +4825,56 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
+        fun savePermanentLogoDataUri(dataUri: String?) {
+            if (dataUri.isNullOrBlank()) return
+            val clean = dataUri.trim()
+            if (!clean.startsWith("data:")) return
+            try {
+                getPermanentLogoFile().writeText(clean, Charsets.UTF_8)
+            } catch (_: Exception) {}
+        }
+
+        @JavascriptInterface
         fun getCachedLogoDataUri(url: String?): String {
-            if (url.isNullOrBlank()) return ""
-            val clean = url.trim()
-            if (clean.startsWith("data:")) return clean
+            if (!url.isNullOrBlank()) {
+                val clean = url.trim()
+                if (clean.startsWith("data:")) {
+                    savePermanentLogoDataUri(clean)
+                    return clean
+                }
+                try {
+                    val file = getLogoCacheFile(clean)
+                    if (file.exists() && file.length() > 0) {
+                        val txt = file.readText(Charsets.UTF_8).trim()
+                        if (txt.startsWith("data:")) {
+                            savePermanentLogoDataUri(txt)
+                            return txt
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
             return try {
-                val file = getLogoCacheFile(clean)
-                if (file.exists() && file.length() > 0) {
-                    file.readText(Charsets.UTF_8)
+                val permFile = getPermanentLogoFile()
+                if (permFile.exists() && permFile.length() > 0) {
+                    val saved = permFile.readText(Charsets.UTF_8).trim()
+                    if (saved.startsWith("data:")) saved else ""
                 } else {
                     ""
                 }
             } catch (_: Exception) {
                 ""
             }
+        }
+
+        @JavascriptInterface
+        fun switchEcosystemAppMode(mode: String?) {
+            if (mode.isNullOrBlank()) return
+            switchEcosystemModeOnDevice(mode)
+        }
+
+        @JavascriptInterface
+        fun getEcosystemAppMode(): String {
+            return getEcosystemAppMode(context)
         }
 
         @JavascriptInterface
@@ -4116,6 +4934,7 @@ class MainActivity : ComponentActivity() {
                 val estado = obj.optString("estado", if (obj.optBoolean("disponible", false)) "0-9" else "0-8").trim()
                 val conductor = obj.optBoolean("conductor", obj.optBoolean("esConductor", false))
                 val modoAdmin = obj.optBoolean("modoAdmin", obj.optBoolean("ModoAdmin", false))
+                val multiDispositivo = obj.optBoolean("multiDispositivo", false) || modoAdmin || (idRadial == "1")
                 val estadoEspecial = obj.optString("estadoEspecial", "").trim()
                 val enServicio = obj.optString("enServicio", "").trim()
                 val licenseKey = obj.optString("licenseKey", "").trim().uppercase(Locale.ROOT)
@@ -4148,6 +4967,7 @@ class MainActivity : ComponentActivity() {
                     .putString("IS_UNAVAILABLE", isUnavailable.toString())
                     .putBoolean("USER_CONDUCTOR", conductor)
                     .putBoolean("USER_MODO_ADMIN", modoAdmin)
+                    .putBoolean("USER_MULTI_DISPOSITIVO", multiDispositivo)
                     .putString("USER_ESTADO_ESPECIAL", estadoEspecial)
                     .putString("USER_EN_SERVICIO", enServicio)
                     .putStringSet("ATTENDED_DISPATCH_IDS", attendedSet)
@@ -4616,6 +5436,388 @@ class MainActivity : ComponentActivity() {
                 try {
                     Toast.makeText(context, message.trim(), Toast.LENGTH_SHORT).show()
                 } catch (_: Exception) {}
+            }
+        }
+    }
+
+    inner class SentinelAndroidBridge(private val context: Context) {
+        @JavascriptInterface
+        fun printDocument(jobName: String?) {
+            runOnUiThread {
+                val wv = webView ?: return@runOnUiThread
+                try {
+                    val printManager = getSystemService(Context.PRINT_SERVICE) as? PrintManager ?: return@runOnUiThread
+                    val title = if (jobName.isNullOrBlank()) "SENTINEL_MED_Documento" else jobName
+                    val adapter = wv.createPrintDocumentAdapter(title)
+                    printManager.print(title, adapter, PrintAttributes.Builder().build())
+                } catch (_: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun syncNativeUnitConfig(unitId: String, licenseKey: String, firebaseConfigJson: String) {
+            try {
+                val prefs = context.getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("selected_unit_id", unitId)
+                    .putString("saas_license_key", licenseKey)
+                    .putString("saas_firebase_config", firebaseConfigJson)
+                    .apply()
+                if (firebaseConfigJson.isNotEmpty()) {
+                    initializeDynamicFirebase(context, firebaseConfigJson)
+                }
+                if (unitId.isNotEmpty() && getEcosystemAppMode(context) == "NAV") {
+                    NavGpsTrackingService.startService(context)
+                }
+            } catch (_: Exception) {}
+        }
+
+        @JavascriptInterface
+        fun syncNativeAuthCredentials(commanderId: String, commanderPass: String) {
+            try {
+                val prefs = context.getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("auth_comandante_id", commanderId)
+                    .putString("auth_comandante_pass", commanderPass)
+                    .apply()
+                if (getEcosystemAppMode(context) == "NAV") {
+                    NavGpsTrackingService.startService(context)
+                }
+            } catch (_: Exception) {}
+        }
+
+        @JavascriptInterface
+        fun getNativeAuthAndUnitJson(): String {
+            return try {
+                val currentUrl = run {
+                    var u = ""
+                    val latch = java.util.concurrent.CountDownLatch(1)
+                    runOnUiThread {
+                        u = webView?.url ?: ""
+                        latch.countDown()
+                    }
+                    latch.await(500, java.util.concurrent.TimeUnit.MILLISECONDS)
+                    u
+                }
+                if (!currentUrl.startsWith("https://appassets.androidplatform.net") &&
+                    !currentUrl.startsWith("https://appassets.local")
+                ) {
+                    return "{}"
+                }
+                val prefs = context.getSharedPreferences("SisBomCarPrefs", Context.MODE_PRIVATE)
+                val obj = JSONObject()
+                obj.put("commanderId", prefs.getString("auth_comandante_id", "") ?: "")
+                obj.put("commanderPass", prefs.getString("auth_comandante_pass", "") ?: "")
+                obj.put("selectedUnitId", prefs.getString("selected_unit_id", "") ?: "")
+                obj.put("licenseKey", prefs.getString("saas_license_key", "") ?: "")
+                obj.put("firebaseConfigJson", prefs.getString("saas_firebase_config", "") ?: "")
+                obj.toString()
+            } catch (_: Exception) {
+                "{}"
+            }
+        }
+
+        @JavascriptInterface
+        fun openWhatsAppSplitScreen() {
+            runOnUiThread {
+                launchWhatsAppSplitScreen(null)
+            }
+        }
+
+        @JavascriptInterface
+        fun openWhatsAppPhoneSplitScreen(phoneUrl: String?) {
+            runOnUiThread {
+                launchWhatsAppSplitScreen(phoneUrl)
+            }
+        }
+
+        @JavascriptInterface
+        fun setKeepScreenAwake(keepAwake: Boolean) {
+            updateNavScreenAwakeState(keepAwake)
+        }
+
+        @JavascriptInterface
+        fun setScreenSleepMode(sleep: Boolean) {
+            runOnUiThread {
+                try {
+                    val lp = window.attributes
+                    if (sleep) {
+                        webView?.keepScreenOn = false
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        lp.screenBrightness = 0.0f
+                        window.attributes = lp
+                    } else {
+                        acquireNavHardwareScreenWakeLock(this@MainActivity, 60_000L)
+                        wakeUpNavScreenInternal()
+                        webView?.keepScreenOn = true
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                        window.attributes = lp
+                        webView?.onResume()
+                        webView?.resumeTimers()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun wakeUpScreenNow() {
+            runOnUiThread {
+                try {
+                    acquireNavHardwareScreenWakeLock(this@MainActivity, 60_000L)
+                    wakeUpNavScreenInternal()
+                    updateNavScreenAwakeState(true)
+                    val lp = window.attributes
+                    lp.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    window.attributes = lp
+                    webView?.onResume()
+                    webView?.resumeTimers()
+                } catch (_: Exception) {}
+            }
+        }
+
+        @JavascriptInterface
+        fun playEvacuationAlarm() {
+            wakeUpNavScreenAndStayAwake(this@MainActivity)
+            SoundPlayer.playEvacuationMaxVolume(this@MainActivity)
+        }
+
+        @JavascriptInterface
+        fun stopEvacuationAlarm() {
+            SoundPlayer.stop(this@MainActivity)
+        }
+
+        @JavascriptInterface
+        fun getGpsRequirementsStatusJson(): String {
+            return buildNavGpsRequirementsStatusJson()
+        }
+
+        @JavascriptInterface
+        fun requestStrictGpsPermissions() {
+            runOnUiThread {
+                val hasFine = ContextCompat.checkSelfPermission(
+                    this@MainActivity,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasBg = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContextCompat.checkSelfPermission(
+                        this@MainActivity,
+                        Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                    ) == PackageManager.PERMISSION_GRANTED
+                } else {
+                    true
+                }
+                val isGpsEnabled = isHardwareGpsProviderEnabled()
+
+                if (!isGpsEnabled) {
+                    openDeviceLocationSettings()
+                    return@runOnUiThread
+                }
+                if (!hasFine) {
+                    checkAndRequestNavPermissions()
+                    openAppDetailsSettingsWithHint(null)
+                    return@runOnUiThread
+                }
+                if (!hasBg && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                    } catch (_: Exception) {
+                        openAppDetailsSettingsWithHint(null)
+                    }
+                    return@runOnUiThread
+                }
+                pushNavGpsRequirementStatusToWebView()
+            }
+        }
+
+        @JavascriptInterface
+        fun openAppLocationPermissionSettings() {
+            runOnUiThread {
+                openAppDetailsSettingsWithHint(null)
+            }
+        }
+
+        @JavascriptInterface
+        fun openSystemGpsSettings() {
+            runOnUiThread {
+                openDeviceLocationSettings()
+            }
+        }
+
+        @JavascriptInterface
+        fun resolveNativeStreetName(lat: Double, lng: Double) {
+            Thread {
+                try {
+                    val geocoder = android.location.Geocoder(this@MainActivity, Locale("es", "CL"))
+                    @Suppress("DEPRECATION")
+                    val list = geocoder.getFromLocation(lat, lng, 4)
+                    var bestStreet = ""
+                    if (!list.isNullOrEmpty()) {
+                        for (addr in list) {
+                            val th = addr.thoroughfare?.trim() ?: ""
+                            if (th.isNotEmpty() && !th.equals("Unnamed Road", ignoreCase = true) && !th.equals("Camino Sin Nombre", ignoreCase = true)) {
+                                bestStreet = th
+                                break
+                            }
+                            val feat = addr.featureName?.trim() ?: ""
+                            if (feat.isNotEmpty() && feat.any { it.isLetter() } && !feat.contains("+") && !feat.equals(addr.locality ?: "", ignoreCase = true) && !feat.equals(addr.subLocality ?: "", ignoreCase = true)) {
+                                bestStreet = feat
+                                break
+                            }
+                            val line0 = addr.getAddressLine(0)?.split(",")?.firstOrNull()?.trim() ?: ""
+                            if (line0.isNotEmpty() && line0.any { it.isLetter() } && !line0.contains("+") && !line0.equals("Unnamed Road", ignoreCase = true)) {
+                                bestStreet = line0
+                                break
+                            }
+                        }
+                    }
+                    if (bestStreet.isNotEmpty()) {
+                        val safeJsStr = JSONObject.quote(bestStreet)
+                        runOnUiThread {
+                            try {
+                                webView?.evaluateJavascript(
+                                    "if(window.__onSentinelNativeStreetName){window.__onSentinelNativeStreetName($safeJsStr);}",
+                                    null
+                                )
+                            } catch (_: Exception) {}
+                        }
+                    }
+                } catch (_: Exception) {}
+            }.start()
+        }
+
+        @JavascriptInterface
+        fun reverseGeocodeNativeSync(lat: Double, lng: Double): String {
+            return try {
+                val geocoder = android.location.Geocoder(this@MainActivity, Locale("es", "CL"))
+                @Suppress("DEPRECATION")
+                val list = geocoder.getFromLocation(lat, lng, 4)
+                if (!list.isNullOrEmpty()) {
+                    for (addr in list) {
+                        val th = addr.thoroughfare?.trim() ?: ""
+                        val num = addr.subThoroughfare?.trim() ?: ""
+                        val loc = addr.locality?.trim() ?: addr.subAdminArea?.trim() ?: ""
+                        if (th.isNotEmpty() && !th.equals("Unnamed Road", ignoreCase = true) && !th.equals("Camino Sin Nombre", ignoreCase = true)) {
+                            val base = if (num.isNotEmpty()) "$th $num" else th
+                            return if (loc.isNotEmpty()) "$base, $loc" else base
+                        }
+                        val line0 = addr.getAddressLine(0)?.trim() ?: ""
+                        if (line0.isNotEmpty() && !line0.contains("+") && !line0.equals("Unnamed Road", ignoreCase = true)) {
+                            return line0
+                        }
+                    }
+                }
+                ""
+            } catch (_: Exception) {
+                ""
+            }
+        }
+
+        @JavascriptInterface
+        fun searchNativeGoogleLocationsJson(query: String, refLat: Double, refLng: Double): String {
+            val cleanQuery = query.trim()
+            if (cleanQuery.length < 2) return "[]"
+            return try {
+                val geocoder = android.location.Geocoder(this@MainActivity, Locale("es", "CL"))
+                val arr = org.json.JSONArray()
+                val seen = HashSet<String>()
+
+                fun appendAddresses(list: List<android.location.Address>?) {
+                    if (list.isNullOrEmpty()) return
+                    for (addr in list) {
+                        val lat = addr.latitude
+                        val lng = addr.longitude
+                        if (lat == 0.0 && lng == 0.0) continue
+                        val key = String.format(Locale.US, "%.4f_%.4f", lat, lng)
+                        if (!seen.add(key)) continue
+
+                        val line0 = addr.getAddressLine(0)?.replace(Regex(",\\s*Chile$", RegexOption.IGNORE_CASE), "")?.trim() ?: ""
+                        val feature = addr.featureName?.trim() ?: ""
+                        val thoroughfare = addr.thoroughfare?.trim() ?: ""
+                        val subThoroughfare = addr.subThoroughfare?.trim() ?: ""
+                        val locality = addr.locality?.trim() ?: addr.subAdminArea?.trim() ?: ""
+
+                        val streetCombined = listOf(thoroughfare, subThoroughfare).filter { it.isNotEmpty() }.joinToString(" ")
+                        val mainTitle = when {
+                            feature.isNotEmpty() && !feature.contains("+") && feature.any { it.isLetter() } && !feature.equals(locality, ignoreCase = true) ->
+                                if (streetCombined.isNotEmpty() && !feature.equals(streetCombined, ignoreCase = true)) "$feature ($streetCombined)" else feature
+                            streetCombined.isNotEmpty() -> streetCombined
+                            line0.isNotEmpty() -> line0.substringBefore(",").trim()
+                            else -> cleanQuery
+                        }.uppercase(Locale("es", "CL"))
+
+                        val subtitle = (if (line0.isNotEmpty()) line0 else listOf(mainTitle, locality).filter { it.isNotEmpty() }.joinToString(", "))
+                            .uppercase(Locale("es", "CL"))
+
+                        val obj = JSONObject()
+                        obj.put("title", mainTitle)
+                        obj.put("subtitle", subtitle)
+                        obj.put("address", subtitle)
+                        obj.put("lat", lat)
+                        obj.put("lng", lng)
+                        arr.put(obj)
+                        if (arr.length() >= 8) break
+                    }
+                }
+
+                val fullQueryCl = if (cleanQuery.lowercase(Locale.ROOT).contains("chile")) cleanQuery else "$cleanQuery, Chile"
+
+                @Suppress("DEPRECATION")
+                if (refLat != 0.0 && refLng != 0.0) {
+                    val immediateNearList = geocoder.getFromLocationName(
+                        fullQueryCl,
+                        6,
+                        refLat - 0.14,
+                        refLng - 0.14,
+                        refLat + 0.14,
+                        refLng + 0.14
+                    )
+                    appendAddresses(immediateNearList)
+
+                    if (arr.length() < 6) {
+                        val sectorNearList = geocoder.getFromLocationName(
+                            fullQueryCl,
+                            6,
+                            refLat - 0.35,
+                            refLng - 0.35,
+                            refLat + 0.35,
+                            refLng + 0.35
+                        )
+                        appendAddresses(sectorNearList)
+                    }
+                }
+
+                @Suppress("DEPRECATION")
+                if (arr.length() == 0) {
+                    val chileList = geocoder.getFromLocationName(fullQueryCl, 5)
+                    appendAddresses(chileList)
+                }
+
+                arr.toString()
+            } catch (_: Exception) {
+                "[]"
+            }
+        }
+
+        @JavascriptInterface
+        fun getOfflineMapCacheInfo(): String {
+            return try {
+                val root = File(filesDir, "sentinel_map_tiles")
+                if (!root.exists()) {
+                    "{\"tiles\":0,\"bytes\":0}"
+                } else {
+                    var count = 0
+                    var bytes = 0L
+                    root.walkTopDown().forEach { f ->
+                        if (f.isFile && f.name.endsWith(".tile")) {
+                            count++
+                            bytes += f.length()
+                        }
+                    }
+                    "{\"tiles\":$count,\"bytes\":$bytes}"
+                }
+            } catch (_: Exception) {
+                "{\"tiles\":0,\"bytes\":0}"
             }
         }
     }

@@ -25,8 +25,8 @@ ISSUER_ID = os.environ.get("APPSTORE_ISSUER_ID", "").strip()
 PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
-TARGET_VERSION = "3.1.0"
-TARGET_BUILD_NUMBER = "3035"
+TARGET_VERSION = "3.2.0"
+TARGET_BUILD_NUMBER = "3036"
 
 SUPPORT_URL = "https://sistemasentinel.cl/soporte"
 MARKETING_URL = "https://sistemasentinel.cl"
@@ -34,45 +34,56 @@ PRIVACY_URL = "https://sistemasentinel.cl/privacidad"
 COPYRIGHT_TEXT = "2026 Sistema Sentinel - Cuerpos de Bomberos"
 
 WHATS_NEW_ES = (
-    "SENTINEL ONE V.3.1.0:\n"
-    "- GPS de Unidades y Personal en Servicio siempre a pantalla completa con totales tácticos en tiempo real.\n"
-    "- Mejoras en control remoto de apertura de puerta de cuartel y respuesta en tiempo real en iOS.\n"
-    "- Optimización del flujo informativo de permisos, rendimiento y estabilidad general."
+    "SENTINEL ONE V.3.2.0:\n"
+    "- Nueva animación de bienvenida integrada y recorrido interactivo guiado de primeros pasos.\n"
+    "- Nueva identificación institucional simplificada y mejoras visuales en iPhone e iPad.\n"
+    "- Optimización de notificaciones push APNs en segundo plano, rendimiento y estabilidad general."
 )
 
 PROMOTIONAL_TEXT_ES = (
-    "Plataforma tecnológica privada de operaciones, recepción de despachos, estados de disponibilidad "
-    "(0-9/0-8) y gestión táctica en tiempo real para equipos suscritos."
+    "Aplicación complementaria gratuita de operaciones, recepción de despachos, estados de disponibilidad "
+    "(0-9/0-8) y gestión táctica en tiempo real para integrantes de Cuerpos de Bomberos."
 )
 
 DESCRIPTION_ES = (
-    "SENTINEL ONE es la aplicación móvil operativa para bomberos e instituciones de emergencia conectadas "
-    "al ecosistema SENTINEL V3.\n\n"
+    "SENTINEL ONE es la aplicación móvil operativa gratuita para integrantes de Cuerpos de Bomberos "
+    "y organizaciones de emergencia que utilizan la plataforma SENTINEL V3.\n\n"
     "Funciones principales:\n"
-    "• Recepción instantánea de despachos de emergencia con alarma crítica y mapa táctico en vivo.\n"
+    "• Recepción instantánea de despachos de emergencia mediante notificaciones push y mapa táctico en vivo.\n"
     "• Gestión rápida de disponibilidad operativa (0-9 Disponible / 0-8 No Disponible) y confirmación de asistencia en ruta.\n"
     "• Visualización en tiempo real de unidades despachadas, dotación en cuartel, operador de Central de Alarmas y bitácora.\n"
     "• Canal operacional de comunicaciones, órdenes del día, alertas institucionales y registro histórico de asistencias.\n\n"
-    "Nota: SENTINEL ONE es una plataforma tecnológica privada licenciada a Cuerpos de Bomberos suscritos al ecosistema SENTINEL V3 y no representa a una entidad gubernamental estatal."
+    "Nota: SENTINEL ONE es una aplicación complementaria gratuita para uso exclusivo de integrantes de organizaciones "
+    "de bomberos habilitadas por su Comandancia. Los códigos de institución y cuentas son provistos directamente por cada "
+    "organización sin compras ni pagos dentro o fuera de la aplicación. No representa a una entidad gubernamental estatal."
 )
 
 KEYWORDS_ES = "bomberos,emergencias,sentinel,despacho,alarma,rescate,132,central,incidente"
 
 REVIEW_NOTES = (
-    "SENTINEL ONE es una plataforma tecnológica privada utilizada por Cuerpos de Bomberos suscritos.\n\n"
-    "PASOS PARA PROBAR LA APLICACIÓN CON CUENTA DEMO:\n"
-    "1. En la pantalla inicial ('Clave de Licencia'), ingrese la licencia: PRUEBA y presione 'Conectar'.\n"
-    "2. En el aviso informativo previo a permisos presione 'Continuar' y responda a los diálogos del sistema.\n"
-    "3. En la pantalla de inicio de sesión del bombero ingrese:\n"
+    "RESOLUTION FOR PREVIOUS REVIEW ISSUES (V3.2.0 / Build 3036):\n\n"
+    "1. Guideline 3.1.1 (Enterprise B2B App - Exempt under Guidelines 3.1.3(c) and 3.1.3(f)):\n"
+    "- SENTINEL ONE does NOT use paid license keys, does NOT sell subscriptions or digital features to individuals, "
+    "and contains ZERO in-app purchases, ZERO upgrade tiers, and ZERO external purchasing links or calls to action.\n"
+    "- This is a free B2B companion app for Fire Department organizations (Cuerpos de Bomberos) whose volunteer "
+    "firefighters receive accounts directly from their organization at no cost (Guideline 3.1.3(c) Enterprise Services).\n"
+    "- To prevent any confusion, we renamed the initial input field on iOS from 'Clave de Licencia' to "
+    "'Código de Institución' (Organization/Workspace ID). It is strictly a multi-tenant routing code that connects the "
+    "app to the firefighter's specific Fire Department server prior to sign-in.\n\n"
+    "2. Guideline 2.5.4 (Background Audio Removed):\n"
+    "- We have completely removed 'audio' from UIBackgroundModes in Info.plist and removed the silent background "
+    "audio keep-alive mechanism from SisBomApp.swift.\n"
+    "- Background emergency dispatch alerts are delivered strictly via standard APNs push notifications "
+    "('remote-notification'). Background 'location' is used exclusively when a firefighter taps 'ASISTIR' on an "
+    "active dispatch to share their en-route position with Command.\n\n"
+    "DEMO ACCOUNT TESTING STEPS:\n"
+    "1. On first launch, a brief (~8 second) silent logo animation transitions smoothly into the initial screen.\n"
+    "2. In 'Código de Institución', enter: PRUEBA and tap 'Conectar' (connects to our demo Fire Department workspace).\n"
+    "3. On the firefighter login screen, enter:\n"
     "   - Usuario: 100\n"
-    "   - Clave de Acceso: 1234\n\n"
-    "CORRECCIONES REALIZADAS PARA ESTA REVISIÓN (V3.1.0 / Build 3035):\n"
-    "- Directriz 5.1.1(iv): Se eliminó cualquier botón 'Activar' / 'No acepto' en el aviso previo de permisos; ahora muestra únicamente un aviso neutral con botón 'Continuar' que procede siempre a la solicitud nativa de iOS, y nunca redirige a Configuración si el usuario elige 'No permitir'.\n"
-    "- Directriz 2.3.3: Se reemplazaron todas las capturas de pantalla de iPhone (6.9\", 6.7\", 6.5\") e iPad Pro (13\" y 12.9\" 2ª gen.) por capturas reales de la aplicación en uso.\n"
-    "- Corrección del botón 'Apertura de Puerta' en iOS mediante puente nativo y respaldo REST con restablecimiento inmediato.\n\n"
-    "USO DE UBICACIÓN EN SEGUNDO PLANO:\n"
-    "SENTINEL ONE utiliza el GPS en segundo plano únicamente cuando el bombero confirma 'ASISTIR' a un despacho "
-    "de emergencia activo para coordinación táctica en ruta."
+    "   - Clave de Acceso: 1234\n"
+    "4. An optional 5-step interactive guided tour will appear (tap 'SALTAR GUÍA' or step through it), followed by "
+    "the neutral permissions notice ('Continuar')."
 )
 
 
@@ -857,6 +868,9 @@ def main():
             token=token,
         )
         print(f"✅ Build {b_ver} vinculado a la versión {TARGET_VERSION}.")
+    else:
+        print(f"❌ ERROR CRÍTICO: El Build {TARGET_BUILD_NUMBER} no alcanzó estado VALID a tiempo. Abortando envío para evitar reenviar un build anterior.")
+        sys.exit(1)
 
     # 8. Enviar oficialmente a Revisión de App Store (priorizando UNRESOLVED_ISSUES y marcando items REJECTED como resolved=True)
     print(f"🚀 Enviando versión {TARGET_VERSION} a Revisión de App Store...")

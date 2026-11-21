@@ -23,7 +23,7 @@ export const CENTRAL_FIREBASE_CONFIG = {
   messagingSenderId: "432594591351"
 };
 
-export const APP_VERSION = "3.1.0";
+export const APP_VERSION = "3.2.0";
 const V304_AUTH_EMAIL = "v304.app@sisbom.com";
 const V304_AUTH_PASS = "SentinelOne_V304_Auth!2026";
 
@@ -377,8 +377,9 @@ export function parseFirestoreValue(v) {
   return v;
 }
 
-// Caché de tokens de Firebase Auth en memoria para REST (indexado por apiKey)
+// Caché de tokens de Firebase Auth en memoria para REST (indexado por apiKey) + deduplicación de solicitudes concurrentes
 const cachedAuthTokensByKey = new Map();
+const inflightTokenPromiseByKey = new Map();
 
 export async function getFirebaseAuthToken(apiKey, email = null, password = null, forceRefresh = false) {
   if (!apiKey) return null;
@@ -392,69 +393,83 @@ export async function getFirebaseAuthToken(apiKey, email = null, password = null
     }
   }
 
-  // Si ya hay un usuario autenticado con cuenta real (no anónima) en el SDK de Firebase Auth para esta app, usar su idToken con timeout corto
-  try {
-    if (auth && auth.currentUser && !auth.currentUser.isAnonymous && auth.app?.options?.apiKey === apiKey) {
-      const sdkToken = await withTimeout(auth.currentUser.getIdToken(forceRefresh), 3000, null);
-      if (sdkToken) {
-        cachedAuthTokensByKey.set(apiKey, {
-          token: sdkToken,
-          expiresAt: now + 3000 * 1000
-        });
-        return sdkToken;
-      }
-    }
-  } catch (_) {}
+  const inflightKey = `${apiKey}:${email || ''}:${forceRefresh ? '1' : '0'}`;
+  if (!forceRefresh && inflightTokenPromiseByKey.has(inflightKey)) {
+    return inflightTokenPromiseByKey.get(inflightKey);
+  }
 
-  const creds = email && password ? { email, password } : resolveCachedUserAuthCredentials();
-  try {
-    if (creds && creds.email && creds.password) {
-      const res = await fetchWithTimeout(
-        `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: creds.email, password: creds.password, returnSecureToken: true })
-        },
-        6000
-      );
-
-      if (res && res.ok) {
-        const data = await res.json();
-        const expiresInSec = parseInt(data.expiresIn || '3600', 10);
-        cachedAuthTokensByKey.set(apiKey, {
-          token: data.idToken,
-          expiresAt: now + (expiresInSec * 1000)
-        });
-        return data.idToken;
-      }
-    }
-
-    // Autenticación de versión autorizada V.3.0.4 vía REST
+  const fetchTokenPromise = (async () => {
+    // Si ya hay un usuario autenticado con cuenta real (no anónima) en el SDK de Firebase Auth para esta app, usar su idToken con timeout corto
     try {
-      const v304Res = await fetchWithTimeout(
-        `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: V304_AUTH_EMAIL, password: V304_AUTH_PASS, returnSecureToken: true })
-        },
-        6000
-      );
-      if (v304Res && v304Res.ok) {
-        const v304Data = await v304Res.json();
-        const expiresInSec = parseInt(v304Data.expiresIn || '3600', 10);
-        cachedAuthTokensByKey.set(apiKey, {
-          token: v304Data.idToken,
-          expiresAt: now + (expiresInSec * 1000)
-        });
-        return v304Data.idToken;
+      if (auth && auth.currentUser && !auth.currentUser.isAnonymous && auth.app?.options?.apiKey === apiKey) {
+        const sdkToken = await withTimeout(auth.currentUser.getIdToken(forceRefresh), 3000, null);
+        if (sdkToken) {
+          cachedAuthTokensByKey.set(apiKey, {
+            token: sdkToken,
+            expiresAt: Date.now() + 3000 * 1000
+          });
+          return sdkToken;
+        }
       }
     } catch (_) {}
-  } catch (err) {
-    console.warn('Error obtaining Firebase Auth token:', err);
+
+    const creds = email && password ? { email, password } : resolveCachedUserAuthCredentials();
+    try {
+      if (creds && creds.email && creds.password) {
+        const res = await fetchWithTimeout(
+          `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: creds.email, password: creds.password, returnSecureToken: true })
+          },
+          6000
+        );
+
+        if (res && res.ok) {
+          const data = await res.json();
+          const expiresInSec = parseInt(data.expiresIn || '3600', 10);
+          cachedAuthTokensByKey.set(apiKey, {
+            token: data.idToken,
+            expiresAt: Date.now() + (expiresInSec * 1000)
+          });
+          return data.idToken;
+        }
+      }
+
+      // Autenticación de versión autorizada V.3.0.4 vía REST
+      try {
+        const v304Res = await fetchWithTimeout(
+          `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email: V304_AUTH_EMAIL, password: V304_AUTH_PASS, returnSecureToken: true })
+          },
+          6000
+        );
+        if (v304Res && v304Res.ok) {
+          const v304Data = await v304Res.json();
+          const expiresInSec = parseInt(v304Data.expiresIn || '3600', 10);
+          cachedAuthTokensByKey.set(apiKey, {
+            token: v304Data.idToken,
+            expiresAt: Date.now() + (expiresInSec * 1000)
+          });
+          return v304Data.idToken;
+        }
+      } catch (_) {}
+    } catch (err) {
+      console.warn('Error obtaining Firebase Auth token:', err);
+    }
+    return null;
+  })();
+
+  inflightTokenPromiseByKey.set(inflightKey, fetchTokenPromise);
+  try {
+    return await fetchTokenPromise;
+  } finally {
+    inflightTokenPromiseByKey.delete(inflightKey);
   }
-  return null;
 }
 
 export async function fetchFirestoreWithAuth(url, apiKey, options = {}) {

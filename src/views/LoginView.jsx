@@ -15,6 +15,7 @@ import { User, Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react-native
 import * as Haptics from 'expo-haptics';
 import { useAuthStore } from '../store/useAuthStore';
 import { useLicenseStore } from '../store/useLicenseStore';
+import { useDispatchStore } from '../store/useDispatchStore';
 import { formatCanonicalInstitutionTitle } from '../shared/sentinelCore';
 
 const FloatingLabelInput = ({
@@ -123,6 +124,11 @@ export const LoginView = ({ onLoginSuccess }) => {
 
     const res = await login(identifier, password, false);
     if (res.success) {
+      try {
+        useDispatchStore.getState().init();
+        await useDispatchStore.getState().waitForInitialBootData(2800);
+        await new Promise((r) => setTimeout(r, 50));
+      } catch (_) {}
       triggerHaptic('success');
       if (onLoginSuccess) {
         onLoginSuccess();
@@ -214,14 +220,14 @@ export const LoginView = ({ onLoginSuccess }) => {
             )}
           </TouchableOpacity>
 
-          {/* Pie de Versión con Logo Oficial SENTINEL ONE + V.3.1.0 */}
+          {/* Pie de Versión con Logo Oficial SENTINEL ONE + V.3.2.0 */}
           <View style={styles.footerVersionRow}>
             <Image
               source={require('../../assets/SENTINEL_ONE.png')}
               style={styles.moduleFooterLogo}
               resizeMode="contain"
             />
-            <Text style={styles.versionTagText}>V.3.1.0</Text>
+            <Text style={styles.versionTagText}>V.3.2.0</Text>
           </View>
         </View>
       </ScrollView>

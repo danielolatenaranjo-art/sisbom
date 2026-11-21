@@ -15,6 +15,13 @@ const LOGO_DATA_URI_KEY = '@sentinel_one_v3_logo_data_uri';
 let silentSyncInFlight = false;
 let lastSilentSyncTs = 0;
 
+function isIosRuntime() {
+  return (
+    typeof window !== 'undefined' &&
+    Boolean(window.webkit?.messageHandlers?.iOSApp || window.__SENTINEL_PLATFORM__ === 'ios')
+  );
+}
+
 function parseValidCoord(val) {
   if (val === null || val === undefined || val === '') return null;
   const num = Number(val);
@@ -482,9 +489,16 @@ export const useLicenseStore = create((set, get) => ({
   },
 
   validateLicense: async (rawKey, silent = false) => {
+    const iosMode = isIosRuntime();
     let key = (rawKey || '').trim().toUpperCase();
     if (!key) {
-      if (!silent) set({ errorReason: 'Ingrese una clave de licencia válida.' });
+      if (!silent) {
+        set({
+          errorReason: iosMode
+            ? 'Ingrese un código de institución válido.'
+            : 'Ingrese una clave de licencia válida.'
+        });
+      }
       return false;
     }
 
@@ -507,7 +521,9 @@ export const useLicenseStore = create((set, get) => ({
               authorized: false,
               status: 'no_autorizado',
               isChecking: false,
-              errorReason: `La clave de licencia "${key}" no existe o es inválida.`
+              errorReason: iosMode
+                ? `El código de institución "${key}" no existe o no fue encontrado.`
+                : `La clave de licencia "${key}" no existe o es inválida.`
             });
           }
           return false;
@@ -525,7 +541,9 @@ export const useLicenseStore = create((set, get) => ({
           authorized: false,
           status: 'suspendido',
           isChecking: false,
-          errorReason: 'Esta suscripción se encuentra suspendida o bloqueada.'
+          errorReason: iosMode
+            ? 'El acceso para esta institución se encuentra temporalmente deshabilitado. Contacte a su Comandancia.'
+            : 'Esta suscripción se encuentra suspendida o bloqueada.'
         });
         return false;
       }
@@ -542,7 +560,9 @@ export const useLicenseStore = create((set, get) => ({
             authorized: false,
             status: 'no_autorizado',
             isChecking: false,
-            errorReason: 'Esta licencia no tiene un proyecto Firebase asignado en el Servidor Central.'
+            errorReason: iosMode
+              ? 'Esta institución no tiene un servidor operativo asignado.'
+              : 'Esta licencia no tiene un proyecto Firebase asignado en el Servidor Central.'
           });
         }
         return false;
@@ -642,7 +662,9 @@ export const useLicenseStore = create((set, get) => ({
           authorized: false,
           status: 'no_autorizado',
           isChecking: false,
-          errorReason: 'No fue posible validar la licencia. Revise su conexión a Internet.'
+          errorReason: iosMode
+            ? 'No fue posible conectar con el servidor institucional. Revise su conexión a Internet.'
+            : 'No fue posible validar la licencia. Revise su conexión a Internet.'
         });
       }
       return false;
