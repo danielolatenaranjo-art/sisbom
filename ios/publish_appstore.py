@@ -26,7 +26,7 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.2.0"
-TARGET_BUILD_NUMBER = "3037"
+TARGET_BUILD_NUMBER = "3038"
 
 SUPPORT_URL = "https://sistemasentinel.cl/soporte"
 MARKETING_URL = "https://sistemasentinel.cl"
@@ -562,7 +562,7 @@ def main():
             print(f"   🧑‍🚒 individualTesters ({len(chunk)}) adjuntados -> HTTP {st_it}")
 
         st_curr_sub, curr_sub_res = api_request("GET", f"/v1/builds/{b_id}/betaAppReviewSubmission", token=token)
-        curr_beta_state = curr_sub_res.get("data", {}).get("attributes", {}).get("betaReviewState", "")
+        curr_beta_state = ((curr_sub_res.get("data") or {}).get("attributes") or {}).get("betaReviewState", "")
         if curr_beta_state in ("APPROVED", "IN_REVIEW", "WAITING_FOR_REVIEW"):
             print(f"   ℹ️ betaAppReviewSubmission ya se encuentra en estado '{curr_beta_state}'.")
         else:
@@ -577,12 +577,12 @@ def main():
                 },
                 token=token,
             )
-            print(f"   🚀 betaAppReviewSubmissions -> HTTP {st_bsub} {json.dumps(bsub_res.get('data', {}).get('attributes', {}), ensure_ascii=False)}")
+            print(f"   🚀 betaAppReviewSubmissions -> HTTP {st_bsub} {json.dumps((bsub_res.get('data') or {}).get('attributes', {}), ensure_ascii=False)}")
 
         _, final_bbd = api_request("GET", f"/v1/buildBetaDetails/{b_id}", token=token)
         _, final_bsub = api_request("GET", f"/v1/builds/{b_id}/betaAppReviewSubmission", token=token)
-        print("🏁 Estado final TestFlight buildBetaDetail:", json.dumps(final_bbd.get("data", {}).get("attributes", {}), ensure_ascii=False))
-        print("🏁 Estado final TestFlight betaAppReviewSubmission:", json.dumps(final_bsub.get("data", {}).get("attributes", {}), ensure_ascii=False))
+        print("🏁 Estado final TestFlight buildBetaDetail:", json.dumps((final_bbd.get("data") or {}).get("attributes", {}), ensure_ascii=False))
+        print("🏁 Estado final TestFlight betaAppReviewSubmission:", json.dumps((final_bsub.get("data") or {}).get("attributes", {}), ensure_ascii=False))
         return
 
     if "--promo-only" in sys.argv:

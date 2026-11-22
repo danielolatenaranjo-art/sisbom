@@ -16,6 +16,7 @@ import {
 import {
   getEntityMaxTimestamp,
   hasAdminModeFlag,
+  hasMedicalStaffFlag,
   matchPersonnelCredentials,
   sanitizeCanonicalPersonnelUpdate,
   buildCanonicalPersonStatusHistoryDoc
@@ -177,7 +178,7 @@ async function fetchPersonalUserFromFirestoreRest(identifierOrUser) {
   const maskFields = [
     'idRegistro', 'idRadial', 'ficha', 'rut', 'nombreBombero', 'nombre',
     'cargo', 'compania', 'estado', 'enServicio', 'conductor', 'activo',
-    'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'multiDispositivo',
+    'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'personalMedico', 'PersonalMedico', 'personal_medico', 'multiDispositivo',
     'contrasena', 'telefono', 'email', 'deviceId',
     'tokenFcm', 'fcmToken', 'apnsToken', 'platform', 'hardwareDeviceId',
     'licenciaMedica', 'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
@@ -265,6 +266,14 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     ? hasAdminModeFlag(raw)
     : Boolean(fallbackUser.modoAdmin);
 
+  const hasPersonalMedico =
+    (raw.personalMedico !== undefined ||
+      raw.PersonalMedico !== undefined ||
+      raw.personal_medico !== undefined ||
+      raw.personalmedico !== undefined)
+      ? hasMedicalStaffFlag(raw)
+      : Boolean(fallbackUser.personalMedico);
+
   const rawPhoto = raw.foto !== undefined ? raw.foto : (fallbackUser.foto || '');
   const metaTs = Math.max(
     Number(raw._metaTimestamp || 0),
@@ -289,6 +298,7 @@ function buildNormalizedUserObject(raw, fallbackUser = {}) {
     activo: isActiveVal,
     puerta: hasPuerta,
     modoAdmin: hasModoAdmin,
+    personalMedico: hasPersonalMedico,
     multiDispositivo:
       raw.multiDispositivo !== undefined
         ? parsePersonalBoolean(raw.multiDispositivo)
@@ -777,6 +787,7 @@ export const useAuthStore = create((set, get) => ({
         updatedUser.cargo !== currentUser.cargo ||
         updatedUser.puerta !== currentUser.puerta ||
         updatedUser.modoAdmin !== currentUser.modoAdmin ||
+        updatedUser.personalMedico !== currentUser.personalMedico ||
         updatedUser.conductor !== currentUser.conductor ||
         updatedUser.activo !== currentUser.activo ||
         updatedUser.nombreBombero !== currentUser.nombreBombero ||

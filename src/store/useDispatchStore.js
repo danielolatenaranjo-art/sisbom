@@ -43,6 +43,7 @@ import {
   resolveCommanderIdRegistroFromPersonal,
   isCanonicalCommander,
   hasAdminModeFlag,
+  hasMedicalStaffFlag,
   hasCommanderPrivileges,
   formatShortPersonName,
   formatCanonicalChatEntry,
@@ -1695,6 +1696,14 @@ export const useDispatchStore = create((set, get) => ({
           ? hasAdminModeFlag(rawData)
           : Boolean(existing?.modoAdmin);
 
+      const hasPersonalMedicoVal =
+        (rawData.personalMedico !== undefined ||
+          rawData.PersonalMedico !== undefined ||
+          rawData.personal_medico !== undefined ||
+          rawData.personalmedico !== undefined)
+          ? hasMedicalStaffFlag(rawData)
+          : Boolean(existing?.personalMedico);
+
       const incomingItem = {
         idRegistro: docId,
         idRadial: String(rawData.idRadial || '').trim(),
@@ -1706,6 +1715,7 @@ export const useDispatchStore = create((set, get) => ({
         activo: isActiveVal,
         puerta: hasPuertaVal,
         modoAdmin: hasModoAdminVal,
+        personalMedico: hasPersonalMedicoVal,
         compania: parseInt(String(rawData.compania || '1').replace(/\D/g, ''), 10) || 1,
         telefono: rawData.telefono || '',
         foto: rawData.foto || '',
@@ -1735,6 +1745,13 @@ export const useDispatchStore = create((set, get) => ({
             (rawData.modoAdmin !== undefined || rawData.ModoAdmin !== undefined || rawData.modoadmin !== undefined)
               ? hasModoAdminVal
               : Boolean(localCandidate.modoAdmin),
+          personalMedico:
+            (rawData.personalMedico !== undefined ||
+              rawData.PersonalMedico !== undefined ||
+              rawData.personal_medico !== undefined ||
+              rawData.personalmedico !== undefined)
+              ? hasPersonalMedicoVal
+              : Boolean(localCandidate.personalMedico),
           foto: incomingItem.foto || localCandidate.foto || '',
           _metaTimestamp: Math.max(getEntityMaxTimestamp(localCandidate), getEntityMaxTimestamp(incomingItem))
         });
@@ -2024,7 +2041,8 @@ export const useDispatchStore = create((set, get) => ({
       const maskFields = [
         'idRegistro', 'idRadial', 'nombreBombero', 'nombre', 'cargo',
         'compania', 'estado', 'enServicio', 'conductor', 'activo', 'ACTIVO', 'Activo',
-        'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'telefono', 'licenciaMedica',
+        'puerta', 'Puerta', 'modoAdmin', 'ModoAdmin', 'personalMedico', 'PersonalMedico', 'personal_medico',
+        'telefono', 'licenciaMedica',
         'fechaSuspensionFin', 'permiso', 'cds', '_metaTimestamp', '_fieldTimestamps'
       ].map((f) => `mask.fieldPaths=${f}`).join('&');
 
