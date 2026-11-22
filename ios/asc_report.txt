@@ -2,7 +2,7 @@
 📱 App: SENTINEL ONE (id=6819802643)
 ⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
   "errors" : [ {
-    "id" : "3bad17d9-23a2-49ab-b7b6-d3c4853a2f60",
+    "id" : "102eecc4-87d3-4dc0-a5ee-f01188b813b7",
     "status" : "409",
     "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.TOO_LONG",
     "title" : "An attribute value is too long.",
