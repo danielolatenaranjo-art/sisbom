@@ -550,6 +550,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
     private static let kPlayedUnitReqKey = "PLAYED_UNIT_REQ_IDS"
 
     private var audioPlayer: AVAudioPlayer?
+    private var keepAlivePlayer: AVAudioPlayer?
     private var repeatTimers: [String: Timer] = [:]
     private var repeatScheduledAtMs: [String: Int64] = [:]
     private var hiddenVolumeView: MPVolumeView?
@@ -628,6 +629,24 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         playedFirstToneDispatchIds = Set(storedFirst).union(storedAlerted)
         playedRepeat60sDispatchIds = Set(storedRepeat)
         playedUnitReqIds = Set(storedUnitReq)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioInterruption(_:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+    }
+
+    @objc private func handleAudioInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeVal = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeVal) else { return }
+        if type == .ended {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.updateBackgroundKeepAlive()
+            }
+        }
     }
 
     var isPlayingAlarm: Bool {
@@ -668,6 +687,17 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    private func findVolumeSliders(in view: UIView) -> [UISlider] {
+        var sliders: [UISlider] = []
+        for subview in view.subviews {
+            if let slider = subview as? UISlider {
+                sliders.append(slider)
+            }
+            sliders.append(contentsOf: findVolumeSliders(in: subview))
+        }
+        return sliders
+    }
+
     func forceHardwareSystemVolumeToMax() {
         let applyMax: () -> Void = { [weak self] in
             guard let self = self else { return }
@@ -675,11 +705,9 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
             guard let vv = self.hiddenVolumeView else { return }
             vv.setNeedsLayout()
             vv.layoutIfNeeded()
-            for subview in vv.subviews {
-                if let slider = subview as? UISlider {
-                    slider.setValue(1.0, animated: false)
-                    slider.sendActions(for: [.touchUpInside, .valueChanged])
-                }
+            for slider in self.findVolumeSliders(in: vv) {
+                slider.setValue(1.0, animated: false)
+                slider.sendActions(for: [.touchUpInside, .valueChanged])
             }
         }
         if Thread.isMainThread {
@@ -692,6 +720,7 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.45, execute: applyMax)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: applyMax)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.35, execute: applyMax)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.00, execute: applyMax)
     }
 
     func resolveSoundFileName(for claveOrName: String) -> String {
@@ -720,13 +749,86 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         return "despacho"
     }
 
+    private static func makeSilentWavData() -> Data {
+        let sampleRate: UInt32 = 8000
+        let numSamples: UInt32 = 8000 // 1 segundo de silencio digital puro (muestras PCM = 0)
+        let bytesPerSample: UInt16 = 2
+        let numChannels: UInt16 = 1
+        let dataSize: UInt32 = numSamples * UInt32(bytesPerSample)
+        let riffChunkSize: UInt32 = 36 + dataSize
+        let byteRate: UInt32 = sampleRate * UInt32(numChannels) * UInt32(bytesPerSample)
+        let blockAlign: UInt16 = numChannels * bytesPerSample
+        let bitsPerSample: UInt16 = 16
+
+        var data = Data(capacity: Int(44 + dataSize))
+        data.append(contentsOf: [0x52, 0x49, 0x46, 0x46]) // "RIFF"
+        var leRiff = riffChunkSize.littleEndian
+        withUnsafeBytes(of: &leRiff) { data.append(contentsOf: $0) }
+        data.append(contentsOf: [0x57, 0x41, 0x56, 0x45]) // "WAVE"
+        data.append(contentsOf: [0x66, 0x6D, 0x74, 0x20]) // "fmt "
+        var subchunk1Size: UInt32 = 16
+        withUnsafeBytes(of: &subchunk1Size) { data.append(contentsOf: $0) }
+        var audioFormat: UInt16 = 1 // PCM
+        withUnsafeBytes(of: &audioFormat) { data.append(contentsOf: $0) }
+        var leChannels = numChannels.littleEndian
+        withUnsafeBytes(of: &leChannels) { data.append(contentsOf: $0) }
+        var leSampleRate = sampleRate.littleEndian
+        withUnsafeBytes(of: &leSampleRate) { data.append(contentsOf: $0) }
+        var leByteRate = byteRate.littleEndian
+        withUnsafeBytes(of: &leByteRate) { data.append(contentsOf: $0) }
+        var leBlockAlign = blockAlign.littleEndian
+        withUnsafeBytes(of: &leBlockAlign) { data.append(contentsOf: $0) }
+        var leBits = bitsPerSample.littleEndian
+        withUnsafeBytes(of: &leBits) { data.append(contentsOf: $0) }
+        data.append(contentsOf: [0x64, 0x61, 0x74, 0x61]) // "data"
+        var leDataSize = dataSize.littleEndian
+        withUnsafeBytes(of: &leDataSize) { data.append(contentsOf: $0) }
+        data.append(Data(count: Int(dataSize))) // 100% muestras en 0 (silencio absoluto)
+        return data
+    }
+
     func updateBackgroundKeepAlive() {
-        // Guideline 2.5.4 compliance: silent background audio keep-alive removed.
-        // Background dispatch alerts are delivered via standard APNs remote notifications.
+        let defaults = UserDefaults.standard
+        let estado = (defaults.string(forKey: "USER_ESTADO") ?? "0-9").uppercased().trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !IOSDispatchTimeValidator.isSilentUserRoleOrSpecialStatus(defaults) && estado == "0-9" else {
+            stopBackgroundKeepAlive()
+            return
+        }
+
+        // En primer plano NO necesitamos reproducir ningún stream keep-alive
+        if AppDelegate.isAppInForeground {
+            stopBackgroundKeepAlive()
+            return
+        }
+
+        // Si ya está sonando la alarma real o ya está corriendo el keep-alive silencioso, mantener activo
+        if let active = audioPlayer, active.isPlaying {
+            return
+        }
+        if let ka = keepAlivePlayer, ka.isPlaying {
+            ka.volume = 0.0
+            return
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try? session.setActive(true)
+            let silentWav = Self.makeSilentWavData()
+            let player = try AVAudioPlayer(data: silentWav, fileTypeHint: AVFileType.wav.rawValue)
+            // Silencio PCM puro (muestras = 0) + volumen 0.0: jamás emite ningún tono ni ruido por el parlante
+            player.volume = 0.0
+            player.numberOfLoops = -1
+            player.prepareToPlay()
+            player.play()
+            self.keepAlivePlayer = player
+        } catch {}
     }
 
     func stopBackgroundKeepAlive() {
-        // No-op: background keep-alive audio player removed for App Store Guideline 2.5.4 compliance.
+        keepAlivePlayer?.stop()
+        keepAlivePlayer = nil
     }
 
     func play(nameOrClave: String, forceMaxVolume: Bool = true) {
@@ -758,6 +860,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
 
         audioPlayer?.stop()
         audioPlayer = nil
+        keepAlivePlayer?.stop()
+        keepAlivePlayer = nil
 
         guard let url = Bundle.main.url(forResource: fileName, withExtension: "mp3")
                 ?? Bundle.main.url(forResource: fileName.lowercased(), withExtension: "mp3")
@@ -847,6 +951,8 @@ final class IOSSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
         audioPlayer?.stop()
         audioPlayer = nil
+        keepAlivePlayer?.stop()
+        keepAlivePlayer = nil
 
         guard let url = Bundle.main.url(forResource: "evacuacion", withExtension: "wav")
                 ?? Bundle.main.url(forResource: "alertas", withExtension: "mp3") else {
@@ -2320,6 +2426,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         Self.shared = self
+        Self.isAppInForeground = (application.applicationState != .background)
         UIApplication.shared.isIdleTimerDisabled = true
         Self.restoreUserDefaultsFromCachedWebSessionIfNeeded()
         UNUserNotificationCenter.current().delegate = self
@@ -2393,6 +2500,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         }
         IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         IOSLocationService.shared.syncPermissionsToWebView()
+        SentinelWebBridge.syncSafeInsetsToWebView(Self.sharedWebView)
         IOSLocationService.shared.updateStandbyKeepAlive()
         application.registerForRemoteNotifications()
         if Self.currentTenantProjectId != nil {
@@ -3452,6 +3560,47 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         decisionHandler(.allow)
     }
 
+    static func currentSafeInsets() -> (top: Int, bottom: Int) {
+        if !Thread.isMainThread {
+            return (47, 20)
+        }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        let rawInsets: UIEdgeInsets?
+        if let win = activeScene?.windows.first(where: { $0.isKeyWindow }) ?? activeScene?.windows.first {
+            rawInsets = win.safeAreaInsets
+        } else {
+            rawInsets = UIApplication.shared.windows.first?.safeAreaInsets
+        }
+        guard let insets = rawInsets, (insets.top > 0 || insets.bottom > 0) else {
+            return (47, 20)
+        }
+        let top = Int(ceil(insets.top))
+        let bottom = Int(ceil(insets.bottom))
+        return (top > 0 ? top : 20, max(0, bottom))
+    }
+
+    static func syncSafeInsetsToWebView(_ webView: WKWebView? = AppDelegate.sharedWebView) {
+        let applyBlock = {
+            guard let wv = webView ?? AppDelegate.sharedWebView else { return }
+            let insets = currentSafeInsets()
+            let js = """
+            (function() {
+                try {
+                    window.__SENTINEL_SAFE_INSETS__ = { top: \(insets.top), bottom: \(insets.bottom) };
+                    window.dispatchEvent(new CustomEvent('sentinelSafeInsetsChanged', { detail: window.__SENTINEL_SAFE_INSETS__ }));
+                } catch (e) {}
+            })();
+            """
+            wv.evaluateJavaScript(js, completionHandler: nil)
+        }
+        if Thread.isMainThread {
+            applyBlock()
+        } else {
+            DispatchQueue.main.async(execute: applyBlock)
+        }
+    }
+
     // Si iOS termina el proceso WebContent en segundo plano tras muchas horas de inactividad,
     // recargar automáticamente el WebView local para que nunca quede congelado ni obligue a cerrar la app de Recientes.
     static func refreshBootUserScript(on webView: WKWebView?) {
@@ -3462,7 +3611,9 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
             "@sentinel_one_v3_logo_data_uri",
             "@sentinel_one_v3_user_session",
             "@sentinel_one_v3_user_prefs",
-            "@sentinel_one_location_disclosed_v3"
+            "@sentinel_one_location_disclosed_v3",
+            "@sentinel_one_intro_video_seen_v3",
+            "@sentinel_one_guided_tour_seen_v3"
         ]
         var storageMap: [String: String] = [:]
         for k in storageKeys {
@@ -3504,6 +3655,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
         let lastKeychainPid = SentinelKeychain.get("last_project_id") ?? ""
         let lastKeychainUid = SentinelKeychain.get("last_user_id") ?? ""
         let lastSessionStr = (!lastKeychainPid.isEmpty && !lastKeychainUid.isEmpty) ? "\(lastKeychainPid):\(lastKeychainUid)" : ""
+        let safeInsets = currentSafeInsets()
 
         let bootJs = """
         (function() {
@@ -3512,6 +3664,7 @@ final class SentinelWebBridge: NSObject, WKScriptMessageHandler, WKNavigationDel
                 window.__SENTINEL_HW_DEVICE_ID__ = "\(hwId)";
                 window.__SENTINEL_APNS_TOKEN__ = "\(apnsHex)";
                 window.__SENTINEL_KEYCHAIN_LAST_SESSION__ = "\(lastSessionStr)";
+                window.__SENTINEL_SAFE_INSETS__ = { top: \(safeInsets.top), bottom: \(safeInsets.bottom) };
                 window.__SENTINEL_IOS_PERMS__ = {
                     fineLocation: \(syncPerms.fine ? "true" : "false"),
                     backgroundLocation: \(syncPerms.bg ? "true" : "false"),
@@ -4046,6 +4199,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
         let lastKeychainPid = SentinelKeychain.get("last_project_id") ?? ""
         let lastKeychainUid = SentinelKeychain.get("last_user_id") ?? ""
         let lastSessionStr = (!lastKeychainPid.isEmpty && !lastKeychainUid.isEmpty) ? "\(lastKeychainPid):\(lastKeychainUid)" : ""
+        let safeInsets = SentinelWebBridge.currentSafeInsets()
 
         let bootJs = """
         (function() {
@@ -4054,6 +4208,7 @@ struct SentinelWebViewContainer: UIViewRepresentable {
                 window.__SENTINEL_HW_DEVICE_ID__ = "\(hwId)";
                 window.__SENTINEL_APNS_TOKEN__ = "\(apnsHex)";
                 window.__SENTINEL_KEYCHAIN_LAST_SESSION__ = "\(lastSessionStr)";
+                window.__SENTINEL_SAFE_INSETS__ = { top: \(safeInsets.top), bottom: \(safeInsets.bottom) };
                 window.__SENTINEL_IOS_PERMS__ = {
                     fineLocation: \(syncPerms.fine ? "true" : "false"),
                     backgroundLocation: \(syncPerms.bg ? "true" : "false"),
@@ -4095,12 +4250,15 @@ struct SentinelWebViewContainer: UIViewRepresentable {
             wv.loadFileURL(indexUrl, allowingReadAccessTo: indexUrl.deletingLastPathComponent())
         }
         IOSLocationService.shared.syncPermissionsToWebView()
+        SentinelWebBridge.syncSafeInsetsToWebView(wv)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             IOSLocationService.shared.syncPermissionsToWebView()
+            SentinelWebBridge.syncSafeInsetsToWebView(wv)
             IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             IOSLocationService.shared.syncPermissionsToWebView()
+            SentinelWebBridge.syncSafeInsetsToWebView(wv)
             IOSSoundPlayer.shared.prepareVolumeViewInWindow()
         }
         return wv

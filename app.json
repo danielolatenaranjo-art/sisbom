@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.misisbom.sisbom.NFR3L3CC3L",
-      "buildNumber": "3036",
+      "buildNumber": "3037",
       "infoPlist": {
         "CFBundleDisplayName": "SENTINEL ONE",
         "NSLocationWhenInUseUsageDescription": "SENTINEL ONE utiliza su ubicación para rutar la respuesta hacia la emergencia de bomberos y confirmar llegada al cuartel.",
@@ -22,6 +22,7 @@
         "UIBackgroundModes": [
           "location",
           "remote-notification",
+          "audio",
           "fetch"
         ]
       }

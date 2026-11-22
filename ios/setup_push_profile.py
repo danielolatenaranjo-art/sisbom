@@ -91,8 +91,8 @@ def main():
 
         if bundle_res_id:
             print(f"   Bundle Resource ID encontrado: {bundle_res_id}")
-            # Habilitar PUSH_NOTIFICATIONS en App Store Connect API
-            for cap_type in ("PUSH_NOTIFICATIONS",):
+            # Habilitar PUSH_NOTIFICATIONS y USERNOTIFICATIONS_TIMESENSITIVE en App Store Connect API
+            for cap_type in ("PUSH_NOTIFICATIONS", "USERNOTIFICATIONS_TIMESENSITIVE"):
                 cap_body = {
                     "data": {
                         "type": "bundleIdCapabilities",
@@ -180,6 +180,7 @@ def main():
         ent_path = os.path.join(ios_dir, "SisBom.entitlements")
         with open(ent_path, "wb") as f:
             plistlib.dump(ent_dict, f)
+        print(f"   SisBom.entitlements generado: {ent_dict}")
 
         proj_path = os.path.join(ios_dir, "project.yml")
         with open(proj_path, "r", encoding="utf-8") as f:

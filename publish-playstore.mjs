@@ -121,7 +121,7 @@ function resolveAabPath() {
 export async function uploadAabToPlayConsole({
   track = trackArg,
   releaseStatus = statusArg,
-  releaseNotes = 'SENTINEL ONE V3.2.0 - Integración completa con SENTINEL MED, carga instantánea en segundo plano detrás del inicio, barras inmersivas integradas con el sistema y mejoras de estabilidad operativa.'
+  releaseNotes = 'SENTINEL ONE V3.2.0 - SENTINEL MED integrado (Ficha Clínica de Bomberos y Parte de Ambulancia de Rescate con caché local y cálculo automático de edad), nueva presentación guiada, mejoras de estabilidad y notificaciones de emergencia.'
 } = {}) {
   console.log('====================================================');
   console.log(' SUBIDA DIRECTA A GOOGLE PLAY CONSOLE (SIN GITHUB)');

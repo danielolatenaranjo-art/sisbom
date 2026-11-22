@@ -55,7 +55,7 @@ targets:
       properties:
         CFBundleDisplayName: "SENTINEL ONE"
         CFBundleShortVersionString: "3.2.0"
-        CFBundleVersion: "3036"
+        CFBundleVersion: "3037"
         UILaunchStoryboardName: LaunchScreen
         UILaunchScreen: {}
         UIRequiresFullScreen: true
@@ -69,6 +69,7 @@ targets:
         UIBackgroundModes:
           - fetch
           - remote-notification
+          - audio
           - location
         NSLocationWhenInUseUsageDescription: "SENTINEL ONE requiere acceso a su ubicación para calcular distancias a emergencias y coordinar al personal."
         NSLocationAlwaysAndWhenInUseUsageDescription: "SENTINEL ONE requiere acceso permanente a su ubicación para alertas de despacho y seguimiento de emergencias en tiempo real."

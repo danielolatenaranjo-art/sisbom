@@ -83,6 +83,51 @@ export function formatEpochToDDMMYYYY(val) {
   return '';
 }
 
+export function formatDateInputDDMMYYYY(raw = '') {
+  const digits = String(raw || '').replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}-${digits.slice(2, 4)}-${digits.slice(4)}`;
+}
+
+export function calculateAgeFromDDMMYYYY(dateStr = '', refDate = new Date()) {
+  const match = String(dateStr || '').trim().match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!match) return null;
+
+  const dd = parseInt(match[1], 10);
+  const mm = parseInt(match[2], 10);
+  const yyyy = parseInt(match[3], 10);
+  if (yyyy < 1900 || mm < 1 || mm > 12 || dd < 1) return null;
+
+  const birth = new Date(yyyy, mm - 1, dd);
+  if (birth.getFullYear() !== yyyy || birth.getMonth() !== mm - 1 || birth.getDate() !== dd) {
+    return null;
+  }
+
+  const ref = refDate instanceof Date ? refDate : new Date(refDate || Date.now());
+  const today = new Date(ref.getFullYear(), ref.getMonth(), ref.getDate());
+  if (today.getTime() < birth.getTime()) return null;
+
+  let years = today.getFullYear() - birth.getFullYear();
+  let months = today.getMonth() - birth.getMonth();
+  let days = today.getDate() - birth.getDate();
+
+  if (days < 0) {
+    months -= 1;
+    const daysInPrevMonth = new Date(today.getFullYear(), today.getMonth(), 0).getDate();
+    const prevAnchorDay = Math.min(birth.getDate(), daysInPrevMonth);
+    days = daysInPrevMonth - prevAnchorDay + today.getDate();
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years < 0) return null;
+
+  const formatted = `${years} ${years === 1 ? 'año' : 'años'}, ${months} ${months === 1 ? 'mes' : 'meses'}, ${days} ${days === 1 ? 'día' : 'días'}`;
+  return { years, months, days, formatted };
+}
+
 export function parseToEpochMs(val, fallbackHoraStr = '', fallbackFechaStr = '') {
   if (typeof val === 'number' && !isNaN(val) && val > 1000000000) {
     return val;
@@ -1510,6 +1555,10 @@ export function sanitizeCanonicalPersonnelUpdate(partial = {}) {
   }
   if (partial.estado !== undefined) clean.estado = String(partial.estado).trim();
   if (partial.enServicio !== undefined) clean.enServicio = String(partial.enServicio).trim();
+  if (partial.telefono !== undefined) clean.telefono = String(partial.telefono).trim();
+  if (partial.email !== undefined || partial.correo !== undefined) {
+    clean.email = String(partial.email ?? partial.correo ?? '').trim();
+  }
   if (partial.deviceId !== undefined || partial.fcmToken !== undefined) {
     clean.deviceId = String(partial.deviceId ?? partial.fcmToken ?? '').trim();
   }
@@ -2414,7 +2463,8 @@ export const MED_LUGARES_SUCESO = [
   'LICEO/ESCUELA',
   'DOMICILIO',
   'URGENCIA',
-  'AGRICOLA'
+  'AGRICOLA',
+  'OTRO'
 ];
 
 export const MED_CINCINNATI_INTERVENCIONES = {
@@ -2468,6 +2518,25 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
   const p = (rawPersonal && typeof rawPersonal === 'object') ? rawPersonal : {};
 
   const cleanId = String(idRegistro || s.idRegistro || p.idRegistro || p.id || '').trim();
+  const rawDb = (s.datosBombero && typeof s.datosBombero === 'object') ? s.datosBombero : {};
+  const rawPersonaDir =
+    typeof p.direccion === 'string'
+      ? p.direccion
+      : (p.direccion && typeof p.direccion === 'object')
+        ? [p.direccion.calle, p.direccion.numero, p.direccion.comuna, p.direccion.region].filter(Boolean).join(' ')
+        : '';
+  const rawFechaNac = String(rawDb.fechaNacimiento || s.fechaNacimiento || p.fechaNacimiento || '').trim();
+  const maskedFechaNac = rawFechaNac ? formatDateInputDDMMYYYY(rawFechaNac) : '';
+  const computedAge = calculateAgeFromDDMMYYYY(maskedFechaNac);
+  const datosBombero = {
+    nombre: String(rawDb.nombre || s.nombreBombero || p.nombreBombero || '').trim().toUpperCase(),
+    rut: String(rawDb.rut || s.rut || p.rut || '').trim(),
+    fechaNacimiento: maskedFechaNac,
+    edad: computedAge ? computedAge.formatted : String(rawDb.edad ?? s.edad ?? p.edad ?? '').trim(),
+    telefono: sanitizeChileanPhone(rawDb.telefono || s.telefono || p.telefono || p.fono || ''),
+    correo: String(rawDb.correo || rawDb.email || s.correo || s.email || p.email || p.correo || '').trim(),
+    direccion: String(rawDb.direccion || (typeof s.direccion === 'string' ? s.direccion : '') || rawPersonaDir || '').trim().toUpperCase()
+  };
   const sangre = String(s.sangre || s.grupoSanguineo || p.grupoSanguineo || p.sangre || '').trim().toUpperCase();
 
   // Sección 1.- Antecedentes Médicos Personales
@@ -2545,7 +2614,7 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
   ).trim().toUpperCase();
 
   const previsionSalud = String(s.previsionSalud || s.prevision || p.previsionSalud || p.prevision || '').trim().toUpperCase();
-  const seguroAccidentes = String(s.seguroAccidentes || 'SI').trim().toUpperCase();
+  const seguroAccidentes = String(s.seguroAccidentes || '').trim().toUpperCase();
   const detalleSeguro = String(s.detalleSeguro || '').trim().toUpperCase();
   const contactoNombre = String(s.contactoNombre || s.contactoEmergenciaNombre || p.contactoEmergencia || s.contactoEmergencia || '').trim().toUpperCase();
   const contactoFono = sanitizeChileanPhone(s.contactoFono || s.contactoEmergenciaTelefono || p.telefonoEmergencia || s.telefonoEmergencia || '');
@@ -2584,10 +2653,7 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
     finTimestamp: licenciaMedicaTs || null
   };
 
-  let aptitudOperativa = String(s.aptitudOperativa || '').trim().toUpperCase();
-  if (!aptitudOperativa) {
-    aptitudOperativa = isLicenciaActiva ? 'BAJA_TEMPORAL' : 'APTO';
-  }
+  const aptitudOperativa = String(s.aptitudOperativa || '').trim().toUpperCase();
 
   // Sección 6.- Control Antropometría y Signos Vitales Base
   const svRaw = (s.signosVitalesBase && typeof s.signosVitalesBase === 'object') ? s.signosVitalesBase : {};
@@ -2620,14 +2686,20 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
     timestamp: parseToEpochMs(svRaw.timestamp) || null
   };
 
-  const ts = parseToEpochMs(s.timestamp ?? s._metaTimestamp, '', s.fechaActualizacion) || Date.now();
+  const ultimaActualizacion =
+    Number(s.ultimaActualizacion || 0) ||
+    parseToEpochMs(s.timestamp ?? s._metaTimestamp, '', s.fechaActualizacion) ||
+    null;
+  const metaTs = Math.max(Number(ultimaActualizacion || 0), Number(s._metaTimestamp || 0));
   const proximoControlTimestamp = parseToEpochMs(s.proximoControlTimestamp, '', s.proximoControlFecha) || null;
-  const fechaConfeccionFicha = String(s.fechaConfeccionFicha || formatEpochToDDMMYYYY(ts) || '').trim();
+  const fechaConfeccionFicha = String(s.fechaConfeccionFicha || '').trim();
 
   return {
     id: cleanId,
     idRegistro: cleanId,
     fechaConfeccionFicha,
+    ultimaActualizacion,
+    datosBombero,
     sangre,
     grupoSanguineo: sangre,
     alergias,
@@ -2671,10 +2743,10 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
     controlAntropometria: signosVitalesBase,
     proximoControlTimestamp,
     proximoControlStr: formatEpochToDDMMYYYY(proximoControlTimestamp),
-    actualizadoPor: String(s.actualizadoPor || 'OFICIAL SANIDAD').trim().toUpperCase(),
-    timestamp: ts,
-    fechaActualizacionStr: formatEpochToDDMMYYYY(ts),
-    _metaTimestamp: Math.max(ts, Number(s._metaTimestamp || 0))
+    actualizadoPor: String(s.actualizadoPor || '').trim().toUpperCase(),
+    timestamp: ultimaActualizacion,
+    fechaActualizacionStr: ultimaActualizacion ? formatEpochToDDMMYYYY(ultimaActualizacion) : '',
+    _metaTimestamp: metaTs
   };
 }
 
@@ -2682,11 +2754,13 @@ export function normalizeFirefighterHealthDoc(idRegistro, rawSalud = {}, rawPers
  * Construye el payload canónico para `personal/{idRegistro}/salud/actual`.
  */
 export function buildCanonicalFirefighterHealthDoc(raw = {}) {
-  const nowMs = Number(raw.timestamp || Date.now());
+  const nowMs = Number(raw.ultimaActualizacion || raw._metaTimestamp || raw.timestamp || Date.now());
   const norm = normalizeFirefighterHealthDoc(raw.idRegistro || raw.id, raw, raw);
   return {
     idRegistro: norm.idRegistro,
-    fechaConfeccionFicha: norm.fechaConfeccionFicha,
+    fechaConfeccionFicha: '',
+    ultimaActualizacion: nowMs,
+    datosBombero: norm.datosBombero,
     sangre: norm.sangre,
     grupoSanguineo: norm.sangre,
     alergias: norm.alergias,
@@ -2717,7 +2791,7 @@ export function buildCanonicalFirefighterHealthDoc(raw = {}) {
     tallaMts: norm.tallaMts,
     imc: norm.imc,
     clasificacionImc: norm.clasificacionImc,
-    ultimaEvaluacionMedica: norm.ultimaEvaluacionMedica,
+    ultimaEvaluacionMedica: '',
     licenciaMedica: norm.licenciaMedica,
     licenciaMedicaTs: norm.licenciaMedicaTs || null,
     motivoLicencia: norm.motivoLicencia || '',
@@ -2797,10 +2871,77 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
         ? Math.min(15, Math.max(3, parseInt(String(rawGT), 10) || 3))
         : null;
 
-  const rawEva = svRaw.evaDolor ?? raw.evaDolor;
-  const evaNum = rawEva !== undefined && rawEva !== null && rawEva !== ''
-    ? Math.min(10, Math.max(0, parseInt(String(rawEva), 10) || 0))
-    : null;
+  const normalizeSiNoCheckbox = (val) => {
+    if (val === true) return 'SI';
+    const clean = String(val || '').trim().toUpperCase();
+    if (clean === 'SI' || clean === 'SÍ' || clean === 'TRUE' || clean === '1') return 'SI';
+    return 'NO';
+  };
+
+  const normalizeVitalEntry = (entry = {}, fallbackTs = nowMs) => {
+    const rawEvaEntry = entry?.evaDolor;
+    const evaEntryNum =
+      rawEvaEntry !== undefined && rawEvaEntry !== null && rawEvaEntry !== ''
+        ? Math.min(10, Math.max(0, parseInt(String(rawEvaEntry), 10) || 0))
+        : null;
+    return {
+      hora: String(entry?.hora ?? '').trim(),
+      fc: Number(entry?.fc ?? 0) || null,
+      fr: Number(entry?.fr ?? 0) || null,
+      paSistolica: Number(entry?.paSistolica ?? 0) || null,
+      paDiastolica: Number(entry?.paDiastolica ?? 0) || null,
+      spo2: Number(entry?.spo2 ?? 0) || null,
+      temperatura: Number(entry?.temperatura ?? 0) || null,
+      hgt: Number(entry?.hgt ?? entry?.glucemia ?? 0) || null,
+      evaDolor: evaEntryNum,
+      timestamp: Number(entry?.timestamp || fallbackTs)
+    };
+  };
+
+  const hasVitalMeasurement = (v = {}) =>
+    Boolean(
+      v.hora ||
+        v.fc ||
+        v.fr ||
+        v.paSistolica ||
+        v.paDiastolica ||
+        v.spo2 ||
+        v.temperatura ||
+        v.hgt ||
+        (v.evaDolor !== null && v.evaDolor !== undefined)
+    );
+
+  const rawVitalList = Array.isArray(raw.signosVitalesLista) ? raw.signosVitalesLista : [];
+  let signosVitalesLista = rawVitalList.map((entry, idx) =>
+    normalizeVitalEntry(entry || {}, nowMs + idx)
+  );
+  if (signosVitalesLista.length === 0) {
+    signosVitalesLista = [
+      normalizeVitalEntry(
+        {
+          hora: svRaw.hora ?? raw.horaVitales ?? '',
+          fc: svRaw.fc ?? raw.fc,
+          fr: svRaw.fr ?? raw.fr,
+          paSistolica: svRaw.paSistolica ?? raw.paSistolica,
+          paDiastolica: svRaw.paDiastolica ?? raw.paDiastolica,
+          spo2: svRaw.spo2 ?? raw.spo2,
+          temperatura: svRaw.temperatura ?? raw.temperatura,
+          hgt: svRaw.hgt ?? raw.glucemia,
+          evaDolor: svRaw.evaDolor ?? raw.evaDolor,
+          timestamp: svRaw.timestamp || nowMs
+        },
+        nowMs
+      )
+    ];
+  }
+
+  const populatedVitals = signosVitalesLista.filter(hasVitalMeasurement);
+  const summaryVital =
+    populatedVitals.length > 0
+      ? populatedVitals[populatedVitals.length - 1]
+      : signosVitalesLista[0];
+
+  const evaNum = summaryVital.evaDolor;
 
   const triageCanon = String(raw.triageStart ?? raw.triage ?? '').trim().toUpperCase();
   const nombrePac = String(pacRaw.nombre ?? raw.nombrePaciente ?? pacRaw.nombrePaciente ?? '').trim().toUpperCase();
@@ -2812,20 +2953,21 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
   const alergiasPac = String(pacRaw.alergias || raw.alergiasConocidas || '').trim().toUpperCase();
 
   const diagnostico = String(dmRaw.diagnostico || raw.diagnostico || raw.motivoConsulta || '').trim().toUpperCase();
+  const embarazoAplica = normalizeSiNoCheckbox(embRaw.aplica);
   const datosMedicos = {
     diagnostico,
     antecedentesMorbidos: normalizeBoolFlags(morbRaw, MED_ANTECEDENTES_MORBIDOS_PACIENTE.map((x) => x.key)),
     otrosAntecedentes: String(dmRaw.otrosAntecedentes || pacRaw.antecedentes || '').trim().toUpperCase(),
-    estadoEtilico: String(dmRaw.estadoEtilico || raw.estadoEtilico || '').trim().toUpperCase(),
+    estadoEtilico: normalizeSiNoCheckbox(dmRaw.estadoEtilico ?? raw.estadoEtilico),
     embarazo: {
-      aplica: String(embRaw.aplica || '').trim().toUpperCase(),
-      meses: String(embRaw.meses || '').trim()
+      aplica: embarazoAplica,
+      meses: embarazoAplica === 'SI' ? String(embRaw.meses || '').trim() : ''
     },
     observacion: String(dmRaw.observacion || '').trim().toUpperCase()
   };
 
   const normInvasivoSiNo = (obj = {}) => ({
-    activo: String(obj.activo || '').trim().toUpperCase(),
+    activo: normalizeSiNoCheckbox(obj.activo),
     numero: String(obj.numero || '').trim().toUpperCase(),
     lugar: String(obj.lugar || '').trim().toUpperCase()
   });
@@ -2834,15 +2976,15 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     vvp1: normInvasivoSiNo(procInvRaw.vvp1),
     vvp2: normInvasivoSiNo(procInvRaw.vvp2),
     sondaFoley: {
-      activo: String(procInvRaw.sondaFoley?.activo || '').trim().toUpperCase(),
+      activo: normalizeSiNoCheckbox(procInvRaw.sondaFoley?.activo),
       numero: String(procInvRaw.sondaFoley?.numero || '').trim().toUpperCase()
     },
     sng: {
-      activo: String(procInvRaw.sng?.activo || '').trim().toUpperCase(),
+      activo: normalizeSiNoCheckbox(procInvRaw.sng?.activo),
       numero: String(procInvRaw.sng?.numero || '').trim().toUpperCase()
     },
     oxigenoterapia: {
-      activo: String(procInvRaw.oxigenoterapia?.activo || '').trim().toUpperCase(),
+      activo: normalizeSiNoCheckbox(procInvRaw.oxigenoterapia?.activo),
       fio2: String(procInvRaw.oxigenoterapia?.fio2 || '').trim().toUpperCase()
     },
     insumosUtilizados: String(procInvRaw.insumosUtilizados || raw.insumosUtilizados || '').trim().toUpperCase()
@@ -2863,6 +3005,9 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
   const medicamentosAdministrados = String(raw.medicamentosAdministrados || medsJoin || '').trim().toUpperCase();
 
   const lugarSuceso = String(raw.lugarSuceso || '').trim().toUpperCase();
+  const lugarSucesoOtro = lugarSuceso === 'OTRO' ? String(raw.lugarSucesoOtro || '').trim().toUpperCase() : '';
+  const transitoOtro = Boolean(tipoAccRaw.transito?.otro);
+  const otrosOtro = Boolean(tipoAccRaw.otros?.otro || tipoAccRaw.otros?.texto);
   const tipoAccidente = {
     transito: {
       activo: Boolean(tipoAccRaw.transito?.activo),
@@ -2870,7 +3015,8 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       atropello: Boolean(tipoAccRaw.transito?.atropello),
       colision: Boolean(tipoAccRaw.transito?.colision),
       choque: Boolean(tipoAccRaw.transito?.choque),
-      otro: Boolean(tipoAccRaw.transito?.otro)
+      otro: transitoOtro,
+      otroTexto: transitoOtro ? String(tipoAccRaw.transito?.otroTexto || '').trim().toUpperCase() : ''
     },
     trauma: {
       activo: Boolean(tipoAccRaw.trauma?.activo),
@@ -2881,14 +3027,15 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       armaFuego: Boolean(tipoAccRaw.trauma?.armaFuego)
     },
     otros: {
-      texto: String(tipoAccRaw.otros?.texto || raw.mecanismoLesion || '').trim().toUpperCase(),
+      texto: otrosOtro ? String(tipoAccRaw.otros?.texto || raw.mecanismoLesion || '').trim().toUpperCase() : '',
+      otro: otrosOtro,
       agresionSexual: Boolean(tipoAccRaw.otros?.agresionSexual),
       intoxicacion: Boolean(tipoAccRaw.otros?.intoxicacion),
       explosion: Boolean(tipoAccRaw.otros?.explosion),
       ahogamiento: Boolean(tipoAccRaw.otros?.ahogamiento),
       caidaNivel: Boolean(tipoAccRaw.otros?.caidaNivel),
       caidaAltura: Boolean(tipoAccRaw.otros?.caidaAltura),
-      caidaAlturaMts: String(tipoAccRaw.otros?.caidaAlturaMts || '').trim(),
+      caidaAlturaMts: Boolean(tipoAccRaw.otros?.caidaAltura) ? String(tipoAccRaw.otros?.caidaAlturaMts || '').trim() : '',
       ahorcamiento: Boolean(tipoAccRaw.otros?.ahorcamiento)
     }
   };
@@ -2900,20 +3047,26 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
   const exposicionLesiones = String(abcRaw.exposicionLesiones || raw.exposicionLesiones || raw.motivoConsulta || abcRaw.lesiones || '').trim().toUpperCase();
   const motivoConsulta = String(raw.motivoConsulta || diagnostico || exposicionLesiones || '').trim().toUpperCase();
 
-  const fc = Number(svRaw.fc ?? raw.fc ?? 0) || null;
-  const fr = Number(svRaw.fr ?? raw.fr ?? 0) || null;
-  const paSistolica = Number(svRaw.paSistolica ?? raw.paSistolica ?? 0) || null;
-  const paDiastolica = Number(svRaw.paDiastolica ?? raw.paDiastolica ?? 0) || null;
-  const spo2 = Number(svRaw.spo2 ?? raw.spo2 ?? 0) || null;
-  const temperatura = Number(svRaw.temperatura ?? raw.temperatura ?? 0) || null;
-  const hgt = Number(svRaw.hgt ?? raw.glucemia ?? 0) || null;
-  const horaVitales = String(svRaw.hora ?? raw.horaVitales ?? '').trim();
+  const fc = summaryVital.fc;
+  const fr = summaryVital.fr;
+  const paSistolica = summaryVital.paSistolica;
+  const paDiastolica = summaryVital.paDiastolica;
+  const spo2 = summaryVital.spo2;
+  const temperatura = summaryVital.temperatura;
+  const hgt = summaryVital.hgt;
+  const horaVitales = summaryVital.hora;
 
-  const hasAnyCinc = ['caidaFacial', 'debilidadBrazo', 'dificultadHabla'].some(
-    (k) => cincRaw[k] !== undefined && cincRaw[k] !== null && cincRaw[k] !== ''
-  );
+  const parseCincBit = (val) => {
+    if (val === true || val === 1 || val === '1') return 1;
+    if (val === false || val === 0 || val === '0') return 0;
+    return null;
+  };
+  const cf = parseCincBit(cincRaw.caidaFacial);
+  const dbBit = parseCincBit(cincRaw.debilidadBrazo);
+  const dh = parseCincBit(cincRaw.dificultadHabla);
+  const hasAnyCinc = cf !== null || dbBit !== null || dh !== null;
   const cincinnatiEval = hasAnyCinc
-    ? evaluateCincinnatiScale(cincRaw.caidaFacial, cincRaw.debilidadBrazo, cincRaw.dificultadHabla)
+    ? evaluateCincinnatiScale(cf || 0, dbBit || 0, dh || 0)
     : {
         caidaFacial: null,
         debilidadBrazo: null,
@@ -2924,23 +3077,23 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       };
   const escalaCincinnati = {
     ...cincinnatiEval,
-    caidaFacial: cincRaw.caidaFacial === 0 || cincRaw.caidaFacial === '0' ? 0 : cincRaw.caidaFacial === 1 || cincRaw.caidaFacial === '1' || cincRaw.caidaFacial === true ? 1 : null,
-    debilidadBrazo: cincRaw.debilidadBrazo === 0 || cincRaw.debilidadBrazo === '0' ? 0 : cincRaw.debilidadBrazo === 1 || cincRaw.debilidadBrazo === '1' || cincRaw.debilidadBrazo === true ? 1 : null,
-    dificultadHabla: cincRaw.dificultadHabla === 0 || cincRaw.dificultadHabla === '0' ? 0 : cincRaw.dificultadHabla === 1 || cincRaw.dificultadHabla === '1' || cincRaw.dificultadHabla === true ? 1 : null,
+    caidaFacial: cf,
+    debilidadBrazo: dbBit,
+    dificultadHabla: dh,
     tiempoTranscurrido: String(cincRaw.tiempoTranscurrido || '').trim().toUpperCase()
   };
 
   const rawReqTraslado = trRaw.requiereTraslado;
-  const estadoTraslado = String(
-    raw.estadoTraslado ||
-    (rawReqTraslado === true ? 'EN_TRASLADO_6_15' : rawReqTraslado === false ? 'SIN_TRASLADO' : '')
-  ).trim().toUpperCase();
   const requiereTraslado =
-    rawReqTraslado === true || estadoTraslado === 'EN_TRASLADO_6_15' || estadoTraslado === 'ENTREGADO_HOSPITAL'
-      ? true
-      : rawReqTraslado === false || estadoTraslado === 'SIN_TRASLADO' || estadoTraslado === 'EN_ESCENA'
-        ? false
-        : null;
+    rawReqTraslado === true ||
+    (rawReqTraslado === undefined &&
+      (String(raw.estadoTraslado || '').trim().toUpperCase() === 'EN_TRASLADO_6_15' ||
+        String(raw.estadoTraslado || '').trim().toUpperCase() === 'ENTREGADO_HOSPITAL'));
+  const estadoTraslado = String(
+    raw.estadoTraslado || (requiereTraslado ? 'EN_TRASLADO_6_15' : 'SIN_TRASLADO')
+  )
+    .trim()
+    .toUpperCase();
   const medioTraslado = String(trRaw.medioTraslado || raw.unidadTraslado || '').trim().toUpperCase();
   const centroAsistencial = String(trRaw.centroAsistencial || raw.centroAsistencialDestino || '').trim().toUpperCase();
   const responsableRecepcion = String(trRaw.responsableRecepcion || raw.medicoReceptor || '').trim().toUpperCase();
@@ -2954,6 +3107,10 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
         .split(',')
         .map((p) => p.trim().toUpperCase())
         .filter(Boolean);
+
+  const rawPacFechaNac = String(pacRaw.fechaNacimiento || '').trim();
+  const maskedPacFechaNac = rawPacFechaNac ? formatDateInputDDMMYYYY(rawPacFechaNac) : '';
+  const computedPacAge = calculateAgeFromDDMMYYYY(maskedPacFechaNac);
 
   return {
     id: idAtencion,
@@ -2975,19 +3132,20 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     idBomberoAccidentado: String(raw.idBomberoAccidentado || raw.idRegistroBombero || '').trim(),
     nombrePaciente: nombrePac,
     documentoPaciente: rutPac,
-    edadPaciente: edadPac,
+    edadPaciente: computedPacAge ? computedPacAge.years : edadPac,
     sexoPaciente: sexoPac,
     alergiasConocidas: alergiasPac,
     paciente: {
       nombre: nombrePac,
       rut: rutPac,
       direccion: String(pacRaw.direccion || raw.direccionPaciente || '').trim().toUpperCase(),
-      edad: edadPac,
+      edad: computedPacAge ? computedPacAge.years : edadPac,
+      edadDetalle: computedPacAge ? computedPacAge.formatted : String(pacRaw.edadDetalle || '').trim(),
       sexo: sexoPac,
       nacionalidad: String(pacRaw.nacionalidad ?? '').trim().toUpperCase(),
       prevision: String(pacRaw.prevision || pacRaw.previsionSalud || '').trim().toUpperCase(),
       telefono: sanitizeChileanPhone(pacRaw.telefono || ''),
-      fechaNacimiento: String(pacRaw.fechaNacimiento || '').trim(),
+      fechaNacimiento: maskedPacFechaNac,
       grupoSanguineo: String(pacRaw.grupoSanguineo || pacRaw.sangre || '').trim().toUpperCase(),
       alergias: alergiasPac,
       antecedentes: datosMedicos.otrosAntecedentes
@@ -2998,6 +3156,7 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
     motivoConsulta,
     mecanismoLesion: String(raw.mecanismoLesion || tipoAccidente.otros.texto || '').trim().toUpperCase(),
     lugarSuceso,
+    lugarSucesoOtro,
     tipoAccidente,
     viaAerea,
     ventilacion,
@@ -3035,8 +3194,9 @@ export function buildCanonicalPatientCareDoc(raw = {}) {
       temperatura,
       hgt,
       evaDolor: evaNum,
-      timestamp: Number(svRaw.timestamp || nowMs)
+      timestamp: Number(summaryVital.timestamp || nowMs)
     },
+    signosVitalesLista,
     procedimientos,
     procedimientosInvasivos,
     tratamientos,

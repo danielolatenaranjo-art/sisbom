@@ -26,7 +26,7 @@ PRIVATE_KEY = os.environ.get("APPSTORE_PRIVATE_KEY", "").strip()
 
 BUNDLE_ID = "com.misisbom.sisbom.NFR3L3CC3L"
 TARGET_VERSION = "3.2.0"
-TARGET_BUILD_NUMBER = "3036"
+TARGET_BUILD_NUMBER = "3037"
 
 SUPPORT_URL = "https://sistemasentinel.cl/soporte"
 MARKETING_URL = "https://sistemasentinel.cl"
@@ -437,6 +437,153 @@ def main():
             break
     app_id = app_obj["id"]
     print(f"📱 App: {app_obj.get('attributes', {}).get('name')} (id={app_id})")
+
+    if "--testflight-only" in sys.argv:
+        print("🧪 MODO TESTFLIGHT ONLY: NO se tocará ninguna versión ni envío en revisión de App Store.")
+        selected_build = None
+        for attempt in range(44):
+            _, pre_res = api_request("GET", f"/v1/preReleaseVersions?filter[app]={app_id}&include=builds&limit=10", token=token)
+            builds = [inc for inc in pre_res.get("included", []) if inc.get("type") == "builds"]
+            if not builds:
+                _, b_res = api_request("GET", f"/v1/builds?filter[app]={app_id}&sort=-uploadedDate&limit=10", token=token)
+                builds = b_res.get("data", [])
+            for b in builds:
+                if str(b.get("attributes", {}).get("version")) == TARGET_BUILD_NUMBER and b.get("attributes", {}).get("processingState") == "VALID":
+                    selected_build = b
+                    break
+            if selected_build:
+                break
+            print(f"⏳ Esperando procesamiento de Build {TARGET_BUILD_NUMBER} en App Store Connect (intento {attempt + 1}/44)...")
+            time.sleep(15)
+
+        if not selected_build:
+            print(f"❌ ERROR CRÍTICO: Build {TARGET_BUILD_NUMBER} no alcanzó estado VALID a tiempo.")
+            sys.exit(1)
+
+        b_id = selected_build["id"]
+        print(f"✅ Build {TARGET_BUILD_NUMBER} VALID (id={b_id}). Configurando cifrado y TestFlight...")
+
+        st_enc, _ = api_request(
+            "PATCH",
+            f"/v1/builds/{b_id}",
+            body={"data": {"type": "builds", "id": b_id, "attributes": {"usesNonExemptEncryption": False}}},
+            token=token,
+        )
+        print(f"   🔐 usesNonExemptEncryption=False -> HTTP {st_enc}")
+
+        tf_whats_new = (
+            "SENTINEL ONE V3.2.0 (TestFlight): SENTINEL MED integrado (Ficha Clínica de Bomberos y "
+            "Parte de Ambulancia de Rescate con caché local y cálculo automático de edad), notificaciones "
+            "sensibles al tiempo y audio de emergencia al 100% en segundo plano en iOS."
+        )
+        _, bbl_res = api_request("GET", f"/v1/builds/{b_id}/betaBuildLocalizations", token=token)
+        existing_bbl_id = None
+        for loc in bbl_res.get("data", []):
+            if loc.get("attributes", {}).get("locale") == "es-ES":
+                existing_bbl_id = loc.get("id")
+                break
+        if existing_bbl_id:
+            st_bbl, _ = api_request(
+                "PATCH",
+                f"/v1/betaBuildLocalizations/{existing_bbl_id}",
+                body={"data": {"type": "betaBuildLocalizations", "id": existing_bbl_id, "attributes": {"whatsNew": tf_whats_new}}},
+                token=token,
+            )
+        else:
+            st_bbl, _ = api_request(
+                "POST",
+                "/v1/betaBuildLocalizations",
+                body={
+                    "data": {
+                        "type": "betaBuildLocalizations",
+                        "attributes": {"locale": "es-ES", "whatsNew": tf_whats_new},
+                        "relationships": {"build": {"data": {"type": "builds", "id": b_id}}},
+                    }
+                },
+                token=token,
+            )
+        print(f"   📝 betaBuildLocalizations (es-ES) -> HTTP {st_bbl}")
+
+        st_bbd, _ = api_request(
+            "PATCH",
+            f"/v1/buildBetaDetails/{b_id}",
+            body={"data": {"type": "buildBetaDetails", "id": b_id, "attributes": {"autoNotifyEnabled": True}}},
+            token=token,
+        )
+        print(f"   🔔 buildBetaDetails autoNotifyEnabled=True -> HTTP {st_bbd}")
+
+        _, brd_res = api_request("GET", f"/v1/apps/{app_id}/betaAppReviewDetail", token=token)
+        brd_id = brd_res.get("data", {}).get("id") or app_id
+        st_brd, _ = api_request(
+            "PATCH",
+            f"/v1/betaAppReviewDetails/{brd_id}",
+            body={
+                "data": {
+                    "type": "betaAppReviewDetails",
+                    "id": brd_id,
+                    "attributes": {
+                        "contactFirstName": "Daniel Antonio",
+                        "contactLastName": "Olate Naranjo",
+                        "contactPhone": "+56941279484",
+                        "contactEmail": "danielolatenaranjo@gmail.com",
+                        "demoAccountRequired": True,
+                        "demoAccountName": "100",
+                        "demoAccountPassword": "1234",
+                        "notes": "Código de Institución: PRUEBA -> Usuario: 100 / Clave de Acceso: 1234",
+                    },
+                }
+            },
+            token=token,
+        )
+        print(f"   👤 betaAppReviewDetails demoAccount -> HTTP {st_brd}")
+
+        _, bg_res = api_request("GET", f"/v1/apps/{app_id}/betaGroups?limit=50", token=token)
+        for bg in bg_res.get("data", []):
+            gid = bg.get("id")
+            if gid:
+                st_bg, _ = api_request(
+                    "POST",
+                    f"/v1/betaGroups/{gid}/relationships/builds",
+                    body={"data": [{"type": "builds", "id": b_id}]},
+                    token=token,
+                )
+                print(f"   👥 betaGroup {gid} asignado -> HTTP {st_bg}")
+
+        _, bt_res = api_request("GET", f"/v1/betaTesters?filter[apps]={app_id}&limit=200", token=token)
+        tester_refs = [{"type": "betaTesters", "id": t["id"]} for t in bt_res.get("data", []) if t.get("id")]
+        for i in range(0, len(tester_refs), 50):
+            chunk = tester_refs[i : i + 50]
+            st_it, _ = api_request(
+                "POST",
+                f"/v1/builds/{b_id}/relationships/individualTesters",
+                body={"data": chunk},
+                token=token,
+            )
+            print(f"   🧑‍🚒 individualTesters ({len(chunk)}) adjuntados -> HTTP {st_it}")
+
+        st_curr_sub, curr_sub_res = api_request("GET", f"/v1/builds/{b_id}/betaAppReviewSubmission", token=token)
+        curr_beta_state = curr_sub_res.get("data", {}).get("attributes", {}).get("betaReviewState", "")
+        if curr_beta_state in ("APPROVED", "IN_REVIEW", "WAITING_FOR_REVIEW"):
+            print(f"   ℹ️ betaAppReviewSubmission ya se encuentra en estado '{curr_beta_state}'.")
+        else:
+            st_bsub, bsub_res = api_request(
+                "POST",
+                "/v1/betaAppReviewSubmissions",
+                body={
+                    "data": {
+                        "type": "betaAppReviewSubmissions",
+                        "relationships": {"build": {"data": {"type": "builds", "id": b_id}}},
+                    }
+                },
+                token=token,
+            )
+            print(f"   🚀 betaAppReviewSubmissions -> HTTP {st_bsub} {json.dumps(bsub_res.get('data', {}).get('attributes', {}), ensure_ascii=False)}")
+
+        _, final_bbd = api_request("GET", f"/v1/buildBetaDetails/{b_id}", token=token)
+        _, final_bsub = api_request("GET", f"/v1/builds/{b_id}/betaAppReviewSubmission", token=token)
+        print("🏁 Estado final TestFlight buildBetaDetail:", json.dumps(final_bbd.get("data", {}).get("attributes", {}), ensure_ascii=False))
+        print("🏁 Estado final TestFlight betaAppReviewSubmission:", json.dumps(final_bsub.get("data", {}).get("attributes", {}), ensure_ascii=False))
+        return
 
     if "--promo-only" in sys.argv:
         _, ver_res = api_request("GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10", token=token)

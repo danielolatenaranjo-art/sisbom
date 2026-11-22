@@ -155,7 +155,9 @@ function buildApnsApsObject({
 }) {
   const safeLevel = APNS_CRITICAL_ALERTS_ENABLED && includeSound
     ? "critical"
-    : (interruptionLevel === "passive" ? "passive" : "active");
+    : (interruptionLevel === "passive"
+        ? "passive"
+        : (interruptionLevel === "time-sensitive" ? "time-sensitive" : "active"));
   const aps = {
     alert: {
       title: String(title || "SENTINEL ONE"),
