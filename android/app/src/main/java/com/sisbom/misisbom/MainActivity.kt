@@ -50,6 +50,7 @@ import android.widget.Toast
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -846,6 +847,7 @@ object NotificationHelper {
         claveForRepeat: String? = null,
         bypassForegroundMute: Boolean = false
     ) {
+        try {
         val prefs = context.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
         val isAirplaneMode = prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)
         if (isAirplaneMode) {
@@ -1099,6 +1101,7 @@ object NotificationHelper {
                     .setLabel("Escribir respuesta...")
                     .build()
                 val replyIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                    setPackage(context.packageName)
                     action = "ACTION_REPLY_CHAT"
                     putExtra("CHAT_ID", chatId)
                     putExtra("NOTIF_ID", notifId)
@@ -1117,6 +1120,7 @@ object NotificationHelper {
                 notificationBuilder.addAction(action)
             } else if (dispatchId != null) {
                 val attendIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                    setPackage(context.packageName)
                     action = "ACTION_ATTEND_DISPATCH"
                     putExtra("DISPATCH_ID", dispatchId)
                     putExtra("NOTIF_ID", notifId)
@@ -1134,6 +1138,7 @@ object NotificationHelper {
                 )
             } else if (alertId != null) {
                 val ackIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                    setPackage(context.packageName)
                     action = "ACTION_ACK_ALERT"
                     putExtra("ALERT_ID", alertId)
                     putExtra("NOTIF_ID", notifId)
@@ -1151,6 +1156,7 @@ object NotificationHelper {
                 )
 
                 val pinIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                    setPackage(context.packageName)
                     action = "ACTION_PIN_ALERT"
                     putExtra("ALERT_ID", alertId)
                     putExtra("NOTIF_ID", notifId)
@@ -1168,6 +1174,7 @@ object NotificationHelper {
                 )
             } else if (doorRequestId != null) {
                 val openDoorIntent = Intent(context, NotificationActionReceiver::class.java).apply {
+                    setPackage(context.packageName)
                     action = "ACTION_OPEN_DOOR"
                     putExtra("DOOR_REQUEST_ID", doorRequestId)
                     putExtra("NOTIF_ID", notifId)
@@ -1187,6 +1194,9 @@ object NotificationHelper {
         }
 
         notificationManager.notify(notifId, notificationBuilder.build())
+        } catch (t: Throwable) {
+            Log.e("FCM", "Error en sendNotification: ${t.message}")
+        }
     }
 
     private fun scheduleRepeatAlert(context: Context, dispatchId: String, clave: String) {
@@ -1338,6 +1348,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
+        try {
         if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
         MainActivity.initializeDynamicFirebase(applicationContext)
         val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
@@ -1626,16 +1637,23 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 }
             }
         }
+        } catch (t: Throwable) {
+            Log.e("FCM", "Error en onMessageReceived: ${t.message}")
+        }
     }
 
     override fun onNewToken(token: String) {
-        if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
-        MainActivity.initializeDynamicFirebase(applicationContext)
-        val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-        prefs.edit().putString("FCM_TOKEN", token).apply()
-        val userId = prefs.getString("USER_ID", null)
-        if (!userId.isNullOrBlank()) {
-            MainActivity.registerFcmTokenInFirestore(applicationContext, userId, token)
+        try {
+            if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
+            MainActivity.initializeDynamicFirebase(applicationContext)
+            val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("FCM_TOKEN", token).apply()
+            val userId = prefs.getString("USER_ID", null)
+            if (!userId.isNullOrBlank()) {
+                MainActivity.registerFcmTokenInFirestore(applicationContext, userId, token)
+            }
+        } catch (t: Throwable) {
+            Log.w("FCM", "Error en onNewToken: ${t.message}")
         }
     }
 }
@@ -1648,6 +1666,65 @@ class DispatchForegroundService : Service() {
         @Volatile
         var instance: DispatchForegroundService? = null
 
+        fun isUserInActiveEmergencyDispatch(context: Context): Boolean {
+            return try {
+                val appCtx = context.applicationContext
+                if (MainActivity.getEcosystemAppMode(appCtx) != "ONE") return false
+                val prefs = appCtx.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val userId = (prefs.getString("USER_ID", "") ?: "").trim()
+                val estado = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
+                val enServicio = (prefs.getString("USER_EN_SERVICIO", "0") ?: "0").trim()
+                val isAirplane = prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)
+                !isAirplane &&
+                    userId.isNotEmpty() &&
+                    estado == "0-9" &&
+                    enServicio.isNotEmpty() &&
+                    enServicio != "0" &&
+                    !enServicio.startsWith("-") &&
+                    enServicio != "EN EL CUARTEL" &&
+                    enServicio != "EN LA COMPAÑIA" &&
+                    enServicio != "EN LA COMPAÑÍA" &&
+                    !enServicio.startsWith("UNIDAD:")
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
+        fun hasValidLocationPermissionForCurrentState(context: Context): Boolean {
+            return try {
+                val hasFine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                val hasCoarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                if (!hasFine && !hasCoarse) return false
+                if (!MainActivity.isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+                } else {
+                    true
+                }
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
+        fun canStartDispatchForegroundServiceNow(context: Context): Boolean {
+            return try {
+                val appCtx = context.applicationContext
+                if (MainActivity.getEcosystemAppMode(appCtx) != "ONE") return false
+                val prefs = appCtx.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                val userId = (prefs.getString("USER_ID", "") ?: "").trim()
+                if (userId.isEmpty()) return false
+                if (isUserInActiveEmergencyDispatch(appCtx) && hasValidLocationPermissionForCurrentState(appCtx)) {
+                    return true
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    MainActivity.isAppInForeground
+                } else {
+                    true
+                }
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
         fun evaluateLocationTrackingNow(context: Context) {
             val appCtx = context.applicationContext
             if (MainActivity.getEcosystemAppMode(appCtx) != "ONE") return
@@ -1655,23 +1732,22 @@ class DispatchForegroundService : Service() {
                 try {
                     val prefs = appCtx.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
                     val userId = (prefs.getString("USER_ID", "") ?: "").trim()
-                    val estado = (prefs.getString("USER_ESTADO", "0-8") ?: "0-8").trim().uppercase(Locale.ROOT)
-                    val enServicio = (prefs.getString("USER_EN_SERVICIO", "0") ?: "0").trim()
-                    val isAirplane = prefs.getBoolean("MODO_AVION", false) || prefs.getBoolean("SILENCIO_ABSOLUTO", false)
+                    val isDispatchService = isUserInActiveEmergencyDispatch(appCtx)
 
-                    val isDispatchService = !isAirplane &&
-                        userId.isNotEmpty() &&
-                        estado == "0-9" &&
-                        enServicio.isNotEmpty() &&
-                        enServicio != "0" &&
-                        !enServicio.startsWith("-") &&
-                        enServicio != "EN EL CUARTEL" &&
-                        enServicio != "EN LA COMPAÑIA" &&
-                        enServicio != "EN LA COMPAÑÍA" &&
-                        !enServicio.startsWith("UNIDAD:")
-
-                    if (isDispatchService) {
-                        instance?.startLocationTracking(userId)
+                    if (isDispatchService && hasValidLocationPermissionForCurrentState(appCtx)) {
+                        val activeSvc = instance
+                        if (activeSvc != null) {
+                            activeSvc.startLocationTracking(userId)
+                        } else if (canStartDispatchForegroundServiceNow(appCtx)) {
+                            try {
+                                val svcIntent = Intent(appCtx, DispatchForegroundService::class.java)
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    ContextCompat.startForegroundService(appCtx, svcIntent)
+                                } else {
+                                    appCtx.startService(svcIntent)
+                                }
+                            } catch (_: Throwable) {}
+                        }
                     } else {
                         instance?.stopLocationTracking()
                         if (userId.isNotEmpty()) {
@@ -1706,7 +1782,7 @@ class DispatchForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") {
-            stopSelf()
+            try { stopSelf() } catch (_: Throwable) {}
             return
         }
         instance = this
@@ -1714,65 +1790,85 @@ class DispatchForegroundService : Service() {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             serviceWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SentinelOneV3::ServiceWakeLock").apply {
                 setReferenceCounted(false)
-                acquire()
+                acquire(15 * 60 * 1000L)
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         MainActivity.initializeDynamicFirebase(applicationContext)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-        startForegroundServiceNotification()
-        authenticateAndListen()
+        if (isUserInActiveEmergencyDispatch(applicationContext) && hasValidLocationPermissionForCurrentState(this)) {
+            isTrackingLocation = true
+        }
+        if (!startForegroundServiceNotification()) {
+            return
+        }
+        try {
+            authenticateAndListen()
+        } catch (t: Throwable) {
+            Log.w("DispatchService", "Error iniciando listeners: ${t.message}")
+        }
     }
 
-    private fun startForegroundServiceNotification() {
-        val channelId = "sisbom_foreground_v2"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Monitoreo de Emergencias SENTINEL ONE",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Mantiene la conexión activa con la Central de Alarmas"
-                setShowBadge(false)
+    private fun startForegroundServiceNotification(): Boolean {
+        return try {
+            val channelId = "sisbom_foreground_v2"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "Monitoreo de Emergencias SENTINEL ONE",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Mantiene la conexión activa con la Central de Alarmas"
+                    setShowBadge(false)
+                }
+                val manager = getSystemService(NotificationManager::class.java)
+                manager?.createNotificationChannel(channel)
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
-        }
 
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.drawable.logo)
-            .setContentTitle("SENTINEL ONE")
-            .setContentText("Servicio de despacho y alertas activo")
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val hasLoc = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            val fgType = if (hasLoc && isTrackingLocation) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            } else {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            val intent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             }
-            try {
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                intent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val notification = NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(R.drawable.logo)
+                .setContentTitle("SENTINEL ONE")
+                .setContentText("Servicio de despacho y alertas activo")
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val hasLoc = hasValidLocationPermissionForCurrentState(this)
+                val fgType = if (hasLoc && isTrackingLocation) {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                } else {
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                }
                 startForeground(1001, notification, fgType)
-            } catch (_: Exception) {
-                startForeground(1001, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(1001, notification)
             }
-        } else {
-            startForeground(1001, notification)
+            true
+        } catch (t: Throwable) {
+            Log.w("DispatchService", "No se pudo iniciar ForegroundService (${t.javaClass.simpleName}): ${t.message}")
+            isTrackingLocation = false
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                } else {
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                }
+            } catch (_: Throwable) {}
+            try { stopSelf() } catch (_: Throwable) {}
+            false
         }
     }
 
@@ -2481,12 +2577,12 @@ class DispatchForegroundService : Service() {
         }
 
         if (isTrackingLocation) return
-        val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        if (!hasFine && !hasCoarse) return
+        if (!hasValidLocationPermissionForCurrentState(this)) return
 
         isTrackingLocation = true
-        startForegroundServiceNotification()
+        if (!startForegroundServiceNotification()) {
+            return
+        }
         val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 6_000L)
             .setMinUpdateIntervalMillis(3_000L)
             .setMinUpdateDistanceMeters(0f)
@@ -2560,7 +2656,7 @@ class DispatchForegroundService : Service() {
         }
     }
 
-    fun stopLocationTracking() {
+    fun stopLocationTracking(allowForegroundServiceUpdate: Boolean = true) {
         val wasTracking = isTrackingLocation
         locationCallback?.let {
             try {
@@ -2578,34 +2674,89 @@ class DispatchForegroundService : Service() {
                     ?.removeValue()
             }
         } catch (_: Exception) {}
-        if (wasTracking) {
-            try {
-                startForegroundServiceNotification()
-            } catch (_: Exception) {}
+        if (wasTracking && allowForegroundServiceUpdate) {
+            if (Build.VERSION.SDK_INT >= 35 && !MainActivity.isAppInForeground) {
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
+                    stopSelf()
+                } catch (_: Throwable) {}
+            } else {
+                try {
+                    startForegroundServiceNotification()
+                } catch (_: Throwable) {}
+            }
         }
+    }
+
+    private fun handleForegroundServiceTimeout(startId: Int, fgsType: Int) {
+        Log.w("DispatchService", "onTimeout recibido (startId=$startId, fgsType=$fgsType). Deteniendo servicio.")
+        try { stopLocationTracking(allowForegroundServiceUpdate = false) } catch (_: Throwable) {}
+        try {
+            if (serviceWakeLock?.isHeld == true) {
+                serviceWakeLock?.release()
+            }
+        } catch (_: Throwable) {}
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Throwable) {}
+        try { stopSelf(startId) } catch (_: Throwable) {
+            try { stopSelf() } catch (_: Throwable) {}
+        }
+    }
+
+    override fun onTimeout(startId: Int) {
+        handleForegroundServiceTimeout(startId, 0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleForegroundServiceTimeout(startId, fgsType)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") {
-            stopSelf()
+            try { stopSelf() } catch (_: Throwable) {}
             return START_NOT_STICKY
         }
-        startForegroundServiceNotification()
-        if (despachosListener == null) {
-            authenticateAndListen()
-        } else {
-            listenToCentralSciAlertsIfNeeded()
+        if (!startForegroundServiceNotification()) {
+            return START_NOT_STICKY
         }
-        return START_STICKY
+        try {
+            if (despachosListener == null) {
+                authenticateAndListen()
+            } else {
+                listenToCentralSciAlertsIfNeeded()
+            }
+        } catch (t: Throwable) {
+            Log.w("DispatchService", "Error en onStartCommand: ${t.message}")
+        }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (isTrackingLocation) START_STICKY else START_NOT_STICKY
+        } else {
+            START_STICKY
+        }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         try {
             if (MainActivity.getEcosystemAppMode(applicationContext) != "ONE") return
-            val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
-            val userId = prefs.getString("USER_ID", null)
-            if (!userId.isNullOrBlank()) {
+            val canRestart = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                isUserInActiveEmergencyDispatch(applicationContext) && hasValidLocationPermissionForCurrentState(applicationContext)
+            } else {
+                val prefs = applicationContext.getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                !prefs.getString("USER_ID", null).isNullOrBlank()
+            }
+            if (canRestart) {
                 val restartIntent = Intent(applicationContext, DispatchForegroundService::class.java)
                 val pendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     PendingIntent.getForegroundService(
@@ -2629,7 +2780,7 @@ class DispatchForegroundService : Service() {
                     pendingIntent
                 )
             }
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
     }
 
     override fun onDestroy() {
@@ -2798,6 +2949,7 @@ class DailyReminderReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
+        try {
         val appCtx = context.applicationContext
         val ecoMode = MainActivity.getEcosystemAppMode(appCtx)
         val isBootOrUpdate = intent.action == Intent.ACTION_BOOT_COMPLETED ||
@@ -2833,14 +2985,18 @@ class DailyReminderReceiver : BroadcastReceiver() {
         if (isBootOrUpdate) {
             if (!userId.isNullOrBlank()) {
                 try {
-                    val svcIntent = Intent(appCtx, DispatchForegroundService::class.java)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        appCtx.startForegroundService(svcIntent)
-                    } else {
-                        appCtx.startService(svcIntent)
+                    if (DispatchForegroundService.canStartDispatchForegroundServiceNow(appCtx)) {
+                        val svcIntent = Intent(appCtx, DispatchForegroundService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            appCtx.startForegroundService(svcIntent)
+                        } else {
+                            appCtx.startService(svcIntent)
+                        }
                     }
+                } catch (_: Throwable) {}
+                try {
                     MainActivity.registerFcmTokenInFirestore(appCtx, userId)
-                } catch (_: Exception) {}
+                } catch (_: Throwable) {}
             }
             return
         }
@@ -2881,11 +3037,15 @@ class DailyReminderReceiver : BroadcastReceiver() {
                     }
                 }
         }
+        } catch (t: Throwable) {
+            Log.w("DailyReminder", "Error en onReceive: ${t.message}")
+        }
     }
 }
 
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        try {
         val action = intent.action ?: return
         val notifId = intent.getIntExtra("NOTIF_ID", 0)
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -2954,6 +3114,7 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     ),
                     SetOptions.merge()
                 )
+                DispatchForegroundService.evaluateLocationTrackingNow(context)
                 notificationManager.cancel(notifId)
             }
             "ACTION_ACK_ALERT" -> {
@@ -2996,6 +3157,9 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 notificationManager.cancel(notifId)
             }
         }
+        } catch (t: Throwable) {
+            Log.w("NotifAction", "Error en NotificationActionReceiver: ${t.message}")
+        }
     }
 }
 
@@ -3007,17 +3171,30 @@ class SisBomApplication : android.app.Application() {
         super.onCreate()
         val prevHandler = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            val msg = throwable.message ?: ""
-            val isBgThread = thread != Looper.getMainLooper().thread
-            if (isBgThread && throwable is IllegalStateException &&
-                (msg.contains("FirebaseApp was deleted") || msg.contains("FirebaseApp is not initialized"))
-            ) {
-                Log.w("SENTINEL_FIREBASE", "Ignorando excepción transitoria de worker Firebase en segundo plano: $msg")
+            val isBgThread = try {
+                Looper.getMainLooper()?.thread !== thread
+            } catch (_: Throwable) {
+                false
+            }
+            if (isBgThread) {
+                Log.e("SentinelCrashShield", "Excepción contenida en hilo secundario (${thread.name})", throwable)
+                try {
+                    val trace = Log.getStackTraceString(throwable).take(8000)
+                    getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE)
+                        .edit()
+                        .putString("last_bg_crash_trace", trace)
+                        .putLong("last_bg_crash_ts", System.currentTimeMillis())
+                        .apply()
+                } catch (_: Throwable) {}
                 return@setDefaultUncaughtExceptionHandler
             }
             prevHandler?.uncaughtException(thread, throwable)
         }
-        MainActivity.initializeDynamicFirebase(this)
+        try {
+            MainActivity.initializeDynamicFirebase(this)
+        } catch (t: Throwable) {
+            Log.w("SentinelCrashShield", "Error en initializeDynamicFirebase: ${t.message}")
+        }
     }
 }
 
@@ -3035,6 +3212,18 @@ class MainActivity : ComponentActivity() {
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile
     private var pendingIntentJson: String? = null
+    private val bgFgsStopHandler = Handler(Looper.getMainLooper())
+    private val bgFgsStopRunnable = Runnable {
+        try {
+            if (Build.VERSION.SDK_INT >= 35 &&
+                !isAppInForeground &&
+                getEcosystemAppMode(applicationContext) == "ONE" &&
+                !DispatchForegroundService.isUserInActiveEmergencyDispatch(applicationContext)
+            ) {
+                stopDispatchForegroundServiceSafely()
+            }
+        } catch (_: Throwable) {}
+    }
 
     companion object {
         @Volatile
@@ -3409,13 +3598,14 @@ class MainActivity : ComponentActivity() {
                 val options = builder.build()
 
                 // 1. Inicializar [DEFAULT] directamente con las opciones del cliente sin llamar NUNCA a defaultApp.delete()
-                if (FirebaseApp.getApps(appContext).isEmpty()) {
+                val hasDefaultApp = FirebaseApp.getApps(appContext).any { it.name == FirebaseApp.DEFAULT_APP_NAME }
+                if (!hasDefaultApp) {
                     try {
                         FirebaseApp.initializeApp(appContext, options)
-                    } catch (_: Exception) {
+                    } catch (_: Throwable) {
                         try {
                             FirebaseApp.initializeApp(appContext)
-                        } catch (_: Exception) {}
+                        } catch (_: Throwable) {}
                     }
                 }
                 currentTenantProjectId = projectId
@@ -3439,10 +3629,41 @@ class MainActivity : ComponentActivity() {
             initializeDynamicFirebase(context)
             dynamicFirebaseApp?.let { return it }
             val appContext = context.applicationContext
-            if (FirebaseApp.getApps(appContext).isEmpty()) {
-                FirebaseApp.initializeApp(appContext)
+            if (FirebaseApp.getApps(appContext).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) {
+                try {
+                    FirebaseApp.initializeApp(appContext)
+                } catch (_: Throwable) {}
+            }
+            if (FirebaseApp.getApps(appContext).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) {
+                try {
+                    FirebaseApp.initializeApp(
+                        appContext,
+                        FirebaseOptions.Builder()
+                            .setApiKey("AIzaSyBjjSBwmUevGC0vT0GdxtQUw-yvawdrH44")
+                            .setProjectId("sisbom-central")
+                            .setApplicationId("1:432594591351:android:99a442ea6ae05276beb072")
+                            .setGcmSenderId("432594591351")
+                            .setStorageBucket("sisbom-central.firebasestorage.app")
+                            .build()
+                    )
+                } catch (_: Throwable) {}
             }
             return FirebaseApp.getInstance()
+        }
+
+        fun getSafeFirebaseMessaging(context: Context): FirebaseMessaging? {
+            return try {
+                val appContext = context.applicationContext
+                if (FirebaseApp.getApps(appContext).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) {
+                    initializeDynamicFirebase(appContext)
+                }
+                if (FirebaseApp.getApps(appContext).none { it.name == FirebaseApp.DEFAULT_APP_NAME }) {
+                    return null
+                }
+                FirebaseMessaging.getInstance()
+            } catch (_: Throwable) {
+                null
+            }
         }
 
         fun getActiveFirestore(context: Context): FirebaseFirestore {
@@ -3526,10 +3747,12 @@ class MainActivity : ComponentActivity() {
                 if (isConductor) topics.add("conductores")
                 if (isCentral) topics.add("central_operador")
 
-                val fm = FirebaseMessaging.getInstance()
-                topics.forEach { t -> fm.subscribeToTopic(t) }
-                if (!isConductor) fm.unsubscribeFromTopic("conductores")
-                if (!isCentral) fm.unsubscribeFromTopic("central_operador")
+                val fm = getSafeFirebaseMessaging(appContext)
+                if (fm != null) {
+                    topics.forEach { t -> fm.subscribeToTopic(t) }
+                    if (!isConductor) fm.unsubscribeFromTopic("conductores")
+                    if (!isCentral) fm.unsubscribeFromTopic("central_operador")
+                }
 
                 val comboSig = "$activePid:$userId:$token:$isMultiDev"
                 val nowMs = System.currentTimeMillis()
@@ -3569,11 +3792,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            val fmSafe = getSafeFirebaseMessaging(appContext) ?: return
             val storedTokenPid = prefs.getString("FCM_TOKEN_PROJECT_ID", "") ?: ""
             if (activePid.isNotBlank() && storedTokenPid != activePid && tokenOverride.isNullOrBlank()) {
                 // Si el token previo fue emitido con otro SenderId (ej. sisbom-central 432594591351), regenerarlo para el proyecto activo
-                FirebaseMessaging.getInstance().deleteToken().addOnCompleteListener {
-                    FirebaseMessaging.getInstance().token.addOnSuccessListener { newToken ->
+                fmSafe.deleteToken().addOnCompleteListener {
+                    getSafeFirebaseMessaging(appContext)?.token?.addOnSuccessListener { newToken ->
                         if (!newToken.isNullOrBlank()) {
                             applyToken(newToken)
                         }
@@ -3585,7 +3809,7 @@ class MainActivity : ComponentActivity() {
             if (!tokenOverride.isNullOrBlank()) {
                 applyToken(tokenOverride)
             } else {
-                FirebaseMessaging.getInstance().token.addOnSuccessListener { token ->
+                fmSafe.token.addOnSuccessListener { token ->
                     if (!token.isNullOrBlank()) {
                         applyToken(token)
                     }
@@ -3679,7 +3903,6 @@ class MainActivity : ComponentActivity() {
                 if (locationDisclosed) {
                     requestNotificationPermissionOnly()
                 }
-                startDispatchForegroundServiceSafely()
                 scheduleDailyReminder()
                 registerFcmTokenInFirestore(this, savedUserId)
             }
@@ -3695,223 +3918,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val resolveLocalAssetResponse: (String) -> WebResourceResponse? = resolveAsset@{ rawPath ->
-            val decoded = try {
-                java.net.URLDecoder.decode(rawPath.trimStart('/'), "UTF-8")
-            } catch (_: Exception) {
-                rawPath.trimStart('/')
-            }
-            val cleanPath = decoded.ifEmpty { "index.html" }
-            val activeMode = getEcosystemAppMode(this@MainActivity)
-            val candidatePaths = mutableListOf<String>()
-
-            if (activeMode != "ONE") {
-                val modePrefix = activeMode.lowercase(Locale.ROOT)
-                if (!cleanPath.startsWith("$modePrefix/")) {
-                    val swappedSub = if (cleanPath.startsWith("_expo/")) {
-                        "expo_bundle/" + cleanPath.removePrefix("_expo/")
-                    } else {
-                        cleanPath
-                    }
-                    candidatePaths.add("www/$modePrefix/$swappedSub")
-                }
-            }
-
-            if (cleanPath.startsWith("_expo/")) {
-                candidatePaths.add("www/expo_bundle/" + cleanPath.removePrefix("_expo/"))
-            }
-            candidatePaths.add("www/$cleanPath")
-            candidatePaths.add(cleanPath.removePrefix("assets/"))
-            candidatePaths.add(cleanPath)
-
-            for (assetPath in candidatePaths) {
-                try {
-                    val stream = assets.open(assetPath)
-                    val mimeType = when {
-                        assetPath.endsWith(".html", true) -> "text/html"
-                        assetPath.endsWith(".js", true) || assetPath.endsWith(".mjs", true) -> "application/javascript"
-                        assetPath.endsWith(".css", true) -> "text/css"
-                        assetPath.endsWith(".json", true) -> "application/json"
-                        assetPath.endsWith(".png", true) -> "image/png"
-                        assetPath.endsWith(".jpg", true) || assetPath.endsWith(".jpeg", true) -> "image/jpeg"
-                        assetPath.endsWith(".gif", true) -> "image/gif"
-                        assetPath.endsWith(".svg", true) -> "image/svg+xml"
-                        assetPath.endsWith(".ico", true) -> "image/x-icon"
-                        assetPath.endsWith(".mp3", true) -> "audio/mpeg"
-                        assetPath.endsWith(".wav", true) -> "audio/wav"
-                        assetPath.endsWith(".mp4", true) -> "video/mp4"
-                        assetPath.endsWith(".webm", true) -> "video/webm"
-                        assetPath.endsWith(".ttf", true) -> "font/ttf"
-                        assetPath.endsWith(".woff", true) -> "font/woff"
-                        assetPath.endsWith(".woff2", true) -> "font/woff2"
-                        else -> "application/octet-stream"
-                    }
-                    val headers = mapOf(
-                        "Access-Control-Allow-Origin" to "*",
-                        "Cache-Control" to "no-cache"
-                    )
-                    return@resolveAsset WebResourceResponse(mimeType, "UTF-8", 200, "OK", headers, stream)
-                } catch (_: Exception) {}
-            }
-            null
-        }
-
-        val assetLoader = WebViewAssetLoader.Builder()
-            .setDomain("appassets.androidplatform.net")
-            .addPathHandler("/") { path -> resolveLocalAssetResponse(path) }
-            .build()
-
-        val wv = WebView(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            )
-            setBackgroundColor(android.graphics.Color.parseColor("#060911"))
-            keepScreenOn = true
-
-            // Regla 8 AGENTS.md: Prohibición absoluta del roller de selección de texto y pantalla fija
-            isLongClickable = false
-            isHapticFeedbackEnabled = false
-            setOnLongClickListener { true }
-            overScrollMode = View.OVER_SCROLL_NEVER
-            isVerticalScrollBarEnabled = false
-            isHorizontalScrollBarEnabled = false
-
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
-                allowFileAccess = true
-                allowContentAccess = true
-                setGeolocationEnabled(true)
-                cacheMode = WebSettings.LOAD_DEFAULT
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                textZoom = 100
-                setSupportZoom(false)
-                builtInZoomControls = false
-                displayZoomControls = false
-            }
-
-            addJavascriptInterface(WebAppInterface(this@MainActivity), "AndroidApp")
-            addJavascriptInterface(SentinelAndroidBridge(this@MainActivity), "SentinelAndroidBridge")
-
-            webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(
-                    view: WebView?,
-                    request: WebResourceRequest?
-                ): WebResourceResponse? {
-                    val url = request?.url ?: return null
-                    val host = (url.host ?: "").lowercase(Locale.ROOT)
-                    if (host == "appassets.local") {
-                        return resolveLocalAssetResponse(url.path ?: "/index.html")
-                    }
-                    if (host.contains("google.com") && (url.path?.contains("/vt") == true)) {
-                        val cachedTile = interceptAndCacheGoogleMapTile(url)
-                        if (cachedTile != null) return cachedTile
-                    }
-                    return assetLoader.shouldInterceptRequest(url)
-                }
-
-                override fun shouldOverrideUrlLoading(
-                    view: WebView?,
-                    request: WebResourceRequest?
-                ): Boolean {
-                    val uri = request?.url ?: return false
-                    val scheme = (uri.scheme ?: "").lowercase()
-                    if (request.isForMainFrame == false && (scheme == "https" || scheme == "http")) {
-                        return false
-                    }
-                    return handleExternalUri(uri)
-                }
-
-                @Deprecated("Deprecated in Java")
-                override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
-                    if (url.isNullOrBlank()) return false
-                    return handleExternalUri(Uri.parse(url))
-                }
-
-                override fun onReceivedError(
-                    view: WebView?,
-                    request: WebResourceRequest?,
-                    error: WebResourceError?
-                ) {
-                    val uri = request?.url
-                    if (uri != null && request.isForMainFrame) {
-                        val scheme = (uri.scheme ?: "").lowercase()
-                        if (scheme != "https" && scheme != "http" && scheme != "about" && scheme != "data" && scheme != "blob") {
-                            handleExternalUri(uri)
-                            view?.stopLoading()
-                            return
-                        }
-                    }
-                    super.onReceivedError(view, request, error)
-                }
-
-                @Deprecated("Deprecated in Java")
-                override fun onReceivedError(
-                    view: WebView?,
-                    errorCode: Int,
-                    description: String?,
-                    failingUrl: String?
-                ) {
-                    if (!failingUrl.isNullOrBlank()) {
-                        val uri = try { Uri.parse(failingUrl) } catch (_: Exception) { null }
-                        val scheme = (uri?.scheme ?: "").lowercase()
-                        if (uri != null && scheme != "https" && scheme != "http" && scheme != "about" && scheme != "data" && scheme != "blob") {
-                            handleExternalUri(uri)
-                            view?.stopLoading()
-                            return
-                        }
-                    }
-                    super.onReceivedError(view, errorCode, description, failingUrl)
-                }
-
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
-                    val hwId = getHardwareDeviceId(this@MainActivity)
-                    val fcmTok = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE).getString("FCM_TOKEN", "") ?: ""
-                    view?.evaluateJavascript(
-                        "try { window.__SENTINEL_HW_DEVICE_ID__ = '$hwId'; if ('$fcmTok') window.__SENTINEL_FCM_TOKEN__ = '$fcmTok'; } catch(e) {}",
-                        null
-                    )
-                    injectSafeAreaCssInsetsToWebView()
-                    val cachedDispatchesJson = lastNativeDispatchesMsgJson
-                    if (!cachedDispatchesJson.isNullOrBlank()) {
-                        view?.evaluateJavascript(
-                            "try { window.dispatchEvent(new CustomEvent('sentinelNativeFirestoreSync', { detail: $cachedDispatchesJson })); } catch(e) {}",
-                            null
-                        )
-                    }
-                    dispatchPendingIntentToWebView()
-                }
-            }
-
-            webChromeClient = object : WebChromeClient() {
-                override fun onGeolocationPermissionsShowPrompt(
-                    origin: String?,
-                    callback: GeolocationPermissions.Callback?
-                ) {
-                    callback?.invoke(origin, true, false)
-                }
-
-                override fun onPermissionRequest(request: PermissionRequest?) {
-                    request?.grant(request.resources)
-                }
-            }
-
-            loadUrl(getEcosystemEntryUrl(initialEcoMode))
-        }
-
-        webView = wv
-        activeWebView = wv
         val rootContainer = android.widget.FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
             setBackgroundColor(barBgColor)
-            addView(wv)
         }
         rootContainerRef = rootContainer
         setContentView(rootContainer)
@@ -3940,9 +3952,11 @@ class MainActivity : ComponentActivity() {
                     view.setPadding(sysBars.left, 0, sysBars.right, keyboardBottomOnly)
                 }
             }
-            wv.requestLayout()
+            webView?.requestLayout()
             WindowInsetsCompat.CONSUMED
         }
+
+        mountWebViewSafely(getEcosystemEntryUrl(initialEcoMode), 0)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -3978,6 +3992,271 @@ class MainActivity : ComponentActivity() {
                 }
             }
         })
+    }
+
+    private fun resolveLocalAssetResponse(rawPath: String): WebResourceResponse? {
+        val decoded = try {
+            java.net.URLDecoder.decode(rawPath.trimStart('/'), "UTF-8")
+        } catch (_: Exception) {
+            rawPath.trimStart('/')
+        }
+        val cleanPath = decoded.ifEmpty { "index.html" }
+        val activeMode = getEcosystemAppMode(this@MainActivity)
+        val candidatePaths = mutableListOf<String>()
+
+        if (activeMode != "ONE") {
+            val modePrefix = activeMode.lowercase(Locale.ROOT)
+            if (!cleanPath.startsWith("$modePrefix/")) {
+                val swappedSub = if (cleanPath.startsWith("_expo/")) {
+                    "expo_bundle/" + cleanPath.removePrefix("_expo/")
+                } else {
+                    cleanPath
+                }
+                candidatePaths.add("www/$modePrefix/$swappedSub")
+            }
+        }
+
+        if (cleanPath.startsWith("_expo/")) {
+            candidatePaths.add("www/expo_bundle/" + cleanPath.removePrefix("_expo/"))
+        }
+        candidatePaths.add("www/$cleanPath")
+        candidatePaths.add(cleanPath.removePrefix("assets/"))
+        candidatePaths.add(cleanPath)
+
+        for (assetPath in candidatePaths) {
+            try {
+                val stream = assets.open(assetPath)
+                val mimeType = when {
+                    assetPath.endsWith(".html", true) -> "text/html"
+                    assetPath.endsWith(".js", true) || assetPath.endsWith(".mjs", true) -> "application/javascript"
+                    assetPath.endsWith(".css", true) -> "text/css"
+                    assetPath.endsWith(".json", true) -> "application/json"
+                    assetPath.endsWith(".png", true) -> "image/png"
+                    assetPath.endsWith(".jpg", true) || assetPath.endsWith(".jpeg", true) -> "image/jpeg"
+                    assetPath.endsWith(".gif", true) -> "image/gif"
+                    assetPath.endsWith(".svg", true) -> "image/svg+xml"
+                    assetPath.endsWith(".ico", true) -> "image/x-icon"
+                    assetPath.endsWith(".mp3", true) -> "audio/mpeg"
+                    assetPath.endsWith(".wav", true) -> "audio/wav"
+                    assetPath.endsWith(".mp4", true) -> "video/mp4"
+                    assetPath.endsWith(".webm", true) -> "video/webm"
+                    assetPath.endsWith(".ttf", true) -> "font/ttf"
+                    assetPath.endsWith(".woff", true) -> "font/woff"
+                    assetPath.endsWith(".woff2", true) -> "font/woff2"
+                    else -> "application/octet-stream"
+                }
+                val headers = mapOf(
+                    "Access-Control-Allow-Origin" to "*",
+                    "Cache-Control" to "no-cache"
+                )
+                return WebResourceResponse(mimeType, "UTF-8", 200, "OK", headers, stream)
+            } catch (_: Exception) {}
+        }
+        return null
+    }
+
+    @SuppressLint("SetJavaScriptEnabled", "ClickableViewAccessibility")
+    private fun mountWebViewSafely(entryUrl: String, attempt: Int = 0) {
+        if (isFinishing || isDestroyed) return
+        val container = rootContainerRef ?: return
+        try {
+            val prev = webView
+            if (prev != null) {
+                try {
+                    container.removeView(prev)
+                    if (activeWebView === prev) activeWebView = null
+                    prev.destroy()
+                } catch (_: Throwable) {}
+                webView = null
+            }
+
+            val assetLoader = WebViewAssetLoader.Builder()
+                .setDomain("appassets.androidplatform.net")
+                .addPathHandler("/") { path -> resolveLocalAssetResponse(path) }
+                .build()
+
+            val wv = WebView(this).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setBackgroundColor(android.graphics.Color.parseColor("#060911"))
+                keepScreenOn = true
+
+                // Regla 8 AGENTS.md: Prohibición absoluta del roller de selección de texto y pantalla fija
+                isLongClickable = false
+                isHapticFeedbackEnabled = false
+                setOnLongClickListener { true }
+                overScrollMode = View.OVER_SCROLL_NEVER
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
+
+                settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    databaseEnabled = true
+                    mediaPlaybackRequiresUserGesture = false
+                    allowFileAccess = true
+                    allowContentAccess = true
+                    setGeolocationEnabled(true)
+                    cacheMode = WebSettings.LOAD_DEFAULT
+                    mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    textZoom = 100
+                    setSupportZoom(false)
+                    builtInZoomControls = false
+                    displayZoomControls = false
+                }
+
+                addJavascriptInterface(WebAppInterface(this@MainActivity), "AndroidApp")
+                addJavascriptInterface(SentinelAndroidBridge(this@MainActivity), "SentinelAndroidBridge")
+
+                webViewClient = object : WebViewClient() {
+                    override fun onRenderProcessGone(
+                        view: WebView?,
+                        detail: RenderProcessGoneDetail?
+                    ): Boolean {
+                        val didCrash = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            detail?.didCrash() ?: false
+                        } else {
+                            false
+                        }
+                        Log.w("MainActivity", "WebView render process gone (didCrash=$didCrash). Recuperando...")
+                        try {
+                            view?.let { goneView ->
+                                (goneView.parent as? ViewGroup)?.removeView(goneView)
+                                if (webView === goneView) webView = null
+                                if (activeWebView === goneView) activeWebView = null
+                                goneView.destroy()
+                            }
+                        } catch (_: Throwable) {}
+                        runOnUiThread {
+                            if (!isFinishing && !isDestroyed) {
+                                mountWebViewSafely(getEcosystemEntryUrl(getEcosystemAppMode(this@MainActivity)), 0)
+                            }
+                        }
+                        return true
+                    }
+
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): WebResourceResponse? {
+                        val url = request?.url ?: return null
+                        val host = (url.host ?: "").lowercase(Locale.ROOT)
+                        if (host == "appassets.local") {
+                            return resolveLocalAssetResponse(url.path ?: "/index.html")
+                        }
+                        if (host.contains("google.com") && (url.path?.contains("/vt") == true)) {
+                            val cachedTile = interceptAndCacheGoogleMapTile(url)
+                            if (cachedTile != null) return cachedTile
+                        }
+                        return assetLoader.shouldInterceptRequest(url)
+                    }
+
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?
+                    ): Boolean {
+                        val uri = request?.url ?: return false
+                        val scheme = (uri.scheme ?: "").lowercase()
+                        if (request.isForMainFrame == false && (scheme == "https" || scheme == "http")) {
+                            return false
+                        }
+                        return handleExternalUri(uri)
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
+                        if (url.isNullOrBlank()) return false
+                        return handleExternalUri(Uri.parse(url))
+                    }
+
+                    override fun onReceivedError(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                        error: WebResourceError?
+                    ) {
+                        val uri = request?.url
+                        if (uri != null && request.isForMainFrame) {
+                            val scheme = (uri.scheme ?: "").lowercase()
+                            if (scheme != "https" && scheme != "http" && scheme != "about" && scheme != "data" && scheme != "blob") {
+                                handleExternalUri(uri)
+                                view?.stopLoading()
+                                return
+                            }
+                        }
+                        super.onReceivedError(view, request, error)
+                    }
+
+                    @Deprecated("Deprecated in Java")
+                    override fun onReceivedError(
+                        view: WebView?,
+                        errorCode: Int,
+                        description: String?,
+                        failingUrl: String?
+                    ) {
+                        if (!failingUrl.isNullOrBlank()) {
+                            val uri = try { Uri.parse(failingUrl) } catch (_: Exception) { null }
+                            val scheme = (uri?.scheme ?: "").lowercase()
+                            if (uri != null && scheme != "https" && scheme != "http" && scheme != "about" && scheme != "data" && scheme != "blob") {
+                                handleExternalUri(uri)
+                                view?.stopLoading()
+                                return
+                            }
+                        }
+                        super.onReceivedError(view, errorCode, description, failingUrl)
+                    }
+
+                    override fun onPageFinished(view: WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        val hwId = getHardwareDeviceId(this@MainActivity)
+                        val fcmTok = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE).getString("FCM_TOKEN", "") ?: ""
+                        view?.evaluateJavascript(
+                            "try { window.__SENTINEL_HW_DEVICE_ID__ = '$hwId'; if ('$fcmTok') window.__SENTINEL_FCM_TOKEN__ = '$fcmTok'; } catch(e) {}",
+                            null
+                        )
+                        injectSafeAreaCssInsetsToWebView()
+                        val cachedDispatchesJson = lastNativeDispatchesMsgJson
+                        if (!cachedDispatchesJson.isNullOrBlank()) {
+                            view?.evaluateJavascript(
+                                "try { window.dispatchEvent(new CustomEvent('sentinelNativeFirestoreSync', { detail: $cachedDispatchesJson })); } catch(e) {}",
+                                null
+                            )
+                        }
+                        dispatchPendingIntentToWebView()
+                    }
+                }
+
+                webChromeClient = object : WebChromeClient() {
+                    override fun onGeolocationPermissionsShowPrompt(
+                        origin: String?,
+                        callback: GeolocationPermissions.Callback?
+                    ) {
+                        callback?.invoke(origin, true, false)
+                    }
+
+                    override fun onPermissionRequest(request: PermissionRequest?) {
+                        request?.grant(request.resources)
+                    }
+                }
+
+                loadUrl(entryUrl)
+            }
+
+            webView = wv
+            activeWebView = wv
+            container.addView(wv)
+            ViewCompat.requestApplyInsets(container)
+        } catch (t: Throwable) {
+            Log.e("MainActivity", "Error montando WebView (intento $attempt): ${t.message}")
+            if (attempt < 2) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!isFinishing && !isDestroyed) {
+                        mountWebViewSafely(entryUrl, attempt + 1)
+                    }
+                }, 600L)
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -4126,14 +4405,15 @@ class MainActivity : ComponentActivity() {
 
     private fun startDispatchForegroundServiceSafely() {
         try {
+            if (!DispatchForegroundService.canStartDispatchForegroundServiceNow(this)) return
             val serviceIntent = Intent(this, DispatchForegroundService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
             } else {
                 startService(serviceIntent)
             }
-        } catch (e: Exception) {
-            Log.w("MainActivity", "No se pudo iniciar DispatchForegroundService: ${e.message}")
+        } catch (t: Throwable) {
+            Log.w("MainActivity", "No se pudo iniciar DispatchForegroundService: ${t.message}")
         }
     }
 
@@ -4151,6 +4431,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        bgFgsStopHandler.removeCallbacks(bgFgsStopRunnable)
         isAppInForeground = true
         val bgSec = if (lastPauseTimestampMs > 0L) {
             ((System.currentTimeMillis() - lastPauseTimestampMs) / 1000L).coerceAtLeast(0L)
@@ -4167,6 +4448,12 @@ class MainActivity : ComponentActivity() {
         val modeNow = getEcosystemAppMode(this)
         applyModeWindowChrome(modeNow)
         notifyWebViewPermissionsChanged()
+        if (modeNow == "ONE") {
+            val savedUserId = getSharedPreferences("SisBomPrefs", Context.MODE_PRIVATE).getString("USER_ID", null)
+            if (!savedUserId.isNullOrBlank()) {
+                startDispatchForegroundServiceSafely()
+            }
+        }
         if (modeNow == "NAV") {
             pushNavGpsRequirementStatusToWebView()
             if (hasStrictNavGpsRequirements()) {
@@ -4189,7 +4476,12 @@ class MainActivity : ComponentActivity() {
             lastPauseTimestampMs = System.currentTimeMillis()
         }
         super.onPause()
-        if (getEcosystemAppMode(this) == "NAV") {
+        val modeNow = getEcosystemAppMode(this)
+        if (modeNow == "ONE" && Build.VERSION.SDK_INT >= 35) {
+            bgFgsStopHandler.removeCallbacks(bgFgsStopRunnable)
+            bgFgsStopHandler.postDelayed(bgFgsStopRunnable, 15_000L)
+        }
+        if (modeNow == "NAV") {
             try {
                 webView?.onResume()
                 webView?.resumeTimers()
@@ -4387,6 +4679,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        bgFgsStopHandler.removeCallbacksAndMessages(null)
         if (activeWebView === webView) {
             activeWebView = null
         }
@@ -4480,13 +4773,15 @@ class MainActivity : ComponentActivity() {
 
         if (targetMode != "ONE") {
             try {
-                val fm = FirebaseMessaging.getInstance()
-                listOf("all", "despachos", "alertas", "alertas_generales", "conductores", "central_operador").forEach {
-                    fm.unsubscribeFromTopic(it)
-                }
-                if (!oldUserId.isNullOrBlank()) {
-                    fm.unsubscribeFromTopic("usuario_$oldUserId")
-                    fm.unsubscribeFromTopic("personal_$oldUserId")
+                val fm = getSafeFirebaseMessaging(this)
+                if (fm != null) {
+                    listOf("all", "despachos", "alertas", "alertas_generales", "conductores", "central_operador").forEach {
+                        fm.unsubscribeFromTopic(it)
+                    }
+                    if (!oldUserId.isNullOrBlank()) {
+                        fm.unsubscribeFromTopic("usuario_$oldUserId")
+                        fm.unsubscribeFromTopic("personal_$oldUserId")
+                    }
                 }
             } catch (_: Exception) {}
 
@@ -5008,11 +5303,13 @@ class MainActivity : ComponentActivity() {
                     .apply()
 
                 if (!oldUserId.isNullOrBlank()) {
-                    val fm = FirebaseMessaging.getInstance()
-                    fm.unsubscribeFromTopic("usuario_$oldUserId")
-                    fm.unsubscribeFromTopic("personal_$oldUserId")
-                    fm.unsubscribeFromTopic("conductores")
-                    fm.unsubscribeFromTopic("central_operador")
+                    val fm = getSafeFirebaseMessaging(context)
+                    if (fm != null) {
+                        fm.unsubscribeFromTopic("usuario_$oldUserId")
+                        fm.unsubscribeFromTopic("personal_$oldUserId")
+                        fm.unsubscribeFromTopic("conductores")
+                        fm.unsubscribeFromTopic("central_operador")
+                    }
                     try {
                         val db = getActiveFirestore(context)
                         db.collection("personal").document(oldUserId).set(
@@ -5044,11 +5341,13 @@ class MainActivity : ComponentActivity() {
             if (active) {
                 SoundPlayer.stop(context)
             }
-            val fm = FirebaseMessaging.getInstance()
-            if (active) {
-                fm.subscribeToTopic("central_operador")
-            } else {
-                fm.unsubscribeFromTopic("central_operador")
+            val fm = getSafeFirebaseMessaging(context)
+            if (fm != null) {
+                if (active) {
+                    fm.subscribeToTopic("central_operador")
+                } else {
+                    fm.unsubscribeFromTopic("central_operador")
+                }
             }
         }
 

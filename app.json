@@ -29,7 +29,7 @@
     },
     "android": {
       "package": "com.sisbom.misisbom",
-      "versionCode": 3028,
+      "versionCode": 3029,
       "adaptiveIcon": {
         "foregroundImage": "./assets/Logo.png",
         "backgroundColor": "#060911"

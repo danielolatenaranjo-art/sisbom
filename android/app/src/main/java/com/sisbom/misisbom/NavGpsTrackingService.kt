@@ -92,6 +92,10 @@ class NavGpsTrackingService : Service(), LocationListener {
                 val hasFine = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
                 val hasCoarse = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
                 if (!hasFine && !hasCoarse) return
+                if (!MainActivity.isAppInForeground && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val hasBg = ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    if (!hasBg) return
+                }
 
                 val intent = Intent(context, NavGpsTrackingService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -99,7 +103,7 @@ class NavGpsTrackingService : Service(), LocationListener {
                 } else {
                     context.startService(intent)
                 }
-            } catch (_: Exception) {}
+            } catch (_: Throwable) {}
         }
 
         fun stopService(context: Context) {
@@ -142,7 +146,12 @@ class NavGpsTrackingService : Service(), LocationListener {
             } else {
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } catch (_: Exception) {}
+        } catch (t: Throwable) {
+            android.util.Log.w("NavGpsService", "No se pudo iniciar ForegroundService NAV: ${t.message}")
+            isServiceRunning = false
+            try { stopSelf() } catch (_: Throwable) {}
+            return
+        }
 
         startLocationUpdates()
         startNativeDispatchWakeWatcher()
@@ -151,7 +160,20 @@ class NavGpsTrackingService : Service(), LocationListener {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (MainActivity.getEcosystemAppMode(this) != "NAV") {
-            stopSelf()
+            try { stopSelf() } catch (_: Throwable) {}
+            return START_NOT_STICKY
+        }
+        try {
+            val notification = buildForegroundNotification("SENTINEL NAV Activo", "Monitoreo GPS continuo de Carro Bomba")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (t: Throwable) {
+            android.util.Log.w("NavGpsService", "Error en onStartCommand NAV: ${t.message}")
+            isServiceRunning = false
+            try { stopSelf() } catch (_: Throwable) {}
             return START_NOT_STICKY
         }
         startNativeDispatchWakeWatcher()
@@ -159,6 +181,36 @@ class NavGpsTrackingService : Service(), LocationListener {
             sendForceUpdate()
         }
         return START_STICKY
+    }
+
+    private fun handleNavForegroundTimeout(startId: Int, fgsType: Int) {
+        android.util.Log.w("NavGpsService", "onTimeout NAV (startId=$startId, fgsType=$fgsType)")
+        isServiceRunning = false
+        try {
+            locationCallback?.let { fusedLocationClient?.removeLocationUpdates(it) }
+            locationManager?.removeUpdates(gpsListener)
+            locationManager?.removeUpdates(networkListener)
+            locationManager?.removeUpdates(this)
+        } catch (_: Throwable) {}
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Throwable) {}
+        try { stopSelf(startId) } catch (_: Throwable) {
+            try { stopSelf() } catch (_: Throwable) {}
+        }
+    }
+
+    override fun onTimeout(startId: Int) {
+        handleNavForegroundTimeout(startId, 0)
+    }
+
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleNavForegroundTimeout(startId, fgsType)
     }
 
     private var hadNetworkInternet = true
