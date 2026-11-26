@@ -1,15 +1,1602 @@
 ✅ Token JWT ES256 generado correctamente.
 📱 App: SENTINEL ONE (id=6819802643)
-⚠️ HTTP 409 en PATCH https://api.appstoreconnect.apple.com/v1/appStoreVersionLocalizations/c9dc24ad-dc36-4500-b40b-91da8db3e90f: {
+🔍 MODO --ensure-live: Verificando publicación pública en App Store y estado de Critical Alerts...
+📱 App attributes (HTTP 200): {"accessibilityUrl": null, "name": "SENTINEL ONE", "bundleId": "com.misisbom.sisbom.NFR3L3CC3L", "sku": "SENTINEL", "primaryLocale": "es-ES", "isOrEverWasMadeForKids": false, "subscriptionStatusUrl": null, "subscriptionStatusUrlVersion": null, "subscriptionStatusUrlForSandbox": null, "subscriptionStatusUrlVersionForSandbox": null, "contentRightsDeclaration": "DOES_NOT_USE_THIRD_PARTY_CONTENT", "streamlinedPurchasingEnabled": true, "groupPurchaseInvitationMode": "APPLE_HOSTED"}
+   📌 Versión 3.2.0 (id=560a8f78-db6a-4284-afd1-3f1245a55675): state=READY_FOR_SALE, releaseType=AFTER_APPROVAL
+💲 GET appPriceSchedule -> HTTP 200, hasData=True
+🌍 GET appAvailabilityV2 -> HTTP 200, data={"type": "appAvailabilities", "id": "6819802643", "attributes": {"availableInNewTerritories": false}, "relationships": {"territoryAvailabilities": {"links": {"self": "https://api.appstoreconnect.apple.com/v2/appAvailabilities/6819802643/relationships/territoryAvailabilities", "related": "https://api.appstoreconnect.apple.com/v2/appAvailabilities/6819802643/territoryAvailabilities"}}}, "links": {"self": "https://api.appstoreconnect.apple.com/v2/appAvailabilities/6819802643"}}
+   📊 Territorios totales: 175, activos (available=true): 1
+   🔎 Estado actual CHL: {"type": "territoryAvailabilities", "id": "eyJzIjoiNjgxOTgwMjY0MyIsInQiOiJDSEwifQ", "attributes": {"available": true, "releaseDate": "2026-11-26", "preOrderEnabled": false, "preOrderPublishDate": null, "contentStatuses": ["AVAILABLE"]}, "relationships": {"territory": {"data": {"type": "territories", "id": "CHL"}}}, "links": {"self": "https://api.appstoreconnect.apple.com/v1/territoryAvailabilities/eyJzIjoiNjgxOTgwMjY0MyIsInQiOiJDSEwifQ"}}
+   🔎 Estado actual USA: {"type": "territoryAvailabilities", "id": "eyJzIjoiNjgxOTgwMjY0MyIsInQiOiJVU0EifQ", "attributes": {"available": false, "releaseDate": "2026-11-26", "preOrderEnabled": false, "preOrderPublishDate": null, "contentStatuses": ["CANNOT_SELL"]}, "relationships": {"territory": {"data": {"type": "territories", "id": "USA"}}}, "links": {"self": "https://api.appstoreconnect.apple.com/v1/territoryAvailabilities/eyJzIjoiNjgxOTgwMjY0MyIsInQiOiJVU0EifQ"}}
+   🔎 Estado actual ESP: {"type": "territoryAvailabilities", "id": "eyJzIjoiNjgxOTgwMjY0MyIsInQiOiJFU1AifQ", "attributes": {"available": false, "releaseDate": "2026-11-26", "preOrderEnabled": false, "preOrderPublishDate": null, "contentStatuses": ["TRADER_STATUS_NOT_PROVIDED", "CANNOT_SELL"]}, "relationships": {"territory": {"data": {"type": "territories", "id": "ESP"}}}, "links": {"self": "https://api.appstoreconnect.apple.com/v1/territoryAvailabilities/eyJzIjoiNjgxOTgwMjY0MyIsInQiOiJFU1AifQ"}}
+⚠️ HTTP 409 en POST https://api.appstoreconnect.apple.com/v2/appAvailabilities: {
   "errors" : [ {
-    "id" : "102eecc4-87d3-4dc0-a5ee-f01188b813b7",
+    "id" : "b3ed3381-a4b5-4c01-ab82-0ca1d9aba5ef",
     "status" : "409",
-    "code" : "ENTITY_ERROR.ATTRIBUTE.INVALID.TOO_LONG",
-    "title" : "An attribute value is too long.",
-    "detail" : "Promotional text cannot be longer than 170 characters.",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "An 'appAvailabilities' with a relationship to 'apps' with id '6819802643' already exists.",
     "source" : {
-      "pointer" : "/data/attributes/promotionalText"
+      "pointer" : "/data/relationships/app"
+    }
+  }, {
+    "id" : "dab50600-93a8-472c-aca8-ce18681b5b47",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SVN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f93221b9-4064-460b-945f-3afbd4c280d5",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PRT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "1240e6bd-7579-462a-ba71-d2d8c8bbeb6d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MDA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "fa6647f4-4b4b-4010-9d6d-f5f5e39d4be8",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ARE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e029e9dd-8b8a-4820-ace5-97044ac25a15",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MMR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6979cf80-2741-48d6-8753-af41b0bac58a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LAO' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c6d3fdcd-f929-426e-85f9-0eb0e3937154",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GBR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c310cc40-6243-4f96-960b-cc84e0d9c09a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MRT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a2259bd6-5b42-479e-bd36-0ad20fa45974",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BGR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d004986b-4e35-46f1-8b71-98980180fbaa",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BRA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "88de3236-fffe-4b57-8f17-0097698815cf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'COG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c06512b5-7541-4108-8c53-e5a0ceda92ec",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'AFG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "271a9820-fdde-41a1-9b34-cb95e6d67bed",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'IND' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e35f4fb3-1222-4166-9969-057c0a5cb728",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GAB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "67fb791b-2629-4ce1-9dae-c7a1bc82c0ea",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GRC' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "08a8a306-4f41-4403-811c-2d1b7c9b30cf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ARM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3408bba6-604d-48fb-9ac1-373cc5fc38da",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GNB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "b4a72e46-b8fe-4860-a66b-10a976dc088a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KOR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "86a7a4c5-f1ed-4087-8ab9-2cdb581d1eaf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TJK' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "094f4666-8822-49d7-83f1-561486979941",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CYP' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "0270c100-d763-477f-a1ee-b8daaeb99805",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SAU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6b06ce0a-9e57-46a2-ae76-56df897ba0d2",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MNE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ea3fb843-add2-4cd6-81ec-42ec83d8d4eb",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SWE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e2e714ac-2bba-4f29-95d8-d914a1ab0db7",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CRI' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f9bb8dce-921b-4c9d-981b-1eea96ce919f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ZAF' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "0a0476ad-eaaa-49b6-b2f7-611a3667c480",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GUY' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8f17266e-f417-4ffe-bb53-ae241903c934",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SEN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "371d3ef4-406c-4e84-b6e5-07bb8993a4bd",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SUR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "9dbc8d2a-8bf6-4e35-846e-d53293c9a7ec",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CZE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "7d7a3512-dfde-4186-a7dd-da2966625919",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'AUT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c2a6e63f-798b-4f97-8ada-a1a002ee0950",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CAN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a0397a5f-e32b-4350-8ad0-936e85d12da9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CHE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "7b34c590-7e63-4156-b14e-20872db484ea",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MAR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "eb0ab06e-6ac9-4443-b7ed-4e1e4accb10d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CYM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "389329c5-f5a2-46d1-8681-0649a5cf0cc4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KGZ' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "1fb45476-b75c-428c-b53c-de918b4aed73",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TUR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "de178f49-390a-4216-b7af-c9ce50c433be",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LCA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "9b8dcba7-99ce-4f41-a9e7-7061e922963f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MNG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "64b79253-2f87-4adc-9e73-2deeb2f70e84",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'AUS' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "4a2385ea-a5c4-4951-8969-e9a4eaa151f3",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MWI' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c8cd57ef-2634-4e06-8875-9714b451800d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'JAM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "2e3e0cae-403b-418d-b156-9c1aadb1d243",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LBN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f03b82d9-8507-47ec-904c-c92d071d8047",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'AIA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "dfed34e8-c714-4e6f-b890-d0fa66607546",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NPL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d4a4bbe5-9d4d-4436-92e9-9fa221b9fb51",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BLZ' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "23cdfb55-fdc0-4c01-9846-f68827c792df",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GEO' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "58b20ca4-5553-4b6c-81e3-16ec6e3402b5",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TWN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "aa9779ff-414f-4a58-8104-b087e87b5265",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TKM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d5c62d9a-799a-4a3b-b311-ece881d2dea6",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NOR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "1d3739ba-578c-4e9b-babf-61626b15bb4b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KNA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "acbcc925-c8be-4ade-8f78-d46144a42142",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'HKG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "19c2acd9-95df-46d2-bf65-a703c0e3e6d0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'VGB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a9ae2093-9ca9-4cd2-97d2-f32c3020aecf",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'HUN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "38a3719d-f1aa-4eab-9f03-e46273792375",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MSR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "1812ed66-999f-48a1-a27e-ccdcf09565d0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SGP' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "64a51fae-b08c-4940-8a3f-24b051e94c5a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MLT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "42069c79-3e87-43ff-8c9e-f7ad6facdd84",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'AZE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f3f02b00-b441-43b9-82bf-6af77e595ec0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SLB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "224005e1-655f-4464-9a95-b73e2eaec2a1",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LVA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d0fd664d-c078-427a-aafc-e48104af6eba",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'FSM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f06b0fbc-fbbe-4b80-ae9c-b58a8d890d1f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CIV' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "074cdb94-9f7b-46a6-a190-2354c7995999",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PLW' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "bcb097f2-8961-4ed5-b8c2-04414cf639e9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PNG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e5dbefbc-c6f7-4394-b4d7-0db35cd28852",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BRB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ef654d4c-82ca-4c15-a96a-fd8a92895ff6",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BWA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "4a22ccf0-67f8-4ff7-9542-810eaea8b495",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GRD' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3de5f8d7-92b8-4a4f-a0e9-8408a53a6d8c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'DOM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8f4eea16-d7a8-401a-b69d-26f1f4ad5133",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'YEM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "255ce720-3845-403e-9e93-f2ce233cd3cd",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LTU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "9ab006d4-a9d4-4b1d-b006-c2fe07f06915",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MUS' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "0c91226f-e26c-4018-8c9d-9058d821772e",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MEX' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "2eb7068b-b41b-49d3-b355-d58b99dc33de",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ZMB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ad7dc425-afc5-428e-bf8f-6148ad086f73",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SLE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6ed40b03-6542-4bff-9398-eed450657b61",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KWT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "16c08ca1-6c50-4bc0-813a-8dec03bf511c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'IRL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "4f1166db-5864-4f09-9d67-a1c1f13a55fe",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ARG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "460c1b98-175f-4181-9cc9-5775d8fe1c8d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TTO' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "da733a67-0851-4f96-b7a2-d51baee51928",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MOZ' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f0e09ff4-847e-444d-aaf2-2eef6ce453b4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'VNM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "96d7dbed-b4f2-4928-98b1-970d3b266c29",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'STP' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "98429f1b-78c1-4ca7-9151-b541b29ea7aa",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TON' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3c4479a9-d689-45e3-9183-6f5b3ac0a187",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BMU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "156a3cfa-b302-484f-97eb-615e3674eef4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PRY' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "70c6e443-bb41-4cef-9416-dcf32ae4dd4b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KEN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "de3b30c9-2dee-4945-ac97-f73e227ca81c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BFA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "4b97ab44-992c-43b6-b3bf-558b9b6e908f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TUN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "9660874d-4441-4c50-8e3e-bf60dafd86ed",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LBY' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6acf3e6a-b340-41cf-9ad6-668cd4bfabc4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'COD' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "21a53333-cf74-4192-b44e-0c6c344446b2",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ZWE' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8c4c296c-36ed-4f4c-bfd0-4f9f5fb31f01",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'DEU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6e385686-e7c7-40ad-8290-eb445471706b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SWZ' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "2b5d7d83-d496-4d71-82b7-2544e910b1a9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ESP' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e7a09df1-9b0c-4b94-929b-f0d66eb3aeee",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NIC' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "79e22355-21b2-4389-8111-53db5716cd90",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'FIN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8e0726f5-a2f8-45a7-9ef4-59cb100df357",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'FRA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "0ae01693-20e5-418e-952b-c92dc8db3bdb",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ITA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e357ec1d-bed7-44bb-b8b0-7326a00d3ba6",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BEL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3db8b05a-b64e-4c6a-811c-feab7fc69803",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LUX' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "b7a3db2a-9ab0-41a3-9c7d-b95367f548d6",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'DMA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "5a2973c7-b7a3-4c7b-815f-641325c32c00",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BIH' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a2306e49-fb6f-4d20-907f-0b8ccf453d51",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MAC' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e0380370-d33a-4ee3-a724-a11f1f992eb3",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'UKR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "7b6ee573-b45a-48e5-94d1-90d525e2d639",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LKA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "7738426b-2401-4acd-9128-361ff47319af",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'UZB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "490686af-63f1-404b-9fd4-fb102ed71d05",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'VUT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "9bee8e20-9d23-4acb-8415-cad18c520f75",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'DZA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c5de85cd-73e4-4bfc-bb2d-660ba5689464",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'JPN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e5cfd39e-6414-4ce9-92e4-0f89cd33607b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'UGA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "90758be3-a9b4-4f08-bea2-1d9d362db407",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BOL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "b8be00a4-9add-41e9-8006-81a0bb1cd0a4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'USA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8d504fbb-8010-41fb-885f-eb73317f85e2",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'COL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "63e6187c-53ec-4ed1-ae96-96ddd7962193",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'VEN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a19353da-b45e-4861-89a5-fbe2f2867074",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'HND' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "df4b2e04-31bf-46da-8a8c-ff39c3c64cae",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'QAT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ee3a0edd-aef5-4605-8fab-185ddc8a1369",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MKD' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f3b4b667-95f4-46c1-b452-5266b80987dc",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BHR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "f9ec61f9-1655-4267-81e0-a7e919abd6ef",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TCA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "32d0dfc7-81a2-4ad2-9fe8-8a92d08687be",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'RWA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e4b5730c-5049-413d-8cdf-475e41d018a6",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MDG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a81847f1-6eaa-4d8a-a4ad-dd65bdd1fd45",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TZA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "0acf9797-bdff-489e-88bd-3c49915cb7b5",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BHS' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d223b925-f37b-4d86-8872-b6f56b68c7c4",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SRB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "7eea0ec3-d3ac-495a-8265-f42e36899ee7",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NRU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a85552f6-5ced-4d95-ba8a-1e0fbb7e614a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MLI' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "702b851b-cc38-4f31-90f8-00922cfa05ea",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PAK' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d3dc667a-c924-4974-aa0d-dd746e37301e",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NAM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "05870b91-b579-45d5-9d70-72eca453f09a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KAZ' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "4c95bcdb-5824-46ab-ade8-7d1cd9ed0ba2",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'EGY' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "cb183486-f156-45d5-bde1-9d3388803df9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'POL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a202f23a-f4a2-4377-9b86-e2ca1eb7aca7",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PER' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "48256305-72c0-4d2f-ba20-9655530d8361",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ALB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "1cdd1bd5-4763-4291-af0e-1a83a1d62f3b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'IRQ' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "358c7945-4d1b-49d1-bdee-5eac11cf0e2c",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ROU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3de9f474-b36f-4a73-92cd-d694835b7089",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'VCT' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3a003a2c-c2f7-494a-b993-f22f97e52a3a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PHL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "203cc678-04d8-45e5-9382-ff54cce17e29",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CHN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3ead8d2c-b1de-4ce5-9c03-20666e5b4b0e",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BTN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6351dbb5-dcd9-4741-b8d8-a58715702e15",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CPV' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a90f2ffe-2b7f-4400-b08e-a2acb881d940",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BRN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "59d4d425-d55c-4055-a6c6-b6e0d6afece0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SYC' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "28ad9827-46df-4f2c-804f-8d36efd80c58",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'XKS' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "fc3ab2dc-9028-4cec-a499-4c00ad822317",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'RUS' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ed40e7b9-8a84-4519-b9a0-aabed17e2fe3",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'PAN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "91ef52f8-bd30-49ab-adc2-33e56bbb9619",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GTM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "7ab27194-2d1f-482f-b111-9030477b5fc5",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'OMN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "91c03661-6dae-4634-92a6-36016b14da27",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'JOR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "5459e94d-ae14-4b12-8e5a-eb85ac3e02ab",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NER' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "eb12593d-df6b-4b68-a1da-81ae7eb5895d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'HRV' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3dd86792-36aa-4c7f-935d-b3aa5769705f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'CMR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "b873dd9a-bb87-401f-945f-303204f3527b",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BEN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "0bc92da3-18e3-4f3d-91ca-cfe41965af24",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MYS' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ba7a37e4-f768-4028-a30c-d0b11061d269",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NGA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "2168531c-2bed-4f12-9ce2-7b2d7a1348fa",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ISR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "487bd30f-4537-4b0d-9d33-1dc72e5e6395",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'KHM' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "45656f7a-b587-435a-9bda-dc94b3c2e806",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ISL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "fa6f17ce-3a7a-47aa-97c8-df1e6dc648ea",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NLD' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "76d3b6f5-1b66-4324-84fc-87941f0a7f24",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'TCD' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8052fecc-0fa3-4765-9b90-812bea6a32db",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ATG' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "ad46866e-477a-4ca1-9f93-206c42823e3f",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'URY' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "38c81a32-aaad-4065-b9a2-f344e6f3b022",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GHA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "e1021e61-2e3f-4206-b161-271ab39f4592",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'MDV' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "af412d0f-35a5-443e-9977-70c343efc167",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'DNK' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "1c888e60-3d6a-4986-ac20-ff4e69972335",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'BLR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "6b04c480-3155-4ca9-a44d-99a937dd6f7a",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'EST' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "367d7248-646e-4b8f-a6fd-504f6877b016",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SVK' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "085a2bec-c3e6-4416-8251-53f7e62ae8f3",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'ECU' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "8157cb2f-a05c-434e-a3b3-d0dd94a0f978",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'GMB' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c7f448dc-ca5a-42be-82a7-5f792ef805e0",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'SLV' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "d1bb1aff-fc5a-40d1-a946-0c81dbda9fa3",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'FJI' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3d79afb9-8688-4a7d-a3d4-d56f35b85580",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'IDN' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "3514e1ec-6283-4e60-849d-688236101e78",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'AGO' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "bd570ed6-f4d2-4735-b8f8-ab193701a18d",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'LBR' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "a80cd32a-d89c-4175-a6ce-e32e62cd9d22",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'THA' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
+    }
+  }, {
+    "id" : "c149161f-056c-4080-ab05-67f0bf59bbe9",
+    "status" : "409",
+    "code" : "ENTITY_ERROR.RELATIONSHIP.INVALID",
+    "title" : "The provided entity includes a relationship with an invalid value",
+    "detail" : "The relationship 'territoryAvailabilities.territory' expects an included resource with type 'territories' and id 'NZL' but no matching resource was included.",
+    "source" : {
+      "pointer" : "/included"
     }
   } ]
 }
-✅ promotionalText actualizado sin retirar de revisión (loc=c9dc24ad-dc36-4500-b40b-91da8db3e90f, HTTP 409).
+   🔄 POST /v2/appAvailabilities (1 territorios) -> HTTP 409
+   ⚠️ Intentando habilitar territorios vía PATCH individual...
+   ✅ Territorios habilitados vía PATCH: 0/0
+   ✅ Post-actualización: 1/175 territorios activos.
+   📍 Post-actualización CHL: {"available": true, "releaseDate": "2026-11-26", "preOrderEnabled": false, "preOrderPublishDate": null, "contentStatuses": ["AVAILABLE"]}
+   📍 Post-actualización USA: {"available": false, "releaseDate": "2026-11-26", "preOrderEnabled": false, "preOrderPublishDate": null, "contentStatuses": ["CANNOT_SELL"]}
+🔔 Auditando capacidades del Bundle ID y Critical Alerts...
+   🆔 Bundle ID resource id=94GRKTS26L, name=SENTINEL ONE
+   📋 bundleIdCapabilities activas: ['IN_APP_PURCHASE', 'IN_APP_PURCHASE', 'PUSH_NOTIFICATIONS', 'USERNOTIFICATIONS_TIMESENSITIVE']
+   📄 Perfiles encontrados con nombre SENTINEL_ONE_AppStore: 1
+   📄 Perfil id=9YUZUSX64D, state=ACTIVE, exp=2027-10-06T16:02:31.000+00:00
+   🔐 Entitlements del perfil: {"beta-reports-active": true, "com.apple.developer.usernotifications.time-sensitive": true, "aps-environment": "production", "application-identifier": "NFR3L3CC3L.com.misisbom.sisbom.NFR3L3CC3L", "keychain-access-groups": ["NFR3L3CC3L.*", "com.apple.token"], "get-task-allow": false, "com.apple.developer.team-identifier": "NFR3L3CC3L"}
+🚨 CRITICAL ALERTS HABILITADO EN PERFIL: False
