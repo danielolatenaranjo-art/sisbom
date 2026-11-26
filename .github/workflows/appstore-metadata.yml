@@ -36,7 +36,9 @@ jobs:
           APPSTORE_ISSUER_ID: ${{ secrets.APPSTORE_ISSUER_ID }}
           APPSTORE_PRIVATE_KEY: ${{ secrets.APPSTORE_PRIVATE_KEY }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event.inputs.promo_only }}" = "true" ]; then
+          if [ "${{ github.event_name }}" = "push" ]; then
+            python3 -u ios/publish_appstore.py --ensure-live | tee ios/asc_report.txt
+          elif [ "${{ github.event.inputs.promo_only }}" = "true" ]; then
             python3 -u ios/publish_appstore.py --promo-only | tee ios/asc_report.txt
           else
             python3 -u ios/publish_appstore.py | tee ios/asc_report.txt

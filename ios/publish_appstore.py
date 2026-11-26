@@ -14,7 +14,10 @@ import os
 import sys
 import time
 import json
+import base64
 import hashlib
+import plistlib
+import subprocess
 import urllib.request
 import urllib.error
 import jwt
@@ -583,6 +586,273 @@ def main():
         _, final_bsub = api_request("GET", f"/v1/builds/{b_id}/betaAppReviewSubmission", token=token)
         print("🏁 Estado final TestFlight buildBetaDetail:", json.dumps((final_bbd.get("data") or {}).get("attributes", {}), ensure_ascii=False))
         print("🏁 Estado final TestFlight betaAppReviewSubmission:", json.dumps((final_bsub.get("data") or {}).get("attributes", {}), ensure_ascii=False))
+        return
+
+    if "--ensure-live" in sys.argv:
+        print("🔍 MODO --ensure-live: Verificando publicación pública en App Store y estado de Critical Alerts...")
+
+        # 1. Estado de la App y Versiones en App Store Connect
+        st_app, app_detail = api_request("GET", f"/v1/apps/{app_id}", token=token)
+        app_attrs = (app_detail.get("data") or {}).get("attributes", {})
+        print(f"📱 App attributes (HTTP {st_app}):", json.dumps(app_attrs, ensure_ascii=False))
+
+        _, ver_res = api_request("GET", f"/v1/apps/{app_id}/appStoreVersions?limit=10", token=token)
+        for v in ver_res.get("data", []):
+            vid = v.get("id")
+            v_attrs = v.get("attributes", {})
+            v_str = v_attrs.get("versionString")
+            v_state = v_attrs.get("appStoreState") or v_attrs.get("appVersionState")
+            print(f"   📌 Versión {v_str} (id={vid}): state={v_state}, releaseType={v_attrs.get('releaseType')}")
+            if v_str == TARGET_VERSION and v_state == "PENDING_DEVELOPER_RELEASE":
+                print(f"   🚀 Versión {v_str} en PENDING_DEVELOPER_RELEASE. Solicitando liberación inmediata...")
+                st_rel, rel_res = api_request(
+                    "POST",
+                    "/v1/appStoreVersionReleaseRequests",
+                    body={
+                        "data": {
+                            "type": "appStoreVersionReleaseRequests",
+                            "relationships": {
+                                "appStoreVersion": {"data": {"type": "appStoreVersions", "id": vid}}
+                            },
+                        }
+                    },
+                    token=token,
+                )
+                print(f"   ✅ appStoreVersionReleaseRequests -> HTTP {st_rel}", json.dumps(rel_res, ensure_ascii=False))
+                _, ver_check = api_request("GET", f"/v1/appStoreVersions/{vid}", token=token)
+                print("   🔄 Nuevo estado de versión:", json.dumps((ver_check.get("data") or {}).get("attributes", {}), ensure_ascii=False))
+
+        # 2. Verificar Precio Gratis ($0.00)
+        st_ps, ps_res = api_request("GET", f"/v1/apps/{app_id}/appPriceSchedule", token=token)
+        print(f"💲 GET appPriceSchedule -> HTTP {st_ps}, hasData={bool(ps_res.get('data'))}")
+        if st_ps == 404 or not ps_res.get("data"):
+            print("   ⚠️ No había appPriceSchedule activo. Configurando precio Gratis ($0.00) en USA...")
+            base_territory = "USA"
+            _, pp_res = api_request(
+                "GET",
+                f"/v1/apps/{app_id}/appPricePoints?filter[territory]={base_territory}&limit=50",
+                token=token,
+            )
+            pp_list = pp_res.get("data", [])
+            free_pp_id = None
+            for pp in pp_list:
+                cp = str(pp.get("attributes", {}).get("customerPrice", ""))
+                if cp in ("0", "0.0", "0.00"):
+                    free_pp_id = pp["id"]
+                    break
+            if not free_pp_id and pp_list:
+                free_pp_id = pp_list[0]["id"]
+            if free_pp_id:
+                price_schedule_body = {
+                    "data": {
+                        "type": "appPriceSchedules",
+                        "relationships": {
+                            "app": {"data": {"type": "apps", "id": app_id}},
+                            "baseTerritory": {"data": {"type": "territories", "id": base_territory}},
+                            "manualPrices": {"data": [{"type": "appPrices", "id": "${price1}"}]},
+                        },
+                    },
+                    "included": [
+                        {
+                            "type": "appPrices",
+                            "id": "${price1}",
+                            "attributes": {"startDate": None},
+                            "relationships": {
+                                "appPricePoint": {"data": {"type": "appPricePoints", "id": free_pp_id}}
+                            },
+                        }
+                    ],
+                }
+                st_pcreate, _ = api_request("POST", "/v1/appPriceSchedules", body=price_schedule_body, token=token)
+                print(f"   ✅ Precio Gratis ($0.00) configurado (HTTP {st_pcreate}).")
+
+        # 3. Verificar y Habilitar Disponibilidad por Países (/v2/appAvailabilities & territoryAvailabilities)
+        def fetch_all_territory_availabilities(avail_resource_id):
+            rows = []
+            next_url = f"/v2/appAvailabilities/{avail_resource_id}/territoryAvailabilities?include=territory&limit=200"
+            while next_url:
+                st_ta, ta_res = api_request("GET", next_url, token=token)
+                if st_ta != 200:
+                    print(f"   ⚠️ GET territoryAvailabilities -> HTTP {st_ta}")
+                    break
+                rows.extend(ta_res.get("data", []))
+                next_url = (ta_res.get("links") or {}).get("next")
+            return rows
+
+        def create_app_availability_for_territories(codes):
+            ta_refs = []
+            included_items = []
+            for code in codes:
+                local_id = f"${{{code}}}"
+                ta_refs.append({"type": "territoryAvailabilities", "id": local_id})
+                included_items.append(
+                    {
+                        "type": "territoryAvailabilities",
+                        "id": local_id,
+                        "attributes": {"available": True},
+                        "relationships": {"territory": {"data": {"type": "territories", "id": code}}},
+                    }
+                )
+            av_body = {
+                "data": {
+                    "type": "appAvailabilities",
+                    "attributes": {"availableInNewTerritories": True},
+                    "relationships": {
+                        "app": {"data": {"type": "apps", "id": app_id}},
+                        "territoryAvailabilities": {"data": ta_refs},
+                    },
+                },
+                "included": included_items,
+            }
+            return api_request("POST", "/v2/appAvailabilities", body=av_body, token=token)
+
+        st_av, av_res = api_request("GET", f"/v1/apps/{app_id}/appAvailabilityV2", token=token)
+        print(f"🌍 GET appAvailabilityV2 -> HTTP {st_av}, data={json.dumps(av_res.get('data'), ensure_ascii=False)}")
+
+        priority_codes = ["CHL", "USA", "ESP", "MEX", "ARG", "COL", "PER", "URY", "PRY", "BOL", "ECU", "BRA", "CAN", "GBR"]
+
+        if st_av == 200 and av_res.get("data"):
+            avail_id = av_res["data"]["id"]
+            ta_rows = fetch_all_territory_availabilities(avail_id)
+            active_count = sum(1 for r in ta_rows if (r.get("attributes") or {}).get("available") is True)
+            print(f"   📊 Territorios totales: {len(ta_rows)}, activos (available=true): {active_count}")
+
+            by_code = {}
+            for r in ta_rows:
+                t_code = (((r.get("relationships") or {}).get("territory") or {}).get("data") or {}).get("id", "")
+                if t_code:
+                    by_code[t_code] = r
+
+            for check_code in ("CHL", "USA", "ESP"):
+                row = by_code.get(check_code)
+                print(f"   🔎 Estado actual {check_code}:", json.dumps(row, ensure_ascii=False) if row else "NO PRESENTE")
+
+            chl_ok = ((by_code.get("CHL") or {}).get("attributes") or {}).get("available") is True
+            usa_ok = ((by_code.get("USA") or {}).get("attributes") or {}).get("available") is True
+
+            if not chl_ok or not usa_ok or active_count < len(priority_codes):
+                eligible_codes = []
+                for r in ta_rows:
+                    t_code = (((r.get("relationships") or {}).get("territory") or {}).get("data") or {}).get("id", "")
+                    statuses = (r.get("attributes") or {}).get("contentStatuses") or []
+                    if t_code and t_code != "CHN" and "CANNOT_SELL" not in statuses:
+                        eligible_codes.append(t_code)
+                if not eligible_codes:
+                    eligible_codes = priority_codes
+
+                st_post, post_res = create_app_availability_for_territories(eligible_codes)
+                print(f"   🔄 POST /v2/appAvailabilities ({len(eligible_codes)} territorios) -> HTTP {st_post}")
+                if st_post not in (200, 201):
+                    print("   ⚠️ Intentando habilitar territorios vía PATCH individual...")
+                    rows_to_patch = []
+                    for r in ta_rows:
+                        r_attrs = r.get("attributes") or {}
+                        t_code = (((r.get("relationships") or {}).get("territory") or {}).get("data") or {}).get("id", "")
+                        statuses = r_attrs.get("contentStatuses") or []
+                        if r_attrs.get("available") is not True and t_code != "CHN" and "CANNOT_SELL" not in statuses:
+                            rows_to_patch.append((t_code, r))
+                    # Priorizar CHL, USA y Latinoamérica primero
+                    rows_to_patch.sort(key=lambda pair: (0 if pair[0] in priority_codes else 1, pair[0]))
+                    patched_ok = 0
+                    for t_code, r in rows_to_patch:
+                        ta_id = r.get("id")
+                        st_pt, _ = api_request(
+                            "PATCH",
+                            f"/v1/territoryAvailabilities/{ta_id}",
+                            body={"data": {"type": "territoryAvailabilities", "id": ta_id, "attributes": {"available": True}}},
+                            token=token,
+                        )
+                        if st_pt in (200, 201):
+                            patched_ok += 1
+                    print(f"   ✅ Territorios habilitados vía PATCH: {patched_ok}/{len(rows_to_patch)}")
+
+                # Verificación post-actualización
+                _, av_after = api_request("GET", f"/v1/apps/{app_id}/appAvailabilityV2", token=token)
+                avail_after_id = (av_after.get("data") or {}).get("id") or avail_id
+                ta_after = fetch_all_territory_availabilities(avail_after_id)
+                active_after = sum(1 for r in ta_after if (r.get("attributes") or {}).get("available") is True)
+                print(f"   ✅ Post-actualización: {active_after}/{len(ta_after)} territorios activos.")
+                for check_code in ("CHL", "USA"):
+                    match_r = next(
+                        (r for r in ta_after if (((r.get("relationships") or {}).get("territory") or {}).get("data") or {}).get("id") == check_code),
+                        None,
+                    )
+                    print(f"   📍 Post-actualización {check_code}:", json.dumps((match_r or {}).get("attributes", {}), ensure_ascii=False))
+        else:
+            print("   ⚠️ appAvailabilityV2 no existe todavía (o HTTP != 200). Obteniendo lista de territorios...")
+            all_codes = []
+            next_t = "/v1/territories?limit=200"
+            while next_t:
+                st_t, t_res = api_request("GET", next_t, token=token)
+                if st_t != 200:
+                    break
+                for t in t_res.get("data", []):
+                    cid = t.get("id")
+                    if cid and cid != "CHN":
+                        all_codes.append(cid)
+                next_t = (t_res.get("links") or {}).get("next")
+            if not all_codes:
+                all_codes = priority_codes
+            st_cav, _ = create_app_availability_for_territories(all_codes)
+            print(f"   🚀 POST /v2/appAvailabilities ({len(all_codes)} territorios) -> HTTP {st_cav}")
+            if st_cav not in (200, 201):
+                st_cav2, _ = create_app_availability_for_territories(priority_codes)
+                print(f"   🚀 Fallback POST /v2/appAvailabilities (prioritarios) -> HTTP {st_cav2}")
+            _, av_after = api_request("GET", f"/v1/apps/{app_id}/appAvailabilityV2", token=token)
+            if av_after.get("data"):
+                ta_after = fetch_all_territory_availabilities(av_after["data"]["id"])
+                active_after = sum(1 for r in ta_after if (r.get("attributes") or {}).get("available") is True)
+                print(f"   ✅ Post-creación: {active_after}/{len(ta_after)} territorios activos.")
+                for check_code in ("CHL", "USA"):
+                    match_r = next(
+                        (r for r in ta_after if (((r.get("relationships") or {}).get("territory") or {}).get("data") or {}).get("id") == check_code),
+                        None,
+                    )
+                    print(f"   📍 Post-creación {check_code}:", json.dumps((match_r or {}).get("attributes", {}), ensure_ascii=False))
+
+        # 4. Auditar Bundle ID Capabilities y Critical Alerts en App Store Connect API
+        print("🔔 Auditando capacidades del Bundle ID y Critical Alerts...")
+        _, bid_res = api_request(
+            "GET",
+            f"/v1/bundleIds?filter[identifier]={BUNDLE_ID}&include=bundleIdCapabilities",
+            token=token,
+        )
+        for item in bid_res.get("data", []):
+            if (item.get("attributes") or {}).get("identifier") == BUNDLE_ID:
+                print(f"   🆔 Bundle ID resource id={item.get('id')}, name={(item.get('attributes') or {}).get('name')}")
+        caps_list = [
+            (inc.get("attributes") or {}).get("capabilityType")
+            for inc in bid_res.get("included", [])
+            if inc.get("type") == "bundleIdCapabilities"
+        ]
+        print(f"   📋 bundleIdCapabilities activas: {caps_list}")
+
+        _, prof_res = api_request("GET", "/v1/profiles?filter[name]=SENTINEL_ONE_AppStore", token=token)
+        profiles = prof_res.get("data", [])
+        print(f"   📄 Perfiles encontrados con nombre SENTINEL_ONE_AppStore: {len(profiles)}")
+        critical_found = False
+        for prof in profiles:
+            p_attrs = prof.get("attributes") or {}
+            b64_content = p_attrs.get("profileContent", "")
+            print(
+                f"   📄 Perfil id={prof.get('id')}, state={p_attrs.get('profileState')}, exp={p_attrs.get('expirationDate')}"
+            )
+            if b64_content:
+                try:
+                    raw_pp = base64.b64decode(b64_content)
+                    plist_bytes = subprocess.check_output(
+                        ["openssl", "smime", "-inform", "DER", "-verify", "-noverify"],
+                        input=raw_pp,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    pp_plist = plistlib.loads(plist_bytes)
+                    ents = pp_plist.get("Entitlements", {})
+                    print(f"   🔐 Entitlements del perfil: {json.dumps(ents, default=str, ensure_ascii=False)}")
+                    if "com.apple.developer.usernotifications.critical-alerts" in ents:
+                        critical_found = True
+                except Exception as ex:
+                    print(f"   ⚠️ No se pudo decodificar profileContent: {ex}")
+        print(f"🚨 CRITICAL ALERTS HABILITADO EN PERFIL: {critical_found}")
         return
 
     if "--promo-only" in sys.argv:
